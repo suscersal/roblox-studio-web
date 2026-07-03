@@ -1,0 +1,12 @@
+{
+	"name": "NotoSansCJK Fallback",
+	"loadStrategy": "sameFamilyOnly",
+	"faces": [
+		{
+			"name": "Regular",
+			"weight": 400,
+			"style": "normal",
+			"assetId": "rbxassetid://123924484074402"
+		}
+	]
+}
