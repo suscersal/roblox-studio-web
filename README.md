@@ -1,5 +1,5 @@
 Part of the code and the README were written by Claude Sonnet 4.6 (I’m not familiar with binary files, and I don’t have the time to write the README myself right now).
-
+[![Скачать](https://img.shields.io/github/downloads/suscersal/roblox-studio-web/total?label=Downloads&style=for-the-badge)](https://github.com/suscersal/roblox-studio-web/releases)
 # 🎮 Roblox Studio Web
 
 **Аналог Roblox Studio** без тестов и плагинов, зато с 3D-просмотром.  (Парсер `.rbxl` с веб-обёрткой на **NiceGUI**).
