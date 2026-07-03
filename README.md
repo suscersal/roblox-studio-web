@@ -4,7 +4,7 @@ Part of the code and the README were written by Claude Sonnet 4.6 (I’m not fam
 
 **Аналог Roblox Studio** без тестов и плагинов, зато с 3D-просмотром.  (Парсер `.rbxl` с веб-обёрткой на **NiceGUI**).
 
-** A Roblox Studio clone (no tests/plugins, but with 3D viewport.(`.rbxl` parser with a NiceGUI web wrapper.) **
+**A Roblox Studio clone (no tests/plugins, but with 3D viewport.(`.rbxl` parser with a NiceGUI web wrapper.)**
 
 ## 🇷🇺
 

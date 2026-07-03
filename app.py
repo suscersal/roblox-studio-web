@@ -11,7 +11,7 @@ from rbxl_parser import parse_rbxl, build_tree, publish_place, save_rbxl as save
 import logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
+    
 ICONS_DIR = Path(__file__).parent / 'icons'
 
 _icon_cache = {}
