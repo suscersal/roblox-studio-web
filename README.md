@@ -114,5 +114,5 @@ With file: `python main.py place.rbxl`
 
 ### Screenshots
 
-![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/1.PNG)
+![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/1.jpg)
 
