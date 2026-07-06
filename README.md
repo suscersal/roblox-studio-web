@@ -132,4 +132,4 @@ roblox-studio-web/
 | F5 | Refresh 3D viewport |
 
 ### ScreenShots:
-![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/1.PNG)
+![](https://github.com/suscersal/roblox-studio-web/blob/old/screenshots%2F1.PNG)
