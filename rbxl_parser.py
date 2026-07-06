@@ -1,6 +1,8 @@
 import sys
 import struct
 import json
+import os
+import math
 from pathlib import Path
 
 # ====================== LZ4 ======================
@@ -75,18 +77,16 @@ def read_chunks(path):
 
 
 def write_chunk(name: bytes, payload: bytes) -> bytes:
-    """Создать бинарный чанк (без сжатия для простоты)"""
     header = struct.pack('<4sIII',
         name,
-        len(payload),  # compsize
-        len(payload),  # uncompsize
-        0              # reserved
+        len(payload),
+        len(payload),
+        0
     )
     return header + payload
 
 
 def write_chunk_raw(chunk: dict) -> bytes:
-    """Создать чанк из оригинальных данных"""
     header = struct.pack('<4sIII',
         chunk['name'],
         chunk['compsize'],
@@ -237,7 +237,7 @@ def write_inst(class_id: int, class_name: str, referents: list) -> bytes:
     name_bytes = class_name.encode('utf-8')
     buf.extend(struct.pack('<I', len(name_bytes)))
     buf.extend(name_bytes)
-    buf.append(0)  # object_format
+    buf.append(0)
     buf.extend(struct.pack('<I', len(referents)))
     buf.extend(write_referents(referents))
     return bytes(buf)
@@ -254,7 +254,7 @@ def parse_prnt(payload):
 
 def write_prnt(pairs: list) -> bytes:
     buf = bytearray()
-    buf.append(0)  # version
+    buf.append(0)
     buf.extend(struct.pack('<I', len(pairs)))
     children = [p[0] for p in pairs]
     parents = [p[1] for p in pairs]
@@ -832,8 +832,187 @@ def parse_rbxl(path):
                 skipped += 1
                 continue
 
-    # Сохраняем сырые данные для точного копирования
+    # Пост-обработка: разбиваем CFrame на Position и Rotation
+    for ref, obj_props in props.items():
+        if 'CFrame' in obj_props:
+            cf = obj_props['CFrame']
+            
+            if isinstance(cf, dict) and 'matrix' in cf:
+                matrix = cf['matrix']
+                
+                # Безопасно извлекаем позицию
+                position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+                if len(matrix) > 3:
+                    position['x'] = float(matrix[3])
+                if len(matrix) > 7:
+                    position['y'] = float(matrix[7])
+                if len(matrix) > 11:
+                    position['z'] = float(matrix[11])
+                
+                obj_props['Position'] = position
+                
+                # Безопасно извлекаем rotation
+                if len(matrix) >= 12:
+                    m00 = float(matrix[0]) if len(matrix) > 0 else 1.0
+                    m01 = float(matrix[1]) if len(matrix) > 1 else 0.0
+                    m02 = float(matrix[2]) if len(matrix) > 2 else 0.0
+                    m10 = float(matrix[4]) if len(matrix) > 4 else 0.0
+                    m11 = float(matrix[5]) if len(matrix) > 5 else 1.0
+                    m12 = float(matrix[6]) if len(matrix) > 6 else 0.0
+                    m20 = float(matrix[8]) if len(matrix) > 8 else 0.0
+                    m21 = float(matrix[9]) if len(matrix) > 9 else 0.0
+                    m22 = float(matrix[10]) if len(matrix) > 10 else 1.0
+                    
+                    sy = math.sqrt(m00*m00 + m10*m10)
+                    singular = sy < 1e-6
+                    
+                    if not singular:
+                        rx = math.atan2(m21, m22)
+                        ry = math.atan2(-m20, sy)
+                        rz = math.atan2(m10, m00)
+                    else:
+                        rx = math.atan2(-m12, m11)
+                        ry = math.atan2(-m20, sy)
+                        rz = 0
+                    
+                    rotation = {
+                        'x': round(math.degrees(rx), 2),
+                        'y': round(math.degrees(ry), 2),
+                        'z': round(math.degrees(rz), 2)
+                    }
+                else:
+                    rotation = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+                
+                obj_props['Rotation'] = rotation
+                
+            elif isinstance(cf, dict) and 'position' in cf:
+                obj_props['Position'] = cf['position']
+                
+                if 'angles_deg' in cf and cf['angles_deg']:
+                    angles = cf['angles_deg']
+                    obj_props['Rotation'] = {
+                        'x': float(angles[0]) if len(angles) > 0 else 0.0,
+                        'y': float(angles[1]) if len(angles) > 1 else 0.0,
+                        'z': float(angles[2]) if len(angles) > 2 else 0.0
+                    }
+                else:
+                    obj_props['Rotation'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+            else:
+                obj_props['Position'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+                obj_props['Rotation'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        
+        # Обработка Size
+        cls = referent_to_class.get(ref, '')
+        if cls in ('Part', 'WedgePart', 'SpherePart', 'MeshPart', 'TrussPart', 
+                    'CornerWedgePart', 'SpawnLocation', 'Seat', 'VehicleSeat'):
+            
+            if 'size' in obj_props and 'Size' not in obj_props:
+                obj_props['Size'] = obj_props['size']
+            
+            size = obj_props.get('Size', obj_props.get('size', {}))
+            
+            if isinstance(size, dict):
+                obj_props['Size'] = {
+                    'x': float(size.get('x', size.get('X', 4.0))),
+                    'y': float(size.get('y', size.get('Y', 1.2))),
+                    'z': float(size.get('z', size.get('Z', 2.0)))
+                }
+            elif isinstance(size, (list, tuple)) and len(size) >= 3:
+                obj_props['Size'] = {
+                    'x': float(size[0]),
+                    'y': float(size[1]),
+                    'z': float(size[2])
+                }
+            else:
+                obj_props['Size'] = {'x': 4.0, 'y': 1.2, 'z': 2.0}
+        
+        # Обработка цвета
+        if 'Color3' in obj_props or 'Color' in obj_props or 'BrickColor' in obj_props:
+            color = obj_props.get('Color3') or obj_props.get('Color') or obj_props.get('BrickColor')
+            if isinstance(color, dict) and 'r' in color and 'g' in color and 'b' in color:
+                r = color['r']
+                g = color['g']
+                b = color['b']
+                if r > 1 or g > 1 or b > 1:
+                    r = r / 255.0
+                    g = g / 255.0
+                    b = b / 255.0
+                obj_props['Color3'] = {'r': round(r, 3), 'g': round(g, 3), 'b': round(b, 3)}
+            elif isinstance(color, (int, float)):
+                brick_colors = {
+                    1: {'r': 0.95, 'g': 0.95, 'b': 0.95},
+                    5: {'r': 0.76, 'g': 0.69, 'b': 0.50},
+                    11: {'r': 0.39, 'g': 0.58, 'b': 0.93},
+                    21: {'r': 0.77, 'g': 0.15, 'b': 0.15},
+                    23: {'r': 0.05, 'g': 0.41, 'b': 0.79},
+                    26: {'r': 0.16, 'g': 0.16, 'b': 0.16},
+                    28: {'r': 0.15, 'g': 0.68, 'b': 0.38},
+                    37: {'r': 0.29, 'g': 0.51, 'b': 0.27},
+                    38: {'r': 0.63, 'g': 0.37, 'b': 0.15},
+                    101: {'r': 0.79, 'g': 0.42, 'b': 0.48},
+                    102: {'r': 0.38, 'g': 0.37, 'b': 0.69},
+                    104: {'r': 0.42, 'g': 0.20, 'b': 0.69},
+                    105: {'r': 0.89, 'g': 0.60, 'b': 0.30},
+                    106: {'r': 0.96, 'g': 0.54, 'b': 0.21},
+                    107: {'r': 0.05, 'g': 0.63, 'b': 0.73},
+                    119: {'r': 0.64, 'g': 0.75, 'b': 0.36},
+                    125: {'r': 0.91, 'g': 0.62, 'b': 0.38},
+                    135: {'r': 0.47, 'g': 0.60, 'b': 0.67},
+                    141: {'r': 0.16, 'g': 0.20, 'b': 0.22},
+                    194: {'r': 0.39, 'g': 0.39, 'b': 0.39},
+                    199: {'r': 0.38, 'g': 0.37, 'b': 0.33},
+                    217: {'r': 0.50, 'g': 0.30, 'b': 0.16},
+                    226: {'r': 0.99, 'g': 0.84, 'b': 0.39},
+                }
+                color_obj = brick_colors.get(int(color), {'r': 0.6, 'g': 0.6, 'b': 0.6})
+                obj_props['Color3'] = color_obj
+            else:
+                obj_props['Color3'] = {'r': 0.6, 'g': 0.6, 'b': 0.6}
+        
+        # Обработка прозрачности
+        if 'Transparency' in obj_props:
+            trans = obj_props['Transparency']
+            if isinstance(trans, (int, float)):
+                obj_props['Transparency'] = max(0.0, min(1.0, float(trans)))
+            else:
+                obj_props['Transparency'] = 0.0
+        else:
+            obj_props['Transparency'] = 0.0
+        
+        # Обработка текстур
+        if 'Texture' in obj_props or 'TextureID' in obj_props:
+            texture = obj_props.get('Texture') or obj_props.get('TextureID')
+            if isinstance(texture, str):
+                obj_props['Texture'] = texture
+            elif isinstance(texture, bytes):
+                try:
+                    obj_props['Texture'] = texture.decode('utf-8')
+                except:
+                    obj_props['Texture'] = ''
+        
+        if 'Decal' in obj_props:
+            decal = obj_props['Decal']
+            if isinstance(decal, str):
+                obj_props['Decal'] = decal
+            elif isinstance(decal, bytes):
+                try:
+                    obj_props['Decal'] = decal.decode('utf-8')
+                except:
+                    pass
+        
+        # Собираем пути к ассетам
+        asset_paths = []
+        for key in ['Texture', 'TextureID', 'Decal', 'MeshId', 'Image', 'SoundId']:
+            val = obj_props.get(key)
+            if isinstance(val, str) and val:
+                asset_paths.append(val)
+        
+        if asset_paths:
+            obj_props['_assets'] = asset_paths
+
+    # Сохраняем сырые данные
     raw_data = open(path, 'rb').read()
+    file_size = os.path.getsize(path)
     
     return {
         'referent_to_class': referent_to_class,
@@ -844,19 +1023,19 @@ def parse_rbxl(path):
         'skipped_prop_chunks': skipped,
         '_raw_chunks': chunks,
         '_raw_data': raw_data,
+        '_file_size': file_size,
+        '_file_path': str(Path(path).absolute()),
     }
 
 
 def save_rbxl(parsed: dict, path: str):
     """Сохранить в бинарный формат RBXL"""
     
-    # Если файл не менялся, делаем точную побайтовую копию
     if not parsed.get('_modified', False) and '_raw_data' in parsed:
         with open(path, 'wb') as f:
             f.write(parsed['_raw_data'])
         return True
     
-    # Если есть сырые чанки и файл не менялся
     raw_chunks = parsed.get('_raw_chunks', [])
     if raw_chunks and not parsed.get('_modified', False):
         file_data = bytearray()
@@ -874,14 +1053,12 @@ def save_rbxl(parsed: dict, path: str):
             f.write(bytes(file_data))
         return True
     
-    # Полная пересборка с нуля
     referent_to_class = parsed['referent_to_class']
     parent_map = parsed['parent_map']
     props = parsed['props']
     class_id_to_name = parsed.get('class_id_to_name', {})
     class_id_to_referents = parsed.get('class_id_to_referents', {})
     
-    # Группируем referent'ы по классам
     class_to_refs = {}
     if class_id_to_name and class_id_to_referents:
         for class_id, class_name in class_id_to_name.items():
@@ -897,17 +1074,14 @@ def save_rbxl(parsed: dict, path: str):
         for cls in class_to_refs:
             class_to_refs[cls] = sorted(class_to_refs[cls])
     
-    # Назначаем class_id
     class_id_map = {}
     class_id = 0
     for cls_name in sorted(class_to_refs.keys()):
         class_id_map[cls_name] = class_id
         class_id += 1
     
-    # Собираем файл
     file_data = bytearray()
     
-    # Заголовок файла
     file_data.extend(b'roblox!\x00')
     file_data.extend(struct.pack('<I', 0))
     file_data.extend(struct.pack('<I', len(class_to_refs)))
@@ -915,20 +1089,17 @@ def save_rbxl(parsed: dict, path: str):
     file_data.extend(struct.pack('<I', 0))
     file_data.extend(b'\x00' * 8)
     
-    # INST чанки
     for cls_name in sorted(class_to_refs.keys()):
         referents = class_to_refs[cls_name]
         cid = class_id_map[cls_name]
         inst_payload = write_inst(cid, cls_name, referents)
         file_data.extend(write_chunk(b'INST', inst_payload))
     
-    # PRNT чанк
     pairs = [(child, parent) for child, parent in parent_map.items()]
     if pairs:
         prnt_payload = write_prnt(pairs)
         file_data.extend(write_chunk(b'PRNT', prnt_payload))
     
-    # PROP чанки
     for cls_name, referents in class_to_refs.items():
         cid = class_id_map[cls_name]
         class_props = {}
@@ -940,11 +1111,9 @@ def save_rbxl(parsed: dict, path: str):
                     class_props[pname][ref] = pval
         
         for pname, ref_values in class_props.items():
-            # Определяем type_id
             sample_value = next((v for v in ref_values.values() if v is not None), None)
             
-            # Пробуем угадать тип
-            type_id = 0x01  # default string
+            type_id = 0x01
             if sample_value is not None:
                 if isinstance(sample_value, str):
                     type_id = 0x01
@@ -956,75 +1125,49 @@ def save_rbxl(parsed: dict, path: str):
                     type_id = 0x04
                 elif isinstance(sample_value, dict):
                     if 'r' in sample_value and 'g' in sample_value and 'b' in sample_value:
-                        # Проверяем, целые или дробные
                         r = sample_value.get('r', 0)
                         if isinstance(r, float) and r <= 1.0:
-                            type_id = 0x0c  # Color3
+                            type_id = 0x0c
                         else:
-                            type_id = 0x1a  # Color3uint8
+                            type_id = 0x1a
                     elif 'matrix' in sample_value or 'position' in sample_value:
-                        type_id = 0x10  # CFrame
+                        type_id = 0x10
                     elif 'x' in sample_value and 'y' in sample_value and 'z' in sample_value:
-                        type_id = 0x0e  # Vector3
+                        type_id = 0x0e
                     elif 'x' in sample_value and 'y' in sample_value:
                         if 'scale' in sample_value.get('x', {}):
-                            type_id = 0x07  # UDim2
+                            type_id = 0x07
                         else:
-                            type_id = 0x0d  # Vector2
+                            type_id = 0x0d
                     elif 'scale' in sample_value and 'offset' in sample_value:
-                        type_id = 0x06  # UDim
+                        type_id = 0x06
                     elif 'index' in sample_value and 'time' in sample_value:
-                        type_id = 0x1f  # UniqueId
+                        type_id = 0x1f
                     elif 'family' in sample_value:
-                        type_id = 0x20  # Font
+                        type_id = 0x20
                     elif 'min' in sample_value and 'max' in sample_value:
-                        type_id = 0x17  # NumberRange
+                        type_id = 0x17
                     else:
-                        type_id = 0x01  # string fallback
+                        type_id = 0x01
             
-            # Собираем значения
             values = [ref_values.get(ref) for ref in referents]
             
-            # Сериализуем
             serializer = TYPE_SERIALIZERS.get(type_id, s_string)
             try:
                 serialized_values = serializer(values)
             except Exception:
-                # Fallback to string
                 serialized_values = s_string(values)
             
             prop_header = write_prop_header(cid, pname, type_id)
             prop_payload = prop_header + serialized_values
             file_data.extend(write_chunk(b'PROP', prop_payload))
     
-    # END чанк
     file_data.extend(write_chunk(b'END\x00', b''))
     
     with open(path, 'wb') as f:
         f.write(bytes(file_data))
     
     return True
-
-
-def build_tree(parsed):
-    """Строит дерево объектов из распарсенных данных"""
-    referent_to_class = parsed['referent_to_class']
-    parent_map = parsed['parent_map']
-    props = parsed['props']
-    children_of = {}
-    for child, parent in parent_map.items():
-        children_of.setdefault(parent, []).append(child)
-
-    def build(referent):
-        return {
-            'referent': referent,
-            'class': referent_to_class.get(referent),
-            'properties': props.get(referent, {}),
-            'children': [build(c) for c in children_of.get(referent, [])],
-        }
-
-    roots = children_of.get(-1, [])
-    return [build(r) for r in roots]
 
 
 def publish_place(rbxl_path, universe_id, place_id, api_key, version_type="Published"):
@@ -1047,34 +1190,3 @@ def publish_place(rbxl_path, universe_id, place_id, api_key, version_type="Publi
                 return resp.status, resp.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
-
-
-# ====================== CLI ======================
-
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print("Использование: python3 rbxl_parser.py путь/к/файлу.rbxl")
-        sys.exit(1)
-
-    parsed = parse_rbxl(sys.argv[1])
-    referent_to_class = parsed['referent_to_class']
-    parent_map = parsed['parent_map']
-    props = parsed['props']
-
-    print(f"Найдено инстансов: {len(referent_to_class)}")
-    print(f"PROP-чанков пропущено: {parsed['skipped_prop_chunks']}")
-    print()
-    print("=== Дерево объектов ===")
-    for r, cls in referent_to_class.items():
-        nm = props.get(r, {}).get('Name', '?')
-        print(f"{r:5d}  {cls:25s} Name={nm!r}  parent={parent_map.get(r)}")
-
-    print()
-    print("=== Исходники скриптов ===")
-    for r, cls in referent_to_class.items():
-        if cls in ('Script', 'LocalScript', 'ModuleScript'):
-            nm = props.get(r, {}).get('Name', '?')
-            src = props.get(r, {}).get('Source')
-            print(f"--- {cls} '{nm}' (referent {r}) ---")
-            print(src)
-            print()

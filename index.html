@@ -1,0 +1,2031 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+    <title>RbxStudio</title>
+
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: #111827;
+            color: #fff;
+            font-family: system-ui, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Верхний тулбар */
+        #toolbar-top {
+            background: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            height: 40px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #374151;
+            overflow-x: auto;
+        }
+
+        #toolbar-top button {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        #toolbar-top button:hover {
+            background: #4b5563;
+        }
+
+        #toolbar-top button.green {
+            background: #065f46;
+        }
+
+        #toolbar-top button.red {
+            background: #7f1d1d;
+        }
+
+        #toolbar-top button.blue {
+            background: #1e3a8a;
+        }
+
+        #toolbar-top button.purple {
+            background: #7c3aed;
+        }
+
+        #toolbar-top .sep {
+            width: 1px;
+            height: 24px;
+            background: #374151;
+            margin: 0 4px;
+        }
+
+        #toolbar-top .title {
+            font-weight: bold;
+            margin-right: 8px;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        /* Основная область */
+        #main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        #explorer {
+            width: 220px;
+            min-width: 150px;
+            max-width: 400px;
+            flex-shrink: 0;
+            background: #1f2937;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .resizer {
+            width: 5px;
+            background: #374151;
+            cursor: col-resize;
+            flex-shrink: 0;
+            transition: background 0.2s;
+            position: relative;
+            z-index: 10;
+        }
+
+        .resizer:hover,
+        .resizer.active {
+            background: #3b82f6;
+        }
+
+        .resizer::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 3px;
+            height: 30px;
+            background: #6b7280;
+            border-radius: 2px;
+        }
+
+        .resizer:hover::after,
+        .resizer.active::after {
+            background: #fff;
+        }
+
+        #explorer-header {
+            background: #111827;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #9ca3af;
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #explorer-header button {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        #search-box {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 4px 8px;
+            width: 100%;
+            font-size: 12px;
+            outline: none;
+            flex-shrink: 0;
+        }
+
+        #tree-scroll {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        #tree {
+            padding: 2px 0;
+        }
+
+        .tree-node {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 1px 0;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            overflow: hidden;
+            font-size: 12px;
+        }
+
+        .tree-node:hover {
+            background: #374151;
+        }
+
+        .tree-node.selected {
+            background: #1e3a5f;
+        }
+
+        .tree-arrow {
+            width: 14px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+
+        .tree-icon {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+            flex-shrink: 0;
+            background: white;
+            border-radius: 2px;
+        }
+
+        .tree-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0 2px;
+        }
+
+        .tree-label mark {
+            background: #854d0e;
+            color: #fef08a;
+            border-radius: 2px;
+        }
+
+        #viewport {
+            flex: 1;
+            position: relative;
+            background: #0f172a;
+            overflow: hidden;
+            min-width: 200px;
+        }
+
+        #viewport canvas {
+            display: block;
+        }
+
+        #vp-label {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            font-size: 11px;
+            color: #9ca3af;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 6px 10px;
+            border-radius: 6px;
+            line-height: 1.5;
+            z-index: 5;
+            backdrop-filter: blur(4px);
+        }
+
+        #speed-indicator {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 11px;
+            color: #fbbf24;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            z-index: 5;
+            display: none;
+        }
+
+        #rightpanel {
+            width: 260px;
+            min-width: 200px;
+            max-width: 500px;
+            flex-shrink: 0;
+            background: #1f2937;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #tabs {
+            display: flex;
+            background: #111827;
+            flex-shrink: 0;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 6px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 12px;
+            color: #6b7280;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab.active {
+            color: #fff;
+            border-bottom: 2px solid #3b82f6;
+        }
+
+        #tab-props {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px;
+        }
+
+        #tab-script {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+        }
+
+        #script-name {
+            padding: 4px 6px;
+            font-size: 11px;
+            color: #6b7280;
+            flex-shrink: 0;
+            background: #111827;
+        }
+
+        #script-editor-container {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+
+        .CodeMirror {
+            height: 100% !important;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+        }
+
+        #script-save-btn {
+            background: #065f46;
+            border: none;
+            color: #fff;
+            padding: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        /* Нижний инвентарь */
+        #toolbar-bottom {
+            background: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 8px;
+            height: 35px;
+            flex-shrink: 0;
+            border-top: 1px solid #374151;
+            overflow-x: auto;
+        }
+
+        #toolbar-bottom .inv-item {
+            background: #374151;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        #toolbar-bottom .inv-item:hover {
+            background: #4b5563;
+            border-color: #3b82f6;
+        }
+
+        #toolbar-bottom .inv-item.selected {
+            background: #1e3a5f;
+            border-color: #3b82f6;
+        }
+
+        #toolbar-bottom .inv-icon {
+            width: 20px;
+            height: 20px;
+            object-fit: contain;
+            background: white;
+            border-radius: 3px;
+        }
+
+        #toolbar-bottom .inv-label {
+            font-weight: 500;
+        }
+
+        #toolbar-bottom .inv-count {
+            color: #9ca3af;
+            font-size: 10px;
+            background: #1f2937;
+            padding: 1px 6px;
+            border-radius: 8px;
+        }
+
+        #toolbar-bottom .sep {
+            width: 1px;
+            height: 20px;
+            background: #374151;
+            margin: 0 2px;
+        }
+
+        .prop-header {
+            padding: 4px 6px;
+            background: #111827;
+            border-radius: 4px;
+            margin-bottom: 4px;
+        }
+
+        .prop-cls {
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .prop-ref {
+            font-size: 10px;
+            color: #6b7280;
+        }
+
+        .prop-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 1px 2px;
+            min-height: 24px;
+        }
+
+        .prop-name {
+            width: 110px;
+            flex-shrink: 0;
+            font-size: 11px;
+            color: #9ca3af;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .prop-val {
+            flex: 1;
+            background: #374151;
+            border: none;
+            color: #fff;
+            font-size: 11px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            width: 100%;
+            outline: none;
+        }
+
+        .prop-val:focus {
+            background: #4b5563;
+        }
+
+        .prop-bool {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #3b82f6;
+        }
+
+        .prop-color-preview {
+            width: 18px;
+            height: 18px;
+            border-radius: 3px;
+            border: 1px solid #4b5563;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        #modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        #modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: #1f2937;
+            border-radius: 8px;
+            padding: 16px;
+            min-width: 320px;
+            max-width: 90vw;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .modal h3 {
+            font-size: 15px;
+            font-weight: bold;
+        }
+
+        .modal input,
+        .modal select {
+            background: #374151;
+            border: 1px solid #4b5563;
+            color: #fff;
+            padding: 6px 8px;
+            border-radius: 4px;
+            width: 100%;
+            font-size: 13px;
+            outline: none;
+        }
+
+        .modal button {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .modal button:hover {
+            background: #4b5563;
+        }
+
+        .modal-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .modal-row button {
+            flex: 1;
+        }
+
+        #fb-path {
+            font-size: 11px;
+            color: #9ca3af;
+            padding: 4px 0;
+            word-break: break-all;
+        }
+
+        #fb-list {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #374151;
+            border-radius: 4px;
+            min-height: 200px;
+            max-height: 40vh;
+        }
+
+        .fb-entry {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .fb-entry:hover {
+            background: #374151;
+        }
+
+        .fb-entry.file-rbxl {
+            color: #86efac;
+        }
+
+        .fb-entry.file-json {
+            color: #fcd34d;
+        }
+
+        .fb-entry.dir {
+            color: #fde68a;
+        }
+
+        .fb-size {
+            margin-left: auto;
+            color: #6b7280;
+            font-size: 10px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+        }
+
+        #notify {
+            position: fixed;
+            bottom: 50px;
+            right: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 200;
+        }
+
+        .notif {
+            background: #065f46;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            animation: fadein .2s ease;
+        }
+
+        .notif.err {
+            background: #7f1d1d;
+        }
+
+        .notif.warn {
+            background: #78350f;
+        }
+
+        @keyframes fadein {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @media(max-width:600px) {
+            #explorer {
+                width: 160px;
+                min-width: 120px;
+            }
+
+            #rightpanel {
+                width: 200px;
+                min-width: 150px;
+            }
+
+            #toolbar-top button {
+                padding: 4px 6px;
+                font-size: 11px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Верхний тулбар -->
+    <div id="toolbar-top">
+        <span class="title">🎮 RbxStudio</span>
+        <div class="sep"></div>
+        <button onclick="openFileBrowser('open')" title="Открыть файл (Ctrl+O)">📂 Открыть</button>
+        <button class="green" onclick="saveFile()" title="Сохранить (Ctrl+S)">💾 Сохранить</button>
+        <button onclick="openFileBrowser('save')" title="Сохранить как (Ctrl+Shift+S)">💾 Как...</button>
+        <div class="sep"></div>
+        <button onclick="showAddDialog()" title="Добавить объект">➕ Добавить</button>
+        <button class="red" onclick="deleteSelected()" title="Удалить (Delete)">🗑 Удалить</button>
+        <div class="sep"></div>
+        <button onclick="reloadScene()" title="Обновить сцену (F5)">🔄 Обновить</button>
+        <button class="blue" onclick="showPublishDialog()" title="Опубликовать">☁ Публикация</button>
+        <div class="sep"></div>
+        <button onclick="resetCamera()" title="Сбросить камеру">🏠 Сброс</button>
+        <button onclick="topView()" title="Вид сверху">⬆ Верх</button>
+        <button onclick="frontView()" title="Вид спереди">📷 Фронт</button>
+        <button onclick="rightView()" title="Вид справа">➡ Право</button>
+        <div class="sep"></div>
+        <button onclick="resetLayout()" title="Сбросить размеры панелей">📐</button>
+    </div>
+
+    <!-- Основная область -->
+    <div id="main">
+        <div id="explorer">
+            <div id="explorer-header">
+                <span>Explorer</span>
+                <div>
+                    <button onclick="collapseAll()" title="Свернуть всё">◢</button>
+                    <button onclick="expandAllVisible()" title="Развернуть всё">◣</button>
+                </div>
+            </div>
+            <input id="search-box" placeholder="🔍 Поиск..." oninput="onSearch(this.value)">
+            <div id="tree-scroll">
+                <div id="tree"></div>
+            </div>
+        </div>
+
+        <!-- Разделитель 1 -->
+        <div class="resizer" id="resizer-1"></div>
+
+        <div id="viewport">
+            <div id="vp-label">
+                🖱️ ЛКМ — вращение | 🖱️ ПКМ/СКМ — панорама | 🖱️ Колесо — зум<br>
+                ⌨️ WASD — движение | Q/E — вверх/вниз | F — фокус | Esc — снять
+            </div>
+            <div id="speed-indicator">🚀 x1.0</div>
+        </div>
+
+        <!-- Разделитель 2 -->
+        <div class="resizer" id="resizer-2"></div>
+
+        <div id="rightpanel">
+            <div id="tabs">
+                <div class="tab active" onclick="switchTab('props')">Properties</div>
+                <div class="tab" onclick="switchTab('script')">Script</div>
+            </div>
+            <div id="tab-props">
+                <p style="color:#6b7280;font-size:12px;padding:8px">← Выбери объект</p>
+            </div>
+            <div id="tab-script" style="display:none;flex:1;flex-direction:column">
+                <div id="script-name">Скрипт не выбран</div>
+                <div id="script-editor-container">
+                    <textarea id="script-editor" spellcheck="false"></textarea>
+                </div>
+                <button id="script-save-btn" onclick="saveScript()">💾 Сохранить скрипт</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Нижний инвентарь -->
+    <div id="toolbar-bottom">
+        <span style="font-size:11px;color:#9ca3af;margin-right:4px;">📋 Быстрое:</span>
+        <div class="inv-item" onclick="quickAdd('Part')">
+            <span>🟫</span>
+            <span class="inv-label">Part</span>
+        </div>
+        <div class="inv-item" onclick="quickAdd('SpherePart')">
+            <span>🔵</span>
+            <span class="inv-label">Sphere</span>
+        </div>
+        <div class="inv-item" onclick="quickAdd('WedgePart')">
+            <span>🔺</span>
+            <span class="inv-label">Wedge</span>
+        </div>
+        <div class="sep"></div>
+        <div class="inv-item" onclick="quickAdd('Script')">
+            <span>📜</span>
+            <span class="inv-label">Script</span>
+        </div>
+        <div class="inv-item" onclick="quickAdd('LocalScript')">
+            <span>📝</span>
+            <span class="inv-label">LocalScript</span>
+        </div>
+        <div class="inv-item" onclick="quickAdd('ModuleScript')">
+            <span>📚</span>
+            <span class="inv-label">Module</span>
+        </div>
+        <div class="sep"></div>
+        <div class="inv-item" onclick="quickAdd('PointLight')">
+            <span>💡</span>
+            <span class="inv-label">Light</span>
+        </div>
+        <div class="inv-item" onclick="quickAdd('Sound')">
+            <span>🔊</span>
+            <span class="inv-label">Sound</span>
+        </div>
+        <div class="inv-item" onclick="quickAdd('Model')">
+            <span>📦</span>
+            <span class="inv-label">Model</span>
+        </div>
+        <div class="inv-item" onclick="quickAdd('Folder')">
+            <span>📁</span>
+            <span class="inv-label">Folder</span>
+        </div>
+        <div class="sep"></div>
+        <div id="inv-selected-info" style="font-size:11px;color:#6b7280;margin-left:auto;">
+            Ничего не выбрано
+        </div>
+    </div>
+
+    <div id="modal-overlay">
+        <div id="modal-content" class="modal"></div>
+    </div>
+    <div id="notify"></div>
+
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+
+    <script>
+        // ============ ИНИЦИАЛИЗАЦИЯ CODEMIRROR ============
+        let cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
+            mode: 'lua',
+            theme: 'monokai',
+            lineNumbers: true,
+            autoCloseBrackets: true,
+            matchBrackets: true,
+            indentUnit: 4,
+            tabSize: 4,
+            indentWithTabs: false,
+            lineWrapping: false,
+            viewportMargin: Infinity
+        });
+
+        function refreshCM() {
+            setTimeout(() => {
+                cmEditor.refresh();
+            }, 10);
+        }
+
+        // ============ РАЗДЕЛИТЕЛИ ПАНЕЛЕЙ ============
+        function initResizers() {
+            const resizers = document.querySelectorAll('.resizer');
+            let currentResizer = null;
+            let startX = 0;
+            let startWidth = 0;
+            let startRightWidth = 0;
+
+            resizers.forEach(resizer => {
+                resizer.addEventListener('mousedown', (e) => {
+                    currentResizer = resizer;
+                    resizer.classList.add('active');
+
+                    if (resizer.id === 'resizer-1') {
+                        const explorer = document.getElementById('explorer');
+                        startWidth = explorer.offsetWidth;
+                        startX = e.clientX;
+                    } else if (resizer.id === 'resizer-2') {
+                        const rightpanel = document.getElementById('rightpanel');
+                        startRightWidth = rightpanel.offsetWidth;
+                        startX = e.clientX;
+                    }
+
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                });
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!currentResizer) return;
+
+                if (currentResizer.id === 'resizer-1') {
+                    const explorer = document.getElementById('explorer');
+                    const diff = e.clientX - startX;
+                    let newWidth = startWidth + diff;
+                    newWidth = Math.max(150, Math.min(400, newWidth));
+                    explorer.style.width = newWidth + 'px';
+                    refreshCM();
+                    resize();
+                } else if (currentResizer.id === 'resizer-2') {
+                    const rightpanel = document.getElementById('rightpanel');
+                    const diff = startX - e.clientX;
+                    let newWidth = startRightWidth + diff;
+                    newWidth = Math.max(200, Math.min(500, newWidth));
+                    rightpanel.style.width = newWidth + 'px';
+                    refreshCM();
+                    resize();
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (currentResizer) {
+                    currentResizer.classList.remove('active');
+                    currentResizer = null;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    saveLayout();
+                }
+            });
+
+            // Touch support
+            resizers.forEach(resizer => {
+                resizer.addEventListener('touchstart', (e) => {
+                    currentResizer = resizer;
+                    resizer.classList.add('active');
+
+                    if (resizer.id === 'resizer-1') {
+                        const explorer = document.getElementById('explorer');
+                        startWidth = explorer.offsetWidth;
+                        startX = e.touches[0].clientX;
+                    } else if (resizer.id === 'resizer-2') {
+                        const rightpanel = document.getElementById('rightpanel');
+                        startRightWidth = rightpanel.offsetWidth;
+                        startX = e.touches[0].clientX;
+                    }
+
+                    document.body.style.userSelect = 'none';
+                });
+            });
+
+            document.addEventListener('touchmove', (e) => {
+                if (!currentResizer) return;
+
+                if (currentResizer.id === 'resizer-1') {
+                    const explorer = document.getElementById('explorer');
+                    const diff = e.touches[0].clientX - startX;
+                    let newWidth = startWidth + diff;
+                    newWidth = Math.max(150, Math.min(400, newWidth));
+                    explorer.style.width = newWidth + 'px';
+                    refreshCM();
+                    resize();
+                } else if (currentResizer.id === 'resizer-2') {
+                    const rightpanel = document.getElementById('rightpanel');
+                    const diff = startX - e.touches[0].clientX;
+                    let newWidth = startRightWidth + diff;
+                    newWidth = Math.max(200, Math.min(500, newWidth));
+                    rightpanel.style.width = newWidth + 'px';
+                    refreshCM();
+                    resize();
+                }
+            });
+
+            document.addEventListener('touchend', () => {
+                if (currentResizer) {
+                    currentResizer.classList.remove('active');
+                    currentResizer = null;
+                    document.body.style.userSelect = '';
+                    saveLayout();
+                }
+            });
+        }
+
+        function saveLayout() {
+            const layout = {
+                explorer: document.getElementById('explorer').style.width || '220px',
+                rightpanel: document.getElementById('rightpanel').style.width || '260px'
+            };
+            localStorage.setItem('rbxstudio-layout', JSON.stringify(layout));
+        }
+
+        function loadLayout() {
+            try {
+                const saved = localStorage.getItem('rbxstudio-layout');
+                if (saved) {
+                    const layout = JSON.parse(saved);
+                    document.getElementById('explorer').style.width = layout.explorer || '220px';
+                    document.getElementById('rightpanel').style.width = layout.rightpanel || '260px';
+                }
+            } catch (e) { }
+        }
+
+        function resetLayout() {
+            document.getElementById('explorer').style.width = '220px';
+            document.getElementById('rightpanel').style.width = '260px';
+            localStorage.removeItem('rbxstudio-layout');
+            refreshCM();
+            resize();
+            notify('📐 Размеры панелей сброшены');
+        }
+
+        // ============ THREE.JS ============
+        (function () {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+            s.onload = initThree;
+            document.head.appendChild(s);
+        })();
+
+        let selectedRef = null;
+        let expanded = new Set();
+        let treeData = [];
+        let searchText = '';
+        let sceneObjs = {};
+        let camera;
+        let renderer;
+        let scene;
+        let raycaster;
+        let mouse;
+        let isDragging = false;
+        let prevMouse = { x: 0, y: 0 };
+        let spherical = { theta: Math.PI / 4, phi: Math.PI / 3, r: 30 };
+        let target = { x: 0, y: 2, z: 0 };
+        let keysPressed = {};
+        let moveSpeed = 1.0;
+
+        // ============ УВЕДОМЛЕНИЯ ============
+        function notify(msg, type = 'ok') {
+            const d = document.createElement('div');
+            d.className = 'notif' + (type === 'err' ? ' err' : type === 'warn' ? ' warn' : '');
+            d.textContent = msg;
+            document.getElementById('notify').appendChild(d);
+            setTimeout(() => d.remove(), 3000);
+        }
+
+        async function api(method, url, body) {
+            const opts = {
+                method: method,
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (body) {
+                opts.body = JSON.stringify(body);
+            }
+            const r = await fetch(url, opts);
+            return r.json();
+        }
+
+        // ============ THREE.JS INIT ============
+        function initThree() {
+            const vp = document.getElementById('viewport');
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            vp.appendChild(renderer.domElement);
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+            camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // Освещение
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+            sun.position.set(20, 40, 20);
+            sun.castShadow = true;
+            scene.add(sun);
+
+            // Сетка и оси
+            scene.add(new THREE.GridHelper(200, 40, 0x374151, 0x1f2937));
+            scene.add(new THREE.AxesHelper(5));
+
+            window._selBox = null;
+            resize();
+            window.addEventListener('resize', resize);
+
+            // Мышь
+            renderer.domElement.addEventListener('mousedown', onMD);
+            renderer.domElement.addEventListener('mousemove', onMM);
+            renderer.domElement.addEventListener('mouseup', onMU);
+            renderer.domElement.addEventListener('wheel', onWh, { passive: false });
+            renderer.domElement.addEventListener('contextmenu', e => {
+                e.preventDefault();
+            });
+
+            // Тач
+            renderer.domElement.addEventListener('touchstart', onTS, { passive: false });
+            renderer.domElement.addEventListener('touchmove', onTM, { passive: false });
+            renderer.domElement.addEventListener('touchend', onTE);
+
+            updateCamera();
+            animate();
+            loadTree();
+        }
+
+        function resize() {
+            const vp = document.getElementById('viewport');
+            const w = vp.clientWidth;
+            const h = vp.clientHeight;
+            renderer.setSize(w, h);
+            if (camera) {
+                camera.aspect = w / h;
+                camera.updateProjectionMatrix();
+            }
+        }
+
+        // ============ АНИМАЦИЯ С WASD ============
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // WASD движение камеры
+            const anyKeyPressed = keysPressed['w'] || keysPressed['s'] || keysPressed['a'] ||
+                keysPressed['d'] || keysPressed['q'] || keysPressed['e'] ||
+                keysPressed['shift'] || keysPressed[' '];
+
+            if (anyKeyPressed) {
+                const direction = new THREE.Vector3();
+                camera.getWorldDirection(direction);
+
+                const right = new THREE.Vector3();
+                right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
+
+                const speed = moveSpeed * (spherical.r / 30) * 0.5;
+
+                // W/S - вперед/назад
+                if (keysPressed['w']) {
+                    target.x += direction.x * speed;
+                    target.y += direction.y * speed;
+                    target.z += direction.z * speed;
+                }
+                if (keysPressed['s']) {
+                    target.x -= direction.x * speed;
+                    target.y -= direction.y * speed;
+                    target.z -= direction.z * speed;
+                }
+
+                // A/D - влево/вправо
+                if (keysPressed['a']) {
+                    target.x -= right.x * speed;
+                    target.y -= right.y * speed;
+                    target.z -= right.z * speed;
+                }
+                if (keysPressed['d']) {
+                    target.x += right.x * speed;
+                    target.y += right.y * speed;
+                    target.z += right.z * speed;
+                }
+
+                // Q/E или Shift/Space - вниз/вверх
+                if (keysPressed['q']) {
+                    target.y -= speed;
+                }
+                if (keysPressed['e'] || keysPressed[' ']) {
+                    target.y += speed;
+                }
+
+                updateCamera();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function updateCamera() {
+            const { theta, phi, r } = spherical;
+            camera.position.set(
+                target.x + r * Math.sin(phi) * Math.sin(theta),
+                target.y + r * Math.cos(phi),
+                target.z + r * Math.sin(phi) * Math.cos(theta)
+            );
+            camera.lookAt(target.x, target.y, target.z);
+        }
+
+        // ============ ПРЕСЕТЫ КАМЕРЫ ============
+        function resetCamera() {
+            spherical = { theta: Math.PI / 4, phi: Math.PI / 3, r: 30 };
+            target = { x: 0, y: 2, z: 0 };
+            updateCamera();
+            notify('🏠 Камера сброшена');
+        }
+
+        function topView() {
+            spherical = { theta: 0, phi: 0.01, r: spherical.r };
+            updateCamera();
+            notify('⬆ Вид сверху');
+        }
+
+        function frontView() {
+            spherical = { theta: 0, phi: Math.PI / 2, r: spherical.r };
+            updateCamera();
+            notify('📷 Вид спереди');
+        }
+
+        function rightView() {
+            spherical = { theta: Math.PI / 2, phi: Math.PI / 2, r: spherical.r };
+            updateCamera();
+            notify('➡ Вид справа');
+        }
+
+        // ============ МЫШЬ ============
+        function onMD(e) {
+            isDragging = false;
+            prevMouse = { x: e.clientX, y: e.clientY };
+        }
+
+        function onMM(e) {
+            if (!e.buttons) return;
+
+            const dx = e.clientX - prevMouse.x;
+            const dy = e.clientY - prevMouse.y;
+            prevMouse = { x: e.clientX, y: e.clientY };
+
+            if (Math.abs(dx) + Math.abs(dy) > 3) {
+                isDragging = true;
+            }
+
+            if (e.buttons === 1) {
+                // Левая кнопка - вращение (вертикаль инвертирована)
+                spherical.theta -= dx * .005;
+                spherical.phi = Math.max(.05, Math.min(Math.PI - .05, spherical.phi - dy * .005));
+            } else if (e.buttons === 2 || e.buttons === 4) {
+                // Правая/средняя кнопка - панорамирование
+                const direction = new THREE.Vector3();
+                camera.getWorldDirection(direction);
+                const right = new THREE.Vector3();
+                right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
+                const up = new THREE.Vector3();
+                up.crossVectors(right, direction).normalize();
+
+                const panSpeed = spherical.r * 0.002;
+                target.x -= right.x * dx * panSpeed + up.x * dy * panSpeed;
+                target.y -= up.y * dy * panSpeed;
+                target.z -= right.z * dx * panSpeed + up.z * dy * panSpeed;
+            }
+
+            updateCamera();
+        }
+
+        function onMU(e) {
+            if (!isDragging && e.button === 0) {
+                pick(e.clientX, e.clientY);
+            }
+        }
+
+        function onWh(e) {
+            e.preventDefault();
+
+            // Shift+колесико - скорость движения
+            if (e.shiftKey) {
+                moveSpeed = Math.max(0.1, Math.min(10, moveSpeed - e.deltaY * 0.01));
+                const indicator = document.getElementById('speed-indicator');
+                indicator.textContent = '🚀 x' + moveSpeed.toFixed(1);
+                indicator.style.display = 'block';
+                clearTimeout(window._speedTimeout);
+                window._speedTimeout = setTimeout(() => {
+                    indicator.style.display = 'none';
+                }, 1500);
+                return;
+            }
+
+            spherical.r = Math.max(1, Math.min(500, spherical.r + e.deltaY * .05));
+            updateCamera();
+        }
+
+        // ============ ТАЧ ============
+        let _tch = [];
+        let _td = 0;
+        let _ts = null;
+
+        function onTS(e) {
+            e.preventDefault();
+            _tch = Array.from(e.touches);
+            _ts = _tch[0] ? { x: _tch[0].clientX, y: _tch[0].clientY } : null;
+            if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                _td = Math.sqrt(dx * dx + dy * dy);
+            }
+        }
+
+        function onTM(e) {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                const t = e.touches[0];
+                const dx = t.clientX - _tch[0].clientX;
+                const dy = t.clientY - _tch[0].clientY;
+                _tch = Array.from(e.touches);
+                spherical.theta -= dx * .005;
+                spherical.phi = Math.max(.05, Math.min(Math.PI - .05, spherical.phi - dy * .005));
+                updateCamera();
+            } else if (e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                spherical.r = Math.max(1, Math.min(500, spherical.r + (dist - _td) * .05));
+                _td = dist;
+                _tch = Array.from(e.touches);
+                updateCamera();
+            }
+        }
+
+        function onTE(e) {
+            if (e.changedTouches.length === 1 && _ts) {
+                const t = e.changedTouches[0];
+                if (Math.abs(t.clientX - _ts.x) < 8 && Math.abs(t.clientY - _ts.y) < 8) {
+                    pick(t.clientX, t.clientY);
+                }
+            }
+        }
+
+        function pick(cx, cy) {
+            const vp = document.getElementById('viewport');
+            const rect = vp.getBoundingClientRect();
+            mouse.x = ((cx - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const hits = raycaster.intersectObjects(Object.values(sceneObjs));
+            if (hits.length) {
+                selectRef(parseInt(hits[0].object.userData.ref));
+            } else {
+                deselect();
+            }
+        }
+
+        // ============ СЦЕНА ============
+        async function reloadScene() {
+            const r = await api('GET', '/api/scene');
+            if (!r.ok) return;
+
+            for (const mesh of Object.values(sceneObjs)) {
+                scene.remove(mesh);
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) {
+                    if (mesh.material.map) mesh.material.map.dispose();
+                    mesh.material.dispose();
+                }
+            }
+            sceneObjs = {};
+            if (window._selBox) {
+                scene.remove(window._selBox);
+                window._selBox = null;
+            }
+
+            const textureLoader = new THREE.TextureLoader();
+
+            for (const o of r.objects) {
+                let geo;
+                if (o.shape === 'sphere') {
+                    geo = new THREE.SphereGeometry(Math.max(o.sx, o.sy, o.sz) * .5, 32, 24);
+                } else {
+                    geo = new THREE.BoxGeometry(o.sx, o.sy, o.sz);
+                }
+
+                // Загружаем текстуру
+                let texture = null;
+                if (o.texture) {
+                    try {
+                        texture = await new Promise((resolve) => {
+                            textureLoader.load(o.texture, resolve, undefined, () => resolve(null));
+                        });
+                        if (texture) {
+                            texture.wrapS = THREE.RepeatWrapping;
+                            texture.wrapT = THREE.RepeatWrapping;
+                        }
+                    } catch (e) {
+                        texture = null;
+                    }
+                }
+
+                const mat = new THREE.MeshStandardMaterial({
+                    color: o.color || '#a0a0a0',
+                    transparent: o.opacity < 1.0,
+                    opacity: o.opacity || 1.0,
+                    map: texture,
+                    metalness: 0.1,
+                    roughness: 0.5,
+                });
+
+                const mesh = new THREE.Mesh(geo, mat);
+
+                if (o.rot && o.rot.length >= 9) {
+                    const m = o.rot;
+                    const rm = new THREE.Matrix4();
+                    rm.set(
+                        m[0], m[3], m[6], o.px,
+                        m[1], m[4], m[7], o.py,
+                        m[2], m[5], m[8], o.pz,
+                        0, 0, 0, 1
+                    );
+                    mesh.matrix.copy(rm);
+                    mesh.matrixAutoUpdate = false;
+                } else {
+                    mesh.position.set(o.px, o.py, o.pz);
+                }
+
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                mesh.userData.ref = o.ref;
+
+                if (o.opacity < 1.0) {
+                    mesh.material.depthWrite = o.opacity > 0.5;
+                }
+
+                scene.add(mesh);
+                sceneObjs[o.ref] = mesh;
+            }
+
+            notify('🔄 Сцена: ' + r.objects.length + ' объектов');
+        }
+
+        function highlightSelected(ref) {
+            for (const [r, mesh] of Object.entries(sceneObjs)) {
+                mesh.material.emissive = new THREE.Color(parseInt(r) === ref ? 0xff6600 : 0);
+                mesh.material.emissiveIntensity = parseInt(r) === ref ? .4 : 0;
+            }
+            if (window._selBox) {
+                scene.remove(window._selBox);
+                window._selBox = null;
+            }
+            if (ref && sceneObjs[ref]) {
+                const box = new THREE.BoxHelper(sceneObjs[ref], 0xff6600);
+                scene.add(box);
+                window._selBox = box;
+            }
+        }
+
+        // ============ ДЕРЕВО ============
+        async function loadTree() {
+            const r = await api('GET', '/api/tree');
+            if (!r.ok) return;
+            treeData = r.tree;
+            for (const n of treeData) {
+                expanded.add(n.ref);
+            }
+            renderTree();
+            reloadScene();
+            updateInventoryCount();
+        }
+
+        function updateInventoryCount() {
+            const info = document.getElementById('inv-selected-info');
+            if (selectedRef) {
+                const node = findNodeByRef(treeData, selectedRef);
+                if (node) {
+                    info.textContent = `Выбрано: ${node.name} (${node.cls})`;
+                }
+            } else {
+                info.textContent = `Объектов: ${Object.keys(sceneObjs).length}`;
+            }
+        }
+
+        function findNodeByRef(nodes, ref) {
+            for (const n of nodes) {
+                if (n.ref === ref) return n;
+                if (n.children) {
+                    const found = findNodeByRef(n.children, ref);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        function onSearch(v) {
+            searchText = v.trim().toLowerCase();
+            if (searchText) {
+                for (const n of treeData) {
+                    expandAll(n);
+                }
+            }
+            renderTree();
+        }
+
+        function expandAll(n) {
+            expanded.add(n.ref);
+            for (const c of n.children) {
+                expandAll(c);
+            }
+        }
+
+        function collapseAll() {
+            expanded.clear();
+            renderTree();
+        }
+
+        function expandAllVisible() {
+            for (const n of treeData) {
+                expandAll(n);
+            }
+            renderTree();
+        }
+
+        function renderTree() {
+            const c = document.getElementById('tree');
+            c.innerHTML = '';
+            for (const n of treeData) {
+                renderNode(c, n, 0);
+            }
+        }
+
+        function renderNode(parentEl, node, depth) {
+            const matchesSearch = !searchText ||
+                node.name.toLowerCase().includes(searchText) ||
+                node.cls.toLowerCase().includes(searchText);
+            const hasMatchingChildren = searchText ? node.children.some(child => anyMatch(child)) : false;
+            const isVisible = matchesSearch || hasMatchingChildren;
+
+            if (!isVisible) return;
+
+            const row = document.createElement('div');
+            row.className = 'tree-node' + (node.ref === selectedRef ? ' selected' : '');
+            row.style.paddingLeft = (depth * 14 + 2) + 'px';
+
+            const arrow = document.createElement('span');
+            arrow.className = 'tree-arrow';
+            if (node.children.length) {
+                arrow.textContent = expanded.has(node.ref) ? '▼' : '▶';
+                arrow.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleExpand(node.ref);
+                };
+            }
+            row.appendChild(arrow);
+
+            if (node.icon) {
+                const img = document.createElement('img');
+                img.className = 'tree-icon';
+                img.src = node.icon;
+                img.onerror = () => { img.style.display = 'none'; };
+                row.appendChild(img);
+            }
+
+            const label = document.createElement('span');
+            label.className = 'tree-label';
+            if (searchText && node.name.toLowerCase().includes(searchText)) {
+                const idx = node.name.toLowerCase().indexOf(searchText);
+                label.innerHTML = esc(node.name.slice(0, idx)) +
+                    '<mark>' + esc(node.name.slice(idx, idx + searchText.length)) + '</mark>' +
+                    esc(node.name.slice(idx + searchText.length));
+            } else {
+                label.textContent = node.name;
+            }
+            label.title = node.cls;
+
+            row.onclick = () => selectRef(node.ref);
+            row.appendChild(label);
+
+            parentEl.appendChild(row);
+
+            if (expanded.has(node.ref)) {
+                for (const child of node.children) {
+                    renderNode(parentEl, child, depth + 1);
+                }
+            }
+        }
+
+        function anyMatch(n) {
+            if (!searchText) return true;
+            if (n.name.toLowerCase().includes(searchText)) return true;
+            return n.children.some(child => anyMatch(child));
+        }
+
+        function toggleExpand(ref) {
+            if (expanded.has(ref)) {
+                expanded.delete(ref);
+            } else {
+                expanded.add(ref);
+            }
+            renderTree();
+        }
+
+        function esc(s) {
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // ============ ВЫБОР ОБЪЕКТА ============
+        async function selectRef(ref) {
+            selectedRef = ref;
+            highlightSelected(ref);
+            renderTree();
+            updateInventoryCount();
+            const r = await api('GET', '/api/instance/' + ref);
+            if (!r.ok) return;
+            renderProps(r);
+        }
+
+        function deselect() {
+            selectedRef = null;
+            highlightSelected(null);
+            renderTree();
+            updateInventoryCount();
+            document.getElementById('tab-props').innerHTML = '<p style="color:#6b7280;font-size:12px;padding:8px">← Выбери объект</p>';
+        }
+
+        // ============ СВОЙСТВА ============
+        function renderProps(r) {
+            const SCLS = ['Script', 'LocalScript', 'ModuleScript'];
+            const panel = document.getElementById('tab-props');
+            panel.innerHTML = '';
+
+            const hdr = document.createElement('div');
+            hdr.className = 'prop-header';
+            if (r.icon) {
+                const img = document.createElement('img');
+                img.style.cssText = 'width:32px;height:32px;object-fit:contain;background:white;border-radius:4px;margin-bottom:4px;display:block';
+                img.src = r.icon;
+                hdr.appendChild(img);
+            }
+            const cls = document.createElement('div');
+            cls.className = 'prop-cls';
+            cls.textContent = r.cls;
+            const ref = document.createElement('div');
+            ref.className = 'prop-ref';
+            ref.textContent = 'ref ' + r.ref;
+            hdr.appendChild(cls);
+            hdr.appendChild(ref);
+            panel.appendChild(hdr);
+
+            // Position, Rotation, Size
+            const specialProps = ['Position', 'Rotation', 'Size'];
+            for (const propName of specialProps) {
+                if (r.props[propName]) {
+                    addVector3Prop(panel, r.ref, propName, r.props[propName]);
+                }
+            }
+
+            // Остальные свойства
+            for (const [k, v] of Object.entries(r.props).sort()) {
+                if (k === 'Source' || k === 'CFrame' || specialProps.includes(k) || k === '_assets') {
+                    continue;
+                }
+                addPropRow(panel, r.ref, k, v);
+            }
+
+            if (SCLS.includes(r.cls)) {
+                document.getElementById('script-name').textContent = r.cls + ': ' + (r.props.Name || '?');
+                cmEditor.setValue(r.props.Source || '');
+                switchTab('script');
+                refreshCM();
+            } else {
+                switchTab('props');
+            }
+        }
+
+        function addVector3Prop(panel, ref, propName, value) {
+            const container = document.createElement('div');
+            container.style.cssText = 'margin-bottom:4px;padding:4px;background:#111827;border-radius:4px';
+
+            const label = document.createElement('div');
+            label.style.cssText = 'font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:bold';
+            label.textContent = propName;
+            container.appendChild(label);
+
+            const coords = ['x', 'y', 'z'];
+            const colors = ['#ef4444', '#22c55e', '#3b82f6'];
+
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;gap:4px';
+
+            coords.forEach((coord, i) => {
+                const inputGroup = document.createElement('div');
+                inputGroup.style.cssText = 'flex:1;display:flex;align-items:center;gap:2px';
+
+                const coordLabel = document.createElement('span');
+                coordLabel.style.cssText = `font-size:10px;color:${colors[i]};font-weight:bold;min-width:12px`;
+                coordLabel.textContent = coord.toUpperCase();
+
+                const input = document.createElement('input');
+                input.className = 'prop-val';
+                input.type = 'number';
+                input.step = propName === 'Rotation' ? '1' : '0.1';
+                input.value = typeof value === 'object' ? (value[coord] || 0) : 0;
+                input.style.cssText = 'font-size:11px;padding:2px 4px';
+
+                input.onchange = async () => {
+                    const newValue = { ...value };
+                    newValue[coord] = parseFloat(input.value) || 0;
+                    await api('POST', '/api/instance/' + ref, {
+                        prop: propName,
+                        value: newValue
+                    });
+                    reloadScene();
+                };
+
+                inputGroup.appendChild(coordLabel);
+                inputGroup.appendChild(input);
+                row.appendChild(inputGroup);
+            });
+
+            container.appendChild(row);
+            panel.appendChild(container);
+        }
+
+        function addPropRow(panel, ref, k, v) {
+            const row = document.createElement('div');
+            row.className = 'prop-row';
+
+            const nm = document.createElement('span');
+            nm.className = 'prop-name';
+            nm.textContent = k;
+            nm.title = k;
+            row.appendChild(nm);
+
+            if (typeof v === 'boolean') {
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'prop-bool';
+                cb.checked = v;
+                cb.onchange = () => setProp(ref, k, cb.checked);
+                row.appendChild(cb);
+            } else if (v && typeof v === 'object' && 'r' in v && 'g' in v && 'b' in v) {
+                const pr = document.createElement('div');
+                pr.className = 'prop-color-preview';
+                const hex = rgbToHex(v.r, v.g, v.b);
+                pr.style.background = hex;
+                pr.onclick = () => {
+                    const inp = document.createElement('input');
+                    inp.type = 'color';
+                    inp.value = hex;
+                    inp.onchange = () => {
+                        const color = hexToRgb(inp.value);
+                        setProp(ref, k, color);
+                        pr.style.background = inp.value;
+                        reloadScene();
+                    };
+                    inp.click();
+                };
+                row.appendChild(pr);
+                const inp = document.createElement('input');
+                inp.className = 'prop-val';
+                inp.value = JSON.stringify(v).slice(0, 50);
+                inp.onchange = () => {
+                    try { setProp(ref, k, JSON.parse(inp.value)); } catch { }
+                };
+                row.appendChild(inp);
+            } else if (v && typeof v === 'object') {
+                const inp = document.createElement('input');
+                inp.className = 'prop-val';
+                inp.value = JSON.stringify(v).slice(0, 80);
+                inp.onchange = () => {
+                    try { setProp(ref, k, JSON.parse(inp.value)); } catch { }
+                };
+                row.appendChild(inp);
+            } else {
+                const inp = document.createElement('input');
+                inp.className = 'prop-val';
+                inp.value = String(v ?? '');
+                inp.onchange = () => setProp(ref, k, inp.value);
+                row.appendChild(inp);
+            }
+            panel.appendChild(row);
+        }
+
+        function rgbToHex(r, g, b) {
+            return '#' + [r, g, b].map(v => Math.min(255, Math.max(0, Math.round(v * 255))).toString(16).padStart(2, '0')).join('');
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16) / 255,
+                g: parseInt(result[2], 16) / 255,
+                b: parseInt(result[3], 16) / 255
+            } : { r: 0.6, g: 0.6, b: 0.6 };
+        }
+
+        async function setProp(ref, prop, val) {
+            await api('POST', '/api/instance/' + ref, {
+                prop: prop,
+                value: val
+            });
+        }
+
+        async function saveScript() {
+            if (selectedRef === null) {
+                notify('Скрипт не выбран', 'warn');
+                return;
+            }
+            const src = cmEditor.getValue();
+            await api('POST', '/api/instance/' + selectedRef, {
+                prop: 'Source',
+                value: src
+            });
+            notify('✅ Скрипт сохранён');
+        }
+
+        function switchTab(t) {
+            document.querySelectorAll('.tab').forEach((el, i) => {
+                el.classList.toggle('active', (i === 0 && t === 'props') || (i === 1 && t === 'script'));
+            });
+            document.getElementById('tab-props').style.display = t === 'props' ? '' : 'none';
+            document.getElementById('tab-script').style.display = t === 'script' ? 'flex' : 'none';
+            if (t === 'script') refreshCM();
+        }
+
+        // ============ БЫСТРОЕ ДОБАВЛЕНИЕ ============
+        async function quickAdd(cls) {
+            const name = 'New' + cls;
+            let parent = selectedRef;
+            if (parent === null) {
+                const findWs = ns => {
+                    for (const n of ns) {
+                        if (n.cls === 'Workspace') return n.ref;
+                        const c = findWs(n.children);
+                        if (c !== null) return c;
+                    }
+                    return null;
+                };
+                parent = findWs(treeData) ?? -1;
+            }
+            const r = await api('PUT', '/api/instance', {
+                class: cls,
+                name: name,
+                parent: parent
+            });
+            if (r.ok) {
+                notify('✅ ' + cls + ' добавлен');
+                loadTree();
+            } else {
+                notify(r.error || 'Ошибка', 'err');
+            }
+        }
+
+        // ============ ФАЙЛОВЫЙ БРАУЗЕР ============
+        let _fbMode = 'open';
+        let _fbPath = '';
+
+        async function openFileBrowser(mode) {
+            _fbMode = mode;
+            const r = await api('GET', '/api/status');
+            _fbPath = r.file ? r.file.replace(/[/\\][^/\\]+$/, '') : '.';
+            showModal(fbModal());
+            browseTo(_fbPath);
+        }
+
+        function fbModal() {
+            return '<h3>' + (_fbMode === 'open' ? '📂 Открыть' : '💾 Сохранить как') + '</h3>' +
+                '<div id="fb-path"></div>' +
+                '<div id="fb-list"></div>' +
+                (_fbMode === 'save' ? '<input id="fb-name" placeholder="файл.rbxl">' : '') +
+                '<div class="modal-row">' +
+                (_fbMode === 'save' ? '<button onclick="fbSave()" style="background:#065f46">Сохранить</button>' : '') +
+                '<button onclick="closeModal()">Отмена</button>' +
+                '</div>';
+        }
+
+        async function browseTo(path) {
+            _fbPath = path;
+            const r = await api('GET', '/api/browse?path=' + encodeURIComponent(path));
+            if (!r.ok) {
+                notify(r.error, 'err');
+                return;
+            }
+            document.getElementById('fb-path').textContent = r.path;
+            const list = document.getElementById('fb-list');
+            list.innerHTML = '';
+            for (const e of r.entries) {
+                const row = document.createElement('div');
+                let cls = 'fb-entry';
+                if (e.type === 'dir') cls += ' dir';
+                else if (e.type === 'rbxl' || e.type === 'rbxlx') cls += ' file-rbxl';
+                else if (e.type === 'json') cls += ' file-json';
+                row.className = cls;
+                const icon = e.type === 'dir' ? '📁' :
+                    e.type === 'rbxl' || e.type === 'rbxlx' ? '🎮' :
+                        e.type === 'json' ? '📋' : '📄';
+                row.innerHTML = '<span>' + icon + '</span><span>' + esc(e.name) + '</span>';
+                if (e.size) {
+                    const sz = document.createElement('span');
+                    sz.className = 'fb-size';
+                    sz.textContent = fmtSz(e.size);
+                    row.appendChild(sz);
+                }
+                row.onclick = () => {
+                    if (e.type === 'dir') browseTo(e.path);
+                    else if (_fbMode === 'open') fbOpen(e.path);
+                };
+                list.appendChild(row);
+            }
+        }
+
+        async function fbOpen(path) {
+            closeModal();
+            const r = await api('POST', '/api/open', { path: path });
+            if (r.ok) {
+                notify('✅ ' + r.count + ' объектов');
+                loadTree();
+            } else {
+                notify(r.error, 'err');
+            }
+        }
+
+        function fbSave() {
+            const nm = document.getElementById('fb-name');
+            if (!nm || !nm.value.trim()) {
+                notify('Введи имя', 'warn');
+                return;
+            }
+            const path = _fbPath.replace(/\/$/, '') + '/' + nm.value.trim();
+            closeModal();
+            doSave(path);
+        }
+
+        async function doSave(path) {
+            const r = await api('POST', '/api/save', { path: path });
+            if (r.ok) notify('💾 ' + r.path);
+            else notify(r.error || 'Ошибка', 'err');
+        }
+
+        async function saveFile() {
+            const r = await api('GET', '/api/status');
+            if (!r.file) {
+                openFileBrowser('save');
+                return;
+            }
+            doSave(r.file);
+        }
+
+        function fmtSz(s) {
+            return s > 1048576 ? (s / 1048576).toFixed(1) + 'MB' :
+                s > 1024 ? (s / 1024).toFixed(0) + 'KB' : s + 'B';
+        }
+
+        // ============ ДИАЛОГИ ============
+        function showAddDialog() {
+            const ALL_CLS = [
+                'Part', 'WedgePart', 'SpherePart', 'MeshPart', 'Model', 'Folder',
+                'Script', 'LocalScript', 'ModuleScript', 'RemoteEvent', 'RemoteFunction',
+                'BindableEvent', 'BindableFunction', 'ScreenGui', 'Frame', 'TextLabel',
+                'TextButton', 'TextBox', 'ImageLabel', 'ImageButton', 'Sound',
+                'ParticleEmitter', 'Fire', 'Smoke', 'PointLight', 'SpotLight',
+                'SurfaceLight', 'NumberValue', 'StringValue', 'BoolValue', 'IntValue',
+                'Animation', 'Tool', 'Camera'
+            ].sort();
+            showModal(
+                '<h3>➕ Добавить</h3>' +
+                '<select id="add-cls">' + ALL_CLS.map(c => '<option>' + c + '</option>').join('') + '</select>' +
+                '<input id="add-name" placeholder="Имя" value="NewPart">' +
+                '<p style="font-size:11px;color:#9ca3af;margin-top:4px">Родитель: ' +
+                (selectedRef !== null ? 'ref ' + selectedRef : 'Workspace') + '</p>' +
+                '<div class="modal-row">' +
+                '<button onclick="doAdd()" style="background:#065f46">Добавить</button>' +
+                '<button onclick="closeModal()">Отмена</button>' +
+                '</div>'
+            );
+        }
+
+        async function doAdd() {
+            const cls = document.getElementById('add-cls').value;
+            const name = document.getElementById('add-name').value || 'New' + cls;
+            closeModal();
+            let parent = selectedRef;
+            if (parent === null) {
+                const findWs = ns => {
+                    for (const n of ns) {
+                        if (n.cls === 'Workspace') return n.ref;
+                        const c = findWs(n.children);
+                        if (c !== null) return c;
+                    }
+                    return null;
+                };
+                parent = findWs(treeData) ?? -1;
+            }
+            const r = await api('PUT', '/api/instance', {
+                class: cls,
+                name: name,
+                parent: parent
+            });
+            if (r.ok) {
+                notify('✅ ' + cls);
+                loadTree();
+            } else {
+                notify(r.error || 'Ошибка', 'err');
+            }
+        }
+
+        async function deleteSelected() {
+            if (selectedRef === null) {
+                notify('Не выбран', 'warn');
+                return;
+            }
+            const r = await api('DELETE', '/api/instance/' + selectedRef);
+            if (r.ok) {
+                notify('🗑 Удалён');
+                selectedRef = null;
+                loadTree();
+            }
+        }
+
+        function showPublishDialog() {
+            showModal(
+                '<h3>☁ Open Cloud</h3>' +
+                '<input id="pu" placeholder="Universe ID">' +
+                '<input id="pp" placeholder="Place ID">' +
+                '<input id="pk" placeholder="API Key" type="password">' +
+                '<select id="pv">' +
+                '<option>Published</option>' +
+                '<option>Saved</option>' +
+                '</select>' +
+                '<div class="modal-row">' +
+                '<button onclick="doPub()" style="background:#7c3aed">☁ Опубликовать</button>' +
+                '<button onclick="closeModal()">Отмена</button>' +
+                '</div>'
+            );
+        }
+
+        async function doPub() {
+            const b = {
+                universe_id: document.getElementById('pu').value,
+                place_id: document.getElementById('pp').value,
+                api_key: document.getElementById('pk').value,
+                version_type: document.getElementById('pv').value
+            };
+            closeModal();
+            const r = await api('POST', '/api/publish', b);
+            if (r.ok) notify('✅ Опубликовано!');
+            else notify('HTTP ' + r.status + ': ' + (r.text || r.error), 'err');
+        }
+
+        function showModal(html) {
+            document.getElementById('modal-content').innerHTML = html;
+            document.getElementById('modal-overlay').classList.add('show');
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').classList.remove('show');
+        }
+
+        // ============ КЛАВИШИ ============
+        document.addEventListener('keydown', (e) => {
+            // Игнорируем если фокус в инпуте или CodeMirror
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' ||
+                e.target.classList.contains('CodeMirror') || e.target.closest('.CodeMirror')) {
+                return;
+            }
+
+            keysPressed[e.key.toLowerCase()] = true;
+
+            // Горячие клавиши
+            if (e.ctrlKey && e.key === 'o') {
+                e.preventDefault();
+                openFileBrowser('open');
+            } else if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+                e.preventDefault();
+                openFileBrowser('save');
+            } else if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                saveFile();
+            } else if (e.key === 'Delete') {
+                deleteSelected();
+            } else if (e.key === 'Escape') {
+                closeModal();
+                deselect();
+            } else if (e.key === 'F5') {
+                e.preventDefault();
+                reloadScene();
+            } else if (e.key === 'f' && !e.ctrlKey) {
+                // Фокус на выбранный объект
+                if (selectedRef && sceneObjs[selectedRef]) {
+                    const p = sceneObjs[selectedRef].position;
+                    target = { x: p.x, y: p.y, z: p.z };
+                    updateCamera();
+                    notify('🎯 Фокус на объекте');
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keysPressed[e.key.toLowerCase()] = false;
+        });
+
+        document.getElementById('modal-overlay').onclick = e => {
+            if (e.target.id === 'modal-overlay') closeModal();
+        };
+
+        // ============ ИНИЦИАЛИЗАЦИЯ ============
+        window.addEventListener('DOMContentLoaded', () => {
+            loadLayout();
+            initResizers();
+        });
+    </script>
+</body>
+
+</html>
