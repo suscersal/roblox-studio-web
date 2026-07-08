@@ -4,7 +4,18 @@ RbxStudio - мобильный редактор Roblox-мест
 Запуск: python3 app.py [путь/к/файлу.rbxl]
 Зависимости устанавливаются автоматически.
 """
-import sys, subprocess, os
+import base64
+import struct
+import math
+import traceback
+import json
+from rbxl_parser import parse_rbxl, save_rbxl, publish_place
+from flask import Flask, request, jsonify, Response, send_from_directory
+from pathlib import Path
+import sys
+import subprocess
+import os
+
 
 def _ensure(pkg, imp=None):
     try:
@@ -16,20 +27,18 @@ def _ensure(pkg, imp=None):
             '--break-system-packages', '-q'
         ])
 
+
 _ensure('flask')
 
-import json, traceback, math, struct, base64
-from pathlib import Path
-from flask import Flask, request, jsonify, Response, send_from_directory
 
 sys.path.insert(0, str(Path(__file__).parent))
-from rbxl_parser import parse_rbxl, save_rbxl, publish_place
 
 ICONS_DIR = Path(__file__).parent / 'icons'
-PORT      = 8080
+PORT = 8080
 
 CLASS_ICONS = {}
-_icon_b64   = {}
+_icon_b64 = {}
+
 
 def _load_icons():
     global CLASS_ICONS
@@ -59,11 +68,14 @@ def _load_icons():
                 except Exception:
                     pass
 
+
 _load_icons()
+
 
 def icon_src(cls):
     fn = CLASS_ICONS.get(cls, 'Instance.png')
     return _icon_b64.get(fn, '')
+
 
 state = {
     'parsed':    None,
@@ -71,20 +83,21 @@ state = {
 }
 
 HIDDEN = {
-    'Debris','CookiesService','InsertService','GamePassService','VRService',
-    'Selection','ContextActionService','Instance','LuaWebService',
-    'FilteredSelection','LocalizationService','PhysicsService',
-    'TouchInputService','AvatarSettings','GuidRegistryService',
-    'ProcessInstancePhysicsService','HttpService','UGCAvatarService',
-    'VirtualInputManager','VideoService','CollectionService',
-    'VideoCaptureService','NonReplicatedCSGDictionaryService',
-    'CSGDictionaryService','TweenService','PermissionsService',
+    'Debris', 'CookiesService', 'InsertService', 'GamePassService', 'VRService',
+    'Selection', 'ContextActionService', 'Instance', 'LuaWebService',
+    'FilteredSelection', 'LocalizationService', 'PhysicsService',
+    'TouchInputService', 'AvatarSettings', 'GuidRegistryService',
+    'ProcessInstancePhysicsService', 'HttpService', 'UGCAvatarService',
+    'VirtualInputManager', 'VideoService', 'CollectionService',
+    'VideoCaptureService', 'NonReplicatedCSGDictionaryService',
+    'CSGDictionaryService', 'TweenService', 'PermissionsService',
 }
 
 PART_CLASSES = {
-    'Part','WedgePart','CornerWedgePart','TrussPart',
-    'SpawnLocation','Seat','VehicleSeat','SpherePart',
+    'Part', 'WedgePart', 'CornerWedgePart', 'TrussPart',
+    'SpawnLocation', 'Seat', 'VehicleSeat', 'SpherePart',
 }
+
 
 def safe_float(v, default=0.0):
     try:
@@ -93,12 +106,14 @@ def safe_float(v, default=0.0):
     except Exception:
         return default
 
+
 def get_vec3(d, default=1.0):
     if not isinstance(d, dict):
         return default, default, default
     return (safe_float(d.get('x', default), default),
             safe_float(d.get('y', default), default),
             safe_float(d.get('z', default), default))
+
 
 def get_color(c):
     if not isinstance(c, dict):
@@ -107,6 +122,7 @@ def get_color(c):
     g = min(255, int(safe_float(c.get('g', 0.6)) * 255))
     b = min(255, int(safe_float(c.get('b', 0.6)) * 255))
     return f'#{r:02x}{g:02x}{b:02x}'
+
 
 def get_pos(cf):
     if not isinstance(cf, dict):
@@ -119,9 +135,10 @@ def get_pos(cf):
         return (safe_float(mat[3]), safe_float(mat[7]), safe_float(mat[11]))
     return 0.0, 0.0, 0.0
 
+
 def get_rot_matrix(cf):
     if not isinstance(cf, dict):
-        return [1,0,0, 0,1,0, 0,0,1]
+        return [1, 0, 0, 0, 1, 0, 0, 0, 1]
     mat = cf.get('matrix')
     if isinstance(mat, (list, tuple)) and len(mat) >= 9:
         return [safe_float(v) for v in mat[:9]]
@@ -136,7 +153,8 @@ def get_rot_matrix(cf):
             sx*sy*cz+cx*sz, -sx*sy*sz+cx*cz, -sx*cy,
             -cx*sy*cz+sx*sz, cx*sy*sz+sx*cz, cx*cy
         ]
-    return [1,0,0, 0,1,0, 0,0,1]
+    return [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
 
 def serialize_prop(v):
     if isinstance(v, bytes):
@@ -146,6 +164,7 @@ def serialize_prop(v):
         return v
     except Exception:
         return str(v)
+
 
 def make_scene_objects():
     parsed = state['parsed']
@@ -158,7 +177,7 @@ def make_scene_objects():
         props = parsed['props'].get(ref, {})
         if props.get('Visible') is False:
             continue
-        
+
         # Получаем Position
         pos = props.get('Position', {})
         if isinstance(pos, dict):
@@ -167,7 +186,7 @@ def make_scene_objects():
             pz = safe_float(pos.get('z', 0))
         else:
             px = py = pz = 0
-        
+
         # Получаем Size
         sz = props.get('Size', props.get('size', {}))
         if isinstance(sz, dict):
@@ -180,7 +199,7 @@ def make_scene_objects():
             sz_ = max(0.05, safe_float(sz[2], 1))
         else:
             sx = sy = sz_ = 1.0
-        
+
         # Получаем Rotation
         rot = props.get('Rotation', {})
         if isinstance(rot, dict):
@@ -189,25 +208,44 @@ def make_scene_objects():
             rz = math.radians(safe_float(rot.get('z', 0)))
         else:
             rx = ry = rz = 0
-        
+
         # Создаем матрицу поворота
         cx, sx_v = math.cos(rx), math.sin(rx)
         cy, sy_v = math.cos(ry), math.sin(ry)
         cz, sz_v = math.cos(rz), math.sin(rz)
-        
+
         rot_matrix = [
             cy*cz, -cy*sz_v, sy_v,
             sx_v*sy_v*cz+cx*sz_v, -sx_v*sy_v*sz_v+cx*cz, -sx_v*cy,
             -cx*sy_v*cz+sx_v*sz_v, cx*sy_v*sz_v+sx_v*cz, cx*cy
         ]
-        
+
         # Получаем цвет
-        col = props.get('Color') or props.get('Color3') or props.get('BrickColor')
+        col = props.get('Color') or props.get(
+            'Color3') or props.get('BrickColor')
         color = get_color(col) if isinstance(col, dict) else '#a0a0a0'
-        
+
         shape = 'sphere' if cls == 'SpherePart' else 'box'
+        CONE_IDS = ['9756362', '1033714', '9887819', 'cone.mesh']
+        for sm_ref in [ref + 1, ref + 2]:
+            if parsed['referent_to_class'].get(sm_ref) != 'SpecialMesh':
+                continue
+            cp = parsed['props'].get(sm_ref, {})
+            mt = cp.get('MeshType', 0)
+            if isinstance(mt, str):
+                mt = int(mt) if mt.isdigit() else 0
+            mid = str(cp.get('MeshId', ''))
+            if mt == 4 or mt == 3:
+                shape = 'sphere'
+            elif mt == 1:
+                shape = 'cylinder'
+            elif mt == 6:
+                shape = 'wedge'
+            elif any(cid in mid for cid in CONE_IDS):
+                shape = 'cone'
+            break
         name = props.get('Name', cls)
-        
+
         objs.append({
             'ref': ref, 'class': cls, 'name': name,
             'shape': shape,
@@ -217,7 +255,9 @@ def make_scene_objects():
         })
     return objs
 
+
 flask_app = Flask(__name__)
+
 
 @flask_app.route('/icons/<path:fn>')
 def serve_icon(fn):
@@ -225,16 +265,18 @@ def serve_icon(fn):
         return send_from_directory(str(ICONS_DIR), fn)
     return '', 404
 
+
 @flask_app.route('/api/open', methods=['POST'])
 def api_open():
     path = (request.json or {}).get('path', '')
     try:
         parsed = parse_rbxl(path)
-        state['parsed']    = parsed
+        state['parsed'] = parsed
         state['file_path'] = path
         return jsonify({'ok': True, 'count': len(parsed['referent_to_class'])})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
+
 
 @flask_app.route('/api/tree')
 def api_tree():
@@ -242,12 +284,12 @@ def api_tree():
     if not parsed:
         return jsonify({'ok': False, 'error': 'Файл не загружен'}), 400
     r2c = parsed['referent_to_class']
-    pm  = parsed['parent_map']
-    pr  = parsed['props']
+    pm = parsed['parent_map']
+    pr = parsed['props']
     children_of = {}
     for child, parent in pm.items():
         children_of.setdefault(parent, []).append(child)
-    
+
     def node(ref, depth=0, vis=None):
         if vis is None:
             vis = set()
@@ -255,13 +297,13 @@ def api_tree():
             return None
         vis.add(ref)
         cls = r2c.get(ref, '?')
-        
+
         # Пропускаем скрытые классы
         if cls in HIDDEN:
             return None
-        
+
         name = pr.get(ref, {}).get('Name', cls)
-        
+
         # Собираем детей (рекурсивно)
         kids = []
         for c in sorted(children_of.get(ref, [])):
@@ -269,7 +311,7 @@ def api_tree():
             child_node = node(c, depth + 1, vis.copy())
             if child_node:
                 kids.append(child_node)
-        
+
         return {
             'ref': ref,
             'cls': cls,
@@ -277,7 +319,7 @@ def api_tree():
             'icon': icon_src(cls),
             'children': kids
         }
-    
+
     # Корневые элементы (parent = -1 или отсутствует в parent_map)
     roots = []
     # Находим все ref, у которых parent = -1 или parent отсутствует в r2c
@@ -286,29 +328,32 @@ def api_tree():
         parent = pm.get(ref, -1)
         if parent == -1 or parent not in r2c:
             root_refs.add(ref)
-    
+
     # Также добавляем явно указанных детей -1
     for ref in children_of.get(-1, []):
         root_refs.add(ref)
-    
+
     for ref in sorted(root_refs):
         cls = r2c.get(ref, '?')
         if cls not in HIDDEN:
             n = node(ref)
             if n:
                 roots.append(n)
-    
+
     return jsonify({'ok': True, 'tree': roots})
+
 
 @flask_app.route('/api/scene')
 def api_scene():
     return jsonify({'ok': True, 'objects': make_scene_objects()})
 
+
 @flask_app.route('/api/instance/<int:ref>')
 def api_get_instance(ref):
     parsed = state['parsed']
-    if not parsed: return jsonify({'ok': False}), 400
-    cls   = parsed['referent_to_class'].get(ref, '?')
+    if not parsed:
+        return jsonify({'ok': False}), 400
+    cls = parsed['referent_to_class'].get(ref, '?')
     props = {k: serialize_prop(v)
              for k, v in parsed['props'].get(ref, {}).items()}
     return jsonify({
@@ -317,51 +362,60 @@ def api_get_instance(ref):
         'parent': parsed['parent_map'].get(ref, -1),
     })
 
+
 @flask_app.route('/api/instance/<int:ref>', methods=['POST'])
 def api_set_prop(ref):
     parsed = state['parsed']
-    if not parsed: return jsonify({'ok': False}), 400
+    if not parsed:
+        return jsonify({'ok': False}), 400
     data = request.json or {}
     prop = data.get('prop')
-    val  = data.get('value')
+    val = data.get('value')
     if prop is not None and ref in parsed['referent_to_class']:
         parsed['props'].setdefault(ref, {})[prop] = val
         parsed['_modified'] = True
     return jsonify({'ok': True})
 
+
 @flask_app.route('/api/instance', methods=['PUT'])
 def api_add():
     parsed = state['parsed']
-    if not parsed: return jsonify({'ok': False}), 400
-    data   = request.json or {}
-    cls    = data.get('class', 'Part')
-    name   = data.get('name', 'New' + cls)
+    if not parsed:
+        return jsonify({'ok': False}), 400
+    data = request.json or {}
+    cls = data.get('class', 'Part')
+    name = data.get('name', 'New' + cls)
     parent = data.get('parent', -1)
     new_ref = max(parsed['referent_to_class'].keys(), default=0) + 1
     parsed['referent_to_class'][new_ref] = cls
-    parsed['parent_map'][new_ref]        = parent
-    parsed['props'][new_ref]             = {'Name': name}
+    parsed['parent_map'][new_ref] = parent
+    parsed['props'][new_ref] = {'Name': name}
     parsed['_modified'] = True
     return jsonify({'ok': True, 'ref': new_ref})
+
 
 @flask_app.route('/api/instance/<int:ref>', methods=['DELETE'])
 def api_delete(ref):
     parsed = state['parsed']
-    if not parsed: return jsonify({'ok': False}), 400
+    if not parsed:
+        return jsonify({'ok': False}), 400
     for d in ('referent_to_class', 'parent_map', 'props'):
         parsed[d].pop(ref, None)
     parsed['_modified'] = True
     return jsonify({'ok': True})
 
+
 @flask_app.route('/api/save', methods=['POST'])
 def api_save():
     parsed = state['parsed']
-    if not parsed: return jsonify({'ok': False, 'error': 'Нет данных'}), 400
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'Нет данных'}), 400
     data = request.json or {}
     path = data.get('path') or state['file_path']
-    if not path: return jsonify({'ok': False, 'error': 'Нет пути'}), 400
+    if not path:
+        return jsonify({'ok': False, 'error': 'Нет пути'}), 400
     try:
-        p   = Path(path)
+        p = Path(path)
         ext = p.suffix.lower()
         if ext in ('.rbxl', '.rbxlx'):
             save_rbxl(parsed, str(p))
@@ -370,7 +424,8 @@ def api_save():
         else:
             out = {}
             for ref, props in parsed['props'].items():
-                out[str(ref)] = {k: serialize_prop(v) for k, v in props.items()}
+                out[str(ref)] = {k: serialize_prop(v)
+                                 for k, v in props.items()}
             with open(p, 'w', encoding='utf-8') as f:
                 json.dump({
                     'referent_to_class': {str(k): v for k, v in parsed['referent_to_class'].items()},
@@ -382,6 +437,7 @@ def api_save():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'ok': False, 'error': str(e)}), 500
+
 
 @flask_app.route('/api/publish', methods=['POST'])
 def api_publish():
@@ -400,19 +456,22 @@ def api_publish():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
 
+
 @flask_app.route('/api/browse')
 def api_browse():
     path = request.args.get('path', str(Path.home()))
     try:
         p = Path(path)
-        if not p.exists(): p = Path.home()
+        if not p.exists():
+            p = Path.home()
         entries = []
         if p.parent != p:
-            entries.append({'name': '..', 'path': str(p.parent), 'type': 'dir', 'size': 0})
+            entries.append({'name': '..', 'path': str(
+                p.parent), 'type': 'dir', 'size': 0})
         for item in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
             try:
                 is_dir = item.is_dir()
-                ext    = item.suffix.lower()
+                ext = item.suffix.lower()
                 entries.append({
                     'name': item.name,
                     'path': str(item),
@@ -425,6 +484,7 @@ def api_browse():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
 
+
 @flask_app.route('/api/status')
 def api_status():
     parsed = state['parsed']
@@ -435,25 +495,31 @@ def api_status():
         'count': len(parsed['referent_to_class']) if parsed else 0,
     })
 
+
 # Чтение HTML шаблона
 with open("index.html", "r", encoding="utf-8") as file:
     HTML_TEMPLATE = file.read()
+
 
 @flask_app.route('/')
 def index():
     return Response(HTML_TEMPLATE, mimetype='text/html')
 
+
 if __name__ == '__main__':
-    import threading, webbrowser, time
+    import threading
+    import webbrowser
+    import time
 
     if len(sys.argv) > 1:
         p = sys.argv[1]
         if Path(p).exists():
             try:
                 parsed = parse_rbxl(p)
-                state['parsed']    = parsed
+                state['parsed'] = parsed
                 state['file_path'] = p
-                print(f'[RbxStudio] Загружен: {p} ({len(parsed["referent_to_class"])} объектов)')
+                print(
+                    f'[RbxStudio] Загружен: {p} ({len(parsed["referent_to_class"])} объектов)')
             except Exception as e:
                 print(f'[RbxStudio] Ошибка загрузки: {e}')
 
@@ -462,8 +528,10 @@ if __name__ == '__main__':
 
     def open_browser():
         time.sleep(2)
-        try: webbrowser.open(url)
-        except Exception: pass
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
 
     threading.Thread(target=open_browser, daemon=True).start()
     flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)

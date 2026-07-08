@@ -652,6 +652,57 @@
                 font-size: 11px;
             }
         }
+
+        #mobile-pad {
+            position: absolute;
+            bottom: 56px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            gap: 6px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        @media (pointer: coarse) {
+            #mobile-pad {
+                display: flex;
+            }
+        }
+
+        .pad-col {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+            pointer-events: all;
+        }
+
+        .pad-row-h {
+            display: flex;
+            gap: 4px;
+        }
+
+        .pad-btn {
+            width: 52px;
+            height: 52px;
+            background: rgba(31, 41, 55, 0.85);
+            border: 1px solid #4b5563;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .pad-btn.active {
+            background: rgba(59, 130, 246, 0.7);
+        }
     </style>
 </head>
 
@@ -697,12 +748,26 @@
         <!-- Разделитель 1 -->
         <div class="resizer" id="resizer-1"></div>
 
-        <div id="viewport">
+        <div id="viewport" tabindex="0">
             <div id="vp-label">
                 🖱️ ЛКМ — вращение | 🖱️ ПКМ/СКМ — панорама | 🖱️ Колесо — зум<br>
                 ⌨️ WASD — движение | Q/E — вверх/вниз | F — фокус | Esc — снять
             </div>
             <div id="speed-indicator">🚀 x1.0</div>
+            <div id="mobile-pad">
+                <div class="pad-col">
+                    <button class="pad-btn" data-key="q">⬆</button>
+                    <div class="pad-row-h">
+                        <button class="pad-btn" data-key="a">◀</button>
+                        <button class="pad-btn" data-key="s">▼</button>
+                        <button class="pad-btn" data-key="d">▶</button>
+                    </div>
+                    <button class="pad-btn" data-key="e">⬇</button>
+                </div>
+                <div class="pad-col" style="margin-left:12px">
+                    <button class="pad-btn" data-key="w">▲</button>
+                </div>
+            </div>
         </div>
 
         <!-- Разделитель 2 -->
@@ -1040,6 +1105,28 @@
             updateCamera();
             animate();
             loadTree();
+
+            // Фокус viewport для WASD на десктопе
+            vp.addEventListener('click', () => vp.focus());
+            vp.focus();
+
+            // Мобильный геймпад — только touch, не мышь
+            document.querySelectorAll('.pad-btn').forEach(btn => {
+                const key = btn.dataset.key;
+                btn.addEventListener('touchstart', e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    keysPressed[key] = true;
+                    btn.classList.add('active');
+                }, { passive: false });
+                ['touchend', 'touchcancel'].forEach(ev =>
+                    btn.addEventListener(ev, e => {
+                        e.preventDefault();
+                        keysPressed[key] = false;
+                        btn.classList.remove('active');
+                    }, { passive: false })
+                );
+            });
         }
 
         function resize() {
