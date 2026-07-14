@@ -4,9 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-    <title>RbxStudio</title>
+    <title>RbxStudio - OPi3</title>
 
-    <!-- CodeMirror CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
 
@@ -14,7 +13,7 @@
         * {
             box-sizing: border-box;
             margin: 0;
-            padding: 0;
+            padding: 0
         }
 
         body {
@@ -24,10 +23,9 @@
             height: 100vh;
             overflow: hidden;
             display: flex;
-            flex-direction: column;
+            flex-direction: column
         }
 
-        /* Верхний тулбар */
         #toolbar-top {
             background: #1f2937;
             display: flex;
@@ -37,7 +35,7 @@
             height: 40px;
             flex-shrink: 0;
             border-bottom: 1px solid #374151;
-            overflow-x: auto;
+            overflow-x: auto
         }
 
         #toolbar-top button {
@@ -48,48 +46,47 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 13px;
-            white-space: nowrap;
+            white-space: nowrap
         }
 
         #toolbar-top button:hover {
-            background: #4b5563;
+            background: #4b5563
         }
 
         #toolbar-top button.green {
-            background: #065f46;
+            background: #065f46
         }
 
         #toolbar-top button.red {
-            background: #7f1d1d;
+            background: #7f1d1d
         }
 
         #toolbar-top button.blue {
-            background: #1e3a8a;
+            background: #1e3a8a
         }
 
         #toolbar-top button.purple {
-            background: #7c3aed;
+            background: #7c3aed
         }
 
         #toolbar-top .sep {
             width: 1px;
             height: 24px;
             background: #374151;
-            margin: 0 4px;
+            margin: 0 4px
         }
 
         #toolbar-top .title {
             font-weight: bold;
             margin-right: 8px;
             font-size: 14px;
-            white-space: nowrap;
+            white-space: nowrap
         }
 
-        /* Основная область */
         #main {
             display: flex;
             flex: 1;
-            overflow: hidden;
+            overflow: hidden
         }
 
         #explorer {
@@ -100,7 +97,7 @@
             background: #1f2937;
             display: flex;
             flex-direction: column;
-            position: relative;
+            position: relative
         }
 
         .resizer {
@@ -110,12 +107,12 @@
             flex-shrink: 0;
             transition: background 0.2s;
             position: relative;
-            z-index: 10;
+            z-index: 10
         }
 
         .resizer:hover,
         .resizer.active {
-            background: #3b82f6;
+            background: #3b82f6
         }
 
         .resizer::after {
@@ -127,12 +124,12 @@
             width: 3px;
             height: 30px;
             background: #6b7280;
-            border-radius: 2px;
+            border-radius: 2px
         }
 
         .resizer:hover::after,
         .resizer.active::after {
-            background: #fff;
+            background: #fff
         }
 
         #explorer-header {
@@ -144,7 +141,7 @@
             flex-shrink: 0;
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: center
         }
 
         #explorer-header button {
@@ -154,7 +151,7 @@
             padding: 2px 6px;
             border-radius: 3px;
             cursor: pointer;
-            font-size: 11px;
+            font-size: 11px
         }
 
         #search-box {
@@ -165,17 +162,17 @@
             width: 100%;
             font-size: 12px;
             outline: none;
-            flex-shrink: 0;
+            flex-shrink: 0
         }
 
         #tree-scroll {
             flex: 1;
             overflow-y: auto;
-            overflow-x: hidden;
+            overflow-x: hidden
         }
 
         #tree {
-            padding: 2px 0;
+            padding: 2px 0
         }
 
         .tree-node {
@@ -187,15 +184,15 @@
             user-select: none;
             white-space: nowrap;
             overflow: hidden;
-            font-size: 12px;
+            font-size: 12px
         }
 
         .tree-node:hover {
-            background: #374151;
+            background: #374151
         }
 
         .tree-node.selected {
-            background: #1e3a5f;
+            background: #1e3a5f
         }
 
         .tree-arrow {
@@ -203,7 +200,7 @@
             text-align: center;
             color: #6b7280;
             font-size: 10px;
-            flex-shrink: 0;
+            flex-shrink: 0
         }
 
         .tree-icon {
@@ -212,19 +209,19 @@
             object-fit: contain;
             flex-shrink: 0;
             background: white;
-            border-radius: 2px;
+            border-radius: 2px
         }
 
         .tree-label {
             overflow: hidden;
             text-overflow: ellipsis;
-            padding: 0 2px;
+            padding: 0 2px
         }
 
         .tree-label mark {
             background: #854d0e;
             color: #fef08a;
-            border-radius: 2px;
+            border-radius: 2px
         }
 
         #viewport {
@@ -232,11 +229,11 @@
             position: relative;
             background: #0f172a;
             overflow: hidden;
-            min-width: 200px;
+            min-width: 200px
         }
 
         #viewport canvas {
-            display: block;
+            display: block
         }
 
         #vp-label {
@@ -251,7 +248,21 @@
             border-radius: 6px;
             line-height: 1.5;
             z-index: 5;
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(4px)
+        }
+
+        #fps-counter {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            font-size: 11px;
+            color: #22c55e;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            z-index: 5;
+            font-family: monospace
         }
 
         #speed-indicator {
@@ -265,7 +276,32 @@
             padding: 4px 8px;
             border-radius: 4px;
             z-index: 5;
-            display: none;
+            display: none
+        }
+
+        #quality-selector {
+            position: absolute;
+            top: 36px;
+            right: 8px;
+            z-index: 5;
+            display: flex;
+            gap: 2px
+        }
+
+        #quality-selector button {
+            background: rgba(31, 41, 55, 0.9);
+            border: 1px solid #4b5563;
+            color: #fff;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            backdrop-filter: blur(4px)
+        }
+
+        #quality-selector button.active {
+            background: #3b82f6;
+            border-color: #60a5fa
         }
 
         #rightpanel {
@@ -275,13 +311,13 @@
             flex-shrink: 0;
             background: #1f2937;
             display: flex;
-            flex-direction: column;
+            flex-direction: column
         }
 
         #tabs {
             display: flex;
             background: #111827;
-            flex-shrink: 0;
+            flex-shrink: 0
         }
 
         .tab {
@@ -291,24 +327,24 @@
             cursor: pointer;
             font-size: 12px;
             color: #6b7280;
-            border-bottom: 2px solid transparent;
+            border-bottom: 2px solid transparent
         }
 
         .tab.active {
             color: #fff;
-            border-bottom: 2px solid #3b82f6;
+            border-bottom: 2px solid #3b82f6
         }
 
         #tab-props {
             flex: 1;
             overflow-y: auto;
-            padding: 4px;
+            padding: 4px
         }
 
         #tab-script {
             flex: 1;
             display: none;
-            flex-direction: column;
+            flex-direction: column
         }
 
         #script-name {
@@ -316,19 +352,19 @@
             font-size: 11px;
             color: #6b7280;
             flex-shrink: 0;
-            background: #111827;
+            background: #111827
         }
 
         #script-editor-container {
             flex: 1;
             min-height: 0;
-            position: relative;
+            position: relative
         }
 
         .CodeMirror {
             height: 100% !important;
             font-family: 'Fira Code', 'Consolas', monospace;
-            font-size: 13px;
+            font-size: 13px
         }
 
         #script-save-btn {
@@ -338,10 +374,9 @@
             padding: 6px;
             cursor: pointer;
             font-size: 12px;
-            flex-shrink: 0;
+            flex-shrink: 0
         }
 
-        /* Нижний инвентарь */
         #toolbar-bottom {
             background: #1f2937;
             display: flex;
@@ -351,7 +386,7 @@
             height: 35px;
             flex-shrink: 0;
             border-top: 1px solid #374151;
-            overflow-x: auto;
+            overflow-x: auto
         }
 
         #toolbar-bottom .inv-item {
@@ -365,17 +400,17 @@
             align-items: center;
             gap: 6px;
             border: 2px solid transparent;
-            transition: all 0.2s;
+            transition: all 0.2s
         }
 
         #toolbar-bottom .inv-item:hover {
             background: #4b5563;
-            border-color: #3b82f6;
+            border-color: #3b82f6
         }
 
         #toolbar-bottom .inv-item.selected {
             background: #1e3a5f;
-            border-color: #3b82f6;
+            border-color: #3b82f6
         }
 
         #toolbar-bottom .inv-icon {
@@ -383,43 +418,35 @@
             height: 20px;
             object-fit: contain;
             background: white;
-            border-radius: 3px;
+            border-radius: 3px
         }
 
         #toolbar-bottom .inv-label {
-            font-weight: 500;
-        }
-
-        #toolbar-bottom .inv-count {
-            color: #9ca3af;
-            font-size: 10px;
-            background: #1f2937;
-            padding: 1px 6px;
-            border-radius: 8px;
+            font-weight: 500
         }
 
         #toolbar-bottom .sep {
             width: 1px;
             height: 20px;
             background: #374151;
-            margin: 0 2px;
+            margin: 0 2px
         }
 
         .prop-header {
             padding: 4px 6px;
             background: #111827;
             border-radius: 4px;
-            margin-bottom: 4px;
+            margin-bottom: 4px
         }
 
         .prop-cls {
             font-weight: bold;
-            font-size: 13px;
+            font-size: 13px
         }
 
         .prop-ref {
             font-size: 10px;
-            color: #6b7280;
+            color: #6b7280
         }
 
         .prop-row {
@@ -427,7 +454,7 @@
             align-items: center;
             gap: 4px;
             padding: 1px 2px;
-            min-height: 24px;
+            min-height: 24px
         }
 
         .prop-name {
@@ -437,7 +464,7 @@
             color: #9ca3af;
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: nowrap;
+            white-space: nowrap
         }
 
         .prop-val {
@@ -449,18 +476,18 @@
             padding: 2px 4px;
             border-radius: 3px;
             width: 100%;
-            outline: none;
+            outline: none
         }
 
         .prop-val:focus {
-            background: #4b5563;
+            background: #4b5563
         }
 
         .prop-bool {
             width: 16px;
             height: 16px;
             cursor: pointer;
-            accent-color: #3b82f6;
+            accent-color: #3b82f6
         }
 
         .prop-color-preview {
@@ -469,7 +496,7 @@
             border-radius: 3px;
             border: 1px solid #4b5563;
             flex-shrink: 0;
-            cursor: pointer;
+            cursor: pointer
         }
 
         #modal-overlay {
@@ -479,11 +506,11 @@
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 100;
+            z-index: 100
         }
 
         #modal-overlay.show {
-            display: flex;
+            display: flex
         }
 
         .modal {
@@ -495,12 +522,12 @@
             max-height: 85vh;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 8px
         }
 
         .modal h3 {
             font-size: 15px;
-            font-weight: bold;
+            font-weight: bold
         }
 
         .modal input,
@@ -512,7 +539,7 @@
             border-radius: 4px;
             width: 100%;
             font-size: 13px;
-            outline: none;
+            outline: none
         }
 
         .modal button {
@@ -522,27 +549,27 @@
             padding: 6px 12px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 13px
         }
 
         .modal button:hover {
-            background: #4b5563;
+            background: #4b5563
         }
 
         .modal-row {
             display: flex;
-            gap: 6px;
+            gap: 6px
         }
 
         .modal-row button {
-            flex: 1;
+            flex: 1
         }
 
         #fb-path {
             font-size: 11px;
             color: #9ca3af;
             padding: 4px 0;
-            word-break: break-all;
+            word-break: break-all
         }
 
         #fb-list {
@@ -551,7 +578,7 @@
             border: 1px solid #374151;
             border-radius: 4px;
             min-height: 200px;
-            max-height: 40vh;
+            max-height: 40vh
         }
 
         .fb-entry {
@@ -560,41 +587,41 @@
             gap: 6px;
             padding: 6px 8px;
             cursor: pointer;
-            font-size: 12px;
+            font-size: 12px
         }
 
         .fb-entry:hover {
-            background: #374151;
+            background: #374151
         }
 
         .fb-entry.file-rbxl {
-            color: #86efac;
+            color: #86efac
         }
 
         .fb-entry.file-json {
-            color: #fcd34d;
+            color: #fcd34d
         }
 
         .fb-entry.dir {
-            color: #fde68a;
+            color: #fde68a
         }
 
         .fb-size {
             margin-left: auto;
             color: #6b7280;
-            font-size: 10px;
+            font-size: 10px
         }
 
         ::-webkit-scrollbar {
-            width: 4px;
+            width: 4px
         }
 
         ::-webkit-scrollbar-track {
-            background: #1f2937;
+            background: #1f2937
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #374151;
+            background: #374151
         }
 
         #notify {
@@ -604,7 +631,7 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
-            z-index: 200;
+            z-index: 200
         }
 
         .notif {
@@ -613,43 +640,26 @@
             padding: 8px 14px;
             border-radius: 6px;
             font-size: 13px;
-            animation: fadein .2s ease;
+            animation: fadein .2s ease
         }
 
         .notif.err {
-            background: #7f1d1d;
+            background: #7f1d1d
         }
 
         .notif.warn {
-            background: #78350f;
+            background: #78350f
         }
 
         @keyframes fadein {
             from {
                 opacity: 0;
-                transform: translateY(8px);
+                transform: translateY(8px)
             }
 
             to {
                 opacity: 1;
-                transform: none;
-            }
-        }
-
-        @media(max-width:600px) {
-            #explorer {
-                width: 160px;
-                min-width: 120px;
-            }
-
-            #rightpanel {
-                width: 200px;
-                min-width: 150px;
-            }
-
-            #toolbar-top button {
-                padding: 4px 6px;
-                font-size: 11px;
+                transform: none
             }
         }
 
@@ -661,12 +671,12 @@
             display: none;
             gap: 6px;
             z-index: 10;
-            pointer-events: none;
+            pointer-events: none
         }
 
-        @media (pointer: coarse) {
+        @media(pointer:coarse) {
             #mobile-pad {
-                display: flex;
+                display: flex
             }
         }
 
@@ -675,12 +685,12 @@
             flex-direction: column;
             gap: 4px;
             align-items: center;
-            pointer-events: all;
+            pointer-events: all
         }
 
         .pad-row-h {
             display: flex;
-            gap: 4px;
+            gap: 4px
         }
 
         .pad-btn {
@@ -697,23 +707,22 @@
             touch-action: none;
             display: flex;
             align-items: center;
-            justify-content: center;
+            justify-content: center
         }
 
         .pad-btn.active {
-            background: rgba(59, 130, 246, 0.7);
+            background: rgba(59, 130, 246, 0.7)
         }
     </style>
 </head>
 
 <body>
-    <!-- Верхний тулбар -->
     <div id="toolbar-top">
         <span class="title">🎮 RbxStudio</span>
         <div class="sep"></div>
         <button onclick="openFileBrowser('open')" title="Открыть файл (Ctrl+O)">📂 Открыть</button>
         <button class="green" onclick="saveFile()" title="Сохранить (Ctrl+S)">💾 Сохранить</button>
-        <button onclick="openFileBrowser('save')" title="Сохранить как (Ctrl+Shift+S)">💾 Как...</button>
+        <button onclick="openFileBrowser('save')" title="Сохранить как">💾 Как...</button>
         <div class="sep"></div>
         <button onclick="showAddDialog()" title="Добавить объект">➕ Добавить</button>
         <button class="red" onclick="deleteSelected()" title="Удалить (Delete)">🗑 Удалить</button>
@@ -726,10 +735,10 @@
         <button onclick="frontView()" title="Вид спереди">📷 Фронт</button>
         <button onclick="rightView()" title="Вид справа">➡ Право</button>
         <div class="sep"></div>
+        <button onclick="toggleHelpers()" title="Сетка и оси">📏</button>
         <button onclick="resetLayout()" title="Сбросить размеры панелей">📐</button>
     </div>
 
-    <!-- Основная область -->
     <div id="main">
         <div id="explorer">
             <div id="explorer-header">
@@ -744,16 +753,19 @@
                 <div id="tree"></div>
             </div>
         </div>
-
-        <!-- Разделитель 1 -->
         <div class="resizer" id="resizer-1"></div>
-
         <div id="viewport" tabindex="0">
-            <div id="vp-label">
-                🖱️ ЛКМ — вращение | 🖱️ ПКМ/СКМ — панорама | 🖱️ Колесо — зум<br>
-                ⌨️ WASD — движение | Q/E — вверх/вниз | F — фокус | Esc — снять
-            </div>
+            <div id="fps-counter">FPS: --</div>
             <div id="speed-indicator">🚀 x1.0</div>
+            <div id="quality-selector">
+                <button onclick="setQuality('low')" class="active" id="q-low">Low</button>
+                <button onclick="setQuality('medium')" id="q-med">Med</button>
+                <button onclick="setQuality('high')" id="q-high">High</button>
+            </div>
+            <div id="vp-label">
+                🖱️ ЛКМ — вращение | 🖱️ ПКМ — панорама | 🖱️ Колесо — зум<br>
+                ⌨️ WASD — движение | F — фокус | Esc — снять
+            </div>
             <div id="mobile-pad">
                 <div class="pad-col">
                     <button class="pad-btn" data-key="q">⬆</button>
@@ -769,10 +781,7 @@
                 </div>
             </div>
         </div>
-
-        <!-- Разделитель 2 -->
         <div class="resizer" id="resizer-2"></div>
-
         <div id="rightpanel">
             <div id="tabs">
                 <div class="tab active" onclick="switchTab('props')">Properties</div>
@@ -791,55 +800,21 @@
         </div>
     </div>
 
-    <!-- Нижний инвентарь -->
     <div id="toolbar-bottom">
         <span style="font-size:11px;color:#9ca3af;margin-right:4px;">📋 Быстрое:</span>
-        <div class="inv-item" onclick="quickAdd('Part')">
-            <span>🟫</span>
-            <span class="inv-label">Part</span>
+        <div class="inv-item" onclick="quickAdd('Part')"><span>🟫</span><span class="inv-label">Part</span></div>
+        <div class="inv-item" onclick="quickAdd('SpherePart')"><span>🔵</span><span class="inv-label">Sphere</span>
         </div>
-        <div class="inv-item" onclick="quickAdd('SpherePart')">
-            <span>🔵</span>
-            <span class="inv-label">Sphere</span>
-        </div>
-        <div class="inv-item" onclick="quickAdd('WedgePart')">
-            <span>🔺</span>
-            <span class="inv-label">Wedge</span>
-        </div>
+        <div class="inv-item" onclick="quickAdd('WedgePart')"><span>🔺</span><span class="inv-label">Wedge</span></div>
         <div class="sep"></div>
-        <div class="inv-item" onclick="quickAdd('Script')">
-            <span>📜</span>
-            <span class="inv-label">Script</span>
-        </div>
-        <div class="inv-item" onclick="quickAdd('LocalScript')">
-            <span>📝</span>
-            <span class="inv-label">LocalScript</span>
-        </div>
-        <div class="inv-item" onclick="quickAdd('ModuleScript')">
-            <span>📚</span>
-            <span class="inv-label">Module</span>
-        </div>
+        <div class="inv-item" onclick="quickAdd('Script')"><span>📜</span><span class="inv-label">Script</span></div>
+        <div class="inv-item" onclick="quickAdd('LocalScript')"><span>📝</span><span
+                class="inv-label">LocalScript</span></div>
         <div class="sep"></div>
-        <div class="inv-item" onclick="quickAdd('PointLight')">
-            <span>💡</span>
-            <span class="inv-label">Light</span>
-        </div>
-        <div class="inv-item" onclick="quickAdd('Sound')">
-            <span>🔊</span>
-            <span class="inv-label">Sound</span>
-        </div>
-        <div class="inv-item" onclick="quickAdd('Model')">
-            <span>📦</span>
-            <span class="inv-label">Model</span>
-        </div>
-        <div class="inv-item" onclick="quickAdd('Folder')">
-            <span>📁</span>
-            <span class="inv-label">Folder</span>
-        </div>
+        <div class="inv-item" onclick="quickAdd('PointLight')"><span>💡</span><span class="inv-label">Light</span></div>
+        <div class="inv-item" onclick="quickAdd('Sound')"><span>🔊</span><span class="inv-label">Sound</span></div>
         <div class="sep"></div>
-        <div id="inv-selected-info" style="font-size:11px;color:#6b7280;margin-left:auto;">
-            Ничего не выбрано
-        </div>
+        <div id="inv-selected-info" style="font-size:11px;color:#6b7280;margin-left:auto;">Ничего не выбрано</div>
     </div>
 
     <div id="modal-overlay">
@@ -847,14 +822,46 @@
     </div>
     <div id="notify"></div>
 
-    <!-- CodeMirror JS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
 
     <script>
-        // ============ ИНИЦИАЛИЗАЦИЯ CODEMIRROR ============
+        // Three.js загрузка
+        (function () {
+            const scripts = [
+                'three.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'
+            ];
+            let loaded = false;
+            function tryLoad(i) {
+                if (i >= scripts.length) {
+                    console.error('Three.js не загружен');
+                    document.getElementById('fps-counter').textContent = '3D: ошибка';
+                    return;
+                }
+                const s = document.createElement('script');
+                s.src = scripts[i];
+                s.onload = () => {
+                    if (!loaded) {
+                        loaded = true;
+                        console.log('Three.js загружен из: ' + scripts[i]);
+                        initThree();
+                    }
+                };
+                s.onerror = () => {
+                    console.warn('Не удалось загрузить: ' + scripts[i]);
+                    tryLoad(i + 1);
+                };
+                document.head.appendChild(s);
+            }
+            tryLoad(0);
+        })();
+    </script>
+
+    <script>
+        // ============ CODEMIRROR ============
         let cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
             mode: 'lua',
             theme: 'monokai',
@@ -865,38 +872,91 @@
             tabSize: 4,
             indentWithTabs: false,
             lineWrapping: false,
-            viewportMargin: Infinity
+            viewportMargin: 50
         });
 
         function refreshCM() {
             setTimeout(() => {
-                cmEditor.refresh();
+                if (cmEditor) cmEditor.refresh();
             }, 10);
+        }
+
+        // ============ КАЧЕСТВО 3D ============
+        const QUALITY_PRESETS = {
+            low: {
+                antialias: false,
+                shadows: false,
+                resolutionScale: 0.3,
+                sphereSegments: 4,
+                textures: false,
+                helpers: false,
+                ambientLight: 1.0,
+                dirLight: 0.0,
+                fog: true,
+                skipSmallObjects: true,
+                maxObjects: 1000,
+            },
+            medium: {
+                antialias: false,
+                shadows: false,
+                resolutionScale: 0.5,
+                sphereSegments: 8,
+                textures: false,
+                helpers: false,
+                ambientLight: 0.8,
+                dirLight: 0.2,
+                fog: true,
+                skipSmallObjects: false,
+                maxObjects: 2000,
+            },
+            high: {
+                antialias: true,
+                shadows: false,
+                resolutionScale: 0.75,
+                sphereSegments: 12,
+                textures: true,
+                helpers: true,
+                ambientLight: 0.5,
+                dirLight: 0.6,
+                fog: false,
+                skipSmallObjects: false,
+                maxObjects: 5000,
+            }
+        };
+
+        let currentQuality = 'low';
+        let qualitySettings = QUALITY_PRESETS.low;
+
+        function setQuality(level) {
+            currentQuality = level;
+            qualitySettings = QUALITY_PRESETS[level];
+            document.querySelectorAll('#quality-selector button').forEach(b => b.classList.remove('active'));
+            document.getElementById('q-' + level).classList.add('active');
+            if (renderer) {
+                renderer.shadowMap.enabled = qualitySettings.shadows;
+                resize();
+            }
+            updateHelpers();
+            reloadScene();
+            notify('🎨 Качество: ' + level.toUpperCase());
         }
 
         // ============ РАЗДЕЛИТЕЛИ ПАНЕЛЕЙ ============
         function initResizers() {
             const resizers = document.querySelectorAll('.resizer');
-            let currentResizer = null;
-            let startX = 0;
-            let startWidth = 0;
-            let startRightWidth = 0;
+            let currentResizer = null, startX = 0, startWidth = 0, startRightWidth = 0;
 
             resizers.forEach(resizer => {
                 resizer.addEventListener('mousedown', (e) => {
                     currentResizer = resizer;
                     resizer.classList.add('active');
-
                     if (resizer.id === 'resizer-1') {
-                        const explorer = document.getElementById('explorer');
-                        startWidth = explorer.offsetWidth;
+                        startWidth = document.getElementById('explorer').offsetWidth;
                         startX = e.clientX;
                     } else if (resizer.id === 'resizer-2') {
-                        const rightpanel = document.getElementById('rightpanel');
-                        startRightWidth = rightpanel.offsetWidth;
+                        startRightWidth = document.getElementById('rightpanel').offsetWidth;
                         startX = e.clientX;
                     }
-
                     document.body.style.cursor = 'col-resize';
                     document.body.style.userSelect = 'none';
                 });
@@ -904,24 +964,15 @@
 
             document.addEventListener('mousemove', (e) => {
                 if (!currentResizer) return;
-
                 if (currentResizer.id === 'resizer-1') {
-                    const explorer = document.getElementById('explorer');
-                    const diff = e.clientX - startX;
-                    let newWidth = startWidth + diff;
-                    newWidth = Math.max(150, Math.min(400, newWidth));
-                    explorer.style.width = newWidth + 'px';
-                    refreshCM();
-                    resize();
+                    let w = Math.max(150, Math.min(400, startWidth + e.clientX - startX));
+                    document.getElementById('explorer').style.width = w + 'px';
                 } else if (currentResizer.id === 'resizer-2') {
-                    const rightpanel = document.getElementById('rightpanel');
-                    const diff = startX - e.clientX;
-                    let newWidth = startRightWidth + diff;
-                    newWidth = Math.max(200, Math.min(500, newWidth));
-                    rightpanel.style.width = newWidth + 'px';
-                    refreshCM();
-                    resize();
+                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.clientX));
+                    document.getElementById('rightpanel').style.width = w + 'px';
                 }
+                refreshCM();
+                resize();
             });
 
             document.addEventListener('mouseup', () => {
@@ -939,41 +990,28 @@
                 resizer.addEventListener('touchstart', (e) => {
                     currentResizer = resizer;
                     resizer.classList.add('active');
-
                     if (resizer.id === 'resizer-1') {
-                        const explorer = document.getElementById('explorer');
-                        startWidth = explorer.offsetWidth;
+                        startWidth = document.getElementById('explorer').offsetWidth;
                         startX = e.touches[0].clientX;
                     } else if (resizer.id === 'resizer-2') {
-                        const rightpanel = document.getElementById('rightpanel');
-                        startRightWidth = rightpanel.offsetWidth;
+                        startRightWidth = document.getElementById('rightpanel').offsetWidth;
                         startX = e.touches[0].clientX;
                     }
-
                     document.body.style.userSelect = 'none';
                 });
             });
 
             document.addEventListener('touchmove', (e) => {
                 if (!currentResizer) return;
-
                 if (currentResizer.id === 'resizer-1') {
-                    const explorer = document.getElementById('explorer');
-                    const diff = e.touches[0].clientX - startX;
-                    let newWidth = startWidth + diff;
-                    newWidth = Math.max(150, Math.min(400, newWidth));
-                    explorer.style.width = newWidth + 'px';
-                    refreshCM();
-                    resize();
+                    let w = Math.max(150, Math.min(400, startWidth + e.touches[0].clientX - startX));
+                    document.getElementById('explorer').style.width = w + 'px';
                 } else if (currentResizer.id === 'resizer-2') {
-                    const rightpanel = document.getElementById('rightpanel');
-                    const diff = startX - e.touches[0].clientX;
-                    let newWidth = startRightWidth + diff;
-                    newWidth = Math.max(200, Math.min(500, newWidth));
-                    rightpanel.style.width = newWidth + 'px';
-                    refreshCM();
-                    resize();
+                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.touches[0].clientX));
+                    document.getElementById('rightpanel').style.width = w + 'px';
                 }
+                refreshCM();
+                resize();
             });
 
             document.addEventListener('touchend', () => {
@@ -1014,14 +1052,7 @@
             notify('📐 Размеры панелей сброшены');
         }
 
-        // ============ THREE.JS ============
-        (function () {
-            const s = document.createElement('script');
-            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-            s.onload = initThree;
-            document.head.appendChild(s);
-        })();
-
+        // ============ THREE.JS ПЕРЕМЕННЫЕ ============
         let selectedRef = null;
         let expanded = new Set();
         let treeData = [];
@@ -1038,6 +1069,11 @@
         let target = { x: 0, y: 2, z: 0 };
         let keysPressed = {};
         let moveSpeed = 1.0;
+        let fpsFrames = 0;
+        let fpsTime = performance.now();
+        let currentFPS = 0;
+        let lastCameraUpdate = 0;
+        const CAMERA_UPDATE_INTERVAL = 2000;
 
         // ============ УВЕДОМЛЕНИЯ ============
         function notify(msg, type = 'ok') {
@@ -1063,27 +1099,35 @@
         // ============ THREE.JS INIT ============
         function initThree() {
             const vp = document.getElementById('viewport');
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.shadowMap.enabled = true;
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: qualitySettings.antialias,
+                powerPreference: "low-power",
+                precision: "mediump"
+            });
+            renderer.setPixelRatio(1);
+            renderer.shadowMap.enabled = qualitySettings.shadows;
             vp.appendChild(renderer.domElement);
+
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0f172a);
-            camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
+            if (qualitySettings.fog) {
+                scene.fog = new THREE.Fog(0x0f172a, 50, 400);
+            }
+
+            camera = new THREE.PerspectiveCamera(60, 1, 0.5, 500);
             raycaster = new THREE.Raycaster();
             mouse = new THREE.Vector2();
 
             // Освещение
-            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-            sun.position.set(20, 40, 20);
-            sun.castShadow = true;
-            scene.add(sun);
+            scene.add(new THREE.AmbientLight(0xffffff, qualitySettings.ambientLight));
+            if (qualitySettings.dirLight > 0) {
+                const sun = new THREE.DirectionalLight(0xffffff, qualitySettings.dirLight);
+                sun.position.set(20, 40, 20);
+                scene.add(sun);
+            }
 
-            // Сетка и оси
-            scene.add(new THREE.GridHelper(200, 40, 0x374151, 0x1f2937));
-            scene.add(new THREE.AxesHelper(5));
-
+            updateHelpers();
             window._selBox = null;
             resize();
             window.addEventListener('resize', resize);
@@ -1093,9 +1137,7 @@
             renderer.domElement.addEventListener('mousemove', onMM);
             renderer.domElement.addEventListener('mouseup', onMU);
             renderer.domElement.addEventListener('wheel', onWh, { passive: false });
-            renderer.domElement.addEventListener('contextmenu', e => {
-                e.preventDefault();
-            });
+            renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 
             // Тач
             renderer.domElement.addEventListener('touchstart', onTS, { passive: false });
@@ -1106,11 +1148,11 @@
             animate();
             loadTree();
 
-            // Фокус viewport для WASD на десктопе
+            // Фокус viewport для WASD
             vp.addEventListener('click', () => vp.focus());
             vp.focus();
 
-            // Мобильный геймпад — только touch, не мышь
+            // Мобильный геймпад
             document.querySelectorAll('.pad-btn').forEach(btn => {
                 const key = btn.dataset.key;
                 btn.addEventListener('touchstart', e => {
@@ -1129,68 +1171,95 @@
             });
         }
 
+        function updateHelpers() {
+            if (window._gridHelper) {
+                scene.remove(window._gridHelper);
+                window._gridHelper = null;
+            }
+            if (window._axesHelper) {
+                scene.remove(window._axesHelper);
+                window._axesHelper = null;
+            }
+            if (qualitySettings.helpers) {
+                window._gridHelper = new THREE.GridHelper(200, 40, 0x374151, 0x1f2937);
+                window._axesHelper = new THREE.AxesHelper(5);
+                scene.add(window._gridHelper);
+                scene.add(window._axesHelper);
+            }
+        }
+
+        function toggleHelpers() {
+            qualitySettings.helpers = !qualitySettings.helpers;
+            updateHelpers();
+            notify(qualitySettings.helpers ? '📏 Сетка и оси: ВКЛ' : '📏 Сетка и оси: ВЫКЛ');
+        }
+
         function resize() {
             const vp = document.getElementById('viewport');
-            const w = vp.clientWidth;
-            const h = vp.clientHeight;
-            renderer.setSize(w, h);
+            const scale = qualitySettings.resolutionScale;
+            const w = Math.floor(vp.clientWidth * scale);
+            const h = Math.floor(vp.clientHeight * scale);
+            renderer.setSize(w, h, false);
+            renderer.domElement.style.width = '100%';
+            renderer.domElement.style.height = '100%';
             if (camera) {
-                camera.aspect = w / h;
+                camera.aspect = w / Math.max(h, 1);
                 camera.updateProjectionMatrix();
             }
         }
 
-        // ============ АНИМАЦИЯ С WASD ============
+        // ============ АНИМАЦИЯ ============
         function animate() {
             requestAnimationFrame(animate);
 
-            // WASD движение камеры
+            fpsFrames++;
+            const now = performance.now();
+            if (now - fpsTime >= 1000) {
+                currentFPS = Math.round(fpsFrames / ((now - fpsTime) / 1000));
+                document.getElementById('fps-counter').textContent =
+                    'FPS: ' + currentFPS + ' | ' + Object.keys(sceneObjs).length + ' obj';
+                fpsFrames = 0;
+                fpsTime = now;
+            }
+
+            // WASD движение
             const anyKeyPressed = keysPressed['w'] || keysPressed['s'] || keysPressed['a'] ||
-                keysPressed['d'] || keysPressed['q'] || keysPressed['e'] ||
-                keysPressed['shift'] || keysPressed[' '];
+                keysPressed['d'] || keysPressed['q'] || keysPressed['e'];
 
             if (anyKeyPressed) {
                 const direction = new THREE.Vector3();
                 camera.getWorldDirection(direction);
-
                 const right = new THREE.Vector3();
                 right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
-
                 const speed = moveSpeed * (spherical.r / 30) * 0.5;
 
-                // W/S - вперед/назад
                 if (keysPressed['w']) {
                     target.x += direction.x * speed;
-                    target.y += direction.y * speed;
                     target.z += direction.z * speed;
                 }
                 if (keysPressed['s']) {
                     target.x -= direction.x * speed;
-                    target.y -= direction.y * speed;
                     target.z -= direction.z * speed;
                 }
-
-                // A/D - влево/вправо
                 if (keysPressed['a']) {
                     target.x -= right.x * speed;
-                    target.y -= right.y * speed;
                     target.z -= right.z * speed;
                 }
                 if (keysPressed['d']) {
                     target.x += right.x * speed;
-                    target.y += right.y * speed;
                     target.z += right.z * speed;
                 }
-
-                // Q/E или Shift/Space - вниз/вверх
-                if (keysPressed['q']) {
-                    target.y -= speed;
-                }
-                if (keysPressed['e'] || keysPressed[' ']) {
-                    target.y += speed;
-                }
+                if (keysPressed['q']) target.y -= speed;
+                if (keysPressed['e']) target.y += speed;
 
                 updateCamera();
+
+                // Обновляем сцену при движении (не чаще раза в 2 сек)
+                if (now - lastCameraUpdate > CAMERA_UPDATE_INTERVAL &&
+                    Object.keys(sceneObjs).length > 500) {
+                    lastCameraUpdate = now;
+                    reloadScene();
+                }
             }
 
             renderer.render(scene, camera);
@@ -1250,11 +1319,9 @@
             }
 
             if (e.buttons === 1) {
-                // Левая кнопка - вращение (вертикаль инвертирована)
                 spherical.theta -= dx * .005;
                 spherical.phi = Math.max(.05, Math.min(Math.PI - .05, spherical.phi - dy * .005));
             } else if (e.buttons === 2 || e.buttons === 4) {
-                // Правая/средняя кнопка - панорамирование
                 const direction = new THREE.Vector3();
                 camera.getWorldDirection(direction);
                 const right = new THREE.Vector3();
@@ -1280,7 +1347,6 @@
         function onWh(e) {
             e.preventDefault();
 
-            // Shift+колесико - скорость движения
             if (e.shiftKey) {
                 moveSpeed = Math.max(0.1, Math.min(10, moveSpeed - e.deltaY * 0.01));
                 const indicator = document.getElementById('speed-indicator');
@@ -1359,15 +1425,30 @@
 
         // ============ СЦЕНА ============
         async function reloadScene() {
-            const r = await api('GET', '/api/scene');
+            const params = new URLSearchParams({
+                cx: Math.round(target.x),
+                cy: Math.round(target.y),
+                cz: Math.round(target.z),
+                r: Math.round(spherical.r * 1.5)
+            });
+
+            const r = await api('GET', '/api/scene?' + params.toString());
             if (!r.ok) return;
 
+            // Очистка старых объектов
             for (const mesh of Object.values(sceneObjs)) {
                 scene.remove(mesh);
                 if (mesh.geometry) mesh.geometry.dispose();
                 if (mesh.material) {
-                    if (mesh.material.map) mesh.material.map.dispose();
-                    mesh.material.dispose();
+                    if (Array.isArray(mesh.material)) {
+                        mesh.material.forEach(m => {
+                            if (m.map) m.map.dispose();
+                            m.dispose();
+                        });
+                    } else {
+                        if (mesh.material.map) mesh.material.map.dispose();
+                        mesh.material.dispose();
+                    }
                 }
             }
             sceneObjs = {};
@@ -1376,77 +1457,87 @@
                 window._selBox = null;
             }
 
-            const textureLoader = new THREE.TextureLoader();
+            // Кеши геометрий и материалов
+            const geoCache = {};
+            const matCache = {};
 
-            for (const o of r.objects) {
-                let geo;
-                if (o.shape === 'sphere') {
-                    geo = new THREE.SphereGeometry(Math.max(o.sx, o.sy, o.sz) * .5, 32, 24);
-                } else {
-                    geo = new THREE.BoxGeometry(o.sx, o.sy, o.sz);
-                }
+            let objects = r.objects;
+            let totalAvailable = r.total || objects.length;
 
-                // Загружаем текстуру
-                let texture = null;
-                if (o.texture) {
-                    try {
-                        texture = await new Promise((resolve) => {
-                            textureLoader.load(o.texture, resolve, undefined, () => resolve(null));
-                        });
-                        if (texture) {
-                            texture.wrapS = THREE.RepeatWrapping;
-                            texture.wrapT = THREE.RepeatWrapping;
-                        }
-                    } catch (e) {
-                        texture = null;
+            if (qualitySettings.maxObjects && objects.length > qualitySettings.maxObjects) {
+                objects = objects.slice(0, qualitySettings.maxObjects);
+            }
+
+            for (const o of objects) {
+                // Кеш геометрий
+                const geoKey = o.shape + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
+                if (!geoCache[geoKey]) {
+                    if (o.shape === 'sphere') {
+                        const seg = Math.max(4, qualitySettings.sphereSegments);
+                        const radius = Math.max(o.sx || 1, o.sy || 1, o.sz || 1) * 0.5;
+                        geoCache[geoKey] = new THREE.SphereGeometry(radius, seg, Math.round(seg * 0.75));
+                    } else if (o.shape === 'cylinder') {
+                        const seg = Math.max(6, qualitySettings.sphereSegments);
+                        geoCache[geoKey] = new THREE.CylinderGeometry((o.sx || 1) * 0.5, (o.sz || 1) * 0.5, o.sy || 1, seg);
+                    } else {
+                        geoCache[geoKey] = new THREE.BoxGeometry(o.sx || 1, o.sy || 1, o.sz || 1, 1, 1, 1);
                     }
                 }
+                const geo = geoCache[geoKey];
 
-                const mat = new THREE.MeshStandardMaterial({
-                    color: o.color || '#a0a0a0',
-                    transparent: o.opacity < 1.0,
-                    opacity: o.opacity || 1.0,
-                    map: texture,
-                    metalness: 0.1,
-                    roughness: 0.5,
-                });
+                // Кеш материалов
+                const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1);
+                if (!matCache[matKey]) {
+                    matCache[matKey] = new THREE.MeshLambertMaterial({
+                        color: o.color || '#a0a0a0',
+                        transparent: (o.opacity || 1) < 1.0,
+                        opacity: o.opacity || 1.0,
+                        flatShading: currentQuality === 'low',
+                    });
+                }
+                const mat = matCache[matKey];
 
                 const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(o.px || 0, o.py || 0, o.pz || 0);
 
+                // Поворот
                 if (o.rot && o.rot.length >= 9) {
-                    const m = o.rot;
                     const rm = new THREE.Matrix4();
                     rm.set(
-                        m[0], m[3], m[6], o.px,
-                        m[1], m[4], m[7], o.py,
-                        m[2], m[5], m[8], o.pz,
+                        o.rot[0], o.rot[3], o.rot[6], o.px || 0,
+                        o.rot[1], o.rot[4], o.rot[7], o.py || 0,
+                        o.rot[2], o.rot[5], o.rot[8], o.pz || 0,
                         0, 0, 0, 1
                     );
                     mesh.matrix.copy(rm);
                     mesh.matrixAutoUpdate = false;
                 } else {
-                    mesh.position.set(o.px, o.py, o.pz);
+                    mesh.matrixAutoUpdate = false;
+                    mesh.updateMatrix();
                 }
 
-                mesh.castShadow = true;
-                mesh.receiveShadow = true;
+                mesh.castShadow = qualitySettings.shadows;
+                mesh.receiveShadow = qualitySettings.shadows;
                 mesh.userData.ref = o.ref;
+                mesh.frustumCulled = true;
 
-                if (o.opacity < 1.0) {
-                    mesh.material.depthWrite = o.opacity > 0.5;
+                if ((o.opacity || 1) < 1.0) {
+                    mesh.material.depthWrite = (o.opacity || 1) > 0.7;
                 }
 
                 scene.add(mesh);
                 sceneObjs[o.ref] = mesh;
             }
 
-            notify('🔄 Сцена: ' + r.objects.length + ' объектов');
+            const shown = Object.keys(sceneObjs).length;
+            notify('🔄 Сцена: ' + shown + ' объектов' + (totalAvailable > shown ? ' (из ' + totalAvailable + ')' : ''));
+            updateInventoryCount();
         }
 
         function highlightSelected(ref) {
             for (const [r, mesh] of Object.entries(sceneObjs)) {
                 mesh.material.emissive = new THREE.Color(parseInt(r) === ref ? 0xff6600 : 0);
-                mesh.material.emissiveIntensity = parseInt(r) === ref ? .4 : 0;
+                mesh.material.emissiveIntensity = parseInt(r) === ref ? 0.4 : 0;
             }
             if (window._selBox) {
                 scene.remove(window._selBox);
@@ -1469,7 +1560,6 @@
             }
             renderTree();
             reloadScene();
-            updateInventoryCount();
         }
 
         function updateInventoryCount() {
@@ -1477,10 +1567,10 @@
             if (selectedRef) {
                 const node = findNodeByRef(treeData, selectedRef);
                 if (node) {
-                    info.textContent = `Выбрано: ${node.name} (${node.cls})`;
+                    info.textContent = 'Выбрано: ' + node.name + ' (' + node.cls + ')';
                 }
             } else {
-                info.textContent = `Объектов: ${Object.keys(sceneObjs).length}`;
+                info.textContent = 'Объектов: ' + Object.keys(sceneObjs).length;
             }
         }
 
@@ -1696,7 +1786,7 @@
                 inputGroup.style.cssText = 'flex:1;display:flex;align-items:center;gap:2px';
 
                 const coordLabel = document.createElement('span');
-                coordLabel.style.cssText = `font-size:10px;color:${colors[i]};font-weight:bold;min-width:12px`;
+                coordLabel.style.cssText = 'font-size:10px;color:' + colors[i] + ';font-weight:bold;min-width:12px';
                 coordLabel.textContent = coord.toUpperCase();
 
                 const input = document.createElement('input');
@@ -1745,14 +1835,20 @@
             } else if (v && typeof v === 'object' && 'r' in v && 'g' in v && 'b' in v) {
                 const pr = document.createElement('div');
                 pr.className = 'prop-color-preview';
-                const hex = rgbToHex(v.r, v.g, v.b);
+                const hex = '#' + [v.r, v.g, v.b].map(x =>
+                    Math.min(255, Math.max(0, Math.round(x * 255))).toString(16).padStart(2, '0')
+                ).join('');
                 pr.style.background = hex;
                 pr.onclick = () => {
                     const inp = document.createElement('input');
                     inp.type = 'color';
                     inp.value = hex;
                     inp.onchange = () => {
-                        const color = hexToRgb(inp.value);
+                        const color = {
+                            r: parseInt(inp.value.slice(1, 3), 16) / 255,
+                            g: parseInt(inp.value.slice(3, 5), 16) / 255,
+                            b: parseInt(inp.value.slice(5, 7), 16) / 255
+                        };
                         setProp(ref, k, color);
                         pr.style.background = inp.value;
                         reloadScene();
@@ -1760,42 +1856,18 @@
                     inp.click();
                 };
                 row.appendChild(pr);
-                const inp = document.createElement('input');
-                inp.className = 'prop-val';
-                inp.value = JSON.stringify(v).slice(0, 50);
-                inp.onchange = () => {
-                    try { setProp(ref, k, JSON.parse(inp.value)); } catch { }
-                };
-                row.appendChild(inp);
-            } else if (v && typeof v === 'object') {
-                const inp = document.createElement('input');
-                inp.className = 'prop-val';
-                inp.value = JSON.stringify(v).slice(0, 80);
-                inp.onchange = () => {
-                    try { setProp(ref, k, JSON.parse(inp.value)); } catch { }
-                };
-                row.appendChild(inp);
             } else {
                 const inp = document.createElement('input');
                 inp.className = 'prop-val';
-                inp.value = String(v ?? '');
-                inp.onchange = () => setProp(ref, k, inp.value);
+                inp.value = typeof v === 'object' ? JSON.stringify(v).slice(0, 80) : String(v ?? '');
+                inp.onchange = () => {
+                    let val = inp.value;
+                    try { val = JSON.parse(val); } catch (e) { }
+                    setProp(ref, k, val);
+                };
                 row.appendChild(inp);
             }
             panel.appendChild(row);
-        }
-
-        function rgbToHex(r, g, b) {
-            return '#' + [r, g, b].map(v => Math.min(255, Math.max(0, Math.round(v * 255))).toString(16).padStart(2, '0')).join('');
-        }
-
-        function hexToRgb(hex) {
-            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-            return result ? {
-                r: parseInt(result[1], 16) / 255,
-                g: parseInt(result[2], 16) / 255,
-                b: parseInt(result[3], 16) / 255
-            } : { r: 0.6, g: 0.6, b: 0.6 };
         }
 
         async function setProp(ref, prop, val) {
@@ -1902,7 +1974,8 @@
                 if (e.size) {
                     const sz = document.createElement('span');
                     sz.className = 'fb-size';
-                    sz.textContent = fmtSz(e.size);
+                    sz.textContent = e.size > 1048576 ? (e.size / 1048576).toFixed(1) + 'MB' :
+                        e.size > 1024 ? (e.size / 1024).toFixed(0) + 'KB' : e.size + 'B';
                     row.appendChild(sz);
                 }
                 row.onclick = () => {
@@ -1948,11 +2021,6 @@
                 return;
             }
             doSave(r.file);
-        }
-
-        function fmtSz(s) {
-            return s > 1048576 ? (s / 1048576).toFixed(1) + 'MB' :
-                s > 1024 ? (s / 1024).toFixed(0) + 'KB' : s + 'B';
         }
 
         // ============ ДИАЛОГИ ============
@@ -2062,7 +2130,6 @@
 
         // ============ КЛАВИШИ ============
         document.addEventListener('keydown', (e) => {
-            // Игнорируем если фокус в инпуте или CodeMirror
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' ||
                 e.target.classList.contains('CodeMirror') || e.target.closest('.CodeMirror')) {
                 return;
@@ -2070,7 +2137,6 @@
 
             keysPressed[e.key.toLowerCase()] = true;
 
-            // Горячие клавиши
             if (e.ctrlKey && e.key === 'o') {
                 e.preventDefault();
                 openFileBrowser('open');
@@ -2089,7 +2155,6 @@
                 e.preventDefault();
                 reloadScene();
             } else if (e.key === 'f' && !e.ctrlKey) {
-                // Фокус на выбранный объект
                 if (selectedRef && sceneObjs[selectedRef]) {
                     const p = sceneObjs[selectedRef].position;
                     target = { x: p.x, y: p.y, z: p.z };
