@@ -4,6 +4,7 @@ RbxStudio - мобильный редактор Roblox-мест
 Запуск: python3 app.py [путь/к/файлу.rbxl]
 Зависимости устанавливаются автоматически.
 """
+from flask import Flask, request, jsonify, Response, send_from_directory
 import base64
 import struct
 import math
@@ -27,9 +28,9 @@ def _ensure(pkg, imp=None):
             '--break-system-packages', '-q'
         ])
 
+
 _ensure('flask')
 
-from flask import Flask, request, jsonify, Response, send_from_directory
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -135,7 +136,8 @@ def serialize_prop(v):
 
 
 # Кеш для объектов сцены
-_scene_cache = {'timestamp': 0, 'objects': [], 'hash': '', 'pos': (0, 0, 0), 'r': 0}
+_scene_cache = {'timestamp': 0, 'objects': [],
+                'hash': '', 'pos': (0, 0, 0), 'r': 0}
 
 
 def make_scene_objects(viewport_center=None, viewport_radius=None):
@@ -146,61 +148,62 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
     parsed = state['parsed']
     if not parsed:
         return []
-    
+
     # Проверяем кеш (если данные не менялись и камера не двигалась)
-    current_hash = str(len(parsed['referent_to_class'])) + str(parsed.get('_mod_counter', 0))
-    
+    current_hash = str(len(parsed['referent_to_class'])) + \
+        str(parsed.get('_mod_counter', 0))
+
     if viewport_center and viewport_radius:
         cx, cy, cz = viewport_center
         cache_cx, cache_cy, cache_cz = _scene_cache['pos']
         cache_r = _scene_cache['r']
-        
+
         # Если камера сдвинулась меньше чем на 10% радиуса - используем кеш
-        if (time.time() - _scene_cache['timestamp'] < 3.0 and 
+        if (time.time() - _scene_cache['timestamp'] < 3.0 and
             _scene_cache['hash'] == current_hash and
             abs(cx - cache_cx) < viewport_radius * 0.1 and
             abs(cy - cache_cy) < viewport_radius * 0.1 and
             abs(cz - cache_cz) < viewport_radius * 0.1 and
-            abs(viewport_radius - cache_r) < viewport_radius * 0.1):
+                abs(viewport_radius - cache_r) < viewport_radius * 0.1):
             return _scene_cache['objects']
-    
+
     objs = []
     r2c = parsed['referent_to_class']
     props_all = parsed['props']
-    
+
     # Предвычисленные значения для быстрой фильтрации
     cx = cy = cz = 0
     radius_sq = float('inf')
-    
+
     if viewport_center:
         cx, cy, cz = viewport_center
         radius_sq = (viewport_radius or 100) ** 2
-    
+
     # Счётчики для статистики
     total_parts = 0
     skipped_invisible = 0
     skipped_distance = 0
     skipped_small = 0
-    
+
     for ref, cls in r2c.items():
         # Только Part-классы
         if cls not in PART_CLASSES:
             continue
-        
+
         total_parts += 1
         props = props_all.get(ref, {})
-        
+
         # Пропускаем невидимые
         if props.get('Visible') is False:
             skipped_invisible += 1
             continue
-        
+
         # Пропускаем полностью прозрачные
         transparency = props.get('Transparency', 0)
         if isinstance(transparency, (int, float)) and transparency > 0.95:
             skipped_invisible += 1
             continue
-        
+
         # Получаем Position
         pos = props.get('Position', {})
         if isinstance(pos, dict):
@@ -209,9 +212,9 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
             pz = safe_float(pos.get('z', 0))
         else:
             px = py = pz = 0
-        
+
         dist_sq = 0
-        
+
         # Фильтрация по расстоянию до камеры
         if viewport_center:
             dx = px - cx
@@ -221,7 +224,7 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
             if dist_sq > radius_sq:
                 skipped_distance += 1
                 continue
-        
+
         # Получаем Size
         sz = props.get('Size', props.get('size', {}))
         if isinstance(sz, dict):
@@ -234,23 +237,23 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
             sz_ = max(0.05, safe_float(sz[2], 1))
         else:
             sx = sy = sz_ = 1.0
-        
+
         max_dim = max(sx, sy, sz_)
-        
+
         # Пропускаем мелкие объекты далеко от камеры
         if viewport_center and dist_sq > 10000 and max_dim < 0.5:
             skipped_small += 1
             continue
-        
+
         # Получаем Rotation
         rot = props.get('Rotation', {})
         if isinstance(rot, dict):
             rx = math.radians(safe_float(rot.get('x', 0)))
             ry = math.radians(safe_float(rot.get('y', 0)))
             rz = math.radians(safe_float(rot.get('z', 0)))
-        else:
-            rx = ry = rz = 0
-        
+        # else:
+            # rx = ry = rz = 0
+
         # Создаем матрицу поворота
         if rx == 0 and ry == 0 and rz == 0:
             rot_matrix = [1, 0, 0, 0, 1, 0, 0, 0, 1]
@@ -263,14 +266,15 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
                 sx_v*sy_v*cz_v+cx_v*sz_v, -sx_v*sy_v*sz_v+cx_v*cz_v, -sx_v*cy_v,
                 -cx_v*sy_v*cz_v+sx_v*sz_v, cx_v*sy_v*sz_v+sx_v*cz_v, cx_v*cy_v
             ]
-        
+
         # Получаем цвет
-        col = props.get('Color') or props.get('Color3') or props.get('BrickColor')
+        col = props.get('Color') or props.get(
+            'Color3') or props.get('BrickColor')
         color = get_color(col) if isinstance(col, dict) else '#a0a0a0'
-        
+
         # Определяем форму
         shape = 'sphere' if cls == 'SpherePart' else 'box'
-        
+
         # Проверяем SpecialMesh только для обычных Part
         if cls == 'Part':
             # Оптимизированный поиск SpecialMesh (только ближайшие ref)
@@ -282,9 +286,9 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
                     if isinstance(mt, str):
                         mt = int(mt) if mt.isdigit() else 0
                     mid = str(cp.get('MeshId', ''))
-                    
+
                     CONE_IDS = ['9756362', '1033714', '9887819', 'cone.mesh']
-                    
+
                     if mt == 4 or mt == 3:
                         shape = 'sphere'
                     elif mt == 1:
@@ -294,9 +298,9 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
                     elif any(cid in mid for cid in CONE_IDS):
                         shape = 'cone'
                     break
-        
+
         name = props.get('Name', cls)
-        
+
         objs.append({
             'ref': ref,
             'class': cls,
@@ -309,27 +313,29 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
             'distance_sq': dist_sq,
             'size': max_dim,
         })
-    
+
     # Сортируем: ближние и крупные объекты первыми
     if viewport_center:
         objs.sort(key=lambda o: (o['distance_sq'] / 10000) - o['size'])
-        
+
         # Ограничиваем количество объектов для производительности
         MAX_OBJECTS = 1500
         if len(objs) > MAX_OBJECTS:
             # Приоритет: ближние + крупные
             near_objects = [o for o in objs if o['distance_sq'] < 2500]
-            far_big_objects = [o for o in objs if o['distance_sq'] >= 2500 and o['size'] > 2.0]
-            
+            far_big_objects = [
+                o for o in objs if o['distance_sq'] >= 2500 and o['size'] > 2.0]
+
             # Если всё ещё много - берём ближайшие
             if len(near_objects) > MAX_OBJECTS:
                 near_objects = near_objects[:MAX_OBJECTS]
                 far_big_objects = []
             elif len(near_objects) + len(far_big_objects) > MAX_OBJECTS:
-                far_big_objects = far_big_objects[:MAX_OBJECTS - len(near_objects)]
-            
+                far_big_objects = far_big_objects[:MAX_OBJECTS -
+                                                  len(near_objects)]
+
             objs = near_objects + far_big_objects
-    
+
     # Обновляем кеш
     _scene_cache['timestamp'] = time.time()
     _scene_cache['objects'] = objs
@@ -337,7 +343,7 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
     _scene_cache['pos'] = (cx, cy, cz) if viewport_center else (0, 0, 0)
     _scene_cache['r'] = viewport_radius or 0
     parsed['_mod_counter'] = parsed.get('_mod_counter', 0)
-    
+
     # Логируем статистику
     if total_parts > 100:
         print(f'[Scene] Всего частей: {total_parts}, '
@@ -345,7 +351,7 @@ def make_scene_objects(viewport_center=None, viewport_radius=None):
               f'{skipped_distance} далеко, '
               f'{skipped_small} мелких, '
               f'Отправлено: {len(objs)}')
-    
+
     return objs
 
 
@@ -444,21 +450,22 @@ def api_scene():
     except (ValueError, TypeError):
         cam_x = cam_y = cam_z = 0
         cam_r = 100
-    
+
     if cam_x == 0 and cam_y == 0 and cam_z == 0:
         objects = make_scene_objects()
     else:
         objects = make_scene_objects((cam_x, cam_y, cam_z), cam_r)
-    
+
     # Удаляем служебные поля перед отправкой
     clean_objects = []
     for obj in objects:
-        clean_obj = {k: v for k, v in obj.items() if k not in ('distance_sq', 'size')}
+        clean_obj = {k: v for k, v in obj.items(
+        ) if k not in ('distance_sq', 'size')}
         clean_objects.append(clean_obj)
-    
+
     return jsonify({
-        'ok': True, 
-        'objects': clean_objects, 
+        'ok': True,
+        'objects': clean_objects,
         'total': len(clean_objects),
         'cached': bool(cam_x or cam_y or cam_z)
     })

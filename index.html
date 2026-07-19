@@ -895,6 +895,8 @@
                 fog: true,
                 skipSmallObjects: true,
                 maxObjects: 1000,
+                lodDistance: 50,
+                viewportMultiplier: 1.5,
             },
             medium: {
                 antialias: false,
@@ -907,20 +909,24 @@
                 dirLight: 0.2,
                 fog: true,
                 skipSmallObjects: false,
-                maxObjects: 2000,
+                maxObjects: 3000,
+                lodDistance: 100,
+                viewportMultiplier: 1.5,
             },
             high: {
                 antialias: true,
                 shadows: false,
                 resolutionScale: 0.75,
-                sphereSegments: 12,
+                sphereSegments: 16,
                 textures: true,
                 helpers: true,
                 ambientLight: 0.5,
                 dirLight: 0.6,
                 fog: false,
                 skipSmallObjects: false,
-                maxObjects: 5000,
+                maxObjects: 99999,
+                lodDistance: 200,
+                viewportMultiplier: 3.0,
             }
         };
 
@@ -1075,6 +1081,13 @@
         let lastCameraUpdate = 0;
         const CAMERA_UPDATE_INTERVAL = 2000;
 
+        // Кеш для raycasting
+        let raycasterCache = {
+            lastUpdate: 0,
+            objects: [],
+            updateInterval: 100
+        };
+
         // ============ УВЕДОМЛЕНИЯ ============
         function notify(msg, type = 'ok') {
             const d = document.createElement('div');
@@ -1116,7 +1129,12 @@
             }
 
             camera = new THREE.PerspectiveCamera(60, 1, 0.5, 500);
+
+            // Инициализация raycaster с правильными настройками
             raycaster = new THREE.Raycaster();
+            raycaster.params.Points.threshold = 0.1;
+            raycaster.params.Line.threshold = 0.1;
+
             mouse = new THREE.Vector2();
 
             // Освещение
@@ -1409,27 +1427,65 @@
             }
         }
 
+        // ============ ИСПРАВЛЕННЫЙ PICK ============
         function pick(cx, cy) {
             const vp = document.getElementById('viewport');
             const rect = vp.getBoundingClientRect();
             mouse.x = ((cx - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
-            raycaster.setFromCamera(mouse, camera);
-            const hits = raycaster.intersectObjects(Object.values(sceneObjs));
-            if (hits.length) {
-                selectRef(parseInt(hits[0].object.userData.ref));
-            } else {
-                deselect();
+
+            // Пересоздаем raycaster если нужно
+            if (!raycaster) {
+                raycaster = new THREE.Raycaster();
+                raycaster.params.Points.threshold = 0.1;
+                raycaster.params.Line.threshold = 0.1;
             }
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // Обновляем кеш объектов для raycasting
+            const now = performance.now();
+            let objectsToCheck;
+
+            if (now - raycasterCache.lastUpdate > raycasterCache.updateInterval) {
+                raycasterCache.objects = Object.values(sceneObjs);
+                raycasterCache.lastUpdate = now;
+            }
+            objectsToCheck = raycasterCache.objects;
+
+            // Для low/medium с большим количеством объектов - оптимизация
+            if (currentQuality !== 'high' && objectsToCheck.length > 2000) {
+                objectsToCheck = objectsToCheck
+                    .map(obj => ({
+                        obj: obj,
+                        dist: obj.position.distanceToSquared(camera.position)
+                    }))
+                    .sort((a, b) => a.dist - b.dist)
+                    .slice(0, 2000)
+                    .map(item => item.obj);
+            }
+
+            const hits = raycaster.intersectObjects(objectsToCheck, false);
+
+            if (hits.length) {
+                const hit = hits[0];
+                if (hit.object && hit.object.userData && hit.object.userData.ref) {
+                    selectRef(parseInt(hit.object.userData.ref));
+                    return;
+                }
+            }
+
+            deselect();
         }
 
-        // ============ СЦЕНА ============
+        // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
         async function reloadScene() {
             const params = new URLSearchParams({
                 cx: Math.round(target.x),
                 cy: Math.round(target.y),
                 cz: Math.round(target.z),
-                r: Math.round(spherical.r * 1.5)
+                r: Math.round(spherical.r * qualitySettings.viewportMultiplier),
+                quality: currentQuality
             });
 
             const r = await api('GET', '/api/scene?' + params.toString());
@@ -1452,6 +1508,11 @@
                 }
             }
             sceneObjs = {};
+
+            // Сбрасываем кеш raycasting
+            raycasterCache.objects = [];
+            raycasterCache.lastUpdate = 0;
+
             if (window._selBox) {
                 scene.remove(window._selBox);
                 window._selBox = null;
@@ -1464,8 +1525,14 @@
             let objects = r.objects;
             let totalAvailable = r.total || objects.length;
 
+            // Применяем лимиты качества
             if (qualitySettings.maxObjects && objects.length > qualitySettings.maxObjects) {
-                objects = objects.slice(0, qualitySettings.maxObjects);
+                if (currentQuality === 'high') {
+                    const maxHighObjects = Math.min(objects.length, 10000);
+                    objects = objects.slice(0, maxHighObjects);
+                } else {
+                    objects = objects.slice(0, qualitySettings.maxObjects);
+                }
             }
 
             for (const o of objects) {
@@ -1532,6 +1599,11 @@
             const shown = Object.keys(sceneObjs).length;
             notify('🔄 Сцена: ' + shown + ' объектов' + (totalAvailable > shown ? ' (из ' + totalAvailable + ')' : ''));
             updateInventoryCount();
+
+            // Обновляем выделение если было
+            if (selectedRef && sceneObjs[selectedRef]) {
+                highlightSelected(selectedRef);
+            }
         }
 
         function highlightSelected(ref) {
