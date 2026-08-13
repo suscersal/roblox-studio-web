@@ -12,6 +12,16 @@ import sys
 def start_server(port: int, data_dir: str = ""):
     os.environ.setdefault("FLASK_DEBUG", "False")
 
+    # app.py открывает index.html/icons.txt по ОТНОСИТЕЛЬНОМУ пути
+    # (open("index.html", ...)) — это работало локально только потому,
+    # что вы запускали `python app.py` из той же папки. Chaquopy стартует
+    # процесс с другим текущим каталогом, поэтому переключаемся в папку,
+    # где реально лежат app.py/index.html/icons.txt — она всегда та же,
+    # что и у этого файла (bridge_launcher.py копируется туда же
+    # в шаге "Sync Python sources" из workflow).
+    here = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(here)
+
     # data_dir — приватная папка приложения (filesDir), куда Kotlin-сторона
     # копирует .rbxl-файлы, выбранные пользователем через системный пикер
     # (см. MainActivity.importRbxlFile). Прокидываем как переменную
