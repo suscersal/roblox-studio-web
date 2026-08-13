@@ -201,24 +201,24 @@ def make_scene_objects():
             sx = sy = sz_ = 1.0
 
         # Получаем Rotation
-        rot = props.get('Rotation', {})
-        if isinstance(rot, dict):
-            rx = math.radians(safe_float(rot.get('x', 0)))
-            ry = math.radians(safe_float(rot.get('y', 0)))
-            rz = math.radians(safe_float(rot.get('z', 0)))
+        # Position + Rotation из CFrame (содержит матрицу вращения напрямую)
+        cf = props.get('CFrame', {})
+        px, py, pz = get_pos(cf)
+        rot_matrix = get_rot_matrix(cf)
+
+        # Size
+        sz = props.get('Size', props.get('size', {}))
+        if isinstance(sz, dict):
+            sx = max(0.05, safe_float(sz.get('x', 1), 1))
+            sy = max(0.05, safe_float(sz.get('y', 1), 1))
+            sz_ = max(0.05, safe_float(sz.get('z', 1), 1))
+        elif isinstance(sz, (list, tuple)) and len(sz) >= 3:
+            sx = max(0.05, safe_float(sz[0], 1))
+            sy = max(0.05, safe_float(sz[1], 1))
+            sz_ = max(0.05, safe_float(sz[2], 1))
         else:
-            rx = ry = rz = 0
+            sx = sy = sz_ = 1.0
 
-        # Создаем матрицу поворота
-        cx, sx_v = math.cos(rx), math.sin(rx)
-        cy, sy_v = math.cos(ry), math.sin(ry)
-        cz, sz_v = math.cos(rz), math.sin(rz)
-
-        rot_matrix = [
-            cy*cz, -cy*sz_v, sy_v,
-            sx_v*sy_v*cz+cx*sz_v, -sx_v*sy_v*sz_v+cx*cz, -sx_v*cy,
-            -cx*sy_v*cz+sx_v*sz_v, cx*sy_v*sz_v+sx_v*cz, cx*cy
-        ]
 
         # Получаем цвет
         col = props.get('Color') or props.get(

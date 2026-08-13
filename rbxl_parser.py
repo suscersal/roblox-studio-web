@@ -863,16 +863,19 @@ def parse_rbxl(path):
                     m21 = float(matrix[9]) if len(matrix) > 9 else 0.0
                     m22 = float(matrix[10]) if len(matrix) > 10 else 1.0
                     
-                    sy = math.sqrt(m00*m00 + m10*m10)
-                    singular = sy < 1e-6
+                    # Матрица собрана как R = Rx(rx) * Ry(ry) * Rz(rz)
+                    # (см. app.py: rot_matrix), поэтому раскладываем в тех же осях.
+                    cy = math.sqrt(m00*m00 + m01*m01)
+                    singular = cy < 1e-6
                     
                     if not singular:
-                        rx = math.atan2(m21, m22)
-                        ry = math.atan2(-m20, sy)
-                        rz = math.atan2(m10, m00)
+                        rx = math.atan2(-m12, m22)
+                        ry = math.atan2(m02, cy)
+                        rz = math.atan2(-m01, m00)
                     else:
-                        rx = math.atan2(-m12, m11)
-                        ry = math.atan2(-m20, sy)
+                        # Gimbal lock: ry = ±90°, ось X и Z сливаются, берём rz = 0
+                        ry = math.pi / 2 if m02 > 0 else -math.pi / 2
+                        rx = math.atan2(m10, m11) if m02 > 0 else -math.atan2(m10, m11)
                         rz = 0
                     
                     rotation = {
