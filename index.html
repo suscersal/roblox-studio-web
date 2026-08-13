@@ -666,10 +666,10 @@
         #mobile-pad {
             position: absolute;
             bottom: 56px;
-            left: 50%;
-            transform: translateX(-50%);
+            left: 16px;
             display: none;
-            gap: 6px;
+            align-items: flex-end;
+            gap: 14px;
             z-index: 10;
             pointer-events: none
         }
@@ -680,17 +680,36 @@
             }
         }
 
+        #joy-base {
+            width: 112px;
+            height: 112px;
+            border-radius: 50%;
+            background: rgba(31, 41, 55, 0.55);
+            border: 1px solid #4b5563;
+            position: relative;
+            pointer-events: all;
+            touch-action: none;
+        }
+
+        #joy-thumb {
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            background: rgba(59, 130, 246, 0.85);
+            border: 1px solid #93c5fd;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
         .pad-col {
             display: flex;
             flex-direction: column;
             gap: 4px;
             align-items: center;
             pointer-events: all
-        }
-
-        .pad-row-h {
-            display: flex;
-            gap: 4px
         }
 
         .pad-btn {
@@ -759,7 +778,7 @@
             <div id="speed-indicator">🚀 x1.0</div>
             <div id="quality-selector">
                 <button onclick="setQuality('low')" class="active" id="q-low">Low</button>
-                <button onclick="setQuality('medium')" id="q-med">Med</button>
+                <button onclick="setQuality('medium')" id="q-medium">Med</button>
                 <button onclick="setQuality('high')" id="q-high">High</button>
             </div>
             <div id="vp-label">
@@ -767,17 +786,12 @@
                 ⌨️ WASD — движение | F — фокус | Esc — снять
             </div>
             <div id="mobile-pad">
-                <div class="pad-col">
-                    <button class="pad-btn" data-key="q">⬆</button>
-                    <div class="pad-row-h">
-                        <button class="pad-btn" data-key="a">◀</button>
-                        <button class="pad-btn" data-key="s">▼</button>
-                        <button class="pad-btn" data-key="d">▶</button>
-                    </div>
-                    <button class="pad-btn" data-key="e">⬇</button>
+                <div id="joy-base">
+                    <div id="joy-thumb"></div>
                 </div>
-                <div class="pad-col" style="margin-left:12px">
-                    <button class="pad-btn" data-key="w">▲</button>
+                <div class="pad-col">
+                    <button class="pad-btn" data-key="e" title="Вверх">⬆</button>
+                    <button class="pad-btn" data-key="q" title="Вниз">⬇</button>
                 </div>
             </div>
         </div>
@@ -1074,6 +1088,7 @@
         let spherical = { theta: Math.PI / 4, phi: Math.PI / 3, r: 30 };
         let target = { x: 0, y: 2, z: 0 };
         let keysPressed = {};
+        let joyVector = { x: 0, y: 0 }; // аналоговый стик: x — влево/вправо, y — вперёд/назад
         let moveSpeed = 1.0;
         let fpsFrames = 0;
         let fpsTime = performance.now();
@@ -1170,7 +1185,7 @@
             vp.addEventListener('click', () => vp.focus());
             vp.focus();
 
-            // Мобильный геймпад
+            // Мобильный геймпад: кнопки вверх/вниз
             document.querySelectorAll('.pad-btn').forEach(btn => {
                 const key = btn.dataset.key;
                 btn.addEventListener('touchstart', e => {
@@ -1187,6 +1202,72 @@
                     }, { passive: false })
                 );
             });
+
+            // Мобильный геймпад: аналоговый стик движения
+            initJoystick();
+        }
+
+        function initJoystick() {
+            const base = document.getElementById('joy-base');
+            const thumb = document.getElementById('joy-thumb');
+            if (!base || !thumb) return;
+            const maxR = 34; // px, максимальный вылет ручки стика
+            let touchId = null;
+
+            function setThumb(dx, dy) {
+                thumb.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
+            }
+
+            function handleMove(clientX, clientY) {
+                const rect = base.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+                let dx = clientX - cx;
+                let dy = clientY - cy;
+                const dist = Math.hypot(dx, dy);
+                if (dist > maxR) {
+                    dx = dx / dist * maxR;
+                    dy = dy / dist * maxR;
+                }
+                setThumb(dx, dy);
+                joyVector.x = dx / maxR;
+                joyVector.y = -dy / maxR; // тянем вверх по экрану — едем вперёд
+            }
+
+            function resetJoy() {
+                touchId = null;
+                joyVector.x = 0;
+                joyVector.y = 0;
+                setThumb(0, 0);
+            }
+
+            base.addEventListener('touchstart', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const t = e.changedTouches[0];
+                touchId = t.identifier;
+                handleMove(t.clientX, t.clientY);
+            }, { passive: false });
+
+            base.addEventListener('touchmove', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                for (const t of e.changedTouches) {
+                    if (t.identifier === touchId) {
+                        handleMove(t.clientX, t.clientY);
+                        break;
+                    }
+                }
+            }, { passive: false });
+
+            ['touchend', 'touchcancel'].forEach(ev => base.addEventListener(ev, e => {
+                for (const t of e.changedTouches) {
+                    if (t.identifier === touchId) {
+                        resetJoy();
+                        break;
+                    }
+                }
+            }));
         }
 
         function updateHelpers() {
@@ -1240,35 +1321,25 @@
                 fpsTime = now;
             }
 
-            // WASD движение
-            const anyKeyPressed = keysPressed['w'] || keysPressed['s'] || keysPressed['a'] ||
-                keysPressed['d'] || keysPressed['q'] || keysPressed['e'];
+            // WASD + аналоговый стик — движение
+            const forward = Math.max(-1, Math.min(1,
+                (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
+            const strafe = Math.max(-1, Math.min(1,
+                (keysPressed['d'] ? 1 : 0) - (keysPressed['a'] ? 1 : 0) + joyVector.x));
+            const vertical = (keysPressed['e'] ? 1 : 0) - (keysPressed['q'] ? 1 : 0);
 
-            if (anyKeyPressed) {
+            const anyMove = forward !== 0 || strafe !== 0 || vertical !== 0;
+
+            if (anyMove) {
                 const direction = new THREE.Vector3();
                 camera.getWorldDirection(direction);
                 const right = new THREE.Vector3();
                 right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
                 const speed = moveSpeed * (spherical.r / 30) * 0.5;
 
-                if (keysPressed['w']) {
-                    target.x += direction.x * speed;
-                    target.z += direction.z * speed;
-                }
-                if (keysPressed['s']) {
-                    target.x -= direction.x * speed;
-                    target.z -= direction.z * speed;
-                }
-                if (keysPressed['a']) {
-                    target.x -= right.x * speed;
-                    target.z -= right.z * speed;
-                }
-                if (keysPressed['d']) {
-                    target.x += right.x * speed;
-                    target.z += right.z * speed;
-                }
-                if (keysPressed['q']) target.y -= speed;
-                if (keysPressed['e']) target.y += speed;
+                target.x += direction.x * speed * forward + right.x * speed * strafe;
+                target.z += direction.z * speed * forward + right.z * speed * strafe;
+                target.y += speed * vertical;
 
                 updateCamera();
 
@@ -1478,6 +1549,31 @@
             deselect();
         }
 
+        // Геометрия WedgePart (клин/скат). Конвенция Roblox: BackSurface — это +Z
+        // (полная прямоугольная грань), FrontSurface — -Z (высота сходится в ребро).
+        function makeWedgeGeometry(sx, sy, sz) {
+            const hx = sx / 2, hy = sy / 2, hz = sz / 2;
+            const BBL = [-hx, -hy, hz], BBR = [hx, -hy, hz];
+            const BTL = [-hx, hy, hz], BTR = [hx, hy, hz];
+            const FBL = [-hx, -hy, -hz], FBR = [hx, -hy, -hz];
+            const tris = [
+                BBL, BTR, BTL,   // задняя грань (полная, +Z)
+                BBL, BBR, BTR,
+                BBL, FBL, FBR,   // низ
+                BBL, FBR, BBR,
+                BBL, BTL, FBL,   // левая треугольная грань
+                BBR, FBR, BTR,   // правая треугольная грань
+                BTL, FBR, FBL,   // скат
+                BTL, BTR, FBR,
+            ];
+            const positions = new Float32Array(tris.length * 3);
+            tris.forEach((v, i) => positions.set(v, i * 3));
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.computeVertexNormals();
+            return geo;
+        }
+
         // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
         async function reloadScene() {
             const params = new URLSearchParams({
@@ -1546,6 +1642,12 @@
                     } else if (o.shape === 'cylinder') {
                         const seg = Math.max(6, qualitySettings.sphereSegments);
                         geoCache[geoKey] = new THREE.CylinderGeometry((o.sx || 1) * 0.5, (o.sz || 1) * 0.5, o.sy || 1, seg);
+                    } else if (o.shape === 'cone') {
+                        const seg = Math.max(6, qualitySettings.sphereSegments);
+                        const radius = Math.max(o.sx || 1, o.sz || 1) * 0.5;
+                        geoCache[geoKey] = new THREE.ConeGeometry(radius, o.sy || 1, seg);
+                    } else if (o.shape === 'wedge') {
+                        geoCache[geoKey] = makeWedgeGeometry(o.sx || 1, o.sy || 1, o.sz || 1);
                     } else {
                         geoCache[geoKey] = new THREE.BoxGeometry(o.sx || 1, o.sy || 1, o.sz || 1, 1, 1, 1);
                     }
