@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-    <title>RbxStudio - OPi3</title>
+    <title>Roblox Studio Mobile</title>
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
@@ -81,6 +81,25 @@
             margin-right: 8px;
             font-size: 14px;
             white-space: nowrap
+        }
+
+        @media (max-width: 700px) {
+            #toolbar-top {
+                flex-wrap: wrap;
+                height: auto;
+                overflow-x: visible;
+                padding: 4px 6px
+            }
+
+            #toolbar-top .title {
+                width: 100%;
+                margin-bottom: 2px
+            }
+
+            #toolbar-top button {
+                padding: 5px 7px;
+                font-size: 12px
+            }
         }
 
         #main {
@@ -309,6 +328,7 @@
             min-width: 200px;
             max-width: 500px;
             flex-shrink: 0;
+            min-height: 0;
             background: #1f2937;
             display: flex;
             flex-direction: column
@@ -343,6 +363,7 @@
 
         #tab-script {
             flex: 1;
+            min-height: 0;
             display: none;
             flex-direction: column
         }
@@ -365,6 +386,16 @@
             height: 100% !important;
             font-family: 'Fira Code', 'Consolas', monospace;
             font-size: 13px
+        }
+
+        .CodeMirror-scroll {
+            overflow: auto !important;
+            touch-action: pan-x pan-y !important;
+        }
+
+        .CodeMirror-vscrollbar,
+        .CodeMirror-hscrollbar {
+            display: block !important;
         }
 
         #script-save-btn {
@@ -825,9 +856,11 @@
         });
 
         function refreshCM() {
-            setTimeout(() => {
-                if (cmEditor) cmEditor.refresh();
-            }, 10);
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    if (cmEditor) cmEditor.refresh();
+                });
+            });
         }
 
         // ============ КАЧЕСТВО 3D ============
@@ -2349,7 +2382,10 @@
         window.addEventListener('DOMContentLoaded', () => {
             loadLayout();
             initResizers();
+            refreshCM();
         });
+
+        window.addEventListener('resize', refreshCM);
     </script>
 </body>
 
