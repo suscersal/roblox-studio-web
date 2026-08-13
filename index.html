@@ -758,7 +758,7 @@
                 <button onclick="setQuality('high')" id="q-high">High</button>
             </div>
             <div id="vp-label">
-                🖱️ ЛКМ — вращение | 🖱️ ПКМ — панорама | 🖱️ Колесо — зум<br>
+                🖱️ ЛКМ — вращение | 🖱️ ПКМ — панорама | 🖱️ Колесо — дальность прорисовки<br>
                 ⌨️ WASD — движение | F — фокус | Esc — снять
             </div>
             <div id="mobile-pad">
@@ -1323,13 +1323,14 @@
         }
 
         function updateCamera() {
-            const { theta, phi, r } = spherical;
-            camera.position.set(
-                target.x + r * Math.sin(phi) * Math.sin(theta),
-                target.y + r * Math.cos(phi),
-                target.z + r * Math.sin(phi) * Math.cos(theta)
-            );
-            camera.lookAt(target.x, target.y, target.z);
+            const { theta, phi } = spherical;
+            const dirX = Math.sin(phi) * Math.sin(theta);
+            const dirY = Math.cos(phi);
+            const dirZ = Math.sin(phi) * Math.cos(theta);
+            // Камера от первого лица: позиция глаза = target,
+            // смотрим в направлении, заданном theta/phi (без отступа на радиус r)
+            camera.position.set(target.x, target.y, target.z);
+            camera.lookAt(target.x - dirX, target.y - dirY, target.z - dirZ);
         }
 
         // ============ ПРЕСЕТЫ КАМЕРЫ ============
@@ -1416,8 +1417,9 @@
                 return;
             }
 
+            // r больше не двигает камеру (вид от 1-го лица), но всё ещё
+            // задаёт дальность подгрузки сцены и скорость панорамирования
             spherical.r = Math.max(1, Math.min(500, spherical.r + e.deltaY * .05));
-            updateCamera();
         }
 
         // ============ ТАЧ ============
