@@ -1675,15 +1675,14 @@
         }
 
         function updateInventoryCount() {
-            const info = document.getElementById('inv-selected-info');
-            if (selectedRef) {
-                const node = findNodeByRef(treeData, selectedRef);
-                if (node) {
-                    info.textContent = 'Выбрано: ' + node.name + ' (' + node.cls + ')';
-                }
-            } else {
-                info.textContent = 'Объектов: ' + Object.keys(sceneObjs).length;
-            }
+            // Раньше это писало текст в #inv-selected-info — элемент из
+            // панели "Быстрое", которая была убрана из интерфейса.
+            // document.getElementById возвращал null, и обращение к
+            // .textContent роняло исключение, из-за чего вызывающие
+            // функции (selectRef/deselect) обрывались ДО отображения
+            // свойств объекта — отсюда и пропадало выделение в
+            // Properties/Script. Оставляем функцию как no-op, чтобы не
+            // трогать остальную логику выбора объектов.
         }
 
         function findNodeByRef(nodes, ref) {
