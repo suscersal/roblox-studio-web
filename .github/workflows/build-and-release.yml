@@ -40,11 +40,18 @@ jobs:
             cp -r icons/. android/app/src/main/python/icons/
           fi
 
-      - name: Grant execute permission for gradlew
-        run: |
-          cd android
-          [ -f gradlew ] || gradle wrapper --gradle-version 8.7
-          chmod +x gradlew
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # В репозитории нет закоммиченного gradlew — вместо генерации его
+      # системным Gradle рантера (там может стоять версия 9.x, несовместимая
+      # со старым AGP/Kotlin-плагином — падает на org.gradle.util.VersionNumber)
+      # ставим нужную версию через официальный action и вызываем `gradle`
+      # напрямую, без wrapper.
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
 
       # Версия растёт с каждым запуском CI: 1.0 -> 1.1 -> 1.2 ...
       - name: Compute version
@@ -74,7 +81,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android
-          ./gradlew assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK as build artifact
         uses: actions/upload-artifact@v4
