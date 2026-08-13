@@ -377,61 +377,6 @@
             flex-shrink: 0
         }
 
-        #toolbar-bottom {
-            background: #1f2937;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 4px 8px;
-            height: 35px;
-            flex-shrink: 0;
-            border-top: 1px solid #374151;
-            overflow-x: auto
-        }
-
-        #toolbar-bottom .inv-item {
-            background: #374151;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
-            white-space: nowrap;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            border: 2px solid transparent;
-            transition: all 0.2s
-        }
-
-        #toolbar-bottom .inv-item:hover {
-            background: #4b5563;
-            border-color: #3b82f6
-        }
-
-        #toolbar-bottom .inv-item.selected {
-            background: #1e3a5f;
-            border-color: #3b82f6
-        }
-
-        #toolbar-bottom .inv-icon {
-            width: 20px;
-            height: 20px;
-            object-fit: contain;
-            background: white;
-            border-radius: 3px
-        }
-
-        #toolbar-bottom .inv-label {
-            font-weight: 500
-        }
-
-        #toolbar-bottom .sep {
-            width: 1px;
-            height: 20px;
-            background: #374151;
-            margin: 0 2px
-        }
-
         .prop-header {
             padding: 4px 6px;
             background: #111827;
@@ -812,23 +757,6 @@
                 <button id="script-save-btn" onclick="saveScript()">💾 Сохранить скрипт</button>
             </div>
         </div>
-    </div>
-
-    <div id="toolbar-bottom">
-        <span style="font-size:11px;color:#9ca3af;margin-right:4px;">📋 Быстрое:</span>
-        <div class="inv-item" onclick="quickAdd('Part')"><span>🟫</span><span class="inv-label">Part</span></div>
-        <div class="inv-item" onclick="quickAdd('SpherePart')"><span>🔵</span><span class="inv-label">Sphere</span>
-        </div>
-        <div class="inv-item" onclick="quickAdd('WedgePart')"><span>🔺</span><span class="inv-label">Wedge</span></div>
-        <div class="sep"></div>
-        <div class="inv-item" onclick="quickAdd('Script')"><span>📜</span><span class="inv-label">Script</span></div>
-        <div class="inv-item" onclick="quickAdd('LocalScript')"><span>📝</span><span
-                class="inv-label">LocalScript</span></div>
-        <div class="sep"></div>
-        <div class="inv-item" onclick="quickAdd('PointLight')"><span>💡</span><span class="inv-label">Light</span></div>
-        <div class="inv-item" onclick="quickAdd('Sound')"><span>🔊</span><span class="inv-label">Sound</span></div>
-        <div class="sep"></div>
-        <div id="inv-selected-info" style="font-size:11px;color:#6b7280;margin-left:auto;">Ничего не выбрано</div>
     </div>
 
     <div id="modal-overlay">
