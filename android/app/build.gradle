@@ -1,0 +1,95 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.suscersal.rsw'
+    compileSdk 34
+    ndkVersion "27.0.12077973"
+
+    defaultConfig {
+        applicationId "com.suscersal.rsw"
+        minSdk 26
+        targetSdk 34
+
+        // Версия прилетает из CI (см. .github/workflows/build-and-release.yml).
+        // Локально, если переменных нет, берутся значения по умолчанию.
+        def verCode = (System.getenv("ANDROID_VERSION_CODE") ?: "1").toInteger()
+        def verName = System.getenv("ANDROID_VERSION_NAME") ?: "1.0"
+        versionCode verCode
+        versionName verName
+
+        // arm64-v8a покрывает подавляющее большинство актуальных устройств
+        // и заметно ускоряет сборку по сравнению с multi-ABI.
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+
+        python {
+            version "3.11"
+        }
+    }
+
+    // Постоянная подпись — чтобы APK можно было обновлять поверх старой
+    // версии, а не только переустанавливать. Ключ подкладывается в CI из
+    // GitHub Secret (см. workflow), локально при отсутствии переменных
+    // используется обычный debug-ключ Android Studio/Gradle.
+    def hasCustomSigning = System.getenv("ANDROID_KEYSTORE_PATH") != null
+
+    if (hasCustomSigning) {
+        signingConfigs {
+            custom {
+                storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (hasCustomSigning) {
+                signingConfig signingConfigs.custom
+            }
+        }
+        release {
+            minifyEnabled false
+            if (hasCustomSigning) {
+                signingConfig signingConfigs.custom
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    // app.py / rbxl_parser.py / index.html / icons.txt лежат здесь.
+    sourceSets {
+        main {
+            python.srcDirs = ["src/main/python"]
+        }
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        pip {
+            // rbxl_parser.py использует только стандартную библиотеку —
+            // единственная внешняя зависимость приложения это Flask.
+            install "flask"
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core-ktx:1.13.1'
+}
