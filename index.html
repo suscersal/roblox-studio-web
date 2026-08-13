@@ -803,6 +803,13 @@
     </script>
 
     <script>
+        // ============ ANDROID (SAF) ============
+        // Если приложение открыто внутри Android-обёртки, MainActivity.kt
+        // добавляет window.AndroidBridge через addJavascriptInterface —
+        // используем это как признак "мы в APK, обычной файловой системы
+        // с произвольным доступом нет, нужен системный пикер (SAF)".
+        const IS_ANDROID = typeof window.AndroidBridge !== 'undefined';
+
         // ============ CODEMIRROR ============
         let cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
             mode: 'lua',
@@ -2038,11 +2045,73 @@
 
         async function openFileBrowser(mode) {
             _fbMode = mode;
+
+            // На Android нет доступа к произвольным путям на диске (scoped
+            // storage) — вместо самописного браузера по /api/browse
+            // используем системный пикер (SAF). Открытие идёт через
+            // Android-интент, сохранение — через отдельный лёгкий диалог
+            // с именем файла (см. androidSaveModal).
+            if (IS_ANDROID) {
+                if (mode === 'open') {
+                    window.AndroidBridge.pickRbxlFile();
+                } else {
+                    showModal(androidSaveModal());
+                }
+                return;
+            }
+
             const r = await api('GET', '/api/status');
             _fbPath = r.file ? r.file.replace(/[/\\][^/\\]+$/, '') : '.';
             showModal(fbModal());
             browseTo(_fbPath);
         }
+
+        // Вызывается из Kotlin (MainActivity.AndroidBridge) после того как
+        // пользователь выбрал .rbxl через системный пикер, а Kotlin скопировал
+        // его в приватное хранилище приложения и передал сюда локальный путь.
+        window.onAndroidFileImported = async function (path) {
+            const r = await api('POST', '/api/open', { path: path });
+            if (r.ok) {
+                notify('✅ ' + r.count + ' объектов');
+                loadTree();
+            } else {
+                notify(r.error || 'Ошибка', 'err');
+            }
+        };
+
+        function androidSaveModal() {
+            return '<h3>💾 Сохранить как</h3>' +
+                '<input id="fb-name" placeholder="файл.rbxl" value="place.rbxl">' +
+                '<div class="modal-row">' +
+                '<button onclick="androidSaveConfirm()" style="background:#065f46">Сохранить</button>' +
+                '<button onclick="closeModal()">Отмена</button>' +
+                '</div>';
+        }
+
+        // Сохранение на Android — двухшаговое: сервер сначала пишет .rbxl во
+        // временный файл в приватном хранилище приложения (сервер видит
+        // только его — SAF-Uri для него недоступны), а затем Kotlin
+        // предлагает пользователю выбрать реальное место через системный
+        // диалог "Сохранить как" и копирует туда байты.
+        async function androidSaveConfirm() {
+            const nm = document.getElementById('fb-name');
+            const name = (nm && nm.value.trim()) || 'place.rbxl';
+            closeModal();
+            const dataDir = window.AndroidBridge.getDataDir();
+            const tempPath = dataDir + '/export_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
+            const r = await api('POST', '/api/save', { path: tempPath });
+            if (!r.ok) {
+                notify(r.error || 'Ошибка', 'err');
+                return;
+            }
+            window.AndroidBridge.exportRbxlFile(tempPath, name);
+        }
+
+        // Вызывается из Kotlin после того как пользователь выбрал место
+        // через SAF и файл скопирован (или отменил диалог / произошла ошибка).
+        window.onAndroidFileExported = function (ok) {
+            notify(ok ? '💾 Сохранено' : 'Сохранение отменено или не удалось', ok ? undefined : 'err');
+        };
 
         function fbModal() {
             return '<h3>' + (_fbMode === 'open' ? '📂 Открыть' : '💾 Сохранить как') + '</h3>' +

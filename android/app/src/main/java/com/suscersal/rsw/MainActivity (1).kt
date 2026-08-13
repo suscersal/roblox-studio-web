@@ -50,6 +50,44 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    // Путь временного файла (в приватном хранилище приложения), который
+    // Flask-сервер только что записал через /api/save — сохраняем его здесь
+    // между запуском SAF-диалога "Сохранить как" (exportRbxlFile) и
+    // получением выбранного пользователем Uri в saveFileLauncher.
+    private var pendingExportSourcePath: String? = null
+
+    // Экспорт через системный пикер (SAF, ACTION_CREATE_DOCUMENT) —
+    // единственный способ дать пользователю сохранить файл в выбранное им
+    // место (Загрузки, другое приложение и т.п.) при scoped storage.
+    // Сервер сам писать туда не может — не имеет доступа к SAF-Uri.
+    private val saveFileLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val sourcePath = pendingExportSourcePath
+        pendingExportSourcePath = null
+        val uri: Uri? = if (result.resultCode == RESULT_OK) result.data?.data else null
+
+        val ok = if (sourcePath != null && uri != null) {
+            try {
+                File(sourcePath).inputStream().use { input ->
+                    contentResolver.openOutputStream(uri)?.use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                true
+            } catch (e: Exception) {
+                false
+            }
+        } else {
+            false
+        }
+
+        webView.evaluateJavascript(
+            "window.onAndroidFileExported && window.onAndroidFileExported($ok);",
+            null
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -112,7 +150,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** Доступно из JS страницы как window.AndroidBridge.pickRbxlFile(). */
+    /** Доступно из JS страницы как window.AndroidBridge.<метод>(). */
     inner class AndroidBridge {
         @JavascriptInterface
         fun pickRbxlFile() {
@@ -121,6 +159,25 @@ class MainActivity : AppCompatActivity() {
                 type = "*/*"
             }
             filePickerLauncher.launch(intent)
+        }
+
+        /** Приватная папка приложения — сюда сервер пишет временные файлы
+         * перед экспортом через SAF (сам сервер SAF-Uri не видит). */
+        @JavascriptInterface
+        fun getDataDir(): String = filesDir.absolutePath
+
+        /** sourcePath — файл, который сервер уже записал в приватное
+         * хранилище (см. getDataDir). suggestedName — имя по умолчанию
+         * в диалоге "Сохранить как". */
+        @JavascriptInterface
+        fun exportRbxlFile(sourcePath: String, suggestedName: String) {
+            pendingExportSourcePath = sourcePath
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/octet-stream"
+                putExtra(Intent.EXTRA_TITLE, suggestedName)
+            }
+            saveFileLauncher.launch(intent)
         }
     }
 }
