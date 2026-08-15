@@ -63,12 +63,11 @@ class RobloxLoginActivity : AppCompatActivity() {
         // процесс, поэтому явных действий не требуется.
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
-        cookieManager.setAcceptThirdPartyCookies(webViewOrNull(), true)
 
         webView = findViewById(R.id.loginWebView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        cookieManager.setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = WebViewClient()
         webView.loadUrl(LOGIN_URL)
 
@@ -81,10 +80,6 @@ class RobloxLoginActivity : AppCompatActivity() {
         handler.postDelayed(pollCookies, POLL_INTERVAL_MS)
     }
 
-    private fun webViewOrNull(): WebView? = if (::webView.isInitialized) webView else null
-
-    /** Ищет .ROBLOSECURITY в куках домена roblox.com. Возвращает полную
-     * строку "ИМЯ=значение" — именно её ждёт заголовок Cookie в HTTP. */
     private fun extractRoblosecurity(): String? {
         val raw = CookieManager.getInstance().getCookie(COOKIE_DOMAIN) ?: return null
         val pair = raw.split(";")
