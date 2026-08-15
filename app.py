@@ -80,6 +80,7 @@ def icon_src(cls):
 state = {
     'parsed':    None,
     'file_path': None,
+    'static_cache': None,
 }
 
 HIDDEN = {
@@ -166,10 +167,10 @@ def serialize_prop(v):
         return str(v)
 
 
-def make_scene_objects():
+def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None):
     parsed = state['parsed']
     if not parsed:
-        return []
+        return [], 0
     objs = []
     for ref, cls in parsed['referent_to_class'].items():
         if cls not in PART_CLASSES:
@@ -246,14 +247,33 @@ def make_scene_objects():
             break
         name = props.get('Name', cls)
 
+        anchored = props.get('Anchored', False)
+        if isinstance(anchored, str):
+            anchored = anchored.lower() in ('true', '1')
+        cancollide = props.get('CanCollide', True)
+        if isinstance(cancollide, str):
+            cancollide = cancollide.lower() in ('true', '1')
+
         objs.append({
             'ref': ref, 'class': cls, 'name': name,
             'shape': shape,
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color,
+            'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
-    return objs
+
+    if cx is not None and cy is not None and cz is not None:
+        def d2(o):
+            return (o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2
+        if r is not None:
+            objs = [o for o in objs if d2(o) <= r * r]
+        objs.sort(key=d2)
+
+    total = len(objs)
+    if limit is not None:
+        objs = objs[:limit]
+    return objs, total
 
 
 flask_app = Flask(__name__)
@@ -345,7 +365,51 @@ def api_tree():
 
 @flask_app.route('/api/scene')
 def api_scene():
-    return jsonify({'ok': True, 'objects': make_scene_objects()})
+    cx = request.args.get('cx', type=float)
+    cy = request.args.get('cy', type=float)
+    cz = request.args.get('cz', type=float)
+    r = request.args.get('r', type=float)
+    limit = request.args.get('limit', type=int)
+    objs, total = make_scene_objects(cx, cy, cz, r, limit)
+    return jsonify({'ok': True, 'objects': objs, 'total': total})
+
+
+@flask_app.route('/api/spawn')
+def api_spawn_point():
+    # Отдельная ручка, не зависящая от того, какой кусок сцены сейчас
+    # подгружен в редакторе — нужна, чтобы Play всегда находил точку
+    # спавна, даже если она не попала в текущий LOD-радиус камеры.
+    #
+    # На карте может быть несколько SpawnLocation (командные спавны и
+    # т.п.). Предпочитаем Anchored=true — незакреплённый спавн часто
+    # висит в воздухе (декоративный/на движущейся платформе) и роняет
+    # игрока в пустоту, если он выбран первым просто по порядку в файле.
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'nothing open'}), 400
+
+    candidates = []
+    for ref, cls in parsed['referent_to_class'].items():
+        if cls != 'SpawnLocation':
+            continue
+        props = parsed['props'].get(ref, {})
+        if props.get('Visible') is False:
+            continue
+        cf = props.get('CFrame', {})
+        px, py, pz = get_pos(cf)
+        sz = props.get('Size', props.get('size', {}))
+        sy = safe_float(sz.get('y', 1), 1) if isinstance(sz, dict) else 1
+        anchored = props.get('Anchored', False)
+        if isinstance(anchored, str):
+            anchored = anchored.lower() in ('true', '1')
+        candidates.append((bool(anchored), px, py + sy * 0.5, pz))
+
+    if not candidates:
+        return jsonify({'ok': False, 'error': 'no SpawnLocation in scene'})
+
+    candidates.sort(key=lambda c: not c[0])  # anchored=True первыми
+    _, x, y, z = candidates[0]
+    return jsonify({'ok': True, 'x': x, 'y': y, 'z': z, 'anchored': candidates[0][0]})
 
 
 @flask_app.route('/api/instance/<int:ref>')
@@ -528,6 +592,27 @@ if __name__ == '__main__':
 
     def open_browser():
         time.sleep(2)
+        # На Termux нет обычного GUI-браузера, который понимает
+        # стандартный python webbrowser.open() — он там может найти
+        # текстовый браузер (links/w3m/lynx) и открыть его ПРЯМО В
+        # ТЕРМИНАЛЕ, что выглядит как "дамп" HTML вместо реального
+        # запуска сервера. termux-open-url (из пакета Termux:API)
+        # корректно передаёт ссылку системному Android-браузеру.
+        try:
+            subprocess.run(
+                ['termux-open-url', url],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            return
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            pass
+        # Не на Termux (или Termux:API не установлен) — пробуем обычный
+        # способ, но только если это НЕ похоже на текстовый браузер.
+        if sys.platform != 'linux' or os.environ.get('TERMUX_VERSION'):
+            return
         try:
             webbrowser.open(url)
         except Exception:

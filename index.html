@@ -725,6 +725,8 @@
         <button onclick="reloadScene()" title="Обновить сцену (F5)">🔄 Обновить</button>
         <button class="blue" onclick="showPublishDialog()" title="Опубликовать">☁ Публикация</button>
         <div class="sep"></div>
+        <button class="green" id="play-btn" onclick="togglePlay()" title="Запустить симуляцию физики">▶ Play</button>
+        <div class="sep"></div>
         <button onclick="resetCamera()" title="Сбросить камеру">🏠 Сброс</button>
         <button onclick="topView()" title="Вид сверху">⬆ Верх</button>
         <button onclick="frontView()" title="Вид спереди">📷 Фронт</button>
@@ -766,8 +768,8 @@
                     <div id="joy-thumb"></div>
                 </div>
                 <div class="pad-col">
-                    <button class="pad-btn" data-key="e" title="Вверх">⬆</button>
-                    <button class="pad-btn" data-key="q" title="Вниз">⬇</button>
+                    <button class="pad-btn" id="pad-e" data-key="e" title="Вверх">⬆</button>
+                    <button class="pad-btn" id="pad-q" data-key="q" title="Вниз">⬇</button>
                 </div>
             </div>
         </div>
@@ -834,6 +836,34 @@
     </script>
 
     <script>
+        // Cannon.js загрузка (физика для Play-режима)
+        (function () {
+            const scripts = [
+                'cannon.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js'
+            ];
+            let loaded = false;
+            function tryLoad(i) {
+                if (i >= scripts.length) {
+                    console.error('Cannon.js не загружен — Play-режим недоступен');
+                    return;
+                }
+                const s = document.createElement('script');
+                s.src = scripts[i];
+                s.onload = () => {
+                    if (!loaded) {
+                        loaded = true;
+                        console.log('Cannon.js загружен из: ' + scripts[i]);
+                    }
+                };
+                s.onerror = () => tryLoad(i + 1);
+                document.head.appendChild(s);
+            }
+            tryLoad(0);
+        })();
+    </script>
+
+    <script>
         // ============ ANDROID (SAF) ============
         // Если приложение открыто внутри Android-обёртки, MainActivity.kt
         // добавляет window.AndroidBridge через addJavascriptInterface —
@@ -878,7 +908,7 @@
                 skipSmallObjects: true,
                 maxObjects: 1000,
                 lodDistance: 50,
-                viewportMultiplier: 1.5,
+                renderDistance: 250,
             },
             medium: {
                 antialias: false,
@@ -893,7 +923,7 @@
                 skipSmallObjects: false,
                 maxObjects: 3000,
                 lodDistance: 100,
-                viewportMultiplier: 1.5,
+                renderDistance: 500,
             },
             high: {
                 antialias: true,
@@ -908,7 +938,7 @@
                 skipSmallObjects: false,
                 maxObjects: 99999,
                 lodDistance: 200,
-                viewportMultiplier: 3.0,
+                renderDistance: 1200,
             }
         };
 
@@ -1063,6 +1093,24 @@
         let currentFPS = 0;
         let lastCameraUpdate = 0;
         const CAMERA_UPDATE_INTERVAL = 2000;
+        let lastReloadTarget = { x: null, y: null, z: null };
+
+        // Раньше подгрузка триггерилась только WASD-движением, да ещё с
+        // условием "только если объектов уже больше 500" — то есть ровно
+        // тогда, когда объектов мало и нужна дозагрузка, она НЕ срабатывала.
+        // Радиус теперь фиксирован (не зависит от зума), так что зум/поворот
+        // сам по себе дозагрузку не требует — важно только реальное
+        // смещение точки обзора (WASD-полёт, панорама ПКМ).
+        function maybeReloadNearby(now) {
+            if (isPlaying) return; // у Play своя отдельная подгрузка вокруг персонажа
+            if (now - lastCameraUpdate < CAMERA_UPDATE_INTERVAL) return;
+            const moved = lastReloadTarget.x === null
+                ? Infinity
+                : Math.hypot(target.x - lastReloadTarget.x, target.y - lastReloadTarget.y, target.z - lastReloadTarget.z);
+            const threshold = (qualitySettings.renderDistance || 300) * 0.25;
+            if (moved < threshold) return;
+            reloadScene();
+        }
 
         // Кеш для raycasting
         let raycasterCache = {
@@ -1160,6 +1208,7 @@
                     e.preventDefault();
                     e.stopPropagation();
                     keysPressed[key] = true;
+                    if (isPlaying && key === 'e') jumpQueued = true;
                     btn.classList.add('active');
                 }, { passive: false });
                 ['touchend', 'touchcancel'].forEach(ev =>
@@ -1289,36 +1338,34 @@
                 fpsTime = now;
             }
 
-            // WASD + аналоговый стик — движение
-            const forward = Math.max(-1, Math.min(1,
-                (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
-            const strafe = Math.max(-1, Math.min(1,
-                (keysPressed['d'] ? 1 : 0) - (keysPressed['a'] ? 1 : 0) + joyVector.x));
-            const vertical = (keysPressed['e'] ? 1 : 0) - (keysPressed['q'] ? 1 : 0);
+            // WASD + аналоговый стик — свободный полёт камеры (только в режиме
+            // редактирования; во время Play движением управляет тело персонажа)
+            if (!isPlaying) {
+                const forward = Math.max(-1, Math.min(1,
+                    (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
+                const strafe = Math.max(-1, Math.min(1,
+                    (keysPressed['d'] ? 1 : 0) - (keysPressed['a'] ? 1 : 0) + joyVector.x));
+                const vertical = (keysPressed['e'] ? 1 : 0) - (keysPressed['q'] ? 1 : 0);
 
-            const anyMove = forward !== 0 || strafe !== 0 || vertical !== 0;
+                const anyMove = forward !== 0 || strafe !== 0 || vertical !== 0;
 
-            if (anyMove) {
-                const direction = new THREE.Vector3();
-                camera.getWorldDirection(direction);
-                const right = new THREE.Vector3();
-                right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
-                const speed = moveSpeed * (spherical.r / 30) * 0.5;
+                if (anyMove) {
+                    const direction = new THREE.Vector3();
+                    camera.getWorldDirection(direction);
+                    const right = new THREE.Vector3();
+                    right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
+                    const speed = moveSpeed * (spherical.r / 30) * 0.5;
 
-                target.x += direction.x * speed * forward + right.x * speed * strafe;
-                target.z += direction.z * speed * forward + right.z * speed * strafe;
-                target.y += speed * vertical;
+                    target.x += direction.x * speed * forward + right.x * speed * strafe;
+                    target.z += direction.z * speed * forward + right.z * speed * strafe;
+                    target.y += speed * vertical;
 
-                updateCamera();
-
-                // Обновляем сцену при движении (не чаще раза в 2 сек)
-                if (now - lastCameraUpdate > CAMERA_UPDATE_INTERVAL &&
-                    Object.keys(sceneObjs).length > 500) {
-                    lastCameraUpdate = now;
-                    reloadScene();
+                    updateCamera();
+                    maybeReloadNearby(now);
                 }
             }
 
+            stepPhysics();
             renderer.render(scene, camera);
         }
 
@@ -1391,6 +1438,7 @@
                 target.x -= right.x * dx * panSpeed + up.x * dy * panSpeed;
                 target.y -= up.y * dy * panSpeed;
                 target.z -= right.z * dx * panSpeed + up.z * dy * panSpeed;
+                maybeReloadNearby(performance.now());
             }
 
             updateCamera();
@@ -1429,32 +1477,40 @@
 
         function onTS(e) {
             e.preventDefault();
-            _tch = Array.from(e.touches);
+            // targetTouches — только касания НА ЭТОМ элементе (вьюпорт).
+            // e.touches — все касания на странице сразу, включая палец на
+            // джойстике (другой DOM-элемент) — из-за этого при игре двумя
+            // пальцами (джойстик + поворот камеры) вьюпорт видел "2 касания"
+            // и вместо поворота включал pinch-zoom, а после отпускания
+            // состояние _tch оставалось рассинхронизировано с реальными
+            // пальцами — движение переставало отвечать.
+            _tch = Array.from(e.targetTouches);
             _ts = _tch[0] ? { x: _tch[0].clientX, y: _tch[0].clientY } : null;
-            if (e.touches.length === 2) {
-                const dx = e.touches[0].clientX - e.touches[1].clientX;
-                const dy = e.touches[0].clientY - e.touches[1].clientY;
+            if (e.targetTouches.length === 2) {
+                const dx = e.targetTouches[0].clientX - e.targetTouches[1].clientX;
+                const dy = e.targetTouches[0].clientY - e.targetTouches[1].clientY;
                 _td = Math.sqrt(dx * dx + dy * dy);
             }
         }
 
         function onTM(e) {
             e.preventDefault();
-            if (e.touches.length === 1) {
-                const t = e.touches[0];
+            if (e.targetTouches.length === 1) {
+                const t = e.targetTouches[0];
+                if (!_tch[0]) { _tch = [t]; return; }
                 const dx = t.clientX - _tch[0].clientX;
                 const dy = t.clientY - _tch[0].clientY;
-                _tch = Array.from(e.touches);
+                _tch = Array.from(e.targetTouches);
                 spherical.theta -= dx * .005;
                 spherical.phi = Math.max(.05, Math.min(Math.PI - .05, spherical.phi - dy * .005));
                 updateCamera();
-            } else if (e.touches.length === 2) {
-                const dx = e.touches[0].clientX - e.touches[1].clientX;
-                const dy = e.touches[0].clientY - e.touches[1].clientY;
+            } else if (e.targetTouches.length === 2) {
+                const dx = e.targetTouches[0].clientX - e.targetTouches[1].clientX;
+                const dy = e.targetTouches[0].clientY - e.targetTouches[1].clientY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 spherical.r = Math.max(1, Math.min(500, spherical.r + (dist - _td) * .05));
                 _td = dist;
-                _tch = Array.from(e.touches);
+                _tch = Array.from(e.targetTouches);
                 updateCamera();
             }
         }
@@ -1545,12 +1601,90 @@
         }
 
         // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
+        function buildMeshFromObj(o, geoCache, matCache) {
+            const geoKey = o.shape + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
+            if (!geoCache[geoKey]) {
+                if (o.shape === 'sphere') {
+                    const seg = Math.max(4, qualitySettings.sphereSegments);
+                    const radius = Math.max(o.sx || 1, o.sy || 1, o.sz || 1) * 0.5;
+                    geoCache[geoKey] = new THREE.SphereGeometry(radius, seg, Math.round(seg * 0.75));
+                } else if (o.shape === 'cylinder') {
+                    const seg = Math.max(6, qualitySettings.sphereSegments);
+                    geoCache[geoKey] = new THREE.CylinderGeometry((o.sx || 1) * 0.5, (o.sz || 1) * 0.5, o.sy || 1, seg);
+                } else if (o.shape === 'cone') {
+                    const seg = Math.max(6, qualitySettings.sphereSegments);
+                    const radius = Math.max(o.sx || 1, o.sz || 1) * 0.5;
+                    geoCache[geoKey] = new THREE.ConeGeometry(radius, o.sy || 1, seg);
+                } else if (o.shape === 'wedge') {
+                    geoCache[geoKey] = makeWedgeGeometry(o.sx || 1, o.sy || 1, o.sz || 1);
+                } else {
+                    geoCache[geoKey] = new THREE.BoxGeometry(o.sx || 1, o.sy || 1, o.sz || 1, 1, 1, 1);
+                }
+            }
+            const geo = geoCache[geoKey];
+
+            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1);
+            if (!matCache[matKey]) {
+                matCache[matKey] = new THREE.MeshLambertMaterial({
+                    color: o.color || '#a0a0a0',
+                    transparent: (o.opacity || 1) < 1.0,
+                    opacity: o.opacity || 1.0,
+                    flatShading: currentQuality === 'low',
+                });
+            }
+            const mat = matCache[matKey];
+
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(o.px || 0, o.py || 0, o.pz || 0);
+
+            if (o.rot && o.rot.length >= 9) {
+                const rm = new THREE.Matrix4();
+                // o.rot — row-major [R00,R01,R02, R10,R11,R12, R20,R21,R22],
+                // Matrix4.set() тоже принимает аргументы по строкам, поэтому
+                // просто передаём подряд, БЕЗ транспонирования.
+                rm.set(
+                    o.rot[0], o.rot[1], o.rot[2], o.px || 0,
+                    o.rot[3], o.rot[4], o.rot[5], o.py || 0,
+                    o.rot[6], o.rot[7], o.rot[8], o.pz || 0,
+                    0, 0, 0, 1
+                );
+                mesh.matrix.copy(rm);
+                mesh.matrixAutoUpdate = false;
+            } else {
+                mesh.matrixAutoUpdate = false;
+                mesh.updateMatrix();
+            }
+
+            mesh.castShadow = qualitySettings.shadows;
+            mesh.receiveShadow = qualitySettings.shadows;
+            mesh.userData.ref = o.ref;
+            mesh.userData.cls = o.class;
+            mesh.userData.shape = o.shape;
+            mesh.userData.sx = o.sx || 1;
+            mesh.userData.sy = o.sy || 1;
+            mesh.userData.sz = o.sz || 1;
+            mesh.userData.anchoredFlag = !!o.anchored;
+            mesh.userData.cancollideFlag = o.cancollide !== false;
+            mesh.frustumCulled = true;
+
+            if ((o.opacity || 1) < 1.0) {
+                mesh.material.depthWrite = (o.opacity || 1) > 0.7;
+            }
+            return mesh;
+        }
+
         async function reloadScene() {
+            if (isPlaying) {
+                notify('Сначала останови Play, потом обновляй сцену', 'warn');
+                return;
+            }
+            lastCameraUpdate = performance.now();
+            lastReloadTarget = { x: target.x, y: target.y, z: target.z };
             const params = new URLSearchParams({
                 cx: Math.round(target.x),
                 cy: Math.round(target.y),
                 cz: Math.round(target.z),
-                r: Math.round(spherical.r * qualitySettings.viewportMultiplier),
+                r: qualitySettings.renderDistance,
                 quality: currentQuality
             });
 
@@ -1602,71 +1736,7 @@
             }
 
             for (const o of objects) {
-                // Кеш геометрий
-                const geoKey = o.shape + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
-                if (!geoCache[geoKey]) {
-                    if (o.shape === 'sphere') {
-                        const seg = Math.max(4, qualitySettings.sphereSegments);
-                        const radius = Math.max(o.sx || 1, o.sy || 1, o.sz || 1) * 0.5;
-                        geoCache[geoKey] = new THREE.SphereGeometry(radius, seg, Math.round(seg * 0.75));
-                    } else if (o.shape === 'cylinder') {
-                        const seg = Math.max(6, qualitySettings.sphereSegments);
-                        geoCache[geoKey] = new THREE.CylinderGeometry((o.sx || 1) * 0.5, (o.sz || 1) * 0.5, o.sy || 1, seg);
-                    } else if (o.shape === 'cone') {
-                        const seg = Math.max(6, qualitySettings.sphereSegments);
-                        const radius = Math.max(o.sx || 1, o.sz || 1) * 0.5;
-                        geoCache[geoKey] = new THREE.ConeGeometry(radius, o.sy || 1, seg);
-                    } else if (o.shape === 'wedge') {
-                        geoCache[geoKey] = makeWedgeGeometry(o.sx || 1, o.sy || 1, o.sz || 1);
-                    } else {
-                        geoCache[geoKey] = new THREE.BoxGeometry(o.sx || 1, o.sy || 1, o.sz || 1, 1, 1, 1);
-                    }
-                }
-                const geo = geoCache[geoKey];
-
-                // Кеш материалов
-                const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1);
-                if (!matCache[matKey]) {
-                    matCache[matKey] = new THREE.MeshLambertMaterial({
-                        color: o.color || '#a0a0a0',
-                        transparent: (o.opacity || 1) < 1.0,
-                        opacity: o.opacity || 1.0,
-                        flatShading: currentQuality === 'low',
-                    });
-                }
-                const mat = matCache[matKey];
-
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.set(o.px || 0, o.py || 0, o.pz || 0);
-
-                // Поворот
-                if (o.rot && o.rot.length >= 9) {
-                    const rm = new THREE.Matrix4();
-                    // o.rot — row-major [R00,R01,R02, R10,R11,R12, R20,R21,R22],
-                    // Matrix4.set() тоже принимает аргументы по строкам, поэтому
-                    // просто передаём подряд, БЕЗ транспонирования.
-                    rm.set(
-                        o.rot[0], o.rot[1], o.rot[2], o.px || 0,
-                        o.rot[3], o.rot[4], o.rot[5], o.py || 0,
-                        o.rot[6], o.rot[7], o.rot[8], o.pz || 0,
-                        0, 0, 0, 1
-                    );
-                    mesh.matrix.copy(rm);
-                    mesh.matrixAutoUpdate = false;
-                } else {
-                    mesh.matrixAutoUpdate = false;
-                    mesh.updateMatrix();
-                }
-
-                mesh.castShadow = qualitySettings.shadows;
-                mesh.receiveShadow = qualitySettings.shadows;
-                mesh.userData.ref = o.ref;
-                mesh.frustumCulled = true;
-
-                if ((o.opacity || 1) < 1.0) {
-                    mesh.material.depthWrite = (o.opacity || 1) > 0.7;
-                }
-
+                const mesh = buildMeshFromObj(o, geoCache, matCache);
                 scene.add(mesh);
                 sceneObjs[o.ref] = mesh;
             }
@@ -1695,6 +1765,322 @@
                 scene.add(box);
                 window._selBox = box;
             }
+        }
+
+        // ============ PLAY-РЕЖИМ (ФИЗИКА + ПЕРСОНАЖ) ============
+        let isPlaying = false;
+        let physicsWorld = null;
+        let physicsBodies = {};   // ref -> CANNON.Body
+        let playSnapshot = {};    // ref -> THREE.Matrix4 до запуска
+        let playOnlyRefs = new Set(); // ref-ы мешей, подгруженных только для Play
+        let charBody = null;
+        let jumpQueued = false;
+        let canJump = false;
+        let prevCameraState = null;
+        const GRAVITY_STUDS = -196.2; // workspace.Gravity в настоящем Roblox
+        const CHAR_RADIUS = 2.2;      // примерный радиус капсулы персонажа
+        const CHAR_SPEED = 16;        // стадов/сек — дефолтный Humanoid.WalkSpeed
+        const JUMP_VELOCITY = 50;
+        const EYE_HEIGHT = CHAR_RADIUS + 3;
+        // Физику считаем не для всей загруженной сцены (при Quality=High это
+        // могут быть тысячи объектов и телефон не тянет), а только для тех,
+        // что ближе всего к точке спавна — это отдельный от рендер-LOD лимит.
+        const MAX_PHYSICS_BODIES = 900;
+
+        function togglePlay() {
+            if (isPlaying) stopPlay(); else startPlay();
+        }
+
+        // Раньше спавн искался среди уже подгруженных в редакторе мешей —
+        // если сцена была открыта на Low-качестве или камера стояла далеко
+        // от SpawnLocation, объект просто не был загружен, и Play спавнил
+        // персонажа в воздухе без единой опоры под ногами ("падение в
+        // пустоту"). Теперь спавн и ближайшая геометрия запрашиваются с
+        // бэкенда напрямую, независимо от того, что сейчас на экране.
+        async function findSpawnPoint() {
+            const r = await api('GET', '/api/spawn');
+            if (r && r.ok) {
+                return { x: r.x, y: r.y + CHAR_RADIUS + 1, z: r.z };
+            }
+            notify('SpawnLocation не найден в файле — спавню у текущей камеры', 'warn');
+            return { x: target.x, y: target.y + 10, z: target.z };
+        }
+
+        async function startPlay() {
+            if (typeof CANNON === 'undefined') {
+                notify('Cannon.js ещё не загрузился, подожди секунду и попробуй снова', 'err');
+                return;
+            }
+
+            const spawn = await findSpawnPoint();
+
+            // Геометрия для физики запрашивается заново, центрированная на
+            // точке спавна — а не берётся из того, что уже отрисовано в
+            // редакторе (это могла быть совсем другая часть карты).
+            const params = new URLSearchParams({
+                cx: Math.round(spawn.x), cy: Math.round(spawn.y), cz: Math.round(spawn.z),
+                limit: MAX_PHYSICS_BODIES
+            });
+            const sceneResp = await api('GET', '/api/scene?' + params.toString());
+            if (!sceneResp.ok || !sceneResp.objects.length) {
+                notify('Рядом со спавном нет геометрии — нечего запускать', 'err');
+                return;
+            }
+
+            physicsWorld = new CANNON.World();
+            physicsWorld.gravity.set(0, GRAVITY_STUDS, 0);
+            physicsWorld.broadphase = new CANNON.SAPBroadphase(physicsWorld);
+            physicsWorld.solver.iterations = 6;
+            physicsWorld.allowSleep = true;
+            // friction = 0 обязательно: персонаж — единственное динамическое
+            // тело, и у него fixedRotation (сфера не катится). Ненулевое
+            // трение при любом касании (пол, стена) целиком уходит в
+            // гашение той скорости, что мы явно выставляем каждый кадр —
+            // отсюда резкое замедление при контакте с чем угодно. Прыжок
+            // не страдал, потому что вертикальная скорость трением почти
+            // не гасится. Торможение при отсутствии ввода даёт linearDamping.
+            physicsWorld.defaultContactMaterial.friction = 0;
+            physicsWorld.defaultContactMaterial.restitution = 0.05;
+
+            physicsBodies = {};
+            playSnapshot = {};
+            playOnlyRefs = new Set();
+            const geoCache = {}, matCache = {};
+
+            for (const o of sceneResp.objects) {
+                let mesh = sceneObjs[o.ref];
+                if (!mesh) {
+                    // Этого объекта не было в текущем виде редактора —
+                    // подгружаем именно для физики и добавляем в сцену.
+                    mesh = buildMeshFromObj(o, geoCache, matCache);
+                    scene.add(mesh);
+                    sceneObjs[o.ref] = mesh;
+                    playOnlyRefs.add(o.ref);
+                }
+                playSnapshot[o.ref] = mesh.matrix.clone();
+
+                const pos = new THREE.Vector3();
+                const quat = new THREE.Quaternion();
+                mesh.matrix.decompose(pos, quat, new THREE.Vector3());
+
+                const shape = buildCannonShape(mesh);
+                if (!shape) continue;
+
+                const canCollide = mesh.userData.cancollideFlag !== false;
+
+                // По умолчанию вся загруженная геометрия статична (mass=0),
+                // Anchored конкретной части игнорируется. На этой карте
+                // большая часть Part вообще не заанкорена (обычный билд
+                // без расчёта на реальную физику) — если честно уважать
+                // Anchored=false, весь замок рядом со спавном рушится в
+                // момент старта Play и заваливает/зажимает персонажа
+                // обломками, из-за чего он не может двигаться. Двигается
+                // по-настоящему только сам персонаж.
+                const body = new CANNON.Body({
+                    mass: 0,
+                    shape: shape,
+                    position: new CANNON.Vec3(pos.x, pos.y, pos.z),
+                    quaternion: new CANNON.Quaternion(quat.x, quat.y, quat.z, quat.w),
+                    allowSleep: true,
+                });
+
+                if (!canCollide) {
+                    body.collisionFilterGroup = 2;
+                    body.collisionFilterMask = 0;
+                }
+
+                physicsWorld.addBody(body);
+                physicsBodies[o.ref] = body;
+            }
+
+            // Персонаж — сфера (без вращения, чтобы камера не крутило),
+            // сильный linearDamping вместо трения, чтобы останавливался
+            // сразу как в Roblox, а не катился шариком.
+            // allowSleep: false — обязательно для управляемого игроком тела:
+            // мы каждый кадр напрямую задаём velocity, а не толкаем его
+            // силами/контактами, поэтому physicsWorld никогда не увидит
+            // "естественного" импульса, который бы разбудил спящее тело.
+            // Cannon.js усыпляет неподвижные тела через sleepTimeLimit
+            // секунд (по умолчанию allowSleep=true у ЛЮБОГО Body) — а у
+            // спящего тела invMassSolve=0, физика ведёт себя так, будто
+            // masса бесконечна, и .velocity просто не читается интегратором.
+            // Отсюда и был баг «постоял — и всё, двигаться больше нельзя».
+            charBody = new CANNON.Body({
+                mass: 5,
+                shape: new CANNON.Sphere(CHAR_RADIUS),
+                position: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
+                fixedRotation: true,
+                linearDamping: 0.9,
+                allowSleep: false,
+            });
+            physicsWorld.addBody(charBody);
+
+            prevCameraState = {
+                spherical: { ...spherical },
+                target: { ...target },
+            };
+            spherical.phi = Math.PI / 2; // смотрим ровно вперёд, а не в пол/потолок
+            target = { x: spawn.x, y: spawn.y + EYE_HEIGHT, z: spawn.z };
+            updateCamera();
+
+            isPlaying = true;
+            jumpQueued = false;
+            document.getElementById('play-btn').textContent = '⏹ Stop';
+            document.getElementById('play-btn').classList.add('red');
+            document.getElementById('play-btn').classList.remove('green');
+            const padE = document.getElementById('pad-e'), padQ = document.getElementById('pad-q');
+            if (padE) { padE.textContent = '⤴'; padE.title = 'Прыжок'; }
+            if (padQ) { padQ.style.visibility = 'hidden'; }
+            notify('▶ Play: ' + Object.keys(physicsBodies).length + ' тел физики');
+        }
+
+        function stopPlay() {
+            isPlaying = false;
+            physicsWorld = null;
+            physicsBodies = {};
+            charBody = null;
+            canJump = false;
+            jumpQueued = false;
+
+            for (const [refStr, mesh] of Object.entries(sceneObjs)) {
+                const ref = parseInt(refStr);
+                if (!(ref in playSnapshot)) continue;
+                if (playOnlyRefs.has(ref)) {
+                    // Загружен только ради Play — убираем совсем, иначе
+                    // задвоится с обычной подгрузкой редактора при следующем
+                    // reloadScene()/смене вида.
+                    scene.remove(mesh);
+                    if (mesh.geometry) mesh.geometry.dispose();
+                    delete sceneObjs[ref];
+                } else {
+                    mesh.matrix.copy(playSnapshot[ref]);
+                }
+            }
+            playSnapshot = {};
+            playOnlyRefs = new Set();
+
+            if (prevCameraState) {
+                spherical = prevCameraState.spherical;
+                target = prevCameraState.target;
+                updateCamera();
+                prevCameraState = null;
+            }
+
+            document.getElementById('play-btn').textContent = '▶ Play';
+            document.getElementById('play-btn').classList.add('green');
+            document.getElementById('play-btn').classList.remove('red');
+            const padE = document.getElementById('pad-e'), padQ = document.getElementById('pad-q');
+            if (padE) { padE.textContent = '⬆'; padE.title = 'Вверх'; }
+            if (padQ) { padQ.style.visibility = 'visible'; }
+            notify('⏹ Stop');
+        }
+
+        function buildCannonShape(mesh) {
+            const shapeName = mesh.userData.shape;
+            const sx = mesh.userData.sx || 1, sy = mesh.userData.sy || 1, sz = mesh.userData.sz || 1;
+            switch (shapeName) {
+                case 'sphere': {
+                    const r = Math.max(sx, sy, sz) * 0.5;
+                    return new CANNON.Sphere(r);
+                }
+                case 'cylinder':
+                    return new CANNON.Cylinder(sx * 0.5, sz * 0.5, sy, 8);
+                // Wedge/Cone у cannon.js нет готовой формы — приближаем боксом
+                // по габаритам. Для точных скатов нужен ConvexPolyhedron.
+                case 'wedge':
+                case 'cone':
+                case 'box':
+                default:
+                    return new CANNON.Box(new CANNON.Vec3(sx * 0.5, sy * 0.5, sz * 0.5));
+            }
+        }
+
+        let charVelX = 0, charVelZ = 0; // последняя заданная игроком горизонтальная скорость
+
+        function applyCharacterControl() {
+            if (!charBody) return;
+            charBody.wakeUp();
+
+            const forward = Math.max(-1, Math.min(1,
+                (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
+            const strafe = Math.max(-1, Math.min(1,
+                (keysPressed['d'] ? 1 : 0) - (keysPressed['a'] ? 1 : 0) + joyVector.x));
+
+            // Движение по горизонтали относительно направления взгляда камеры
+            // (тангаж/phi игнорируем — как в Roblox, ходьба не зависит от
+            // того, куда наклонена голова).
+            //
+            // Раньше бралось camera.getWorldDirection() с обнулением Y — это
+            // вырождается в нулевой вектор, если посмотреть почти строго
+            // вверх/вниз (на мобиле это легко смахнуть одним свайпом), и
+            // персонаж переставал двигаться, хотя камера продолжала
+            // крутиться нормально. theta не зависит от наклона вообще.
+            const theta = spherical.theta;
+            const fwdX = -Math.sin(theta), fwdZ = -Math.cos(theta);
+            const rightX = Math.cos(theta), rightZ = -Math.sin(theta);
+
+            let vx = fwdX * forward + rightX * strafe;
+            let vz = fwdZ * forward + rightZ * strafe;
+            const len = Math.hypot(vx, vz);
+            if (len > 0.001) {
+                vx = (vx / len) * CHAR_SPEED;
+                vz = (vz / len) * CHAR_SPEED;
+            } else {
+                vx = 0; vz = 0;
+            }
+            charVelX = vx;
+            charVelZ = vz;
+            charBody.velocity.x = vx;
+            charBody.velocity.z = vz;
+
+            // Ground-check лучом вниз — определяет, можно ли прыгнуть.
+            // Маска 1 — луч игнорирует CanCollide=false объекты (группа 2).
+            const from = new CANNON.Vec3(charBody.position.x, charBody.position.y, charBody.position.z);
+            const to = new CANNON.Vec3(charBody.position.x, charBody.position.y - CHAR_RADIUS - 0.6, charBody.position.z);
+            const result = new CANNON.RaycastResult();
+            physicsWorld.raycastClosest(from, to, { collisionFilterMask: 1, skipBackfaces: true }, result);
+            canJump = result.hasHit;
+
+            if (jumpQueued && canJump) {
+                charBody.velocity.y = JUMP_VELOCITY;
+                canJump = false;
+            }
+            jumpQueued = false;
+        }
+
+        function followCharacterCamera() {
+            if (!charBody) return;
+            target.x = charBody.position.x;
+            target.y = charBody.position.y + EYE_HEIGHT;
+            target.z = charBody.position.z;
+            updateCamera();
+        }
+
+        function stepPhysics() {
+            if (!isPlaying || !physicsWorld) return;
+            applyCharacterControl();
+            physicsWorld.step(1 / 60);
+            // Ступеньки лестницы — это отдельные боксы с вертикальными
+            // "порожками": во время решения контактов гравитация тянет
+            // персонажа вдоль уклона, и это накапливалось из кадра в кадр —
+            // отсюда съезжание с лестниц. Переустанавливаем ГОРИЗОНТАЛЬНУЮ
+            // скорость сразу после шага физики на то, что реально задал
+            // игрок — любой снос за один кадр остаётся незаметным и не
+            // копится, а Y (гравитация/прыжок/приземление) не трогаем.
+            if (charBody) {
+                charBody.velocity.x = charVelX;
+                charBody.velocity.z = charVelZ;
+            }
+            for (const [refStr, body] of Object.entries(physicsBodies)) {
+                const mesh = sceneObjs[refStr];
+                if (!mesh) continue;
+                mesh.matrix.compose(
+                    new THREE.Vector3(body.position.x, body.position.y, body.position.z),
+                    new THREE.Quaternion(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w),
+                    new THREE.Vector3(1, 1, 1)
+                );
+            }
+            followCharacterCamera();
         }
 
         // ============ ДЕРЕВО ============
@@ -2344,6 +2730,11 @@
             }
 
             keysPressed[e.key.toLowerCase()] = true;
+
+            if (isPlaying && (e.key === ' ' || e.key.toLowerCase() === 'e')) {
+                e.preventDefault();
+                jumpQueued = true;
+            }
 
             if (e.ctrlKey && e.key === 'o') {
                 e.preventDefault();
