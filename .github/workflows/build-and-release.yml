@@ -28,11 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       hot_only: ${{ steps.filter.outputs.hot_only }}
+      # Список изменившихся в этом пуше иконок (пути вида icons/foo.png,
+      # по одной на строку). Нужен, чтобы publish-hot-update заливал в
+      # релиз только их, а не всю папку icons/ — иначе при большом
+      # количестве иконок GitHub Releases API включает secondary rate
+      # limit и джоб падает с "temporarily blocked".
+      changed_icons: ${{ steps.filter.outputs.changed_icons }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Classify changed files
         id: filter
         run: |
@@ -44,12 +49,22 @@ jobs:
              [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]] || \
              [[ -z "${{ github.event.before }}" ]]; then
             echo "hot_only=false" >> "$GITHUB_OUTPUT"
+            echo "changed_icons=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
           echo "Changed files:"
           echo "$CHANGED"
+
+          # Отдельно достаём список изменившихся иконок — понадобится
+          # publish-hot-update, чтобы не заливать всю папку icons/ целиком.
+          CHANGED_ICONS=$(echo "$CHANGED" | grep -E '^icons/' || true)
+          {
+            echo "changed_icons<<CHANGED_ICONS_EOF"
+            echo "$CHANGED_ICONS"
+            echo "CHANGED_ICONS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
           # Файлы, которые НИКОГДА не требуют полной сборки (документация, README и т.п.)
           IGNORE_REGEX='^(README\.md|\.github/.*\.md|docs/.*|\.gitignore|LICENSE)$'
@@ -189,6 +204,42 @@ jobs:
       - name: Generate OTA manifest
         run: bash scripts/generate-ota-manifest.sh "${{ needs.resolve-tag.outputs.version_name }}"
 
+      # generate-ota-manifest.sh кладёт в ota/icons ВСЕ иконки — оставляем
+      # там только те, что реально изменились в этом пуше. Так релиз
+      # получает мало ассетов (не ловим GitHub rate limit), а клиент, как
+      # и раньше, докачивает только изменившиеся файлы, а не весь набор.
+      - name: Keep only changed icons for this OTA release
+        run: |
+          set -euo pipefail
+          CHANGED_ICONS="${{ needs.detect-changes.outputs.changed_icons }}"
+
+          if [[ ! -d ota/icons ]]; then
+            echo "ota/icons does not exist, nothing to filter"
+            exit 0
+          fi
+
+          if [[ -z "$CHANGED_ICONS" ]]; then
+            echo "No icon files changed in this push — dropping icons from this OTA release"
+            rm -rf ota/icons
+            exit 0
+          fi
+
+          KEEP=$(mktemp -d)
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            base=$(basename "$f")
+            if [[ -f "ota/icons/$base" ]]; then
+              cp "ota/icons/$base" "$KEEP/"
+            fi
+          done <<< "$CHANGED_ICONS"
+
+          rm -rf ota/icons
+          if [[ -n "$(ls -A "$KEEP")" ]]; then
+            mv "$KEEP" ota/icons
+          else
+            rmdir "$KEEP"
+          fi
+
       # Чтобы диагностировать "хэш вроде другой у файла, который не менялся"
       # без логов с телефона — печатаем сами хэши прямо в описание релиза.
       - name: Prepare per-file hash summary for release notes
@@ -201,8 +252,8 @@ jobs:
           m = json.load(open('ota/version.json', encoding='utf-8'))
           for name, h in sorted(m['files'].items()):
               print(f'- \`{name}\`: \`{h}\`')
-            "
-                        echo "OTA_SUMMARY_EOF"
+          "
+            echo "OTA_SUMMARY_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish hot-update release
@@ -224,6 +275,9 @@ jobs:
           # релиз без APK. OtaUpdater.kt поэтому смотрит на /releases
           # (полный список, включая prerelease), а не на /releases/latest.
           prerelease: true
+          # Если в этом пуше иконки не менялись, ota/icons будет отсутствовать —
+          # не роняем джоб на пустом матче.
+          fail_on_unmatched_files: false
           files: |
             ota/*.py
             ota/*.html
