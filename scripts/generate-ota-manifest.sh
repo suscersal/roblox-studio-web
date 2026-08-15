@@ -24,9 +24,14 @@ mkdir -p "$OUT_DIR"
 
 # Список "горячих" файлов — тех, что грузятся Python/Flask как обычные
 # файлы (не требуют компиляции и не влияют на нативный Kotlin/Java-код).
+# icons.txt и icons/ сюда намеренно НЕ входят: любое изменение иконок
+# теперь всегда идёт через полную сборку APK (см. HOT_REGEX в
+# build-and-release.yml) — заливать иконки как OTA-ассеты слишком легко
+# упирается в лимиты GitHub Releases API, а трафик на докачку каждой
+# отдельной иконки того не стоит.
 # Если добавляешь новый файл в корень репозитория, который должен
 # обновляться без пересборки APK, — впиши его сюда тоже.
-HOT_FILES=(app.py rbxl_parser.py index.html icons.txt)
+HOT_FILES=(app.py rbxl_parser.py index.html)
 
 python3 - "$VERSION" "$SRC" "$OUT_DIR" "${HOT_FILES[@]}" <<'PYEOF'
 import sys, os, json, hashlib, shutil
@@ -52,14 +57,6 @@ for name in files:
         hash_and_copy(name, path)
     else:
         print(f"[ota] предупреждение: {path} не найден, пропускаю", file=sys.stderr)
-
-# Всё содержимое icons/ (иконки классов) тоже считаем горячим.
-icons_src = os.path.join(src, "icons")
-if os.path.isdir(icons_src):
-    for fname in sorted(os.listdir(icons_src)):
-        fpath = os.path.join(icons_src, fname)
-        if os.path.isfile(fpath):
-            hash_and_copy(f"icons/{fname}", fpath)
 
 with open(os.path.join(out_dir, "version.json"), "w", encoding="utf-8") as f:
     json.dump(manifest, f, ensure_ascii=False, indent=2)

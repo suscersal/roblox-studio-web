@@ -19,21 +19,20 @@ permissions:
 
 jobs:
   # Определяем, какие файлы поменялись в этом пуше: если это ТОЛЬКО
-  # "горячие" файлы (чистый Python + index.html + иконки — не требуют
-  # компиляции), то полную сборку APK не запускаем вообще, а вместо неё
-  # публикуем лёгкое OTA-обновление (см. publish-hot-update). Если
-  # поменялось что-то ещё (Kotlin, gradle, манифест, воркфлоу) — собираем
-  # APK как обычно.
+  # "горячие" файлы (чистый Python + index.html — не требуют компиляции),
+  # то полную сборку APK не запускаем вообще, а вместо неё публикуем лёгкое
+  # OTA-обновление (см. publish-hot-update). Если поменялось что-то ещё
+  # (иконки, Kotlin, gradle, манифест, воркфлоу) — собираем APK как обычно.
+  #
+  # ВАЖНО: icons.txt и icons/ намеренно НЕ считаются "горячими" — заливать
+  # иконки как отдельные OTA-ассеты слишком легко упирается в лимиты
+  # GitHub Releases API (secondary rate limit, "temporarily blocked"), а
+  # смысла в частичной докачке одних иконок немного. Поэтому любое
+  # изменение иконок всегда идёт через полную пересборку APK.
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
       hot_only: ${{ steps.filter.outputs.hot_only }}
-      # Список изменившихся в этом пуше иконок (пути вида icons/foo.png,
-      # по одной на строку). Нужен, чтобы publish-hot-update заливал в
-      # релиз только их, а не всю папку icons/ — иначе при большом
-      # количестве иконок GitHub Releases API включает secondary rate
-      # limit и джоб падает с "temporarily blocked".
-      changed_icons: ${{ steps.filter.outputs.changed_icons }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,7 +48,6 @@ jobs:
              [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]] || \
              [[ -z "${{ github.event.before }}" ]]; then
             echo "hot_only=false" >> "$GITHUB_OUTPUT"
-            echo "changed_icons=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -57,21 +55,13 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED"
 
-          # Отдельно достаём список изменившихся иконок — понадобится
-          # publish-hot-update, чтобы не заливать всю папку icons/ целиком.
-          CHANGED_ICONS=$(echo "$CHANGED" | grep -E '^icons/' || true)
-          {
-            echo "changed_icons<<CHANGED_ICONS_EOF"
-            echo "$CHANGED_ICONS"
-            echo "CHANGED_ICONS_EOF"
-          } >> "$GITHUB_OUTPUT"
-
           # Файлы, которые НИКОГДА не требуют полной сборки (документация, README и т.п.)
           IGNORE_REGEX='^(README\.md|\.github/.*\.md|docs/.*|\.gitignore|LICENSE)$'
 
           # "Горячие" пути — то, что попадает в scripts/sync-android-python.sh
-          # и не требует пересборки нативного кода.
-          HOT_REGEX='^(app\.py|rbxl_parser\.py|index\.html|icons\.txt|icons/.*)$'
+          # и не требует пересборки нативного кода. icons.txt/icons/ сюда
+          # не входят — см. пояснение над job'ом.
+          HOT_REGEX='^(app\.py|rbxl_parser\.py|index\.html)$'
 
           # Убираем из списка изменений файлы, которые вообще не влияют на сборку
           NON_IGNORED=$(echo "$CHANGED" | grep -Ev "$IGNORE_REGEX" || true)
@@ -188,9 +178,10 @@ jobs:
           files: android/app/build/outputs/apk/debug/app-debug.apk
 
   # ---------- Лёгкое OTA-обновление: только когда менялись "горячие" файлы ----------
-  # Никакой компиляции — просто публикуем изменившиеся Python/HTML/иконки как
+  # Никакой компиляции — просто публикуем изменившиеся Python/HTML как
   # ассеты нового релиза. Приложение на устройстве само их подтянет
-  # (см. OtaUpdater.kt) без переустановки APK.
+  # (см. OtaUpdater.kt) без переустановки APK. Иконки сюда не попадают —
+  # см. пояснение в detect-changes.
   publish-hot-update:
     needs: [detect-changes, resolve-tag]
     if: needs.detect-changes.outputs.hot_only == 'true'
@@ -204,83 +195,22 @@ jobs:
       - name: Generate OTA manifest
         run: bash scripts/generate-ota-manifest.sh "${{ needs.resolve-tag.outputs.version_name }}"
 
-      # generate-ota-manifest.sh кладёт в ota/icons ВСЕ иконки — оставляем
-      # там только те, что реально изменились в этом пуше. Так релиз
-      # получает мало ассетов (не ловим GitHub rate limit), а клиент, как
-      # и раньше, докачивает только изменившиеся файлы, а не весь набор.
-      - name: Keep only changed icons for this OTA release
-        run: |
-          set -euo pipefail
-          CHANGED_ICONS="${{ needs.detect-changes.outputs.changed_icons }}"
-
-          if [[ ! -d ota/icons ]]; then
-            echo "ota/icons does not exist, nothing to filter"
-            exit 0
-          fi
-
-          if [[ -z "$CHANGED_ICONS" ]]; then
-            echo "No icon files changed in this push — dropping icons from this OTA release"
-            rm -rf ota/icons
-            exit 0
-          fi
-
-          KEEP=$(mktemp -d)
-          while IFS= read -r f; do
-            [[ -z "$f" ]] && continue
-            base=$(basename "$f")
-            if [[ -f "ota/icons/$base" ]]; then
-              cp "ota/icons/$base" "$KEEP/"
-            fi
-          done <<< "$CHANGED_ICONS"
-
-          rm -rf ota/icons
-          if [[ -n "$(ls -A "$KEEP")" ]]; then
-            mv "$KEEP" ota/icons
-          else
-            rmdir "$KEEP"
-          fi
-
-      # Чтобы диагностировать "хэш вроде другой у файла, который не менялся"
-      # без логов с телефона — печатаем сами хэши прямо в описание релиза.
-      - name: Prepare per-file hash summary for release notes
-        id: ota-summary
-        run: |
-          {
-            echo "summary<<OTA_SUMMARY_EOF"
-            python3 -c "
-          import json
-          m = json.load(open('ota/version.json', encoding='utf-8'))
-          for name, h in sorted(m['files'].items()):
-              print(f'- \`{name}\`: \`{h}\`')
-          "
-            echo "OTA_SUMMARY_EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Publish hot-update release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: hot-${{ github.run_number }}
           name: "RbxStudio — hot update ${{ needs.resolve-tag.outputs.version_name }}"
           body: |
-            Только обновление Python/HTML/иконок (app.py, rbxl_parser.py,
-            index.html, icons.txt, icons/), без изменений в нативном
-            Android-коде. Полная пересборка APK для этого не запускалась.
-
-            **sha256 файлов в этом обновлении** (сравни с прошлым hot-релизом,
-            чтобы понять, что реально изменилось):
-            ${{ steps.ota-summary.outputs.summary }}
+            Только обновление Python/HTML (app.py, rbxl_parser.py,
+            index.html), без изменений в нативном Android-коде и без
+            иконок. Полная пересборка APK для этого не запускалась.
           generate_release_notes: false
           # КРИТИЧНО: не даём этому релизу стать "latest release" — иначе
           # releases/latest/download/app-debug.apk начнёт указывать на
           # релиз без APK. OtaUpdater.kt поэтому смотрит на /releases
           # (полный список, включая prerelease), а не на /releases/latest.
           prerelease: true
-          # Если в этом пуше иконки не менялись, ota/icons будет отсутствовать —
-          # не роняем джоб на пустом матче.
-          fail_on_unmatched_files: false
           files: |
             ota/*.py
             ota/*.html
-            ota/*.txt
             ota/*.json
-            ota/icons/*

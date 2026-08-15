@@ -10,8 +10,11 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * Обновление "горячих" файлов (app.py, rbxl_parser.py, index.html,
- * icons.txt, icons/...) без пересборки и переустановки APK.
+ * Обновление "горячих" файлов (app.py, rbxl_parser.py, index.html) без
+ * пересборки и переустановки APK. Иконки (icons.txt, icons/) сюда
+ * намеренно не входят — любое их изменение теперь всегда идёт через
+ * полную сборку APK (см. build-and-release.yml), поэтому OtaUpdater про
+ * них ничего не знает.
  *
  * Логика:
  *  0. Если versionCode установленного APK вырос с прошлого запуска (значит,
@@ -134,17 +137,6 @@ object OtaUpdater {
             val names = remoteFiles.keys().asSequence().toList()
             var done = 0
             var downloaded = 0
-            // Более старые релизы из того же окна (releasesArray) — на случай,
-            // если нужный файл не менялся в самом свежем hot-update и поэтому
-            // не был туда залит (см. "Keep only changed icons for this OTA
-            // release" в build-and-release.yml — CI теперь публикует в
-            // каждом hot-релизе только реально изменившиеся иконки, чтобы не
-            // ловить GitHub rate limit и не гонять лишний трафик). version.json
-            // при этом всегда содержит хэши ВСЕХ файлов, поэтому нужный файл
-            // просто лежит физически в одном из более ранних релизов — ищем
-            // его там по совпадению хэша, а не только в последнем.
-            var olderReleasesCache: List<JSONObject>? = null
-
             for (name in names) {
                 val expectedHash = remoteFiles.getString(name)
                 val destFile = File(dir, name)
@@ -165,25 +157,11 @@ object OtaUpdater {
                     continue
                 }
 
-                var downloadUrl = fileAssetUrls[name] ?: fileAssetUrls[name.substringAfterLast('/')]
-
-                if (downloadUrl == null) {
-                    if (olderReleasesCache == null) {
-                        olderReleasesCache = collectOlderReleases(releasesArray, releaseJson)
-                    }
-                    downloadUrl = findAssetInOlderReleases(olderReleasesCache, name, expectedHash)
-                }
-
+                val downloadUrl = fileAssetUrls[name] ?: fileAssetUrls[name.substringAfterLast('/')]
                 if (downloadUrl != null) {
                     destFile.parentFile?.mkdirs()
                     downloadToFile(downloadUrl, destFile)
                     downloaded++
-                } else {
-                    // Файл не нашёлся ни в последнем, ни в более ранних из
-                    // окна релизов — оставляем локальную копию как есть (или
-                    // baked-in из APK, если hotpatch ещё не создавался). Не
-                    // блокируем остальные файлы из-за одного отсутствующего.
-                    Log.w("OtaUpdater", "$name: asset not found in any of the last releases, skipping")
                 }
 
                 done++
@@ -257,62 +235,6 @@ object OtaUpdater {
             }
         }
         return newest
-    }
-
-    /**
-     * Остальные релизы из уже скачанного окна (RELEASES_LIST_URL, per_page=10),
-     * кроме того, что уже выбран как самый новый — отсортированы от новых к
-     * старым. Используется как источник ассетов для файлов, которые не
-     * менялись в самом свежем hot-update и поэтому не были в него залиты.
-     */
-    private fun collectOlderReleases(all: JSONArray, newest: JSONObject): List<JSONObject> {
-        val newestId = newest.optLong("id", -1)
-        val list = ArrayList<JSONObject>()
-        for (i in 0 until all.length()) {
-            val r = all.getJSONObject(i)
-            if (r.optLong("id", -2) != newestId) list.add(r)
-        }
-        list.sortByDescending { it.optString("created_at", "") }
-        return list
-    }
-
-    /**
-     * Ищет файл `name` с хэшем ровно `expectedHash` среди более старых
-     * релизов: для каждого релиза сверяет его собственный version.json
-     * (если релиз вообще OTA, а не обычная сборка APK) и, если хэш там
-     * совпадает и файл реально приложен как ассет — возвращает ссылку на
-     * скачивание. Как только нашли — останавливаемся, дальше не ходим.
-     */
-    private fun findAssetInOlderReleases(
-        releases: List<JSONObject>,
-        name: String,
-        expectedHash: String
-    ): String? {
-        for (r in releases) {
-            val assets = r.optJSONArray("assets") ?: continue
-            var versionUrl: String? = null
-            var assetUrl: String? = null
-            for (i in 0 until assets.length()) {
-                val a = assets.getJSONObject(i)
-                val aName = a.getString("name")
-                if (aName == "version.json") versionUrl = a.getString("browser_download_url")
-                if (aName == name || aName == name.substringAfterLast('/')) {
-                    assetUrl = a.getString("browser_download_url")
-                }
-            }
-            if (versionUrl == null || assetUrl == null) continue
-
-            val manifest = try {
-                httpGetJson(versionUrl)
-            } catch (e: Exception) {
-                continue
-            }
-            val files = manifest.optJSONObject("files") ?: continue
-            if (files.has(name) && files.getString(name) == expectedHash) {
-                return assetUrl
-            }
-        }
-        return null
     }
 
     private fun existingHotpatchOrNull(ctx: Context): File? {
