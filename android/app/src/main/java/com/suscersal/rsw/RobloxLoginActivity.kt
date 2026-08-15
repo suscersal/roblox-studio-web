@@ -67,6 +67,22 @@ class RobloxLoginActivity : AppCompatActivity() {
         webView = findViewById(R.id.loginWebView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        // Без этих двух флагов WebView рендерит страницу в фиксированном
+        // "desktop" viewport (~980px) и потом сжимает её под экран —
+        // отсюда эффект "всё мелкое/масштабировано не под реальное
+        // разрешение". useWideViewPort включает уважение к <meta
+        // viewport>, loadWithOverviewMode подгоняет начальный масштаб под
+        // ширину экрана.
+        webView.settings.useWideViewPort = true
+        webView.settings.loadWithOverviewMode = true
+        webView.settings.builtInZoomControls = true
+        webView.settings.displayZoomControls = false
+        // Roblox отдаёt урезанную/иначе свёрстанную страницу под desktop
+        // User-Agent — подменяем на мобильный Chrome, чтобы получить
+        // нормальную мобильную вёрстку логина.
+        webView.settings.userAgentString =
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
         cookieManager.setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = WebViewClient()
         webView.loadUrl(LOGIN_URL)
