@@ -724,6 +724,7 @@
         <div class="sep"></div>
         <button onclick="reloadScene()" data-i18n-title="tb_refresh_title" title="Refresh scene (F5)"><span data-i18n="tb_refresh">🔄 Refresh</span></button>
         <button class="blue" onclick="showPublishDialog()" data-i18n-title="tb_publish_title" title="Publish"><span data-i18n="tb_publish">☁ Publish</span></button>
+        <button class="purple" id="avatar3d-btn" onclick="showAvatar3dDialog()" title="Скачать 3D-аватар по Roblox User ID">🧍 Avatar</button>
         <div class="sep"></div>
         <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title" title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
         <div class="sep"></div>
@@ -3062,6 +3063,94 @@
             const r = await api('POST', '/api/publish', b);
             if (r.ok) notify(t('notify_published'));
             else notify('HTTP ' + r.status + ': ' + (r.text || r.error), 'err');
+        }
+
+        // === Скачивание 3D-аватара пользователя по Roblox User ID ===
+        // Логин делается через RobloxLoginActivity (Kotlin, WebView) — она
+        // сама ловит .ROBLOSECURITY и передаёт результат сюда через
+        // window.onRobloxAuthUpdated. Сама кука на JS-сторону никогда не
+        // попадает — только флаг "залогинен / нет".
+        window.onRobloxAuthUpdated = function (loggedIn) {
+            closeModal();
+            if (loggedIn) {
+                notify('✅ Вход выполнен');
+                showAvatar3dDialog();
+            } else {
+                notify('Вход не выполнен', 'err');
+            }
+        };
+
+        async function showAvatar3dDialog() {
+            let loggedIn = false;
+            if (IS_ANDROID) {
+                loggedIn = window.AndroidBridge.isRobloxLoggedIn();
+            } else {
+                const st = await api('GET', '/api/roblox/auth-status');
+                loggedIn = !!(st.ok && st.loggedIn);
+            }
+
+            if (!loggedIn) {
+                showModal(
+                    '<h3>🧍 3D-аватар</h3>' +
+                    '<p>Нужен вход в аккаунт Roblox — так Roblox отдаёт доступ к 3D-модели аватара.</p>' +
+                    '<div class="modal-row">' +
+                    (IS_ANDROID
+                        ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#7c3aed">Войти через Roblox</button>'
+                        : '<p style="opacity:.7">Вход доступен только в Android-приложении.</p>') +
+                    '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
+                    '</div>'
+                );
+                return;
+            }
+
+            showModal(
+                '<h3>🧍 Скачать 3D-аватар</h3>' +
+                '<input id="av-uid" placeholder="Roblox User ID">' +
+                '<div class="modal-row">' +
+                '<button onclick="doDownloadAvatar3d()" style="background:#7c3aed">Скачать</button>' +
+                '<button onclick="window.AndroidBridge && window.AndroidBridge.logoutRoblox(); closeModal();">Выйти из аккаунта</button>' +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
+                '</div>'
+            );
+        }
+
+        function _b64ToBlob(b64, mime) {
+            const bytes = atob(b64);
+            const arr = new Uint8Array(bytes.length);
+            for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+            return new Blob([arr], { type: mime });
+        }
+
+        function _downloadBlob(blob, name) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        async function doDownloadAvatar3d() {
+            const userId = (document.getElementById('av-uid').value || '').trim();
+            if (!/^[0-9]+$/.test(userId)) {
+                notify('Введите числовой Roblox User ID', 'err');
+                return;
+            }
+            closeModal();
+            notify('Скачиваю 3D-аватар… это может занять до ~30 сек');
+            const r = await api('GET', '/api/roblox/avatar3d?userId=' + encodeURIComponent(userId));
+            if (!r.ok) {
+                notify((r.message || r.error || ('HTTP ' + r.status)), 'err');
+                return;
+            }
+            _downloadBlob(_b64ToBlob(r.obj.data_b64, 'text/plain'), r.obj.name);
+            _downloadBlob(_b64ToBlob(r.mtl.data_b64, 'text/plain'), r.mtl.name);
+            (r.textures || []).forEach(tex => {
+                _downloadBlob(_b64ToBlob(tex.data_b64, 'image/png'), tex.name);
+            });
+            notify('✅ Аватар скачан (' + (2 + (r.textures || []).length) + ' файлов)');
         }
 
         function showModal(html) {

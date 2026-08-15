@@ -16,6 +16,7 @@ import com.chaquo.python.android.AndroidPlatform
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -55,6 +56,33 @@ class MainActivity : AppCompatActivity() {
     // между запуском SAF-диалога "Сохранить как" (exportRbxlFile) и
     // получением выбранного пользователем Uri в saveFileLauncher.
     private var pendingExportSourcePath: String? = null
+
+    // Файл, где хранится .ROBLOSECURITY между запусками приложения — тот же
+    // filesDir, что уже прокидывается в Python как RSW_DATA_DIR (см.
+    // bridge_launcher.start_server), так что app.py читает куку напрямую
+    // оттуда, без дополнительного канала передачи.
+    private val robloxAuthFile: File
+        get() = File(filesDir, "roblox_auth.json")
+
+    private val robloxLoginLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val cookie = if (result.resultCode == RESULT_OK)
+            result.data?.getStringExtra(RobloxLoginActivity.EXTRA_COOKIE) else null
+
+        val loggedIn = cookie != null
+        if (cookie != null) {
+            val payload = JSONObject().apply {
+                put("cookie", cookie)
+                put("savedAt", System.currentTimeMillis())
+            }
+            robloxAuthFile.writeText(payload.toString())
+        }
+        webView.evaluateJavascript(
+            "window.onRobloxAuthUpdated && window.onRobloxAuthUpdated($loggedIn);",
+            null
+        )
+    }
 
     // Экспорт через системный пикер (SAF, ACTION_CREATE_DOCUMENT) —
     // единственный способ дать пользователю сохранить файл в выбранное им
@@ -240,6 +268,24 @@ class MainActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_TITLE, suggestedName)
             }
             saveFileLauncher.launch(intent)
+        }
+
+        /** Открывает экран логина roblox.com. Результат (успех/неудача)
+         * приходит на страницу через window.onRobloxAuthUpdated(bool). */
+        @JavascriptInterface
+        fun loginToRoblox() {
+            robloxLoginLauncher.launch(Intent(this@MainActivity, RobloxLoginActivity::class.java))
+        }
+
+        /** true, если ранее уже успешно логинились и кука ещё сохранена
+         * локально (её актуальность на сервере Roblox не проверяется —
+         * это делает сам Python при первом запросе). */
+        @JavascriptInterface
+        fun isRobloxLoggedIn(): Boolean = robloxAuthFile.exists()
+
+        @JavascriptInterface
+        fun logoutRoblox() {
+            robloxAuthFile.delete()
         }
     }
 }

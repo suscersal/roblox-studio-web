@@ -31,5 +31,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Отдельный экран для входа в аккаунт Roblox через обычную
+             веб-форму (WebView) — см. RobloxLoginActivity.kt. Не exported:
+             запускается только изнутри приложения. -->
+        <activity
+            android:name=".RobloxLoginActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
     </application>
 </manifest>
