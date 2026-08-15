@@ -3139,12 +3139,59 @@
                 return;
             }
             closeModal();
-            notify('Скачиваю 3D-аватар… это может занять до ~30 сек');
-            const r = await api('GET', '/api/roblox/avatar3d?userId=' + encodeURIComponent(userId));
-            if (!r.ok) {
-                notify((r.message || r.error || ('HTTP ' + r.status)), 'err');
+
+            const STATE_LABELS = {
+                'Pending': 'Roblox готовит модель…',
+                'InProgress': 'Roblox генерирует модель…',
+            };
+
+            const maxWaitMs = 120000; // до 2 минут — генерация иногда небыстрая
+            const pollEveryMs = 2500;
+            const startedAt = Date.now();
+            let bundleUrl = null;
+
+            while (Date.now() - startedAt < maxWaitMs) {
+                let st;
+                try {
+                    st = await api('GET', '/api/roblox/avatar3d/status?userId=' + encodeURIComponent(userId));
+                } catch (e) {
+                    notify('Сеть/сервер: ' + (e && e.message || e), 'err');
+                    return;
+                }
+                if (!st.ok) {
+                    notify(st.message || st.error || 'Не удалось запросить статус', 'err');
+                    return;
+                }
+                if (st.ready) {
+                    bundleUrl = st.bundleUrl;
+                    break;
+                }
+                if (st.state === 'Error') {
+                    notify('Roblox не смог сгенерировать модель для этого User ID', 'err');
+                    return;
+                }
+                notify(STATE_LABELS[st.state] || ('Ожидание… (' + st.state + ')'));
+                await new Promise(res => setTimeout(res, pollEveryMs));
+            }
+
+            if (!bundleUrl) {
+                notify('Roblox слишком долго готовит модель — попробуйте ещё раз чуть позже', 'err');
                 return;
             }
+
+            notify('Модель готова, скачиваю файлы…');
+            let r;
+            try {
+                r = await api('GET', '/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl));
+            } catch (e) {
+                notify('Ошибка скачивания: ' + (e && e.message || e), 'err');
+                return;
+            }
+            if (!r.ok) {
+                notify(r.message || r.error || 'Не удалось скачать файлы', 'err');
+                return;
+            }
+
             _downloadBlob(_b64ToBlob(r.obj.data_b64, 'text/plain'), r.obj.name);
             _downloadBlob(_b64ToBlob(r.mtl.data_b64, 'text/plain'), r.mtl.name);
             (r.textures || []).forEach(tex => {

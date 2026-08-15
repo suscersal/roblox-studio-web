@@ -603,75 +603,86 @@ def api_roblox_logout():
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
-@flask_app.route('/api/roblox/avatar3d')
-def api_roblox_avatar3d():
-    """Скачивает 3D-модель аватара (obj+mtl+текстуры) для заданного
-    userId, используя куку, сохранённую через экран логина, и отдаёт
-    результат одним JSON-ответом (файлы — как base64), либо ошибку с
-    понятным текстом, если логина ещё не было или Roblox ответил 403."""
-    import base64 as _b64
-    import re as _re
-    import time as _time
-    import urllib.request as _req
-    import urllib.error as _urlerr
+import base64 as _b64
+import re as _re
+import urllib.request as _req
+import urllib.error as _urlerr
 
+
+def _rbx_get_json(url):
+    r = _req.Request(url, headers=_roblox_headers())
+    try:
+        with _req.urlopen(r, timeout=20) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except _urlerr.HTTPError as e:
+        body = e.read().decode('utf-8', 'replace')[:300]
+        raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
+
+
+def _rbx_get_bytes(url):
+    r = _req.Request(url, headers=_roblox_headers())
+    with _req.urlopen(r, timeout=20) as resp:
+        return resp.read()
+
+
+def _rbx_download_cdn(hash_value):
+    last_err = None
+    for n in range(8):
+        try:
+            return _rbx_get_bytes(f'https://t{n}.rbxcdn.com/{hash_value}')
+        except Exception as e:
+            last_err = str(e)
+    raise RuntimeError(last_err or f'Не удалось скачать {hash_value}')
+
+
+@flask_app.route('/api/roblox/avatar3d/status')
+def api_roblox_avatar3d_status():
+    """Один быстрый неблокирующий опрос состояния генерации у Roblox —
+    вызывается клиентом периодически (см. doDownloadAvatar3d в index.html),
+    а не ждётся одним долгим запросом. Roblox генерирует 3D-модель
+    асинхронно и может занять от нескольких секунд до ~минуты — раньше мы
+    ждали это одним запросом с фиксированным таймаутом, из-за чего при
+    медленной генерации запрос обрывался с невнятной ошибкой."""
     user_id = request.args.get('userId', '').strip()
     if not user_id.isdigit():
         return jsonify({'ok': False, 'error': 'userId должен быть числом'}), 400
-
     if _roblox_cookie() is None:
-        return jsonify({
-            'ok': False,
-            'error': 'not_logged_in',
-            'message': 'Сначала войдите в аккаунт Roblox (кнопка входа).',
-        }), 401
-
-    def _get_json(url):
-        r = _req.Request(url, headers=_roblox_headers())
-        try:
-            with _req.urlopen(r, timeout=30) as resp:
-                return json.loads(resp.read().decode('utf-8'))
-        except _urlerr.HTTPError as e:
-            body = e.read().decode('utf-8', 'replace')[:300]
-            raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
-
-    def _get_bytes(url):
-        r = _req.Request(url, headers=_roblox_headers())
-        with _req.urlopen(r, timeout=30) as resp:
-            return resp.read()
-
-    def _download_cdn(hash_value):
-        last_err = None
-        for n in range(8):
-            try:
-                return _get_bytes(f'https://t{n}.rbxcdn.com/{hash_value}')
-            except Exception as e:
-                last_err = str(e)
-        raise RuntimeError(last_err or f'Не удалось скачать {hash_value}')
-
+        return jsonify({'ok': False, 'error': 'not_logged_in',
+                         'message': 'Сначала войдите в аккаунт Roblox.'}), 401
     try:
-        api_url = f'https://thumbnails.roblox.com/v1/users/avatar-3d?userId={user_id}'
-        waited = 0
-        bundle = None
-        while waited <= 30:
-            resp = _get_json(api_url)
-            item = resp['data'][0]
-            state_ = item.get('state')
-            if state_ == 'Completed':
-                bundle = _get_json(item['imageUrl'])
-                break
-            if state_ == 'Error':
-                raise RuntimeError(f'Roblox вернул ошибку генерации аватара: {item}')
-            _time.sleep(2)
-            waited += 2
-        if bundle is None:
-            raise RuntimeError('Превышено время ожидания генерации 3D-аватара')
+        resp = _rbx_get_json(
+            f'https://thumbnails.roblox.com/v1/users/avatar-3d?userId={user_id}')
+        item = resp['data'][0]
+        state_ = item.get('state')
+        return jsonify({
+            'ok': True,
+            'state': state_,
+            'ready': state_ == 'Completed',
+            'bundleUrl': item.get('imageUrl') if state_ == 'Completed' else None,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
 
-        obj_bytes = _download_cdn(bundle['obj'])
-        mtl_bytes = _download_cdn(bundle['mtl'])
+
+@flask_app.route('/api/roblox/avatar3d/fetch')
+def api_roblox_avatar3d_fetch():
+    """Вызывается клиентом ТОЛЬКО после того, как /status вернул
+    ready=true — сразу скачивает obj/mtl/текстуры по уже готовому
+    bundleUrl (без повторного ожидания)."""
+    bundle_url = request.args.get('bundleUrl', '').strip()
+    if not bundle_url.startswith('https://'):
+        return jsonify({'ok': False, 'error': 'bundleUrl отсутствует или некорректен'}), 400
+    if _roblox_cookie() is None:
+        return jsonify({'ok': False, 'error': 'not_logged_in',
+                         'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+    try:
+        bundle = _rbx_get_json(bundle_url)
+
+        obj_bytes = _rbx_download_cdn(bundle['obj'])
+        mtl_bytes = _rbx_download_cdn(bundle['mtl'])
         textures = []
         for tex_hash in bundle.get('textures', []):
-            tex_bytes = _download_cdn(tex_hash)
+            tex_bytes = _rbx_download_cdn(tex_hash)
             textures.append({
                 'name': _re.sub(r'[^a-zA-Z0-9._-]+', '_', tex_hash) + '.png',
                 'data_b64': _b64.b64encode(tex_bytes).decode('ascii'),
@@ -679,7 +690,6 @@ def api_roblox_avatar3d():
 
         return jsonify({
             'ok': True,
-            'userId': user_id,
             'obj': {
                 'name': _re.sub(r'[^a-zA-Z0-9._-]+', '_', bundle['obj']) + '.obj',
                 'data_b64': _b64.b64encode(obj_bytes).decode('ascii'),
