@@ -159,7 +159,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
-          name: ${{ needs.resolve-tag.outputs.tag }}
+          name: RbxStudio ${{ needs.resolve-tag.outputs.tag }} (v${{ needs.resolve-tag.outputs.version_name }})
+          # Автоматически собирает описание релиза из коммитов/PR со времени
+          # прошлого релиза (список изменений генерирует сам GitHub) — тот
+          # же подход, что и в maxclient.
+          generate_release_notes: true
           # ВАЖНО: это должен быть единственный тип релиза, который НЕ
           # помечен prerelease — так /releases/latest и
           # releases/latest/download/app-debug.apk всегда указывают на
