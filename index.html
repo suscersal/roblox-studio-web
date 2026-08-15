@@ -715,25 +715,25 @@
     <div id="toolbar-top">
         <span class="title">🎮 RbxStudio</span>
         <div class="sep"></div>
-        <button onclick="openFileBrowser('open')" title="Открыть файл (Ctrl+O)">📂 Открыть</button>
-        <button class="green" onclick="saveFile()" title="Сохранить (Ctrl+S)">💾 Сохранить</button>
-        <button onclick="openFileBrowser('save')" title="Сохранить как">💾 Как...</button>
+        <button onclick="openFileBrowser('open')" data-i18n-title="tb_open_title" title="Open file (Ctrl+O)"><span data-i18n="tb_open">📂 Open</span></button>
+        <button class="green" onclick="saveFile()" data-i18n-title="tb_save_title" title="Save (Ctrl+S)"><span data-i18n="tb_save">💾 Save</span></button>
+        <button onclick="openFileBrowser('save')" data-i18n-title="tb_saveas_title" title="Save as"><span data-i18n="tb_saveas">💾 As...</span></button>
         <div class="sep"></div>
-        <button onclick="showAddDialog()" title="Добавить объект">➕ Добавить</button>
-        <button class="red" onclick="deleteSelected()" title="Удалить (Delete)">🗑 Удалить</button>
+        <button onclick="showAddDialog()" data-i18n-title="tb_addobj_title" title="Add object"><span data-i18n="tb_add">➕ Add</span></button>
+        <button class="red" onclick="deleteSelected()" data-i18n-title="tb_delete_title" title="Delete (Delete)"><span data-i18n="tb_delete">🗑 Delete</span></button>
         <div class="sep"></div>
-        <button onclick="reloadScene()" title="Обновить сцену (F5)">🔄 Обновить</button>
-        <button class="blue" onclick="showPublishDialog()" title="Опубликовать">☁ Публикация</button>
+        <button onclick="reloadScene()" data-i18n-title="tb_refresh_title" title="Refresh scene (F5)"><span data-i18n="tb_refresh">🔄 Refresh</span></button>
+        <button class="blue" onclick="showPublishDialog()" data-i18n-title="tb_publish_title" title="Publish"><span data-i18n="tb_publish">☁ Publish</span></button>
         <div class="sep"></div>
-        <button class="green" id="play-btn" onclick="togglePlay()" title="Запустить симуляцию физики">▶ Play</button>
+        <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title" title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
         <div class="sep"></div>
-        <button onclick="resetCamera()" title="Сбросить камеру">🏠 Сброс</button>
-        <button onclick="topView()" title="Вид сверху">⬆ Верх</button>
-        <button onclick="frontView()" title="Вид спереди">📷 Фронт</button>
-        <button onclick="rightView()" title="Вид справа">➡ Право</button>
+        <button onclick="resetCamera()" data-i18n-title="tb_resetcam_title" title="Reset camera"><span data-i18n="tb_resetcam">🏠 Reset</span></button>
+        <button onclick="topView()" data-i18n-title="tb_topview_title" title="Top view"><span data-i18n="tb_topview">⬆ Top</span></button>
+        <button onclick="frontView()" data-i18n-title="tb_frontview_title" title="Front view"><span data-i18n="tb_frontview">📷 Front</span></button>
+        <button onclick="rightView()" data-i18n-title="tb_rightview_title" title="Right view"><span data-i18n="tb_rightview">➡ Right</span></button>
         <div class="sep"></div>
-        <button onclick="toggleHelpers()" title="Сетка и оси">📏</button>
-        <button onclick="resetLayout()" title="Сбросить размеры панелей">📐</button>
+        <button onclick="toggleHelpers()" data-i18n-title="tb_helpers_title" title="Grid and axes">📏</button>
+        <button onclick="resetLayout()" data-i18n-title="tb_resetlayout_title" title="Reset panel sizes">📐</button>
     </div>
 
     <div id="main">
@@ -741,11 +741,11 @@
             <div id="explorer-header">
                 <span>Explorer</span>
                 <div>
-                    <button onclick="collapseAll()" title="Свернуть всё">◢</button>
-                    <button onclick="expandAllVisible()" title="Развернуть всё">◣</button>
+                    <button onclick="collapseAll()" data-i18n-title="exp_collapse_title" title="Collapse all">◢</button>
+                    <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title" title="Expand all">◣</button>
                 </div>
             </div>
-            <input id="search-box" placeholder="🔍 Поиск..." oninput="onSearch(this.value)">
+            <input id="search-box" data-i18n-placeholder="exp_search_ph" placeholder="🔍 Search..." oninput="onSearch(this.value)">
             <div id="tree-scroll">
                 <div id="tree"></div>
             </div>
@@ -759,17 +759,17 @@
                 <button onclick="setQuality('medium')" id="q-medium">Med</button>
                 <button onclick="setQuality('high')" id="q-high">High</button>
             </div>
-            <div id="vp-label">
-                🖱️ ЛКМ — вращение | 🖱️ ПКМ — панорама | 🖱️ Колесо — дальность прорисовки<br>
-                ⌨️ WASD — движение | F — фокус | Esc — снять
+            <div id="vp-label" data-i18n-html="vp_hint">
+                🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
+                ⌨️ WASD — move | F — focus | Esc — deselect
             </div>
             <div id="mobile-pad">
                 <div id="joy-base">
                     <div id="joy-thumb"></div>
                 </div>
                 <div class="pad-col">
-                    <button class="pad-btn" id="pad-e" data-key="e" title="Вверх">⬆</button>
-                    <button class="pad-btn" id="pad-q" data-key="q" title="Вниз">⬇</button>
+                    <button class="pad-btn" id="pad-e" data-key="e" data-i18n-title="pad_up_title" title="Up">⬆</button>
+                    <button class="pad-btn" id="pad-q" data-key="q" data-i18n-title="pad_down_title" title="Down">⬇</button>
                 </div>
             </div>
         </div>
@@ -780,14 +780,14 @@
                 <div class="tab" onclick="switchTab('script')">Script</div>
             </div>
             <div id="tab-props">
-                <p style="color:#6b7280;font-size:12px;padding:8px">← Выбери объект</p>
+                <p style="color:#6b7280;font-size:12px;padding:8px" data-i18n="props_placeholder">← Select an object</p>
             </div>
             <div id="tab-script" style="display:none;flex:1;flex-direction:column">
-                <div id="script-name">Скрипт не выбран</div>
+                <div id="script-name" data-i18n="script_none_selected">No script selected</div>
                 <div id="script-editor-container">
                     <textarea id="script-editor" spellcheck="false"></textarea>
                 </div>
-                <button id="script-save-btn" onclick="saveScript()">💾 Сохранить скрипт</button>
+                <button id="script-save-btn" onclick="saveScript()" data-i18n="script_save_btn">💾 Save script</button>
             </div>
         </div>
     </div>
@@ -796,6 +796,175 @@
         <div id="modal-content" class="modal"></div>
     </div>
     <div id="notify"></div>
+
+    <script>
+        // ============ I18N ============
+        // Dictionary keyed by 2-letter language code. Add more languages
+        // by adding a new key here (falls back to "en" for missing strings).
+        const I18N = {
+            en: {
+                tb_open: '📂 Open', tb_open_title: 'Open file (Ctrl+O)',
+                tb_save: '💾 Save', tb_save_title: 'Save (Ctrl+S)',
+                tb_saveas: '💾 As...', tb_saveas_title: 'Save as',
+                tb_add: '➕ Add', tb_addobj_title: 'Add object',
+                tb_delete: '🗑 Delete', tb_delete_title: 'Delete (Delete)',
+                tb_refresh: '🔄 Refresh', tb_refresh_title: 'Refresh scene (F5)',
+                tb_publish: '☁ Publish', tb_publish_title: 'Publish',
+                tb_play: '▶ Play', tb_play_title: 'Run physics simulation',
+                tb_resetcam: '🏠 Reset', tb_resetcam_title: 'Reset camera',
+                tb_topview: '⬆ Top', tb_topview_title: 'Top view',
+                tb_frontview: '📷 Front', tb_frontview_title: 'Front view',
+                tb_rightview: '➡ Right', tb_rightview_title: 'Right view',
+                tb_helpers_title: 'Grid and axes',
+                tb_resetlayout_title: 'Reset panel sizes',
+                exp_collapse_title: 'Collapse all',
+                exp_expand_title: 'Expand all',
+                exp_search_ph: '🔍 Search...',
+                vp_hint: '🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>⌨️ WASD — move | F — focus | Esc — deselect',
+                pad_up_title: 'Up',
+                pad_down_title: 'Down',
+                pad_jump_title: 'Jump',
+                props_placeholder: '← Select an object',
+                script_none_selected: 'No script selected',
+                script_save_btn: '💾 Save script',
+                notify_quality: '🎨 Quality: ',
+                notify_layout_reset: '📐 Panel sizes reset',
+                notify_camera_reset: '🏠 Camera reset',
+                notify_topview: '⬆ Top view',
+                notify_frontview: '📷 Front view',
+                notify_rightview: '➡ Right view',
+                notify_stop_play_first: 'Stop Play first, then refresh the scene',
+                notify_scene_loaded: '🔄 Scene: {n} objects',
+                notify_scene_of: ' (of {total})',
+                notify_helpers_on: '📏 Grid and axes: ON',
+                notify_helpers_off: '📏 Grid and axes: OFF',
+                notify_spawn_not_found: 'SpawnLocation not found in file — spawning near current camera',
+                notify_cannon_not_ready: "Cannon.js hasn't loaded yet, wait a second and try again",
+                notify_no_geometry: 'No geometry near the spawn — nothing to run',
+                notify_play_started: '▶ Play: {n} physics bodies',
+                notify_stop: '⏹ Stop',
+                notify_script_none: 'No script selected',
+                notify_script_saved: '✅ Script saved',
+                notify_focus: '🎯 Focused on object',
+                notify_loaded_count: '✅ {n} objects',
+                notify_error: 'Error',
+                fb_saveas_title: '💾 Save as',
+                fb_open_title: '📂 Open',
+                fb_name_ph: 'file.rbxl',
+                btn_save: 'Save',
+                btn_cancel: 'Cancel',
+                btn_publish: 'Publish',
+                notify_saved_simple: '💾 Saved',
+                notify_save_cancelled: 'Save cancelled or failed',
+                notify_enter_name: 'Enter a name',
+                add_name_ph: 'Name',
+                add_parent_label: 'Parent:',
+                btn_add: 'Add',
+                notify_not_selected: 'Nothing selected',
+                notify_deleted: '🗑 Deleted',
+                notify_published: '✅ Published!',
+                notify_quickadd: '✅ {cls} added',
+            },
+            ru: {
+                tb_open: '📂 Открыть', tb_open_title: 'Открыть файл (Ctrl+O)',
+                tb_save: '💾 Сохранить', tb_save_title: 'Сохранить (Ctrl+S)',
+                tb_saveas: '💾 Как...', tb_saveas_title: 'Сохранить как',
+                tb_add: '➕ Добавить', tb_addobj_title: 'Добавить объект',
+                tb_delete: '🗑 Удалить', tb_delete_title: 'Удалить (Delete)',
+                tb_refresh: '🔄 Обновить', tb_refresh_title: 'Обновить сцену (F5)',
+                tb_publish: '☁ Публикация', tb_publish_title: 'Опубликовать',
+                tb_play: '▶ Play', tb_play_title: 'Запустить симуляцию физики',
+                tb_resetcam: '🏠 Сброс', tb_resetcam_title: 'Сбросить камеру',
+                tb_topview: '⬆ Верх', tb_topview_title: 'Вид сверху',
+                tb_frontview: '📷 Фронт', tb_frontview_title: 'Вид спереди',
+                tb_rightview: '➡ Право', tb_rightview_title: 'Вид справа',
+                tb_helpers_title: 'Сетка и оси',
+                tb_resetlayout_title: 'Сбросить размеры панелей',
+                exp_collapse_title: 'Свернуть всё',
+                exp_expand_title: 'Развернуть всё',
+                exp_search_ph: '🔍 Поиск...',
+                vp_hint: '🖱️ ЛКМ — вращение | 🖱️ ПКМ — панорама | 🖱️ Колесо — дальность прорисовки<br>⌨️ WASD — движение | F — фокус | Esc — снять',
+                pad_up_title: 'Вверх',
+                pad_down_title: 'Вниз',
+                pad_jump_title: 'Прыжок',
+                props_placeholder: '← Выбери объект',
+                script_none_selected: 'Скрипт не выбран',
+                script_save_btn: '💾 Сохранить скрипт',
+                notify_quality: '🎨 Качество: ',
+                notify_layout_reset: '📐 Размеры панелей сброшены',
+                notify_camera_reset: '🏠 Камера сброшена',
+                notify_topview: '⬆ Вид сверху',
+                notify_frontview: '📷 Вид спереди',
+                notify_rightview: '➡ Вид справа',
+                notify_stop_play_first: 'Сначала останови Play, потом обновляй сцену',
+                notify_scene_loaded: '🔄 Сцена: {n} объектов',
+                notify_scene_of: ' (из {total})',
+                notify_helpers_on: '📏 Сетка и оси: ВКЛ',
+                notify_helpers_off: '📏 Сетка и оси: ВЫКЛ',
+                notify_spawn_not_found: 'SpawnLocation не найден в файле — спавню у текущей камеры',
+                notify_cannon_not_ready: 'Cannon.js ещё не загрузился, подожди секунду и попробуй снова',
+                notify_no_geometry: 'Рядом со спавном нет геометрии — нечего запускать',
+                notify_play_started: '▶ Play: {n} тел физики',
+                notify_stop: '⏹ Stop',
+                notify_script_none: 'Скрипт не выбран',
+                notify_script_saved: '✅ Скрипт сохранён',
+                notify_focus: '🎯 Фокус на объекте',
+                notify_loaded_count: '✅ {n} объектов',
+                notify_error: 'Ошибка',
+                fb_saveas_title: '💾 Сохранить как',
+                fb_open_title: '📂 Открыть',
+                fb_name_ph: 'файл.rbxl',
+                btn_save: 'Сохранить',
+                btn_cancel: 'Отмена',
+                btn_publish: 'Опубликовать',
+                notify_saved_simple: '💾 Сохранено',
+                notify_save_cancelled: 'Сохранение отменено или не удалось',
+                notify_enter_name: 'Введи имя',
+                add_name_ph: 'Имя',
+                add_parent_label: 'Родитель:',
+                btn_add: 'Добавить',
+                notify_not_selected: 'Не выбран',
+                notify_deleted: '🗑 Удалён',
+                notify_published: '✅ Опубликовано!',
+                notify_quickadd: '✅ {cls} добавлен',
+            },
+        };
+
+        // Language auto-detection: browser language first (navigator.languages,
+        // falling back to navigator.language), with an optional manual override
+        // saved in localStorage (e.g. localStorage.setItem('rbxstudio-lang','ru')).
+        // Unknown languages fall back to English.
+        function detectLang() {
+            try {
+                const saved = localStorage.getItem('rbxstudio-lang');
+                if (saved && I18N[saved]) return saved;
+            } catch (e) { }
+            const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
+            for (const l of langs) {
+                const short = (l || '').slice(0, 2).toLowerCase();
+                if (I18N[short]) return short;
+            }
+            return 'en';
+        }
+        const LANG = detectLang();
+
+        function t(key, vars) {
+            let s = (I18N[LANG] && I18N[LANG][key] != null) ? I18N[LANG][key] : (I18N.en[key] != null ? I18N.en[key] : key);
+            if (vars) {
+                for (const k in vars) s = s.split('{' + k + '}').join(vars[k]);
+            }
+            return s;
+        }
+
+        function applyStaticI18n() {
+            document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+            document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.getAttribute('data-i18n-title')); });
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.getAttribute('data-i18n-placeholder')); });
+            document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
+            document.documentElement.lang = LANG;
+        }
+        applyStaticI18n();
+    </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
@@ -956,7 +1125,7 @@
             }
             updateHelpers();
             reloadScene();
-            notify('🎨 Качество: ' + level.toUpperCase());
+            notify(t('notify_quality') + level.toUpperCase());
         }
 
         // ============ РАЗДЕЛИТЕЛИ ПАНЕЛЕЙ ============
@@ -1067,7 +1236,7 @@
             localStorage.removeItem('rbxstudio-layout');
             refreshCM();
             resize();
-            notify('📐 Размеры панелей сброшены');
+            notify(t('notify_layout_reset'));
         }
 
         // ============ THREE.JS ПЕРЕМЕННЫЕ ============
@@ -1307,7 +1476,7 @@
         function toggleHelpers() {
             qualitySettings.helpers = !qualitySettings.helpers;
             updateHelpers();
-            notify(qualitySettings.helpers ? '📏 Сетка и оси: ВКЛ' : '📏 Сетка и оси: ВЫКЛ');
+            notify(qualitySettings.helpers ? t('notify_helpers_on') : t('notify_helpers_off'));
         }
 
         function resize() {
@@ -1385,25 +1554,25 @@
             spherical = { theta: Math.PI / 4, phi: Math.PI / 3, r: 30 };
             target = { x: 0, y: 2, z: 0 };
             updateCamera();
-            notify('🏠 Камера сброшена');
+            notify(t('notify_camera_reset'));
         }
 
         function topView() {
             spherical = { theta: 0, phi: 0.01, r: spherical.r };
             updateCamera();
-            notify('⬆ Вид сверху');
+            notify(t('notify_topview'));
         }
 
         function frontView() {
             spherical = { theta: 0, phi: Math.PI / 2, r: spherical.r };
             updateCamera();
-            notify('📷 Вид спереди');
+            notify(t('notify_frontview'));
         }
 
         function rightView() {
             spherical = { theta: Math.PI / 2, phi: Math.PI / 2, r: spherical.r };
             updateCamera();
-            notify('➡ Вид справа');
+            notify(t('notify_rightview'));
         }
 
         // ============ МЫШЬ ============
@@ -1675,7 +1844,7 @@
 
         async function reloadScene() {
             if (isPlaying) {
-                notify('Сначала останови Play, потом обновляй сцену', 'warn');
+                notify(t('notify_stop_play_first'), 'warn');
                 return;
             }
             lastCameraUpdate = performance.now();
@@ -1742,7 +1911,7 @@
             }
 
             const shown = Object.keys(sceneObjs).length;
-            notify('🔄 Сцена: ' + shown + ' объектов' + (totalAvailable > shown ? ' (из ' + totalAvailable + ')' : ''));
+            notify(t('notify_scene_loaded', {n: shown}) + (totalAvailable > shown ? t('notify_scene_of', {total: totalAvailable}) : ''));
             updateInventoryCount();
 
             // Обновляем выделение если было
@@ -1816,7 +1985,7 @@
             if (r && r.ok) {
                 return { x: r.x, y: r.y + CHAR_RADIUS + 1, z: r.z };
             }
-            notify('SpawnLocation не найден в файле — спавню у текущей камеры', 'warn');
+            notify(t('notify_spawn_not_found'), 'warn');
             return { x: target.x, y: target.y + 10, z: target.z };
         }
 
@@ -1955,7 +2124,7 @@
 
         async function startPlay() {
             if (typeof CANNON === 'undefined') {
-                notify('Cannon.js ещё не загрузился, подожди секунду и попробуй снова', 'err');
+                notify(t('notify_cannon_not_ready'), 'err');
                 return;
             }
 
@@ -1970,7 +2139,7 @@
             });
             const sceneResp = await api('GET', '/api/scene?' + params.toString());
             if (!sceneResp.ok || !sceneResp.objects.length) {
-                notify('Рядом со спавном нет геометрии — нечего запускать', 'err');
+                notify(t('notify_no_geometry'), 'err');
                 return;
             }
 
@@ -2034,13 +2203,13 @@
             streamInFlight = false;
             playGeoCache = {};
             playMatCache = {};
-            document.getElementById('play-btn').textContent = '⏹ Stop';
+            document.getElementById('play-btn').textContent = t('notify_stop');
             document.getElementById('play-btn').classList.add('red');
             document.getElementById('play-btn').classList.remove('green');
             const padE = document.getElementById('pad-e'), padQ = document.getElementById('pad-q');
-            if (padE) { padE.textContent = '⤴'; padE.title = 'Прыжок'; }
+            if (padE) { padE.textContent = '⤴'; padE.title = t('pad_jump_title'); }
             if (padQ) { padQ.style.visibility = 'hidden'; }
-            notify('▶ Play: ' + Object.keys(physicsBodies).length + ' тел физики');
+            notify(t('notify_play_started', {n: Object.keys(physicsBodies).length}));
         }
 
         function stopPlay() {
@@ -2075,13 +2244,13 @@
                 prevCameraState = null;
             }
 
-            document.getElementById('play-btn').textContent = '▶ Play';
+            document.getElementById('play-btn').textContent = t('tb_play');
             document.getElementById('play-btn').classList.add('green');
             document.getElementById('play-btn').classList.remove('red');
             const padE = document.getElementById('pad-e'), padQ = document.getElementById('pad-q');
-            if (padE) { padE.textContent = '⬆'; padE.title = 'Вверх'; }
+            if (padE) { padE.textContent = '⬆'; padE.title = t('pad_up_title'); }
             if (padQ) { padQ.style.visibility = 'visible'; }
-            notify('⏹ Stop');
+            notify(t('notify_stop'));
         }
 
         function buildCannonShape(mesh) {
@@ -2422,7 +2591,7 @@
             highlightSelected(null);
             renderTree();
             updateInventoryCount();
-            document.getElementById('tab-props').innerHTML = '<p style="color:#6b7280;font-size:12px;padding:8px">← Выбери объект</p>';
+            document.getElementById('tab-props').innerHTML = '<p style="color:#6b7280;font-size:12px;padding:8px">' + t('props_placeholder') + '</p>';
         }
 
         // ============ СВОЙСТВА ============
@@ -2588,7 +2757,7 @@
 
         async function saveScript() {
             if (selectedRef === null) {
-                notify('Скрипт не выбран', 'warn');
+                notify(t('notify_script_none'), 'warn');
                 return;
             }
             const src = cmEditor.getValue();
@@ -2596,7 +2765,7 @@
                 prop: 'Source',
                 value: src
             });
-            notify('✅ Скрипт сохранён');
+            notify(t('notify_script_saved'));
         }
 
         function switchTab(t) {
@@ -2629,10 +2798,10 @@
                 parent: parent
             });
             if (r.ok) {
-                notify('✅ ' + cls + ' добавлен');
+                notify(t('notify_quickadd', {cls: cls}));
                 loadTree();
             } else {
-                notify(r.error || 'Ошибка', 'err');
+                notify(r.error || t('notify_error'), 'err');
             }
         }
 
@@ -2669,19 +2838,19 @@
         window.onAndroidFileImported = async function (path) {
             const r = await api('POST', '/api/open', { path: path });
             if (r.ok) {
-                notify('✅ ' + r.count + ' объектов');
+                notify(t('notify_loaded_count', {n: r.count}));
                 loadTree();
             } else {
-                notify(r.error || 'Ошибка', 'err');
+                notify(r.error || t('notify_error'), 'err');
             }
         };
 
         function androidSaveModal() {
-            return '<h3>💾 Сохранить как</h3>' +
-                '<input id="fb-name" placeholder="файл.rbxl" value="place.rbxl">' +
+            return '<h3>' + t('fb_saveas_title') + '</h3>' +
+                '<input id="fb-name" placeholder="' + t('fb_name_ph') + '" value="place.rbxl">' +
                 '<div class="modal-row">' +
-                '<button onclick="androidSaveConfirm()" style="background:#065f46">Сохранить</button>' +
-                '<button onclick="closeModal()">Отмена</button>' +
+                '<button onclick="androidSaveConfirm()" style="background:#065f46">' + t('btn_save') + '</button>' +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>';
         }
 
@@ -2698,7 +2867,7 @@
             const tempPath = dataDir + '/export_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
             const r = await api('POST', '/api/save', { path: tempPath });
             if (!r.ok) {
-                notify(r.error || 'Ошибка', 'err');
+                notify(r.error || t('notify_error'), 'err');
                 return;
             }
             window.AndroidBridge.exportRbxlFile(tempPath, name);
@@ -2707,17 +2876,17 @@
         // Вызывается из Kotlin после того как пользователь выбрал место
         // через SAF и файл скопирован (или отменил диалог / произошла ошибка).
         window.onAndroidFileExported = function (ok) {
-            notify(ok ? '💾 Сохранено' : 'Сохранение отменено или не удалось', ok ? undefined : 'err');
+            notify(ok ? t('notify_saved_simple') : t('notify_save_cancelled'), ok ? undefined : 'err');
         };
 
         function fbModal() {
-            return '<h3>' + (_fbMode === 'open' ? '📂 Открыть' : '💾 Сохранить как') + '</h3>' +
+            return '<h3>' + (_fbMode === 'open' ? t('fb_open_title') : t('fb_saveas_title')) + '</h3>' +
                 '<div id="fb-path"></div>' +
                 '<div id="fb-list"></div>' +
-                (_fbMode === 'save' ? '<input id="fb-name" placeholder="файл.rbxl">' : '') +
+                (_fbMode === 'save' ? '<input id="fb-name" placeholder="' + t('fb_name_ph') + '">' : '') +
                 '<div class="modal-row">' +
-                (_fbMode === 'save' ? '<button onclick="fbSave()" style="background:#065f46">Сохранить</button>' : '') +
-                '<button onclick="closeModal()">Отмена</button>' +
+                (_fbMode === 'save' ? '<button onclick="fbSave()" style="background:#065f46">' + t('btn_save') + '</button>' : '') +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>';
         }
 
@@ -2766,7 +2935,7 @@
             closeModal();
             const r = await api('POST', '/api/open', { path: path });
             if (r.ok) {
-                notify('✅ ' + r.count + ' объектов');
+                notify(t('notify_loaded_count', {n: r.count}));
                 loadTree();
             } else {
                 notify(r.error, 'err');
@@ -2776,7 +2945,7 @@
         function fbSave() {
             const nm = document.getElementById('fb-name');
             if (!nm || !nm.value.trim()) {
-                notify('Введи имя', 'warn');
+                notify(t('notify_enter_name'), 'warn');
                 return;
             }
             const path = _fbPath.replace(/\/$/, '') + '/' + nm.value.trim();
@@ -2787,7 +2956,7 @@
         async function doSave(path) {
             const r = await api('POST', '/api/save', { path: path });
             if (r.ok) notify('💾 ' + r.path);
-            else notify(r.error || 'Ошибка', 'err');
+            else notify(r.error || t('notify_error'), 'err');
         }
 
         async function saveFile() {
@@ -2811,14 +2980,14 @@
                 'Animation', 'Tool', 'Camera'
             ].sort();
             showModal(
-                '<h3>➕ Добавить</h3>' +
+                '<h3>' + t('tb_add') + '</h3>' +
                 '<select id="add-cls">' + ALL_CLS.map(c => '<option>' + c + '</option>').join('') + '</select>' +
-                '<input id="add-name" placeholder="Имя" value="NewPart">' +
-                '<p style="font-size:11px;color:#9ca3af;margin-top:4px">Родитель: ' +
+                '<input id="add-name" placeholder="' + t('add_name_ph') + '" value="NewPart">' +
+                '<p style="font-size:11px;color:#9ca3af;margin-top:4px">' + t('add_parent_label') + ' ' +
                 (selectedRef !== null ? 'ref ' + selectedRef : 'Workspace') + '</p>' +
                 '<div class="modal-row">' +
-                '<button onclick="doAdd()" style="background:#065f46">Добавить</button>' +
-                '<button onclick="closeModal()">Отмена</button>' +
+                '<button onclick="doAdd()" style="background:#065f46">' + t('btn_add') + '</button>' +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
         }
@@ -2848,18 +3017,18 @@
                 notify('✅ ' + cls);
                 loadTree();
             } else {
-                notify(r.error || 'Ошибка', 'err');
+                notify(r.error || t('notify_error'), 'err');
             }
         }
 
         async function deleteSelected() {
             if (selectedRef === null) {
-                notify('Не выбран', 'warn');
+                notify(t('notify_not_selected'), 'warn');
                 return;
             }
             const r = await api('DELETE', '/api/instance/' + selectedRef);
             if (r.ok) {
-                notify('🗑 Удалён');
+                notify(t('notify_deleted'));
                 selectedRef = null;
                 loadTree();
             }
@@ -2876,8 +3045,8 @@
                 '<option>Saved</option>' +
                 '</select>' +
                 '<div class="modal-row">' +
-                '<button onclick="doPub()" style="background:#7c3aed">☁ Опубликовать</button>' +
-                '<button onclick="closeModal()">Отмена</button>' +
+                '<button onclick="doPub()" style="background:#7c3aed">' + t('btn_publish') + '</button>' +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
         }
@@ -2891,7 +3060,7 @@
             };
             closeModal();
             const r = await api('POST', '/api/publish', b);
-            if (r.ok) notify('✅ Опубликовано!');
+            if (r.ok) notify(t('notify_published'));
             else notify('HTTP ' + r.status + ': ' + (r.text || r.error), 'err');
         }
 
@@ -2940,7 +3109,7 @@
                     const p = sceneObjs[selectedRef].position;
                     target = { x: p.x, y: p.y, z: p.z };
                     updateCamera();
-                    notify('🎯 Фокус на объекте');
+                    notify(t('notify_focus'));
                 }
             }
         });
