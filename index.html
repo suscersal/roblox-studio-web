@@ -1780,12 +1780,26 @@
         const GRAVITY_STUDS = -196.2; // workspace.Gravity в настоящем Roblox
         const CHAR_RADIUS = 2.2;      // примерный радиус капсулы персонажа
         const CHAR_SPEED = 16;        // стадов/сек — дефолтный Humanoid.WalkSpeed
+        const STEP_HEIGHT = 3.2;      // студов — низкий бордюр перешагиваем автоматически
         const JUMP_VELOCITY = 50;
         const EYE_HEIGHT = CHAR_RADIUS + 3;
         // Физику считаем не для всей загруженной сцены (при Quality=High это
         // могут быть тысячи объектов и телефон не тянет), а только для тех,
         // что ближе всего к точке спавна — это отдельный от рендер-LOD лимит.
         const MAX_PHYSICS_BODIES = 900;
+        // Раньше геометрия для физики запрашивалась ОДИН раз при старте
+        // Play, вокруг точки спавна — стоило отойти достаточно далеко, и
+        // под ногами/вокруг просто не оставалось ни одного тела: пол
+        // исчезал, "raycast" переставал что-либо находить не потому что
+        // сломан, а потому что физически нечего было проверять. Теперь
+        // догружаем и выгружаем геометрию по ходу движения персонажа.
+        let lastStreamPos = { x: null, y: null, z: null };
+        let streamInFlight = false;
+        let fallingSinceMs = null; // когда персонаж начал падать без опоры под ногами
+        const STREAM_REFRESH_DIST = 50;   // студов сместились — пора подгрузить ещё
+        const STREAM_REFRESH_MS = 1500;   // не чаще этого, даже если стоим на месте
+        const STREAM_PRUNE_DIST = 500;    // дальше этого от игрока — выгружаем тело
+        const MAX_STREAMED_BODIES = 1400; // жёсткий потолок общего числа тел за сеанс Play
 
         function togglePlay() {
             if (isPlaying) stopPlay(); else startPlay();
@@ -1804,6 +1818,139 @@
             }
             notify('SpawnLocation не найден в файле — спавню у текущей камеры', 'warn');
             return { x: target.x, y: target.y + 10, z: target.z };
+        }
+
+        // Кэши геометрии/материалов для мешей, которые Play подгружает по
+        // ходу (объекты, которых не было в текущем виде редактора) — общие
+        // на весь сеанс Play, не пересоздаём при каждой подгрузке.
+        let playGeoCache = {}, playMatCache = {};
+
+        function addPhysicsBodyForObj(o) {
+            if (physicsBodies[o.ref]) return; // уже физически представлен
+            let mesh = sceneObjs[o.ref];
+            if (!mesh) {
+                // Этого объекта не было в текущем виде редактора —
+                // подгружаем именно для физики и добавляем в сцену.
+                mesh = buildMeshFromObj(o, playGeoCache, playMatCache);
+                scene.add(mesh);
+                sceneObjs[o.ref] = mesh;
+                playOnlyRefs.add(o.ref);
+            }
+            if (!(o.ref in playSnapshot)) {
+                playSnapshot[o.ref] = mesh.matrix.clone();
+            }
+
+            const pos = new THREE.Vector3();
+            const quat = new THREE.Quaternion();
+            mesh.matrix.decompose(pos, quat, new THREE.Vector3());
+
+            const shape = buildCannonShape(mesh);
+            if (!shape) return;
+
+            const canCollide = mesh.userData.cancollideFlag !== false;
+
+            // По умолчанию вся загруженная геометрия статична (mass=0),
+            // Anchored конкретной части игнорируется. На этой карте
+            // большая часть Part вообще не заанкорена (обычный билд
+            // без расчёта на реальную физику) — если честно уважать
+            // Anchored=false, весь замок рядом со спавном рушится в
+            // момент старта Play и заваливает/зажимает персонажа
+            // обломками, из-за чего он не может двигаться. Двигается
+            // по-настоящему только сам персонаж.
+            const body = new CANNON.Body({
+                mass: 0,
+                shape: shape,
+                position: new CANNON.Vec3(pos.x, pos.y, pos.z),
+                quaternion: new CANNON.Quaternion(quat.x, quat.y, quat.z, quat.w),
+                allowSleep: true,
+            });
+
+            if (!canCollide) {
+                body.collisionFilterGroup = 2;
+                body.collisionFilterMask = 0;
+            }
+
+            physicsWorld.addBody(body);
+            physicsBodies[o.ref] = body;
+        }
+
+        // Убирает физическое тело (и, если меш был подгружен только ради
+        // Play, сам меш) для объекта, который остался далеко позади.
+        function removePhysicsBodyForRef(ref) {
+            const body = physicsBodies[ref];
+            if (body) {
+                physicsWorld.removeBody(body);
+                delete physicsBodies[ref];
+            }
+            if (playOnlyRefs.has(ref)) {
+                const mesh = sceneObjs[ref];
+                if (mesh) {
+                    scene.remove(mesh);
+                }
+                delete sceneObjs[ref];
+                delete playSnapshot[ref];
+                playOnlyRefs.delete(ref);
+            }
+        }
+
+        // Подгружает геометрию рядом с текущей позицией персонажа и
+        // выгружает то, что осталось далеко позади — иначе после
+        // единоразовой загрузки вокруг спавна пол и стены просто
+        // заканчивались, стоило отойти подальше (отсюда и "проваливаюсь",
+        // и ground-check, которому не во что было упираться лучом).
+        async function refreshStreamedGeometry() {
+            if (!isPlaying || !charBody || streamInFlight) return;
+            const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
+            streamInFlight = true;
+            try {
+                const params = new URLSearchParams({
+                    cx: Math.round(cx), cy: Math.round(cy), cz: Math.round(cz),
+                    limit: MAX_PHYSICS_BODIES
+                });
+                const sceneResp = await api('GET', '/api/scene?' + params.toString());
+                if (!isPlaying || !sceneResp || !sceneResp.ok) return; // Play могли остановить, пока шёл запрос
+
+                for (const o of sceneResp.objects) {
+                    addPhysicsBodyForObj(o);
+                }
+
+                for (const refStr of Object.keys(physicsBodies)) {
+                    const body = physicsBodies[refStr];
+                    const d = Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz);
+                    if (d > STREAM_PRUNE_DIST) {
+                        removePhysicsBodyForRef(parseInt(refStr));
+                    }
+                }
+
+                // Жёсткий потолок на случай долгой прогулки по большой
+                // карте — иначе набор тел только растёт (пруним лишь по
+                // фиксированной дистанции), и рано или поздно это начинает
+                // тормозить и провоцировать пропуски кадров физики.
+                const refs = Object.keys(physicsBodies);
+                if (refs.length > MAX_STREAMED_BODIES) {
+                    const withDist = refs.map(refStr => {
+                        const body = physicsBodies[refStr];
+                        return [refStr, Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz)];
+                    }).sort((a, b) => b[1] - a[1]);
+                    for (let i = 0; i < withDist.length - MAX_STREAMED_BODIES; i++) {
+                        removePhysicsBodyForRef(parseInt(withDist[i][0]));
+                    }
+                }
+            } finally {
+                streamInFlight = false;
+            }
+        }
+
+        function maybeStreamGeometry() {
+            if (!isPlaying || !charBody) return;
+            const now = performance.now();
+            const moved = lastStreamPos.x === null ? Infinity :
+                Math.hypot(charBody.position.x - lastStreamPos.x,
+                    charBody.position.y - lastStreamPos.y,
+                    charBody.position.z - lastStreamPos.z);
+            if (moved < STREAM_REFRESH_DIST && now - (lastStreamPos.time || 0) < STREAM_REFRESH_MS) return;
+            lastStreamPos = { x: charBody.position.x, y: charBody.position.y, z: charBody.position.z, time: now };
+            refreshStreamedGeometry();
         }
 
         async function startPlay() {
@@ -1830,7 +1977,7 @@
             physicsWorld = new CANNON.World();
             physicsWorld.gravity.set(0, GRAVITY_STUDS, 0);
             physicsWorld.broadphase = new CANNON.SAPBroadphase(physicsWorld);
-            physicsWorld.solver.iterations = 6;
+            physicsWorld.solver.iterations = 10;
             physicsWorld.allowSleep = true;
             // friction = 0 обязательно: персонаж — единственное динамическое
             // тело, и у него fixedRotation (сфера не катится). Ненулевое
@@ -1845,52 +1992,9 @@
             physicsBodies = {};
             playSnapshot = {};
             playOnlyRefs = new Set();
-            const geoCache = {}, matCache = {};
 
             for (const o of sceneResp.objects) {
-                let mesh = sceneObjs[o.ref];
-                if (!mesh) {
-                    // Этого объекта не было в текущем виде редактора —
-                    // подгружаем именно для физики и добавляем в сцену.
-                    mesh = buildMeshFromObj(o, geoCache, matCache);
-                    scene.add(mesh);
-                    sceneObjs[o.ref] = mesh;
-                    playOnlyRefs.add(o.ref);
-                }
-                playSnapshot[o.ref] = mesh.matrix.clone();
-
-                const pos = new THREE.Vector3();
-                const quat = new THREE.Quaternion();
-                mesh.matrix.decompose(pos, quat, new THREE.Vector3());
-
-                const shape = buildCannonShape(mesh);
-                if (!shape) continue;
-
-                const canCollide = mesh.userData.cancollideFlag !== false;
-
-                // По умолчанию вся загруженная геометрия статична (mass=0),
-                // Anchored конкретной части игнорируется. На этой карте
-                // большая часть Part вообще не заанкорена (обычный билд
-                // без расчёта на реальную физику) — если честно уважать
-                // Anchored=false, весь замок рядом со спавном рушится в
-                // момент старта Play и заваливает/зажимает персонажа
-                // обломками, из-за чего он не может двигаться. Двигается
-                // по-настоящему только сам персонаж.
-                const body = new CANNON.Body({
-                    mass: 0,
-                    shape: shape,
-                    position: new CANNON.Vec3(pos.x, pos.y, pos.z),
-                    quaternion: new CANNON.Quaternion(quat.x, quat.y, quat.z, quat.w),
-                    allowSleep: true,
-                });
-
-                if (!canCollide) {
-                    body.collisionFilterGroup = 2;
-                    body.collisionFilterMask = 0;
-                }
-
-                physicsWorld.addBody(body);
-                physicsBodies[o.ref] = body;
+                addPhysicsBodyForObj(o);
             }
 
             // Персонаж — сфера (без вращения, чтобы камера не крутило),
@@ -1925,6 +2029,11 @@
 
             isPlaying = true;
             jumpQueued = false;
+            lastStreamPos = { x: spawn.x, y: spawn.y, z: spawn.z, time: performance.now() };
+            fallingSinceMs = null;
+            streamInFlight = false;
+            playGeoCache = {};
+            playMatCache = {};
             document.getElementById('play-btn').textContent = '⏹ Stop';
             document.getElementById('play-btn').classList.add('red');
             document.getElementById('play-btn').classList.remove('green');
@@ -2022,30 +2131,83 @@
             let vx = fwdX * forward + rightX * strafe;
             let vz = fwdZ * forward + rightZ * strafe;
             const len = Math.hypot(vx, vz);
+            let dirX = 0, dirZ = 0;
             if (len > 0.001) {
-                vx = (vx / len) * CHAR_SPEED;
-                vz = (vz / len) * CHAR_SPEED;
+                dirX = vx / len; dirZ = vz / len;
+                vx = dirX * CHAR_SPEED;
+                vz = dirZ * CHAR_SPEED;
             } else {
                 vx = 0; vz = 0;
             }
-            charVelX = vx;
-            charVelZ = vz;
-            charBody.velocity.x = vx;
-            charBody.velocity.z = vz;
 
-            // Ground-check лучом вниз — определяет, можно ли прыгнуть.
-            // Маска 1 — луч игнорирует CanCollide=false объекты (группа 2).
+            // Ground-check лучом вниз — определяет, можно ли прыгнуть и
+            // стоим ли мы вообще на земле (нужно и для авто-подъёма на
+            // ступени ниже).
             const from = new CANNON.Vec3(charBody.position.x, charBody.position.y, charBody.position.z);
             const to = new CANNON.Vec3(charBody.position.x, charBody.position.y - CHAR_RADIUS - 0.6, charBody.position.z);
             const result = new CANNON.RaycastResult();
             physicsWorld.raycastClosest(from, to, { collisionFilterMask: 1, skipBackfaces: true }, result);
             canJump = result.hasHit;
 
+            // Падаем и уже какое-то время не находим опору — скорее всего
+            // физика под ногами ещё не подгрузилась (стриминг не успевает
+            // за движением), а не что персонаж законно летит в пропасти.
+            // Не ждём обычный троттлинг подгрузки — пробуем немедленно.
+            if (!canJump && charBody.velocity.y < -5) {
+                const now = performance.now();
+                if (fallingSinceMs === null) fallingSinceMs = now;
+                else if (now - fallingSinceMs > 350 && !streamInFlight) {
+                    fallingSinceMs = now;
+                    refreshStreamedGeometry();
+                }
+            } else {
+                fallingSinceMs = null;
+            }
+
+            if (canJump && (dirX !== 0 || dirZ !== 0)) {
+                tryStepUp(dirX, dirZ);
+            }
+
+            charVelX = vx;
+            charVelZ = vz;
+            charBody.velocity.x = vx;
+            charBody.velocity.z = vz;
+
             if (jumpQueued && canJump) {
                 charBody.velocity.y = JUMP_VELOCITY;
                 canJump = false;
             }
             jumpQueued = false;
+        }
+
+        // Сфера плохо лезет по отдельным боксам-ступеням: цепляется за
+        // ребро подступёнка, соскальзывает или проваливается в угол между
+        // ступенями. Вместо того чтобы полагаться на физический контакт с
+        // каждой ступенькой, определяем низкий бордюр впереди сами:
+        // луч на уровне щиколотки что-то видит, а такой же луч на уровне
+        // колена — уже нет (значит это ступенька, а не стена), и просто
+        // приподнимаем персонажа, вместо того чтобы врезаться в неё.
+        function tryStepUp(dirX, dirZ) {
+            const checkDist = CHAR_RADIUS + 1.0;
+            const footY = charBody.position.y - CHAR_RADIUS + 0.15;
+            const kneeY = charBody.position.y - CHAR_RADIUS + STEP_HEIGHT;
+
+            const footFrom = new CANNON.Vec3(charBody.position.x, footY, charBody.position.z);
+            const footTo = new CANNON.Vec3(charBody.position.x + dirX * checkDist, footY, charBody.position.z + dirZ * checkDist);
+            const footResult = new CANNON.RaycastResult();
+            physicsWorld.raycastClosest(footFrom, footTo, { collisionFilterMask: 1, skipBackfaces: true }, footResult);
+            if (!footResult.hasHit) return; // впереди на уровне ног пусто — ступенька не нужна
+
+            const kneeFrom = new CANNON.Vec3(charBody.position.x, kneeY, charBody.position.z);
+            const kneeTo = new CANNON.Vec3(charBody.position.x + dirX * checkDist, kneeY, charBody.position.z + dirZ * checkDist);
+            const kneeResult = new CANNON.RaycastResult();
+            physicsWorld.raycastClosest(kneeFrom, kneeTo, { collisionFilterMask: 1, skipBackfaces: true }, kneeResult);
+            if (kneeResult.hasHit) return; // и выше препятствие — это стена, а не ступенька
+
+            // Низкий порог впереди, сверху свободно — плавно поднимаем,
+            // порциями по кадрам (а не телепортом), пока не окажемся над ним.
+            charBody.position.y += 0.4;
+            if (charBody.velocity.y < 0) charBody.velocity.y = 0;
         }
 
         function followCharacterCamera() {
@@ -2056,21 +2218,35 @@
             updateCamera();
         }
 
+        const PHYSICS_SUBSTEPS = 4; // дробим шаг — у cannon.js 0.6.2 нет CCD,
+        // быстро падающая сфера может за один большой шаг проскочить сквозь
+        // тонкий пол ("проваливаюсь"). Мельче шаг — меньше смещение за шаг.
+        const MAX_FALL_SPEED = 300; // студов/сек — подстраховка на случай
+        // разгона до нереальной скорости (например, пока не подгрузился пол).
+
         function stepPhysics() {
             if (!isPlaying || !physicsWorld) return;
             applyCharacterControl();
-            physicsWorld.step(1 / 60);
-            // Ступеньки лестницы — это отдельные боксы с вертикальными
-            // "порожками": во время решения контактов гравитация тянет
-            // персонажа вдоль уклона, и это накапливалось из кадра в кадр —
-            // отсюда съезжание с лестниц. Переустанавливаем ГОРИЗОНТАЛЬНУЮ
-            // скорость сразу после шага физики на то, что реально задал
-            // игрок — любой снос за один кадр остаётся незаметным и не
-            // копится, а Y (гравитация/прыжок/приземление) не трогаем.
-            if (charBody) {
-                charBody.velocity.x = charVelX;
-                charBody.velocity.z = charVelZ;
+
+            if (charBody && charBody.velocity.y < -MAX_FALL_SPEED) {
+                charBody.velocity.y = -MAX_FALL_SPEED;
             }
+
+            const subDt = (1 / 60) / PHYSICS_SUBSTEPS;
+            for (let i = 0; i < PHYSICS_SUBSTEPS; i++) {
+                physicsWorld.step(subDt);
+                // Ступеньки лестницы — это отдельные боксы с вертикальными
+                // "порожками": во время решения контактов гравитация тянет
+                // персонажа вдоль уклона, и это накапливалось из кадра в
+                // кадр — отсюда съезжание с лестниц. Переустанавливаем
+                // ГОРИЗОНТАЛЬНУЮ скорость после каждого подшага на то, что
+                // реально задал игрок — Y (гравитация/прыжок) не трогаем.
+                if (charBody) {
+                    charBody.velocity.x = charVelX;
+                    charBody.velocity.z = charVelZ;
+                }
+            }
+
             for (const [refStr, body] of Object.entries(physicsBodies)) {
                 const mesh = sceneObjs[refStr];
                 if (!mesh) continue;
@@ -2081,6 +2257,7 @@
                 );
             }
             followCharacterCamera();
+            maybeStreamGeometry();
         }
 
         // ============ ДЕРЕВО ============
@@ -2555,6 +2732,11 @@
             const list = document.getElementById('fb-list');
             list.innerHTML = '';
             for (const e of r.entries) {
+                // В режиме "Открыть" выбрать можно только .rbxl — остальное
+                // не показываем вовсе, чтобы нельзя было случайно ткнуть не
+                // туда (парсер всё равно понимает только бинарный .rbxl).
+                if (_fbMode === 'open' && e.type !== 'dir' && e.type !== 'rbxl') continue;
+
                 const row = document.createElement('div');
                 let cls = 'fb-entry';
                 if (e.type === 'dir') cls += ' dir';
@@ -2574,7 +2756,7 @@
                 }
                 row.onclick = () => {
                     if (e.type === 'dir') browseTo(e.path);
-                    else if (_fbMode === 'open') fbOpen(e.path);
+                    else if (_fbMode === 'open' && e.type === 'rbxl') fbOpen(e.path);
                 };
                 list.appendChild(row);
             }
