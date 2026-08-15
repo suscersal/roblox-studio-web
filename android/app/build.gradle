@@ -15,8 +15,20 @@ android {
         targetSdk 34
 
         // Версия прилетает из CI (см. .github/workflows/build-and-release.yml).
-        // Локально, если переменных нет, берутся значения по умолчанию.
-        def verCode = (System.getenv("ANDROID_VERSION_CODE") ?: "1").toInteger()
+        // Локально, если переменной ANDROID_VERSION_CODE нет, versionCode
+        // берём из файла android/.local_version_code и увеличиваем на 1 на
+        // каждой сборке. Это нужно, чтобы OtaUpdater.invalidateHotpatchIfAppWasUpdated()
+        // видел рост versionCode и сам стирал старый скачанный hotpatch —
+        // иначе он продолжает перекрывать свежие правки в app.py/index.html
+        // даже после переустановки APK (см. bridge_launcher.py: hotpatch
+        // всегда в начале sys.path, если папка существует).
+        def localVersionFile = file("${rootProject.projectDir}/.local_version_code")
+        def verCode = System.getenv("ANDROID_VERSION_CODE")?.toInteger()
+        if (verCode == null) {
+            def prev = localVersionFile.exists() ? localVersionFile.text.trim().toInteger() : 1
+            verCode = prev + 1
+            localVersionFile.text = verCode.toString()
+        }
         def verName = System.getenv("ANDROID_VERSION_NAME") ?: "1.0"
         versionCode verCode
         versionName verName
