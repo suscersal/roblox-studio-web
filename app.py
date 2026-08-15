@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-RbxStudio - мобильный редактор Roblox-мест
-Запуск: python3 app.py [путь/к/файлу.rbxl]
-Зависимости устанавливаются автоматически.
-"""
 import base64
 import struct
 import math
