@@ -1,30 +1,34 @@
 # Roblox Studio Web — Android-обёртка
 
-APK = WebView + встроенный CPython (Chaquopy) + ваш существующий Flask-сервер
+APK = WebView + встроенный CPython (Chaquopy) + существующий Flask-сервер
 (`app.py`), запущенный на 127.0.0.1 внутри приложения. Тот же принцип, что
-и в maxclient, но проще: единственная pip-зависимость — `flask`.
+и в maxclient: единственная pip-зависимость — `flask`, а изменения в
+`app.py` / `rbxl_parser.py` / `index.html` / `icons.txt` / `icons/` могут
+доезжать до установленного APK без переустановки — см. раздел
+[Hot-обновления (OTA)](#hot-обновления-ota) ниже.
 
-## Куда положить файлы этого архива
-
-Распакуйте содержимое **в корень репозитория `roblox-studio-web`**, чтобы
-получилось:
+## Структура
 
 ```
 roblox-studio-web/
-├── app.py                 ← у вас уже есть
-├── rbxl_parser.py         ← у вас уже есть
-├── index.html              ← у вас уже есть
-├── icons.txt / icons/      ← у вас уже есть
-├── android/                 ← из этого архива
+├── app.py                 ← Flask-бэкенд (общий с десктоп-версией)
+├── rbxl_parser.py         ← парсер .rbxl (общий с десктоп-версией)
+├── index.html              ← фронтенд (общий с десктоп-версией)
+├── icons.txt / icons/      ← иконки классов (общие с десктоп-версией)
+├── scripts/
+│   ├── sync-android-python.sh      ← копирует файлы выше в android/app/src/main/python
+│   └── generate-ota-manifest.sh    ← собирает ota/version.json для hot-релиза
+├── android/                 ← Android-проект (Chaquopy + Kotlin)
 └── .github/workflows/
-    └── build-and-release.yml   ← из этого архива
+    └── build-and-release.yml   ← сборка APK и публикация hot-обновлений
 ```
 
-`app.py`, `rbxl_parser.py`, `index.html`, `icons.txt`, `icons/` в
-`android/app/src/main/python` копировать вручную не нужно — это делает шаг
-`Sync Python sources` в workflow при каждой сборке (см. workflow-файл).
-Если хотите собирать локально в Android Studio — скопируйте их туда сами
-один раз (или запустите тот же `cp`, что и в workflow).
+`app.py`, `rbxl_parser.py`, `index.html`, `icons.txt`, `icons/` — это
+единственный источник правды; копия в `android/app/src/main/python`
+собирается автоматически шагом `Sync Python sources` в workflow (через
+`scripts/sync-android-python.sh`) при каждой сборке. Если хотите собирать
+локально в Android Studio — один раз запустите `bash
+scripts/sync-android-python.sh` из корня репозитория.
 
 ## Локальная сборка (Android Studio)
 
@@ -38,11 +42,42 @@ debug-ключом — этого достаточно для локальной
 ## Сборка в GitHub Actions
 
 Workflow триггерится на push в `main` (при изменениях в `android/`,
-`app.py`, `rbxl_parser.py`, `index.html`, `icons.txt`) и вручную
-(`workflow_dispatch`). Результат:
+`app.py`, `rbxl_parser.py`, `index.html`, `icons.txt`, `icons/`,
+`scripts/`) и вручную (`workflow_dispatch`). Сначала джоба `detect-changes`
+смотрит на список изменённых файлов:
 
-- APK доступен как **artifact** сборки (вкладка Actions → конкретный run);
-- и как **GitHub Release** с версией `v1.<номер запуска>`.
+- Если поменялись **только** `app.py` / `rbxl_parser.py` / `index.html` /
+  `icons.txt` / `icons/*` — полная сборка APK пропускается, вместо неё
+  публикуется лёгкий **hot-update релиз** (см. ниже).
+- Если поменялось что-то ещё (Kotlin, gradle, манифест, воркфлоу) —
+  собирается полный APK:
+  - доступен как **artifact** сборки (вкладка Actions → конкретный run);
+  - и как **GitHub Release** с версией `v1.<номер запуска>`.
+
+## Hot-обновления (OTA)
+
+Полная пересборка APK нужна не для каждого изменения — большая часть
+логики (Flask-бэкенд, парсер, HTML/JS, иконки классов) грузится Chaquopy
+как обычные файлы, без компиляции. Для них есть отдельный путь доставки,
+без Google Play/переустановки:
+
+1. CI (`publish-hot-update` job) считает sha256 каждого горячего файла
+   через `scripts/generate-ota-manifest.sh` и публикует их вместе с
+   `version.json` как **prerelease**-релиз с тегом `hot-<номер запуска>`.
+2. При каждом запуске приложение (`OtaUpdater.kt`) смотрит последние
+   релизы репозитория, сравнивает версию с сохранённой локально и
+   докачивает изменившиеся файлы в `filesDir/hotpatch`.
+3. `bridge_launcher.py` подставляет эту папку в начало `sys.path`, поэтому
+   `import app` подхватывает скачанную версию вместо той, что была зашита
+   в APK при сборке — без переустановки.
+4. Если сервер уже успел стартовать в этом процессе со старым кодом,
+   приложение просто перезапускает сам процесс, чтобы применить patch.
+
+Полные релизы (`v1.N`) специально не публикуют `version.json` — иначе
+`OtaUpdater` не мог бы отличить "просто новый APK" от "есть hot-patch".
+Вместо этого он сравнивает `versionCode` установленного APK с сохранённым
+и сам стирает устаревший hotpatch при полном обновлении (см. комментарии
+в `OtaUpdater.kt`).
 
 ### Постоянная подпись (чтобы обновлять APK поверх старой версии)
 
@@ -68,16 +103,14 @@ base64 -w0 release.keystore > release.keystore.base64
 Без этих секретов workflow всё равно соберёт рабочий (debug-подписанный)
 APK — просто без гарантии обновления поверх старой версии.
 
-## Известные ограничения текущего скелета
+## Известные ограничения
 
 - `/api/browse` в `app.py` ходит по `Path.home()` / произвольным путям —
-  на Android 10+ это не будет видеть внешние файлы из-за scoped storage.
-  В `MainActivity.kt` уже есть рабочий SAF-пикер
-  (`window.AndroidBridge.pickRbxlFile()` из JS), который копирует выбранный
-  `.rbxl` в приватную папку приложения и зовёт
-  `window.onAndroidFileImported(path)` — остаётся добавить кнопку и этот
-  колбэк в `index.html`, чтобы дергать открытие файла по этому пути через
-  ваш существующий API вместо `/api/browse`.
+  на Android 10+ это не видит внешние файлы из-за scoped storage.
+  Открытие/сохранение файлов на Android идёт в обход этого эндпоинта —
+  через системный пикер SAF (`window.AndroidBridge.pickRbxlFile()` /
+  `exportRbxlFile()` в `index.html`, реализация в `MainActivity.kt`), а не
+  через `/api/browse`.
 - Иконка приложения не включена в шаблон (чтобы не тащить бинарные PNG) —
   добавьте свои `mipmap-*/ic_launcher.png` и пропишите
   `android:icon="@mipmap/ic_launcher"` в `AndroidManifest.xml`.

@@ -1,0 +1,216 @@
+--- .github/workflows/build-and-release.yml	2026-08-15 09:38:13.040504429 +0000
++++ .github/workflows/build-and-release.yml	2026-08-15 09:40:58.036500655 +0000
+@@ -9,6 +9,8 @@
+       - 'rbxl_parser.py'
+       - 'index.html'
+       - 'icons.txt'
++      - 'icons/**'
++      - 'scripts/**'
+       - '.github/workflows/build-and-release.yml'
+   workflow_dispatch: {}
+ 
+@@ -16,7 +18,84 @@
+   contents: write
+ 
+ jobs:
++  # Определяем, какие файлы поменялись в этом пуше: если это ТОЛЬКО
++  # "горячие" файлы (чистый Python + index.html + иконки — не требуют
++  # компиляции), то полную сборку APK не запускаем вообще, а вместо неё
++  # публикуем лёгкое OTA-обновление (см. publish-hot-update). Если
++  # поменялось что-то ещё (Kotlin, gradle, манифест, воркфлоу) — собираем
++  # APK как обычно.
++  detect-changes:
++    runs-on: ubuntu-latest
++    outputs:
++      hot_only: ${{ steps.filter.outputs.hot_only }}
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++
++      - name: Classify changed files
++        id: filter
++        run: |
++          set -euo pipefail
++
++          # Для ручного запуска или самого первого пуша сравнивать не с чем —
++          # считаем это "не только горячими" файлами, т.е. собираем всё.
++          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
++             [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]] || \
++             [[ -z "${{ github.event.before }}" ]]; then
++            echo "hot_only=false" >> "$GITHUB_OUTPUT"
++            exit 0
++          fi
++
++          CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}")
++          echo "Changed files:"
++          echo "$CHANGED"
++
++          # Файлы, которые НИКОГДА не требуют полной сборки (документация, README и т.п.)
++          IGNORE_REGEX='^(README\.md|\.github/.*\.md|docs/.*|\.gitignore|LICENSE)$'
++
++          # "Горячие" пути — то, что попадает в scripts/sync-android-python.sh
++          # и не требует пересборки нативного кода.
++          HOT_REGEX='^(app\.py|rbxl_parser\.py|index\.html|icons\.txt|icons/.*)$'
++
++          # Убираем из списка изменений файлы, которые вообще не влияют на сборку
++          NON_IGNORED=$(echo "$CHANGED" | grep -Ev "$IGNORE_REGEX" || true)
++
++          if [[ -z "$NON_IGNORED" ]]; then
++            # Изменились ТОЛЬКО игнорируемые файлы (README и т.п.) —
++            # не запускаем вообще ничего, даже hot-update.
++            echo "hot_only=true" >> "$GITHUB_OUTPUT"
++            exit 0
++          fi
++
++          NON_HOT=$(echo "$NON_IGNORED" | grep -Ev "$HOT_REGEX" || true)
++
++          if [[ -z "$NON_HOT" ]]; then
++            echo "hot_only=true" >> "$GITHUB_OUTPUT"
++          else
++            echo "hot_only=false" >> "$GITHUB_OUTPUT"
++          fi
++
++  # Единая точка, где вычисляется тег релиза и версия — чтобы во всех
++  # job'ах (build/hot-update) они были одинаковыми.
++  resolve-tag:
++    needs: detect-changes
++    runs-on: ubuntu-latest
++    outputs:
++      tag: ${{ steps.version.outputs.tag }}
++      version_code: ${{ steps.version.outputs.code }}
++      version_name: ${{ steps.version.outputs.name }}
++    steps:
++      - name: Compute version
++        id: version
++        run: |
++          echo "tag=v1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
++          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
++          echo "name=1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
++
+   build:
++    needs: [detect-changes, resolve-tag]
++    if: needs.detect-changes.outputs.hot_only != 'true'
+     runs-on: ubuntu-latest
+     steps:
+       - name: Checkout
+@@ -28,17 +107,11 @@
+           distribution: temurin
+           java-version: '17'
+ 
+-      # app.py / rbxl_parser.py / index.html / icons.txt живут в корне
+-      # репозитория, а Chaquopy ждёт их в android/app/src/main/python —
++      # app.py / rbxl_parser.py / index.html / icons.txt / icons/ живут в
++      # корне репозитория, а Chaquopy ждёт их в android/app/src/main/python —
+       # синхронизируем перед сборкой, чтобы не дублировать файлы вручную.
+       - name: Sync Python sources into the Android project
+-        run: |
+-          mkdir -p android/app/src/main/python
+-          cp app.py rbxl_parser.py index.html icons.txt android/app/src/main/python/
+-          if [ -d icons ]; then
+-            mkdir -p android/app/src/main/python/icons
+-            cp -r icons/. android/app/src/main/python/icons/
+-          fi
++        run: bash scripts/sync-android-python.sh
+ 
+       - name: Set up Android SDK
+         uses: android-actions/setup-android@v3
+@@ -53,13 +126,6 @@
+         with:
+           gradle-version: 8.7
+ 
+-      # Версия растёт с каждым запуском CI: 1.0 -> 1.1 -> 1.2 ...
+-      - name: Compute version
+-        id: version
+-        run: |
+-          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+-          echo "name=1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+-
+       # Опционально: если в секретах репозитория задан ANDROID_KEYSTORE_BASE64,
+       # все сборки (debug и release) подписываются одним и тем же ключом —
+       # тогда APK можно ставить поверх предыдущей версии без удаления.
+@@ -73,8 +139,8 @@
+ 
+       - name: Build debug APK
+         env:
+-          ANDROID_VERSION_CODE: ${{ steps.version.outputs.code }}
+-          ANDROID_VERSION_NAME: ${{ steps.version.outputs.name }}
++          ANDROID_VERSION_CODE: ${{ needs.resolve-tag.outputs.version_code }}
++          ANDROID_VERSION_NAME: ${{ needs.resolve-tag.outputs.version_name }}
+           ANDROID_KEYSTORE_PATH: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && format('{0}/android/app/release.keystore', github.workspace) || '' }}
+           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+@@ -92,6 +158,71 @@
+       - name: Publish GitHub release
+         uses: softprops/action-gh-release@v2
+         with:
+-          tag_name: v${{ steps.version.outputs.name }}
+-          name: v${{ steps.version.outputs.name }}
++          tag_name: ${{ needs.resolve-tag.outputs.tag }}
++          name: ${{ needs.resolve-tag.outputs.tag }}
++          # ВАЖНО: это должен быть единственный тип релиза, который НЕ
++          # помечен prerelease — так /releases/latest и
++          # releases/latest/download/app-debug.apk всегда указывают на
++          # релиз, где точно есть APK. Hot-update релизы ниже специально
++          # помечены prerelease: true, чтобы не перехватывать этот статус.
++          prerelease: false
+           files: android/app/build/outputs/apk/debug/app-debug.apk
++
++  # ---------- Лёгкое OTA-обновление: только когда менялись "горячие" файлы ----------
++  # Никакой компиляции — просто публикуем изменившиеся Python/HTML/иконки как
++  # ассеты нового релиза. Приложение на устройстве само их подтянет
++  # (см. OtaUpdater.kt) без переустановки APK.
++  publish-hot-update:
++    needs: [detect-changes, resolve-tag]
++    if: needs.detect-changes.outputs.hot_only == 'true'
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++
++      - name: Sync Python sources into the Android project
++        run: bash scripts/sync-android-python.sh
++
++      - name: Generate OTA manifest
++        run: bash scripts/generate-ota-manifest.sh "${{ needs.resolve-tag.outputs.version_name }}"
++
++      # Чтобы диагностировать "хэш вроде другой у файла, который не менялся"
++      # без логов с телефона — печатаем сами хэши прямо в описание релиза.
++      - name: Prepare per-file hash summary for release notes
++        id: ota-summary
++        run: |
++          {
++            echo "summary<<OTA_SUMMARY_EOF"
++            python3 -c "
++          import json
++          m = json.load(open('ota/version.json', encoding='utf-8'))
++          for name, h in sorted(m['files'].items()):
++              print(f'- \`{name}\`: \`{h}\`')
++            "
++                        echo "OTA_SUMMARY_EOF"
++          } >> "$GITHUB_OUTPUT"
++
++      - name: Publish hot-update release
++        uses: softprops/action-gh-release@v2
++        with:
++          tag_name: hot-${{ github.run_number }}
++          name: "RbxStudio — hot update ${{ needs.resolve-tag.outputs.version_name }}"
++          body: |
++            Только обновление Python/HTML/иконок (app.py, rbxl_parser.py,
++            index.html, icons.txt, icons/), без изменений в нативном
++            Android-коде. Полная пересборка APK для этого не запускалась.
++
++            **sha256 файлов в этом обновлении** (сравни с прошлым hot-релизом,
++            чтобы понять, что реально изменилось):
++            ${{ steps.ota-summary.outputs.summary }}
++          generate_release_notes: false
++          # КРИТИЧНО: не даём этому релизу стать "latest release" — иначе
++          # releases/latest/download/app-debug.apk начнёт указывать на
++          # релиз без APK. OtaUpdater.kt поэтому смотрит на /releases
++          # (полный список, включая prerelease), а не на /releases/latest.
++          prerelease: true
++          files: |
++            ota/*.py
++            ota/*.html
++            ota/*.txt
++            ota/*.json
++            ota/icons/*

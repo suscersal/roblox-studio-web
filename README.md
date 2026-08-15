@@ -31,23 +31,29 @@ Part of the code and the README were written by Claude Sonnet 4.6 (I’m not fam
 - 🌳 Explorer с иконками классов и поиском
 - 🧊 3D-вьюпорт (Part, WedgePart, SpherePart, TrussPart, Seat и др.)
 - 📝 Инспектор свойств + редактор CFrame
-- 💻 Редактор Lua-скриптов
-- ➕ CRUD объектов (30+ классов)
+- 💻 Редактор Lua-скриптов (CodeMirror с подсветкой Lua)
+- ➕➖ Добавление/удаление объектов (33 класса на выбор)
+- ▶️ Play-режим: простая физическая симуляция + камера от первого лица
+  (управление WASD/джойстик на тач-устройствах) — экспериментально
 - ☁️ Публикация в Roblox Open Cloud API
 - ⌨️ Горячие клавиши
+- 📱 Android-приложение (WebView + встроенный Python через Chaquopy,
+  с фоновыми hot-обновлениями без переустановки APK) — см.
+  [`android/README-ANDROID.md`](android/README-ANDROID.md)
 
 ### Установка и запуск
 
 ```
 git clone https://github.com/suscersal/roblox-studio-web.git
 cd roblox-studio-web
-pip install -r requirements.txt
-python main.py
+python3 app.py
 ```
 
+Отдельно ставить зависимости не нужно — `app.py` сам поставит `flask`
+через pip при первом запуске, если его ещё нет.
 
 Открыть: `http://localhost:8080`  
-С файлом: `python main.py place.rbxl`
+С файлом: `python3 app.py place.rbxl`
 
 ### Горячие клавиши
 
@@ -56,10 +62,10 @@ python main.py
 | Ctrl+O | Открыть файл |
 | Ctrl+S | Сохранить |
 | Ctrl+Shift+S | Сохранить как... |
-| Ctrl+C / Ctrl+V | Копировать / Вставить |
-| Ctrl+D | Дублировать |
-| Delete | Удалить |
+| Delete | Удалить выбранный объект |
+| Escape | Закрыть окно / снять выделение |
 | F5 | Обновить 3D-сцену |
+| F | Навести камеру на выбранный объект |
 
 ## EN
 
@@ -83,22 +89,29 @@ A web-based `.rbxl` editor written in Python. It opens, views, and edits Roblox 
 - 🌳 Explorer with class icons and search
 - 🧊 3D viewport (Part, WedgePart, SpherePart, TrussPart, Seat, etc.)
 - 📝 Property inspector + CFrame editor
-- 💻 Lua script editor
-- ➕ CRUD objects (30+ classes)
+- 💻 Lua script editor (CodeMirror with Lua syntax highlighting)
+- ➕➖ Add/delete objects (33 selectable classes)
+- ▶️ Play mode: basic physics simulation + first-person camera
+  (WASD / on-screen joystick on touch devices) — experimental
 - ☁️ Roblox Open Cloud API publishing
 - ⌨️ Keyboard shortcuts
+- 📱 Android app (WebView + embedded Python via Chaquopy, with
+  background hot-updates that don't require reinstalling the APK) —
+  see [`android/README-ANDROID.md`](android/README-ANDROID.md)
 
 ### Setup & Run
 
 ```
 git clone https://github.com/suscersal/roblox-studio-web.git
 cd roblox-studio-web
-pip install -r requirements.txt
-python main.py
+python3 app.py
 ```
 
+No separate dependency install needed — `app.py` installs `flask` via
+pip on first run if it isn't already present.
+
 Open: `http://localhost:8080`  
-With file: `python main.py place.rbxl`
+With file: `python3 app.py place.rbxl`
 
 ### Keyboard Shortcuts
 
@@ -107,10 +120,10 @@ With file: `python main.py place.rbxl`
 | Ctrl+O | Open file |
 | Ctrl+S | Save |
 | Ctrl+Shift+S | Save as... |
-| Ctrl+C / Ctrl+V | Copy / Paste |
-| Ctrl+D | Duplicate |
-| Delete | Delete |
+| Delete | Delete selected object |
+| Escape | Close dialog / deselect |
 | F5 | Refresh 3D viewport |
+| F | Focus camera on selected object |
 
 ### Screenshots
 

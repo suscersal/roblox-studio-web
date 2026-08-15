@@ -9,17 +9,29 @@ import os
 import sys
 
 
-def start_server(port: int, data_dir: str = ""):
+def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     os.environ.setdefault("FLASK_DEBUG", "False")
+
+    # Если Kotlin-сторона скачала обновлённые app.py/index.html/icons.txt/
+    # icons/ (см. MainActivity.checkForOtaUpdate -> OtaUpdater), они лежат в
+    # hotpatch_dir. Подсовываем эту папку В НАЧАЛО sys.path, чтобы
+    # `import app` нашёл именно скачанную версию, а не ту, что зашита в APK
+    # при сборке. app.py сам вычисляет ICONS_DIR относительно своего
+    # __file__, поэтому вместе с app.py подхватятся и icons/ из той же
+    # папки — пересборка APK для этого не нужна.
+    if hotpatch_dir and os.path.isdir(hotpatch_dir):
+        sys.path.insert(0, hotpatch_dir)
+        here = hotpatch_dir
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
 
     # app.py открывает index.html/icons.txt по ОТНОСИТЕЛЬНОМУ пути
     # (open("index.html", ...)) — это работало локально только потому,
     # что вы запускали `python app.py` из той же папки. Chaquopy стартует
     # процесс с другим текущим каталогом, поэтому переключаемся в папку,
-    # где реально лежат app.py/index.html/icons.txt — она всегда та же,
-    # что и у этого файла (bridge_launcher.py копируется туда же
-    # в шаге "Sync Python sources" из workflow).
-    here = os.path.dirname(os.path.abspath(__file__))
+    # где реально лежат app.py/index.html/icons.txt (обычная сборка) или в
+    # hotpatch_dir (после OTA-обновления) — иначе open("index.html", ...)
+    # найдёт старую версию файла из первой попавшейся папки на sys.path.
     os.chdir(here)
 
     # data_dir — приватная папка приложения (filesDir), куда Kotlin-сторона

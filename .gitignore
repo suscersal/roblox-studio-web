@@ -1,3 +1,4 @@
 *.pyc
 release.keystore
 release.keystore.base64
+*.patch

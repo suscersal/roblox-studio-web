@@ -104,11 +104,71 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = WebViewClient()
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
 
-        startPythonServerOnce()
-        waitForServerThenLoad()
+        val loadingStatus = findViewById<TextView>(R.id.loadingStatus)
+        loadingStatus.visibility = View.VISIBLE
+
+        // OtaUpdater.checkAndUpdate сама ловит сетевые ошибки и не должна
+        // зависать дольше своих HTTP-таймаутов (~8-16 сек), но если сети нет
+        // вообще (DNS-резолвинг иногда виснет дольше connectTimeout) —
+        // подстраховываемся отдельным таймером, чтобы приложение в любом
+        // случае стартовало на уже скачанном ранее hotpatch'е (или на коде
+        // из APK, если ничего ещё не скачивалось), а не стояло на заставке
+        // бесконечно.
+        val proceededOnce = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        fun proceedWithHotpatch(hotpatchDir: File?) {
+            if (!proceededOnce.compareAndSet(false, true)) return
+            loadingStatus.text = "Запуск…"
+            startPythonServerOnce(hotpatchDir)
+            waitForServerThenLoad()
+        }
+
+        android.os.Handler(mainLooper).postDelayed({
+            if (!proceededOnce.get()) {
+                val existing = OtaUpdater.hotpatchDir(this).let {
+                    if (it.exists() && it.listFiles()?.isNotEmpty() == true) it else null
+                }
+                loadingStatus.text = "Нет соединения, запуск без обновлений…"
+                proceedWithHotpatch(existing)
+            }
+        }, 5000)
+
+        Thread {
+            OtaUpdater.checkAndUpdate(this, object : OtaUpdater.ProgressListener {
+                override fun onProgress(percent: Int, statusText: String) {
+                    runOnUiThread { loadingStatus.text = statusText }
+                }
+
+                override fun onFinished(hotpatchDir: File?, updated: Boolean) {
+                    runOnUiThread {
+                        if (updated && serverStarted) {
+                            // Сервер в этом процессе уже когда-то запускался
+                            // со старым кодом — "на лету" его не подменить
+                            // (модуль app уже импортирован и закэширован
+                            // Python'ом, порт уже занят). Единственный
+                            // надёжный способ подхватить свежескачанный
+                            // app.py — перезапустить процесс целиком.
+                            loadingStatus.text = "Обновление готово, перезапуск…"
+                            restartProcessToApplyUpdate()
+                            return@runOnUiThread
+                        }
+                        proceedWithHotpatch(hotpatchDir)
+                    }
+                }
+            })
+        }.start()
     }
 
-    private fun startPythonServerOnce() {
+    /** Полный перезапуск приложения — единственный надёжный способ подхватить
+     * hot-patch, скачанный поверх уже работающего в этом процессе сервера. */
+    private fun restartProcessToApplyUpdate() {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+        Runtime.getRuntime().exit(0)
+    }
+
+    private fun startPythonServerOnce(hotpatchDir: File?) {
         if (serverStarted) {
             // Сервер в этом процессе уже поднят — просто грузим страницу.
             webView.post { webView.loadUrl("http://127.0.0.1:$PORT/") }
@@ -116,10 +176,12 @@ class MainActivity : AppCompatActivity() {
         }
         serverStarted = true
 
+        val hotpatchPath = hotpatchDir?.absolutePath ?: ""
+
         Thread {
             val py = Python.getInstance()
             val launcher = py.getModule("bridge_launcher")
-            launcher.callAttr("start_server", PORT, filesDir.absolutePath)
+            launcher.callAttr("start_server", PORT, filesDir.absolutePath, hotpatchPath)
         }.start()
     }
 
