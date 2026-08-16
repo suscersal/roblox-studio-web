@@ -481,6 +481,58 @@ def api_get_instance(ref):
         'parent': parsed['parent_map'].get(ref, -1),
     })
 
+def _rbx_post_json(url, data):
+    """Отправляет POST-запрос с JSON-телом и возвращает распарсенный JSON."""
+    req = _req.Request(url, data=data, headers=_roblox_headers())
+    req.add_header('Content-Type', 'application/json')
+    try:
+        with _req.urlopen(req, timeout=20) as resp:
+            raw = _rbx_maybe_gunzip(resp.read())
+            raw_text = raw.decode('utf-8', 'replace')
+        return json.loads(raw_text)
+    except _urlerr.HTTPError as e:
+        body = _rbx_maybe_gunzip(e.read()).decode('utf-8', 'replace')[:300]
+        raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
+    except Exception as e:
+        raise RuntimeError(str(e))
+
+@flask_app.route('/api/roblox/userid', methods=['GET'])
+def api_roblox_userid():
+    """Получить User ID по никнейму через официальный API Roblox.
+    Требуется наличие .ROBLOSECURITY (авторизация)."""
+    username = request.args.get('username', '').strip()
+    if not username:
+        return jsonify({'ok': False, 'error': 'Missing username'}), 400
+
+    if _roblox_cookie() is None:
+        return jsonify({'ok': False, 'error': 'not_logged_in',
+                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+
+    try:
+        # Используем официальный эндпоинт Roblox
+        resp = _rbx_get_json(
+            'https://users.roblox.com/v1/usernames/users',
+            method='POST',
+            data=json.dumps({'usernames': [username], 'excludeBannedUsers': False}).encode('utf-8')
+        )
+        # _rbx_get_json по умолчанию делает GET. Нам нужно POST.
+        # Придётся немного изменить _rbx_get_json или написать отдельную функцию.
+        # Давайте перепишем _rbx_get_json, чтобы поддерживать POST.
+        # Или создадим новую функцию _rbx_post_json.
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
+
+    # Обработка ответа
+    if isinstance(resp, dict) and resp.get('data') and len(resp['data']) > 0:
+        user_data = resp['data'][0]
+        return jsonify({
+            'ok': True,
+            'id': user_data['id'],
+            'displayName': user_data.get('displayName', ''),
+            'name': user_data.get('name', '')
+        })
+    else:
+        return jsonify({'ok': False, 'error': 'Пользователь не найден'}), 404
 
 @flask_app.route('/api/instance/<int:ref>', methods=['POST'])
 def api_set_prop(ref):

@@ -3156,6 +3156,31 @@
                 loadTree();
             }
         }
+        
+        async function fetchUserIdByUsername() {
+    const username = document.getElementById('av-username').value.trim();
+    if (!username) {
+        notify('Введите никнейм', 'warn');
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/roblox/userid?username=${encodeURIComponent(username)}`);
+        const json = await resp.json();
+        if (json.ok) {
+            document.getElementById('av-uid').value = json.id;
+            const preview = document.getElementById('avatar-preview');
+            if (preview) {
+                preview.src = `https://www.roblox.com/headshot-thumbnail/image?userId=${json.id}&width=100&height=100&format=png`;
+                preview.style.display = 'block';
+            }
+            notify(`✅ ID найден: ${json.id} (${json.displayName || json.name || ''})`);
+        } else {
+            notify(json.error || 'Пользователь не найден', 'err');
+        }
+    } catch (e) {
+        notify('Ошибка запроса: ' + e.message, 'err');
+    }
+}
 
         function showPublishDialog() {
             showModal(
@@ -3230,19 +3255,24 @@
                 return;
             }
 
-            showModal(
-                '<h3>' + t('avatar_title_uid') + '</h3>' +
-                '<input id="av-uid" placeholder="' + t('avatar_uid_ph') + '">' +
-                '<div class="modal-row">' +
-                '<button onclick="doDownloadAvatar3d(\'import\')" style="background:#7c3aed">' + t('avatar_import_scene') + '</button>' +
-                '<button onclick="doDownloadAvatar3d(\'save\')">' + t('avatar_download_zip') + '</button>' +
-                '</div>' +
-                localImportRow +
-                '<div class="modal-row">' +
-                '<button onclick="window.AndroidBridge && window.AndroidBridge.logoutRoblox(); closeModal();">' + t('avatar_logout') + '</button>' +
-                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
-                '</div>'
-            );
+            showModal(`
+        <h3>${t('avatar_title_uid')}</h3>
+        <div style="display:flex; gap:6px; margin-bottom:8px;">
+            <input id="av-username" placeholder="Ник в Roblox" style="flex:1; padding:6px;">
+            <button onclick="fetchUserIdByUsername()" style="background:#3b82f6; padding:4px 12px;">🔍 Получить ID</button>
+        </div>
+        <input id="av-uid" placeholder="Roblox User ID (заполнится автоматически)">
+        <img id="avatar-preview" style="width:80px; height:80px; border-radius:50%; display:none; margin:6px auto; background:#1f2937;">
+        <div class="modal-row">
+            <button onclick="doDownloadAvatar3d('import')" style="background:#7c3aed">${t('avatar_import_scene')}</button>
+            <button onclick="doDownloadAvatar3d('save')">${t('avatar_download_zip')}</button>
+        </div>
+        ${localImportRow}
+        <div class="modal-row">
+            <button onclick="window.AndroidBridge && window.AndroidBridge.logoutRoblox(); closeModal();">${t('avatar_logout')}</button>
+            <button onclick="closeModal()">${t('btn_cancel')}</button>
+        </div>
+    `);
         }
 
         function _b64ToBlob(b64, mime) {
