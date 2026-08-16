@@ -1977,9 +1977,37 @@
             }
 
             for (const o of objects) {
-                const mesh = buildMeshFromObj(o, geoCache, matCache);
+                // Импортированные 3D-аватары — не обычные Part/MeshPart,
+                // которые сервер умеет описывать через props (Size/Color
+                // и т.п.) — геометрия целиком живёт только в браузере
+                // (см. importAvatarIntoScene). Поэтому вместо обычной
+                // пересборки меша из свойств инстанса переиспользуем уже
+                // готовый THREE.Group из кэша — иначе аватар превращался
+                // бы обратно в обычный кубик при каждом reloadScene()
+                // (а его вызывает даже простое движение камеры).
+                const cached = window._avatarMeshCache && window._avatarMeshCache[o.ref];
+                const mesh = cached ? cached.object : buildMeshFromObj(o, geoCache, matCache);
                 scene.add(mesh);
                 sceneObjs[o.ref] = mesh;
+            }
+
+            // Чистим кэш от аватаров, чьи Instance удалили через обычный
+            // Explorer/Delete — сервер уже не пришлёт такой ref в objects.
+            if (window._avatarMeshCache) {
+                const liveRefs = new Set(objects.map(o => o.ref));
+                for (const ref of Object.keys(window._avatarMeshCache)) {
+                    if (!liveRefs.has(Number(ref))) {
+                        const entry = window._avatarMeshCache[ref];
+                        entry.object.traverse(n => {
+                            if (n.isMesh) {
+                                if (n.geometry) n.geometry.dispose();
+                                const mats = Array.isArray(n.material) ? n.material : [n.material];
+                                mats.forEach(m => { if (m) { if (m.map) m.map.dispose(); m.dispose(); } });
+                            }
+                        });
+                        delete window._avatarMeshCache[ref];
+                    }
+                }
             }
 
             const shown = Object.keys(sceneObjs).length;
@@ -3433,10 +3461,38 @@
             const mtlLoader = new THREE.MTLLoader(manager);
             const materials = mtlLoader.parse(mtlText, '');
             materials.preload();
+            // ФИКС КАЧЕСТВА 1/2: MTLLoader по умолчанию делает материалы
+            // однослойными (FrontSide) — при неправильном порядке вершин
+            // в части полигонов (частый случай у сгенерированных Roblox
+            // мешей) это вырезает грани и модель выглядит "дырявой"/
+            // некачественной. DoubleSide рендерит обе стороны, дешёво и
+            // без побочных эффектов на статичной модели вроде аватара.
+            for (const key in materials.materials) {
+                const m = materials.materials[key];
+                m.side = THREE.DoubleSide;
+                m.needsUpdate = true;
+            }
 
             const objLoader = new THREE.OBJLoader(manager);
             objLoader.setMaterials(materials);
             const object = objLoader.parse(fixedObjText);
+
+            // ФИКС КАЧЕСТВА 2/2: текстуры из data: URL по умолчанию
+            // трактуются как линейные, из-за чего цвета выглядят блёкло/
+            // серо по сравнению с оригиналом в Roblox — sRGB-кодирование
+            // возвращает нормальную насыщенность. sRGBEncoding — API
+            // three.js r128 (в новых версиях библиотеки заменено на
+            // colorSpace, но здесь используется именно r128).
+            object.traverse(n => {
+                if (n.isMesh) {
+                    n.castShadow = true;
+                    n.receiveShadow = true;
+                    const mats = Array.isArray(n.material) ? n.material : [n.material];
+                    mats.forEach(m => {
+                        if (m && m.map) { m.map.encoding = THREE.sRGBEncoding; m.map.needsUpdate = true; }
+                    });
+                }
+            });
 
             let vertCount = 0;
             object.traverse(n => { if (n.isMesh && n.geometry && n.geometry.attributes.position) vertCount += n.geometry.attributes.position.count; });
@@ -3471,6 +3527,39 @@
             // так, чтобы этот центр оказался в target.
             object.position.copy(target).sub(center);
 
+            // Чтобы аватар появился в Explorer, был выбираемым/удаляемым
+            // как обычный объект и не пропадал при следующем reloadScene()
+            // (его вызывает даже поворот камеры) — заводим для него
+            // настоящий Instance на сервере (Model в дереве), а саму
+            // геометрию (которую сервер не умеет описывать в формате
+            // Part/MeshPart) держим в клиентском кэше и переиспользуем
+            // при каждой пересборке сцены вместо обычного построения меша
+            // из свойств инстанса. См. правку в reloadScene().
+            let ref = null;
+            if (typeof api === 'function') {
+                const findWs = ns => {
+                    for (const n of ns) {
+                        if (n.cls === 'Workspace') return n.ref;
+                        const c = findWs(n.children);
+                        if (c !== null) return c;
+                    }
+                    return null;
+                };
+                const parent = findWs(treeData) ?? -1;
+                const r = await api('PUT', '/api/instance', {
+                    class: 'Part',
+                    name: object.name,
+                    parent: parent,
+                });
+                if (r.ok) ref = r.ref;
+            }
+            if (ref !== null) {
+                window._avatarMeshCache = window._avatarMeshCache || {};
+                window._avatarMeshCache[ref] = { object };
+                sceneObjs[ref] = object;
+                await loadTree(); // подтягивает новый узел в Explorer + reloadScene()
+            }
+
             // Рендер-цикл приложения не всегда рисует каждый кадр по
             // условию (throttling) — принудительно рисуем один кадр сразу,
             // чтобы объект стал виден немедленно, а не только после
@@ -3479,7 +3568,7 @@
                 try { renderer.render(scene, camera); } catch (e) { }
             }
 
-            return { vertCount };
+            return { vertCount, ref };
         }
 
         // Тот же колбэк уже используется для сохранения .rbxl — здесь
