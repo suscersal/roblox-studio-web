@@ -3503,6 +3503,18 @@
                 if (n.isMesh) {
                     n.castShadow = true;
                     n.receiveShadow = true;
+                    // ФИКС "ГРАНЁНОГО" ВИДА: Roblox почти всегда не кладёт
+                    // вершинные нормали (vn) в этот .obj — OBJLoader в таком
+                    // случае считает нормали по каждой грани отдельно (flat
+                    // shading), из-за чего низкополигональная модель
+                    // выглядит ещё грубее, чем есть на самом деле — видны
+                    // резкие "фасеты" вместо плавных переходов. Полигонов
+                    // это не добавляет (их больше в источнике не взять —
+                    // ограничение самого Roblox avatar-3d API), но
+                    // computeVertexNormals() усредняет нормали между
+                    // смежными гранями и свет ложится плавно (smooth
+                    // shading), визуально маскируя низкий poly count.
+                    if (n.geometry) n.geometry.computeVertexNormals();
                     const mats = Array.isArray(n.material) ? n.material : [n.material];
                     mats.forEach(m => {
                         if (m && m.map) { m.map.encoding = THREE.sRGBEncoding; m.map.needsUpdate = true; }
@@ -3569,19 +3581,39 @@
                 });
                 if (r.ok) ref = r.ref;
                 if (ref !== null) {
-                    // КРИТИЧНЫЙ ФИКС: свежий Part создаётся на сервере без
-                    // Position/CFrame (дефолт (0,0,0)). /api/scene фильтрует
-                    // объекты по дистанции от камеры (cx/cy/cz/r) — визуально
-                    // объект стоит рядом с камерой (см. object.position выше),
-                    // но сервер думает, что он в (0,0,0), и при первом же
-                    // reloadScene() (вызывается ниже через loadTree()) он
-                    // вылетает за радиус видимости и пропадает из ответа
-                    // сервера => не попадает ни в Explorer, ни в счётчик
-                    // объектов, ни обратно в сцену. Пишем реальную позицию.
+                    // КРИТИЧНЫЙ ФИКС #2: /api/scene на сервере (make_scene_objects)
+                    // читает позицию ИСКЛЮЧИТЕЛЬНО из свойства CFrame — Position
+                    // читается первым, но сразу же перезаписывается значением из
+                    // CFrame (px, py, pz = get_pos(cf)). Если CFrame не задан,
+                    // get_pos() возвращает (0,0,0), и объект всё равно вылетает
+                    // за радиус видимости камеры, несмотря на записанный Position.
+                    // Пишем CFrame в формате 3x4 row-major матрицы, который ждут
+                    // get_pos()/get_rot_matrix() на сервере: [r00,r01,r02,px,
+                    // r10,r11,r12,py, r20,r21,r22,pz]. Вращение — единичное,
+                    // т.к. геометрия аватара уже "запечена" в мировых координатах
+                    // самого меша (см. центрирование через bounding box выше).
+                    const p = object.position;
                     const size = box.getSize(new THREE.Vector3());
+                    // Формат CFrame, который реально понимает сервер (см.
+                    // get_pos()/get_rot_matrix() в app.py и разбор в
+                    // rbxl_parser.py): { position: {x,y,z}, matrix: [9
+                    // чисел поворота] } — координаты ОТДЕЛЬНО от матрицы
+                    // поворота. Предыдущая версия фикса клала перевод
+                    // внутрь 12-элементной матрицы (r,r,r,tx,...) — но
+                    // get_pos() сначала проверяет cf.get('position', {}),
+                    // а дефолт {} — это тоже dict, поэтому ветка с matrix
+                    // никогда не выполнялась и позиция всегда читалась
+                    // как (0,0,0), несмотря на записанный CFrame.
+                    await api('POST', '/api/instance/' + ref, {
+                        prop: 'CFrame',
+                        value: {
+                            position: { x: p.x, y: p.y, z: p.z },
+                            matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+                        },
+                    });
                     await api('POST', '/api/instance/' + ref, {
                         prop: 'Position',
-                        value: { x: object.position.x, y: object.position.y, z: object.position.z },
+                        value: { x: p.x, y: p.y, z: p.z },
                     });
                     await api('POST', '/api/instance/' + ref, {
                         prop: 'Size',
