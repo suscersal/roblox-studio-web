@@ -51,6 +51,30 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    // Импорт произвольного локального файла (zip с моделью аватара,
+    // выбранного/скачанного пользователем заранее) — тот же SAF-паттерн,
+    // что и filePickerLauncher для .rbxl, но пишет в отдельный файл и
+    // зовёт свой JS-колбэк, чтобы не путать с открытием сцены.
+    private val avatarFilePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uri: Uri? = if (result.resultCode == RESULT_OK) result.data?.data else null
+        if (uri == null) {
+            webView.evaluateJavascript("window.onAvatarFilePicked && window.onAvatarFilePicked(null);", null)
+            return@registerForActivityResult
+        }
+        val dest = File(filesDir, "avatar_import_tmp.zip")
+        contentResolver.openInputStream(uri)?.use { input ->
+            dest.outputStream().use { output -> input.copyTo(output) }
+        }
+        webView.evaluateJavascript(
+            "window.onAvatarFilePicked && window.onAvatarFilePicked(${
+                org.json.JSONObject.quote(dest.absolutePath)
+            });",
+            null
+        )
+    }
+
     // Путь временного файла (в приватном хранилище приложения), который
     // Flask-сервер только что записал через /api/save — сохраняем его здесь
     // между запуском SAF-диалога "Сохранить как" (exportRbxlFile) и
@@ -272,6 +296,20 @@ class MainActivity : AppCompatActivity() {
 
         /** Открывает экран логина roblox.com. Результат (успех/неудача)
          * приходит на страницу через window.onRobloxAuthUpdated(bool). */
+        /** Открывает системный пикер для выбора .zip с аватаром (тот, что
+         * скачан ранее через "Скачать .zip", или любой другой с таким же
+         * набором файлов внутри: avatar.obj, avatar.mtl, текстуры).
+         * Результат приходит в window.onAvatarFilePicked(path|null). */
+        @JavascriptInterface
+        fun pickAvatarZipFile() {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/zip"
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/octet-stream"))
+            }
+            avatarFilePickerLauncher.launch(intent)
+        }
+
         @JavascriptInterface
         fun loginToRoblox() {
             robloxLoginLauncher.launch(Intent(this@MainActivity, RobloxLoginActivity::class.java))

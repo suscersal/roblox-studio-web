@@ -615,6 +615,42 @@ import urllib.request as _req
 import urllib.error as _urlerr
 
 
+@flask_app.route('/api/roblox/avatar3d/import-local')
+def api_roblox_avatar3d_import_local():
+    """Импорт из уже скачанного .zip (см. 'Скачать .zip' / pickAvatarZipFile
+    в Kotlin) — работает БЕЗ логина в Roblox, файл уже на диске устройства.
+    Ждёт внутри zip: avatar.obj, avatar.mtl, и любые *.png/*.jpg текстуры
+    (имена как в .mtl-ссылках)."""
+    import zipfile
+
+    path = request.args.get('path', '').strip()
+    if not path or not Path(path).is_file():
+        return jsonify({'ok': False, 'error': 'Файл не найден: ' + path}), 400
+    try:
+        with zipfile.ZipFile(path, 'r') as zf:
+            names = zf.namelist()
+            obj_name = next((n for n in names if n.lower().endswith('.obj')), None)
+            mtl_name = next((n for n in names if n.lower().endswith('.mtl')), None)
+            if not obj_name or not mtl_name:
+                return jsonify({'ok': False, 'error': 'В архиве нет .obj или .mtl — это точно экспорт аватара?'}), 400
+            obj_text = zf.read(obj_name).decode('utf-8', 'replace')
+            mtl_text = zf.read(mtl_name).decode('utf-8', 'replace')
+            textures = []
+            for n in names:
+                if n.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    data = zf.read(n)
+                    mime = 'image/png' if n.lower().endswith('.png') else 'image/jpeg'
+                    textures.append({
+                        'name': n.rsplit('/', 1)[-1],
+                        'data_url': f'data:{mime};base64,' + _b64.b64encode(data).decode('ascii'),
+                    })
+        return jsonify({'ok': True, 'obj_text': obj_text, 'mtl_text': mtl_text, 'textures': textures})
+    except zipfile.BadZipFile:
+        return jsonify({'ok': False, 'error': 'Файл повреждён или это не .zip'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 def _rbx_maybe_gunzip(raw: bytes) -> bytes:
     """Подстраховка: если какой-то узел всё же проигнорирует
     Accept-Encoding: identity и пришлёт gzip (сигнатура байтов 1f 8b),

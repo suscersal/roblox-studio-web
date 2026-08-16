@@ -725,6 +725,7 @@
         <button onclick="reloadScene()" data-i18n-title="tb_refresh_title" title="Refresh scene (F5)"><span data-i18n="tb_refresh">🔄 Refresh</span></button>
         <button class="blue" onclick="showPublishDialog()" data-i18n-title="tb_publish_title" title="Publish"><span data-i18n="tb_publish">☁ Publish</span></button>
         <button class="purple" id="avatar3d-btn" onclick="showAvatar3dDialog()" title="Скачать 3D-аватар по Roblox User ID">🧍 Avatar</button>
+        <button onclick="toggleLang()" title="Switch language / Сменить язык" id="lang-btn">🌐 EN</button>
         <div class="sep"></div>
         <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title" title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
         <div class="sep"></div>
@@ -865,6 +866,20 @@
                 notify_deleted: '🗑 Deleted',
                 notify_published: '✅ Published!',
                 notify_quickadd: '✅ {cls} added',
+                avatar_title: '🧍 3D Avatar',
+                avatar_title_uid: '🧍 3D Avatar by User ID',
+                avatar_login_needed: 'To download a NEW avatar by User ID, you need to sign in to your Roblox account.',
+                avatar_login_btn: 'Sign in via Roblox',
+                avatar_login_android_only: 'Sign-in is only available in the Android app.',
+                avatar_import_scene: '🎬 Import to scene',
+                avatar_download_zip: '💾 Download .zip',
+                avatar_import_file: '📁 Import from file (.zip)',
+                avatar_logout: 'Log out',
+                avatar_uid_ph: 'Roblox User ID',
+                avatar_enter_uid: 'Enter a numeric Roblox User ID',
+                avatar_added_to_scene: '✅ Avatar added to scene',
+                avatar_saved: '✅ Avatar saved',
+                avatar_save_cancelled: 'Save cancelled',
             },
             ru: {
                 tb_open: '📂 Открыть', tb_open_title: 'Открыть файл (Ctrl+O)',
@@ -928,6 +943,20 @@
                 notify_deleted: '🗑 Удалён',
                 notify_published: '✅ Опубликовано!',
                 notify_quickadd: '✅ {cls} добавлен',
+                avatar_title: '🧍 3D-аватар',
+                avatar_title_uid: '🧍 3D-аватар по User ID',
+                avatar_login_needed: 'Чтобы скачать НОВЫЙ аватар по User ID, нужен вход в аккаунт Roblox.',
+                avatar_login_btn: 'Войти через Roblox',
+                avatar_login_android_only: 'Вход доступен только в Android-приложении.',
+                avatar_import_scene: '🎬 Импортировать на сцену',
+                avatar_download_zip: '💾 Скачать .zip',
+                avatar_import_file: '📁 Импортировать из файла (.zip)',
+                avatar_logout: 'Выйти из аккаунта',
+                avatar_uid_ph: 'Roblox User ID',
+                avatar_enter_uid: 'Введите числовой Roblox User ID',
+                avatar_added_to_scene: '✅ Аватар добавлен на сцену',
+                avatar_saved: '✅ Аватар сохранён',
+                avatar_save_cancelled: 'Сохранение отменено',
             },
         };
 
@@ -963,8 +992,26 @@
             document.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.getAttribute('data-i18n-placeholder')); });
             document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
             document.documentElement.lang = LANG;
+            const langBtn = document.getElementById('lang-btn');
+            if (langBtn) {
+                // Кнопка показывает язык, НА КОТОРЫЙ переключит (не текущий) —
+                // так интуитивнее, как переключатели языка в большинстве приложений.
+                langBtn.textContent = LANG === 'ru' ? '🌐 EN' : '🌐 RU';
+            }
         }
         applyStaticI18n();
+
+        // Простой переключатель между двумя языками (en/ru). Полноценная
+        // смена без перезагрузки потребовала бы переписывать LANG (сейчас
+        // const) и все места, читающие его напрямую (а не только через
+        // t()) — вместо этого просто сохраняем выбор и перезагружаем
+        // страницу, благо это разовое действие, а не то, что переключают
+        // ежесекундно.
+        function toggleLang() {
+            const next = LANG === 'ru' ? 'en' : 'ru';
+            try { localStorage.setItem('rbxstudio-lang', next); } catch (e) { }
+            location.reload();
+        }
     </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
@@ -3113,14 +3160,19 @@
                 loggedIn = !!(st.ok && st.loggedIn);
             }
 
+            const localImportRow = IS_ANDROID
+                ? '<div class="modal-row"><button onclick="pickAvatarFileForImport()">' + t('avatar_import_file') + '</button></div>'
+                : '';
+
             if (!loggedIn) {
                 showModal(
-                    '<h3>🧍 3D-аватар</h3>' +
-                    '<p>Нужен вход в аккаунт Roblox — так Roblox отдаёт доступ к 3D-модели аватара.</p>' +
+                    '<h3>' + t('avatar_title') + '</h3>' +
+                    localImportRow +
+                    '<p style="margin-top:10px">' + t('avatar_login_needed') + '</p>' +
                     '<div class="modal-row">' +
                     (IS_ANDROID
-                        ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#7c3aed">Войти через Roblox</button>'
-                        : '<p style="opacity:.7">Вход доступен только в Android-приложении.</p>') +
+                        ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#7c3aed">' + t('avatar_login_btn') + '</button>'
+                        : '<p style="opacity:.7">' + t('avatar_login_android_only') + '</p>') +
                     '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                     '</div>'
                 );
@@ -3128,14 +3180,15 @@
             }
 
             showModal(
-                '<h3>🧍 3D-аватар по User ID</h3>' +
-                '<input id="av-uid" placeholder="Roblox User ID">' +
+                '<h3>' + t('avatar_title_uid') + '</h3>' +
+                '<input id="av-uid" placeholder="' + t('avatar_uid_ph') + '">' +
                 '<div class="modal-row">' +
-                '<button onclick="doDownloadAvatar3d(\'import\')" style="background:#7c3aed">🎬 Импортировать на сцену</button>' +
-                '<button onclick="doDownloadAvatar3d(\'save\')">💾 Скачать .zip</button>' +
+                '<button onclick="doDownloadAvatar3d(\'import\')" style="background:#7c3aed">' + t('avatar_import_scene') + '</button>' +
+                '<button onclick="doDownloadAvatar3d(\'save\')">' + t('avatar_download_zip') + '</button>' +
                 '</div>' +
+                localImportRow +
                 '<div class="modal-row">' +
-                '<button onclick="window.AndroidBridge && window.AndroidBridge.logoutRoblox(); closeModal();">Выйти из аккаунта</button>' +
+                '<button onclick="window.AndroidBridge && window.AndroidBridge.logoutRoblox(); closeModal();">' + t('avatar_logout') + '</button>' +
                 '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
@@ -3198,10 +3251,41 @@
             return r.json();
         }
 
+        function pickAvatarFileForImport() {
+            if (!IS_ANDROID) {
+                notify('Импорт из файла доступен только в Android-приложении', 'err');
+                return;
+            }
+            window.AndroidBridge.pickAvatarZipFile();
+        }
+
+        window.onAvatarFilePicked = async function (path) {
+            if (!path) return; // пользователь отменил выбор
+            closeModal();
+            notify('Читаю файл…');
+            let r;
+            try {
+                r = await api('GET', '/api/roblox/avatar3d/import-local?path=' + encodeURIComponent(path));
+            } catch (e) {
+                notify('Ошибка чтения файла: ' + (e && e.message || e), 'err');
+                return;
+            }
+            if (!r.ok) {
+                notify(r.error || 'Не удалось прочитать архив', 'err');
+                return;
+            }
+            try {
+                await importAvatarIntoScene(r.obj_text, r.mtl_text, r.textures, 'local');
+                notify(t('avatar_added_to_scene'));
+            } catch (e) {
+                notify('Не удалось импортировать: ' + (e && e.message || e), 'err');
+            }
+        };
+
         async function doDownloadAvatar3d(mode) {
             const userId = (document.getElementById('av-uid').value || '').trim();
             if (!/^[0-9]+$/.test(userId)) {
-                notify('Введите числовой Roblox User ID', 'err');
+                notify(t('avatar_enter_uid'), 'err');
                 return;
             }
 
@@ -3301,7 +3385,7 @@
                     return;
                 }
                 closeModal();
-                notify('✅ Аватар добавлен на сцену');
+                notify(t('avatar_added_to_scene'));
                 return;
             }
 
@@ -3324,6 +3408,19 @@
         async function importAvatarIntoScene(objText, mtlText, textures, userId) {
             await ensureObjMtlLoaders();
 
+            // КРИТИЧНЫЙ ФИКС: Roblox отдаёт НЕстандартный .obj — строки вершин
+            // выглядят как "v x y z r g b a" (координаты + RGBA-цвет прямо в
+            // одной строке), а не "v x y z", как ждёт обычный формат
+            // Wavefront OBJ. THREE.OBJLoader понимает только 3 (или 6 с
+            // цветом без альфы) числа после "v" — лишние токены ломают
+            // парсинг геометрии, из-за чего меш получался пустым/битым и
+            // визуально ничего не появлялось на сцене. Отрезаем всё
+            // лишнее, оставляя только x y z.
+            const fixedObjText = objText.replace(
+                /^v(\s+-?[\d.eE+-]+\s+-?[\d.eE+-]+\s+-?[\d.eE+-]+)(?:\s+-?[\d.eE+-]+)*\s*$/gm,
+                'v$1'
+            );
+
             const texByName = {};
             (textures || []).forEach(t => { texByName[t.name] = t.data_url; });
 
@@ -3339,23 +3436,50 @@
 
             const objLoader = new THREE.OBJLoader(manager);
             objLoader.setMaterials(materials);
-            const object = objLoader.parse(objText);
+            const object = objLoader.parse(fixedObjText);
+
+            let vertCount = 0;
+            object.traverse(n => { if (n.isMesh && n.geometry && n.geometry.attributes.position) vertCount += n.geometry.attributes.position.count; });
+            if (vertCount === 0) {
+                throw new Error('Модель распарсилась, но геометрия пустая (0 вершин) — формат OBJ мог измениться на стороне Roblox');
+            }
 
             object.name = 'RobloxAvatar_' + userId;
-            // Аватар из Roblox приходит в масштабе их студийных единиц —
-            // сцена редактора использует ту же шкалу (studs), поэтому без
-            // доп. масштабирования; ставим в центр текущего вида камеры.
-            if (typeof scene !== 'undefined' && scene) {
-                scene.add(object);
-            } else {
+
+            if (!(typeof scene !== 'undefined' && scene)) {
                 throw new Error('3D-сцена ещё не готова, попробуйте через секунду');
             }
+            scene.add(object);
+
+            // ВАЖНО: координаты вершин в OBJ от Roblox абсолютные — они
+            // привязаны к позиции персонажа в игровом мире (часто Y~100 и
+            // выше), а не к (0,0,0). Простой сдвиг object.position НЕ
+            // компенсирует это — сдвигается только точка опоры (pivot),
+            // а сама геометрия остаётся там же относительно неё. Поэтому
+            // сначала считаем bounding box и центрируем через него.
+            const box = new THREE.Box3().setFromObject(object);
+            const center = box.getCenter(new THREE.Vector3());
+
+            let target = new THREE.Vector3(0, 0, 0);
             if (typeof camera !== 'undefined' && camera) {
-                // Небольшой сдвиг перед камерой, чтобы сразу было видно.
                 const dir = new THREE.Vector3();
                 camera.getWorldDirection(dir);
-                object.position.copy(camera.position).add(dir.multiplyScalar(15));
+                target.copy(camera.position).add(dir.multiplyScalar(15));
             }
+            // object.position сейчас (0,0,0), поэтому center — это и есть
+            // центр геометрии в мировых координатах "как есть". Сдвигаем
+            // так, чтобы этот центр оказался в target.
+            object.position.copy(target).sub(center);
+
+            // Рендер-цикл приложения не всегда рисует каждый кадр по
+            // условию (throttling) — принудительно рисуем один кадр сразу,
+            // чтобы объект стал виден немедленно, а не только после
+            // следующего взаимодействия с камерой.
+            if (typeof renderer !== 'undefined' && renderer && typeof camera !== 'undefined') {
+                try { renderer.render(scene, camera); } catch (e) { }
+            }
+
+            return { vertCount };
         }
 
         // Тот же колбэк уже используется для сохранения .rbxl — здесь
@@ -3367,7 +3491,7 @@
             if (overlay && overlay.classList.contains('show')) {
                 closeModal();
             }
-            notify(ok ? '✅ Аватар сохранён' : 'Сохранение отменено', ok ? undefined : 'err');
+            notify(ok ? t('avatar_saved') : t('avatar_save_cancelled'), ok ? undefined : 'err');
         };
 
         function showModal(html) {
