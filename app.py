@@ -630,11 +630,15 @@ def _rbx_get_json(url):
 
 def _rbx_get_bytes(url):
     r = _req.Request(url, headers=_roblox_headers())
-    with _req.urlopen(r, timeout=20) as resp:
+    with _req.urlopen(r, timeout=8) as resp:
         return resp.read()
 
 
 def _rbx_download_cdn(hash_value):
+    """8 CDN-узлов Roblox равнозначны — здесь короткий таймаут на узел
+    (8с), чтобы один зависший узел не превращал скачивание в минуты
+    ожидания: суммарный худший случай — 8×8с=64с на один файл, что уже
+    приемлемо, а на практике первый же живой узел отвечает почти сразу."""
     last_err = None
     for n in range(8):
         try:
@@ -710,15 +714,25 @@ def api_roblox_avatar3d_fetch():
     try:
         bundle = _rbx_get_json(bundle_url)
 
-        obj_bytes = _rbx_download_cdn(bundle['obj'])
-        mtl_bytes = _rbx_download_cdn(bundle['mtl'])
-        textures = []
-        for tex_hash in bundle.get('textures', []):
-            tex_bytes = _rbx_download_cdn(tex_hash)
-            textures.append({
-                'name': _re.sub(r'[^a-zA-Z0-9._-]+', '_', tex_hash) + '.png',
-                'data_b64': _b64.b64encode(tex_bytes).decode('ascii'),
-            })
+        # obj, mtl и каждая текстура — независимые скачивания с разных
+        # CDN-узлов; параллелим их вместо последовательного цикла, чтобы
+        # весь процесс не растягивался на сумму времени всех файлов.
+        import concurrent.futures as _cf
+
+        tex_hashes = bundle.get('textures', [])
+        with _cf.ThreadPoolExecutor(max_workers=max(2, len(tex_hashes) + 2)) as pool:
+            obj_future = pool.submit(_rbx_download_cdn, bundle['obj'])
+            mtl_future = pool.submit(_rbx_download_cdn, bundle['mtl'])
+            tex_futures = [pool.submit(_rbx_download_cdn, h) for h in tex_hashes]
+
+            obj_bytes = obj_future.result()
+            mtl_bytes = mtl_future.result()
+            textures = []
+            for tex_hash, fut in zip(tex_hashes, tex_futures):
+                textures.append({
+                    'name': _re.sub(r'[^a-zA-Z0-9._-]+', '_', tex_hash) + '.png',
+                    'data_b64': _b64.b64encode(fut.result()).decode('ascii'),
+                })
 
         return jsonify({
             'ok': True,
@@ -808,4 +822,9 @@ if __name__ == '__main__':
             pass
 
     threading.Thread(target=open_browser, daemon=True).start()
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+    # threaded=True обязателен: без него однопоточный dev-сервер Flask
+    # блокирует ВООБЩЕ ВСЕ запросы (включая обычную работу редактора) на
+    # всё время выполнения долгого /api/roblox/avatar3d/fetch — именно из-за
+    # этого приложение выглядело "зависшим" целиком, а не только диалог
+    # скачивания аватара.
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False, threaded=True)

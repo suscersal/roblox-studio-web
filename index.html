@@ -3149,8 +3149,26 @@
                 '<div class="modal-row" style="margin-top:12px">' +
                 (errorText
                     ? '<button onclick="showAvatar3dDialog()">Назад</button>'
-                    : '<button onclick="closeModal()">Свернуть</button>') +
+                    : '<button onclick="cancelAvatar3dDownload()">Отменить</button>') +
                 '</div>';
+        }
+
+        // AbortController текущей загрузки — доступен снаружи doDownloadAvatar3d,
+        // чтобы кнопка "Отменить" могла реально прервать сетевой запрос,
+        // а не просто закрыть модалку поверх продолжающей висеть загрузки.
+        let _avatar3dAbort = null;
+        let _avatar3dCancelled = false;
+
+        function cancelAvatar3dDownload() {
+            _avatar3dCancelled = true;
+            if (_avatar3dAbort) _avatar3dAbort.abort();
+            closeModal();
+            notify('Скачивание отменено');
+        }
+
+        async function _apiAbortable(url, signal) {
+            const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, signal });
+            return r.json();
         }
 
         async function doDownloadAvatar3d() {
@@ -3159,6 +3177,10 @@
                 notify('Введите числовой Roblox User ID', 'err');
                 return;
             }
+
+            _avatar3dCancelled = false;
+            _avatar3dAbort = new AbortController();
+            const signal = _avatar3dAbort.signal;
 
             // Генерация модели у Roblox обычно занимает секунд 10-30, но
             // иногда дольше — поэтому это пошаговый прогресс внутри
@@ -3175,10 +3197,12 @@
             let sawGenerating = false;
 
             while (Date.now() - startedAt < maxWaitMs) {
+                if (_avatar3dCancelled) return;
                 let st;
                 try {
-                    st = await api('GET', '/api/roblox/avatar3d/status?userId=' + encodeURIComponent(userId));
+                    st = await _apiAbortable('/api/roblox/avatar3d/status?userId=' + encodeURIComponent(userId), signal);
                 } catch (e) {
+                    if (_avatar3dCancelled || e.name === 'AbortError') return;
                     showModal(_avatarProgressHtml(steps, step, 'Сеть/сервер: ' + (e && e.message || e)));
                     return;
                 }
@@ -3202,6 +3226,8 @@
                 await new Promise(res => setTimeout(res, pollEveryMs));
             }
 
+            if (_avatar3dCancelled) return;
+
             if (!bundleUrl) {
                 showModal(_avatarProgressHtml(steps, step, 'Roblox слишком долго готовит модель — попробуйте ещё раз чуть позже'));
                 return;
@@ -3211,11 +3237,13 @@
             showModal(_avatarProgressHtml(steps, step));
             let r;
             try {
-                r = await api('GET', '/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl));
+                r = await _apiAbortable('/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl), signal);
             } catch (e) {
+                if (_avatar3dCancelled || e.name === 'AbortError') return;
                 showModal(_avatarProgressHtml(steps, step, 'Ошибка скачивания: ' + (e && e.message || e)));
                 return;
             }
+            if (_avatar3dCancelled) return;
             if (!r.ok) {
                 showModal(_avatarProgressHtml(steps, step, r.message || r.error || 'Не удалось скачать файлы'));
                 return;
