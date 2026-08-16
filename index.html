@@ -2025,8 +2025,32 @@
 
         function highlightSelected(ref) {
             for (const [r, mesh] of Object.entries(sceneObjs)) {
-                mesh.material.emissive = new THREE.Color(parseInt(r) === ref ? 0xff6600 : 0);
-                mesh.material.emissiveIntensity = parseInt(r) === ref ? 0.4 : 0;
+                // ФИКС: импортированные 3D-аватары (importAvatarIntoScene)
+                // хранятся в sceneObjs как THREE.Group (результат
+                // OBJLoader.parse), а не как одиночный THREE.Mesh — у
+                // Group нет своего .material, поэтому обращение к
+                // mesh.material.emissive кидало TypeError и обрывало
+                // выполнение всей функции. Так как highlightSelected()
+                // вызывается при КАЖДОМ выборе объекта, эта ошибка ломала
+                // выбор вообще любого объекта в сцене, как только в ней
+                // был хотя бы один импортированный аватар. Подсвечиваем
+                // рекурсивно все дочерние меши группы вместо прямого
+                // обращения к несуществующему mesh.material.
+                const isSelected = parseInt(r) === ref;
+                const applyEmissive = (m) => {
+                    if (!m || !m.material) return;
+                    const mats = Array.isArray(m.material) ? m.material : [m.material];
+                    mats.forEach(mat => {
+                        if (!mat) return;
+                        mat.emissive = new THREE.Color(isSelected ? 0xff6600 : 0);
+                        mat.emissiveIntensity = isSelected ? 0.4 : 0;
+                    });
+                };
+                if (mesh.isMesh) {
+                    applyEmissive(mesh);
+                } else if (typeof mesh.traverse === 'function') {
+                    mesh.traverse(n => { if (n.isMesh) applyEmissive(n); });
+                }
             }
             if (window._selBox) {
                 scene.remove(window._selBox);
