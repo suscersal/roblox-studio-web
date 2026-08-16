@@ -510,11 +510,10 @@ def api_roblox_userid():
 
     try:
         # Используем официальный эндпоинт Roblox
-        resp = _rbx_get_json(
-            'https://users.roblox.com/v1/usernames/users',
-            method='POST',
-            data=json.dumps({'usernames': [username], 'excludeBannedUsers': False}).encode('utf-8')
-        )
+        resp = _rbx_post_json(
+    'https://users.roblox.com/v1/usernames/users',
+    json.dumps({'usernames': [username], 'excludeBannedUsers': False}).encode('utf-8')
+)
         # _rbx_get_json по умолчанию делает GET. Нам нужно POST.
         # Придётся немного изменить _rbx_get_json или написать отдельную функцию.
         # Давайте перепишем _rbx_get_json, чтобы поддерживать POST.
