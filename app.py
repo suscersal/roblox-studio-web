@@ -576,6 +576,12 @@ ROBLOX_HEADERS_BASE = {
         'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     ),
     'Accept': 'application/json, text/plain, */*',
+    # КРИТИЧНО: без этого сервер может прислать тело в gzip, а urllib
+    # НЕ распаковывает его автоматически (это делают только requests/
+    # браузеры) — итог: JSON и даже сами файлы модели читались как сырые
+    # сжатые байты и превращались в нечитаемую "бинарную кашу" вместо
+    # текста/картинок. Проще всего попросить сервер вообще не сжимать.
+    'Accept-Encoding': 'identity',
 }
 
 
@@ -609,13 +615,25 @@ import urllib.request as _req
 import urllib.error as _urlerr
 
 
+def _rbx_maybe_gunzip(raw: bytes) -> bytes:
+    """Подстраховка: если какой-то узел всё же проигнорирует
+    Accept-Encoding: identity и пришлёт gzip (сигнатура байтов 1f 8b),
+    распаковываем сами — иначе на выходе будет нечитаемая бинарная каша
+    вместо настоящего JSON/OBJ/PNG."""
+    if len(raw) >= 2 and raw[0] == 0x1f and raw[1] == 0x8b:
+        import gzip as _gzip
+        return _gzip.decompress(raw)
+    return raw
+
+
 def _rbx_get_json(url):
     r = _req.Request(url, headers=_roblox_headers())
     try:
         with _req.urlopen(r, timeout=20) as resp:
-            raw_text = resp.read().decode('utf-8', 'replace')
+            raw_bytes = _rbx_maybe_gunzip(resp.read())
+            raw_text = raw_bytes.decode('utf-8', 'replace')
     except _urlerr.HTTPError as e:
-        body = e.read().decode('utf-8', 'replace')[:300]
+        body = _rbx_maybe_gunzip(e.read()).decode('utf-8', 'replace')[:300]
         raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
     try:
         return json.loads(raw_text)
@@ -631,7 +649,7 @@ def _rbx_get_json(url):
 def _rbx_get_bytes(url):
     r = _req.Request(url, headers=_roblox_headers())
     with _req.urlopen(r, timeout=8) as resp:
-        return resp.read()
+        return _rbx_maybe_gunzip(resp.read())
 
 
 def _rbx_download_cdn(hash_value):
