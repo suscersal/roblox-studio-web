@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
 
+
     <style>
         * {
             box-sizing: border-box;
@@ -715,25 +716,39 @@
     <div id="toolbar-top">
         <span class="title">🎮 RbxStudio</span>
         <div class="sep"></div>
-        <button onclick="newProject()" data-i18n-title="tb_new_title" title="New empty scene"><span data-i18n="tb_new">🆕 New</span></button>
-        <button onclick="openFileBrowser('open')" data-i18n-title="tb_open_title" title="Open file (Ctrl+O)"><span data-i18n="tb_open">📂 Open</span></button>
-        <button class="green" onclick="saveFile()" data-i18n-title="tb_save_title" title="Save (Ctrl+S)"><span data-i18n="tb_save">💾 Save</span></button>
-        <button onclick="openFileBrowser('save')" data-i18n-title="tb_saveas_title" title="Save as"><span data-i18n="tb_saveas">💾 As...</span></button>
+        <button onclick="newProject()" data-i18n-title="tb_new_title" title="New empty scene"><span
+                data-i18n="tb_new">🆕 New</span></button>
+        <button onclick="openFileBrowser('open')" data-i18n-title="tb_open_title" title="Open file (Ctrl+O)"><span
+                data-i18n="tb_open">📂 Open</span></button>
+        <button class="green" onclick="saveFile()" data-i18n-title="tb_save_title" title="Save (Ctrl+S)"><span
+                data-i18n="tb_save">💾 Save</span></button>
+        <button onclick="openFileBrowser('save')" data-i18n-title="tb_saveas_title" title="Save as"><span
+                data-i18n="tb_saveas">💾 As...</span></button>
         <div class="sep"></div>
-        <button onclick="showAddDialog()" data-i18n-title="tb_addobj_title" title="Add object"><span data-i18n="tb_add">➕ Add</span></button>
-        <button class="red" onclick="deleteSelected()" data-i18n-title="tb_delete_title" title="Delete (Delete)"><span data-i18n="tb_delete">🗑 Delete</span></button>
+        <button onclick="showAddDialog()" data-i18n-title="tb_addobj_title" title="Add object"><span
+                data-i18n="tb_add">➕ Add</span></button>
+        <button class="red" onclick="deleteSelected()" data-i18n-title="tb_delete_title" title="Delete (Delete)"><span
+                data-i18n="tb_delete">🗑 Delete</span></button>
         <div class="sep"></div>
-        <button onclick="reloadScene()" data-i18n-title="tb_refresh_title" title="Refresh scene (F5)"><span data-i18n="tb_refresh">🔄 Refresh</span></button>
-        <button class="blue" onclick="showPublishDialog()" data-i18n-title="tb_publish_title" title="Publish"><span data-i18n="tb_publish">☁ Publish</span></button>
-        <button class="purple" id="avatar3d-btn" onclick="showAvatar3dDialog()" title="Скачать 3D-аватар по Roblox User ID">🧍 Avatar</button>
+        <button onclick="reloadScene()" data-i18n-title="tb_refresh_title" title="Refresh scene (F5)"><span
+                data-i18n="tb_refresh">🔄 Refresh</span></button>
+        <button class="blue" onclick="showPublishDialog()" data-i18n-title="tb_publish_title" title="Publish"><span
+                data-i18n="tb_publish">☁ Publish</span></button>
+        <button class="purple" id="avatar3d-btn" onclick="showAvatar3dDialog()"
+            title="Скачать 3D-аватар по Roblox User ID">🧍 Avatar</button>
         <button onclick="toggleLang()" title="Switch language / Сменить язык" id="lang-btn">🌐 EN</button>
         <div class="sep"></div>
-        <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title" title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
+        <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title"
+            title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
         <div class="sep"></div>
-        <button onclick="resetCamera()" data-i18n-title="tb_resetcam_title" title="Reset camera"><span data-i18n="tb_resetcam">🏠 Reset</span></button>
-        <button onclick="topView()" data-i18n-title="tb_topview_title" title="Top view"><span data-i18n="tb_topview">⬆ Top</span></button>
-        <button onclick="frontView()" data-i18n-title="tb_frontview_title" title="Front view"><span data-i18n="tb_frontview">📷 Front</span></button>
-        <button onclick="rightView()" data-i18n-title="tb_rightview_title" title="Right view"><span data-i18n="tb_rightview">➡ Right</span></button>
+        <button onclick="resetCamera()" data-i18n-title="tb_resetcam_title" title="Reset camera"><span
+                data-i18n="tb_resetcam">🏠 Reset</span></button>
+        <button onclick="topView()" data-i18n-title="tb_topview_title" title="Top view"><span data-i18n="tb_topview">⬆
+                Top</span></button>
+        <button onclick="frontView()" data-i18n-title="tb_frontview_title" title="Front view"><span
+                data-i18n="tb_frontview">📷 Front</span></button>
+        <button onclick="rightView()" data-i18n-title="tb_rightview_title" title="Right view"><span
+                data-i18n="tb_rightview">➡ Right</span></button>
         <div class="sep"></div>
         <button onclick="toggleHelpers()" data-i18n-title="tb_helpers_title" title="Grid and axes">📏</button>
         <button onclick="resetLayout()" data-i18n-title="tb_resetlayout_title" title="Reset panel sizes">📐</button>
@@ -745,10 +760,12 @@
                 <span>Explorer</span>
                 <div>
                     <button onclick="collapseAll()" data-i18n-title="exp_collapse_title" title="Collapse all">◢</button>
-                    <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title" title="Expand all">◣</button>
+                    <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title"
+                        title="Expand all">◣</button>
                 </div>
             </div>
-            <input id="search-box" data-i18n-placeholder="exp_search_ph" placeholder="🔍 Search..." oninput="onSearch(this.value)">
+            <input id="search-box" data-i18n-placeholder="exp_search_ph" placeholder="🔍 Search..."
+                oninput="onSearch(this.value)">
             <div id="tree-scroll">
                 <div id="tree"></div>
             </div>
@@ -772,7 +789,8 @@
                 </div>
                 <div class="pad-col">
                     <button class="pad-btn" id="pad-e" data-key="e" data-i18n-title="pad_up_title" title="Up">⬆</button>
-                    <button class="pad-btn" id="pad-q" data-key="q" data-i18n-title="pad_down_title" title="Down">⬇</button>
+                    <button class="pad-btn" id="pad-q" data-key="q" data-i18n-title="pad_down_title"
+                        title="Down">⬇</button>
                 </div>
             </div>
         </div>
@@ -2014,7 +2032,7 @@
             }
 
             const shown = Object.keys(sceneObjs).length;
-            notify(t('notify_scene_loaded', {n: shown}) + (totalAvailable > shown ? t('notify_scene_of', {total: totalAvailable}) : ''));
+            notify(t('notify_scene_loaded', { n: shown }) + (totalAvailable > shown ? t('notify_scene_of', { total: totalAvailable }) : ''));
             updateInventoryCount();
 
             // Обновляем выделение если было
@@ -2336,7 +2354,7 @@
             const padE = document.getElementById('pad-e'), padQ = document.getElementById('pad-q');
             if (padE) { padE.textContent = '⤴'; padE.title = t('pad_jump_title'); }
             if (padQ) { padQ.style.visibility = 'hidden'; }
-            notify(t('notify_play_started', {n: Object.keys(physicsBodies).length}));
+            notify(t('notify_play_started', { n: Object.keys(physicsBodies).length }));
         }
 
         function stopPlay() {
@@ -2925,7 +2943,7 @@
                 parent: parent
             });
             if (r.ok) {
-                notify(t('notify_quickadd', {cls: cls}));
+                notify(t('notify_quickadd', { cls: cls }));
                 loadTree();
             } else {
                 notify(r.error || t('notify_error'), 'err');
@@ -2965,7 +2983,7 @@
         window.onAndroidFileImported = async function (path) {
             const r = await api('POST', '/api/open', { path: path });
             if (r.ok) {
-                notify(t('notify_loaded_count', {n: r.count}));
+                notify(t('notify_loaded_count', { n: r.count }));
                 loadTree();
             } else {
                 notify(r.error || t('notify_error'), 'err');
@@ -3062,7 +3080,7 @@
             closeModal();
             const r = await api('POST', '/api/open', { path: path });
             if (r.ok) {
-                notify(t('notify_loaded_count', {n: r.count}));
+                notify(t('notify_loaded_count', { n: r.count }));
                 loadTree();
             } else {
                 notify(r.error, 'err');
@@ -3180,31 +3198,31 @@
                 loadTree();
             }
         }
-        
+
         async function fetchUserIdByUsername() {
-    const username = document.getElementById('av-username').value.trim();
-    if (!username) {
-        notify('Введите никнейм', 'warn');
-        return;
-    }
-    try {
-        const resp = await fetch(`/api/roblox/userid?username=${encodeURIComponent(username)}`);
-        const json = await resp.json();
-        if (json.ok) {
-            document.getElementById('av-uid').value = json.id;
-            const preview = document.getElementById('avatar-preview');
-            if (preview) {
-                preview.src = `https://www.roblox.com/headshot-thumbnail/image?userId=${json.id}&width=100&height=100&format=png`;
-                preview.style.display = 'block';
+            const username = document.getElementById('av-username').value.trim();
+            if (!username) {
+                notify('Введите никнейм', 'warn');
+                return;
             }
-            notify(`✅ ID найден: ${json.id} (${json.displayName || json.name || ''})`);
-        } else {
-            notify(json.error || 'Пользователь не найден', 'err');
+            try {
+                const resp = await fetch(`/api/roblox/userid?username=${encodeURIComponent(username)}`);
+                const json = await resp.json();
+                if (json.ok) {
+                    document.getElementById('av-uid').value = json.id;
+                    const preview = document.getElementById('avatar-preview');
+                    if (preview) {
+                        preview.src = `https://www.roblox.com/headshot-thumbnail/image?userId=${json.id}&width=100&height=100&format=png`;
+                        preview.style.display = 'block';
+                    }
+                    notify(`✅ ID найден: ${json.id} (${json.displayName || json.name || ''})`);
+                } else {
+                    notify(json.error || 'Пользователь не найден', 'err');
+                }
+            } catch (e) {
+                notify('Ошибка запроса: ' + e.message, 'err');
+            }
         }
-    } catch (e) {
-        notify('Ошибка запроса: ' + e.message, 'err');
-    }
-}
 
         function showPublishDialog() {
             showModal(
@@ -3260,9 +3278,8 @@
                 loggedIn = !!(st.ok && st.loggedIn);
             }
 
-            const localImportRow = IS_ANDROID
-                ? '<div class="modal-row"><button onclick="pickAvatarFileForImport()">' + t('avatar_import_file') + '</button></div>'
-                : '';
+            // Кнопка импорта ZIP теперь доступна всегда, без проверки IS_ANDROID
+            const localImportRow = '<div class="modal-row"><button onclick="pickAvatarFileForImport()">' + t('avatar_import_file') + '</button></div>';
 
             if (!loggedIn) {
                 showModal(
@@ -3357,12 +3374,56 @@
         }
 
         function pickAvatarFileForImport() {
-            if (!IS_ANDROID) {
-                notify('Импорт из файла доступен только в Android-приложении', 'err');
+            // Если есть Android-мост — используем нативный выбор файла
+            if (window.AndroidBridge && typeof window.AndroidBridge.pickAvatarZipFile === 'function') {
+                window.AndroidBridge.pickAvatarZipFile();
                 return;
             }
-            window.AndroidBridge.pickAvatarZipFile();
+
+            // Веб-версия: создаём скрытый input для выбора ZIP
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.zip,application/zip';
+            fileInput.style.display = 'none';
+            document.body.appendChild(fileInput);
+
+            fileInput.addEventListener('change', function (event) {
+                const file = event.target.files[0];
+                if (!file) {
+                    document.body.removeChild(fileInput);
+                    return;
+                }
+
+                // Отправляем файл на сервер (multipart/form-data)
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/api/roblox/avatar3d/import-local-upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        document.body.removeChild(fileInput);
+                        if (data.ok) {
+                            // Вызываем реальную функцию импорта в сцену
+                            importAvatarIntoScene(data.obj_text, data.mtl_text, data.textures, 'local')
+                                .then(() => notify(t('avatar_added_to_scene')))
+                                .catch(e => notify('Не удалось импортировать: ' + e.message, 'err'));
+                        } else {
+                            notify(data.error || 'Ошибка импорта', 'err');
+                        }
+                    })
+                    .catch(err => {
+                        document.body.removeChild(fileInput);
+                        console.error('Ошибка загрузки файла:', err);
+                        notify('Ошибка сети при импорте', 'err');
+                    });
+            });
+
+            fileInput.click();
         }
+
 
         window.onAvatarFilePicked = async function (path) {
             if (!path) return; // пользователь отменил выбор
@@ -3621,16 +3682,16 @@
             const box = new THREE.Box3().setFromObject(object);
             const center = box.getCenter(new THREE.Vector3());
 
-            let target = new THREE.Vector3(0, 0, 0);
+            let targetPos = new THREE.Vector3(0, 0, 0);
             if (typeof camera !== 'undefined' && camera) {
                 const dir = new THREE.Vector3();
                 camera.getWorldDirection(dir);
-                target.copy(camera.position).add(dir.multiplyScalar(15));
+                targetPos.copy(camera.position).add(dir.multiplyScalar(15));
             }
-            // object.position сейчас (0,0,0), поэтому center — это и есть
-            // центр геометрии в мировых координатах "как есть". Сдвигаем
-            // так, чтобы этот центр оказался в target.
-            object.position.copy(target).sub(center);
+            object.position.copy(targetPos).sub(center);
+
+            // Сохраняем смещение центра, чтобы использовать при reloadScene
+            const centerOffset = center.clone();
 
             // Чтобы аватар появился в Explorer, был выбираемым/удаляемым
             // как обычный объект и не пропадал при следующем reloadScene()
@@ -3722,9 +3783,9 @@
             }
             if (ref !== null) {
                 window._avatarMeshCache = window._avatarMeshCache || {};
-                window._avatarMeshCache[ref] = { object };
+                window._avatarMeshCache[ref] = { object, centerOffset: centerOffset };
                 sceneObjs[ref] = object;
-                await loadTree(); // подтягивает новый узел в Explorer + reloadScene()
+                await loadTree();
             }
 
             // Рендер-цикл приложения не всегда рисует каждый кадр по

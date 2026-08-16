@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+import urllib.error as _urlerr
+import urllib.request as _req
+import re as _re
+import base64 as _b64
 import base64
 import struct
 import math
@@ -10,7 +14,7 @@ from pathlib import Path
 import sys
 import subprocess
 import os
-
+import io
 
 
 def _ensure(pkg, imp=None):
@@ -200,23 +204,14 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None):
         else:
             px = py = pz = 0
 
-        # Получаем Size
-        sz = props.get('Size', props.get('size', {}))
-        if isinstance(sz, dict):
-            sx = max(0.05, safe_float(sz.get('x', 1), 1))
-            sy = max(0.05, safe_float(sz.get('y', 1), 1))
-            sz_ = max(0.05, safe_float(sz.get('z', 1), 1))
-        elif isinstance(sz, (list, tuple)) and len(sz) >= 3:
-            sx = max(0.05, safe_float(sz[0], 1))
-            sy = max(0.05, safe_float(sz[1], 1))
-            sz_ = max(0.05, safe_float(sz[2], 1))
-        else:
-            sx = sy = sz_ = 1.0
-
-        # Получаем Rotation
-        # Position + Rotation из CFrame (содержит матрицу вращения напрямую)
+        # Получаем CFrame (если он есть, он может переопределить позицию)
         cf = props.get('CFrame', {})
-        px, py, pz = get_pos(cf)
+        # Используем CFrame только если он реально содержит позицию или матрицу
+        if isinstance(cf, dict) and ('position' in cf or 'matrix' in cf):
+            cf_pos = get_pos(cf)
+            # Если get_pos вернул не (0,0,0) — берём позицию из CFrame
+            if cf_pos != (0.0, 0.0, 0.0):
+                px, py, pz = cf_pos
         rot_matrix = get_rot_matrix(cf)
 
         # Size
@@ -231,7 +226,6 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None):
             sz_ = max(0.05, safe_float(sz[2], 1))
         else:
             sx = sy = sz_ = 1.0
-
 
         # Получаем цвет
         col = props.get('Color') or props.get(
@@ -481,6 +475,7 @@ def api_get_instance(ref):
         'parent': parsed['parent_map'].get(ref, -1),
     })
 
+
 def _rbx_post_json(url, data):
     """Отправляет POST-запрос с JSON-телом и возвращает распарсенный JSON."""
     req = _req.Request(url, data=data, headers=_roblox_headers())
@@ -495,6 +490,7 @@ def _rbx_post_json(url, data):
         raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
     except Exception as e:
         raise RuntimeError(str(e))
+
 
 @flask_app.route('/api/roblox/userid', methods=['GET'])
 def api_roblox_userid():
@@ -511,9 +507,10 @@ def api_roblox_userid():
     try:
         # Используем официальный эндпоинт Roblox
         resp = _rbx_post_json(
-    'https://users.roblox.com/v1/usernames/users',
-    json.dumps({'usernames': [username], 'excludeBannedUsers': False}).encode('utf-8')
-)
+            'https://users.roblox.com/v1/usernames/users',
+            json.dumps({'usernames': [username], 'excludeBannedUsers': False}).encode(
+                'utf-8')
+        )
         # _rbx_get_json по умолчанию делает GET. Нам нужно POST.
         # Придётся немного изменить _rbx_get_json или написать отдельную функцию.
         # Давайте перепишем _rbx_get_json, чтобы поддерживать POST.
@@ -532,6 +529,7 @@ def api_roblox_userid():
         })
     else:
         return jsonify({'ok': False, 'error': 'Пользователь не найден'}), 404
+
 
 @flask_app.route('/api/instance/<int:ref>', methods=['POST'])
 def api_set_prop(ref):
@@ -719,30 +717,30 @@ def api_roblox_logout():
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
-import base64 as _b64
-import re as _re
-import urllib.request as _req
-import urllib.error as _urlerr
-
-
-@flask_app.route('/api/roblox/avatar3d/import-local')
-def api_roblox_avatar3d_import_local():
-    """Импорт из уже скачанного .zip (см. 'Скачать .zip' / pickAvatarZipFile
-    в Kotlin) — работает БЕЗ логина в Roblox, файл уже на диске устройства.
-    Ждёт внутри zip: avatar.obj, avatar.mtl, и любые *.png/*.jpg текстуры
-    (имена как в .mtl-ссылках)."""
+@flask_app.route('/api/roblox/avatar3d/import-local-upload', methods=['POST'])
+def api_roblox_avatar3d_import_local_upload():
     import zipfile
+    import base64 as _b64
 
-    path = request.args.get('path', '').strip()
-    if not path or not Path(path).is_file():
-        return jsonify({'ok': False, 'error': 'Файл не найден: ' + path}), 400
+    if 'file' not in request.files:
+        return jsonify({'ok': False, 'error': 'Файл не передан'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'ok': False, 'error': 'Имя файла пустое'}), 400
+
     try:
-        with zipfile.ZipFile(path, 'r') as zf:
+        # Читаем содержимое загруженного файла в память
+        zip_bytes = file.read()
+        with zipfile.ZipFile(io.BytesIO(zip_bytes), 'r') as zf:
             names = zf.namelist()
-            obj_name = next((n for n in names if n.lower().endswith('.obj')), None)
-            mtl_name = next((n for n in names if n.lower().endswith('.mtl')), None)
+            obj_name = next(
+                (n for n in names if n.lower().endswith('.obj')), None)
+            mtl_name = next(
+                (n for n in names if n.lower().endswith('.mtl')), None)
             if not obj_name or not mtl_name:
                 return jsonify({'ok': False, 'error': 'В архиве нет .obj или .mtl — это точно экспорт аватара?'}), 400
+
             obj_text = zf.read(obj_name).decode('utf-8', 'replace')
             mtl_text = zf.read(mtl_name).decode('utf-8', 'replace')
             textures = []
@@ -789,7 +787,8 @@ def _rbx_get_json(url):
         # на логин и т.п.). Показываем начало тела как есть — так сразу
         # видно, что это не наш баг, а блокировка со стороны Roblox.
         snippet = raw_text[:300].replace('\n', ' ')
-        raise RuntimeError(f'Roblox вернул не-JSON ответ (похоже на антибот-страницу): {snippet}')
+        raise RuntimeError(
+            f'Roblox вернул не-JSON ответ (похоже на антибот-страницу): {snippet}')
 
 
 def _rbx_get_bytes(url):
@@ -825,7 +824,7 @@ def api_roblox_avatar3d_status():
         return jsonify({'ok': False, 'error': 'userId должен быть числом'}), 400
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'error': 'not_logged_in',
-                         'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
     try:
         resp = _rbx_get_json(
             f'https://thumbnails.roblox.com/v1/users/avatar-3d?userId={user_id}')
@@ -893,7 +892,7 @@ def api_roblox_avatar3d_fetch():
         return jsonify({'ok': False, 'error': 'savePath отсутствует'}), 400
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'error': 'not_logged_in',
-                         'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
     try:
         bundle = _rbx_get_json(bundle_url)
 
@@ -906,7 +905,8 @@ def api_roblox_avatar3d_fetch():
         with _cf.ThreadPoolExecutor(max_workers=max(2, len(tex_hashes) + 2)) as pool:
             obj_future = pool.submit(_rbx_download_cdn, bundle['obj'])
             mtl_future = pool.submit(_rbx_download_cdn, bundle['mtl'])
-            tex_futures = [pool.submit(_rbx_download_cdn, h) for h in tex_hashes]
+            tex_futures = [pool.submit(_rbx_download_cdn, h)
+                           for h in tex_hashes]
 
             obj_bytes = obj_future.result()
             mtl_bytes = mtl_future.result()
@@ -938,8 +938,10 @@ def api_roblox_avatar3d_fetch():
             zf.writestr('avatar.mtl', mtl_bytes)
             for name, data in tex_files:
                 zf.writestr(name, data)
-            meta = {'userId': user_id, 'camera': bundle.get('camera'), 'aabb': bundle.get('aabb')}
-            zf.writestr('meta.json', json.dumps(meta, ensure_ascii=False, indent=2))
+            meta = {'userId': user_id, 'camera': bundle.get(
+                'camera'), 'aabb': bundle.get('aabb')}
+            zf.writestr('meta.json', json.dumps(
+                meta, ensure_ascii=False, indent=2))
 
         response = {
             'ok': True,
@@ -955,7 +957,8 @@ def api_roblox_avatar3d_fetch():
             response['obj_text'] = obj_bytes.decode('utf-8', 'replace')
             response['mtl_text'] = mtl_text
             response['textures'] = [
-                {'name': name, 'data_url': 'data:image/png;base64,' + _b64.b64encode(data).decode('ascii')}
+                {'name': name, 'data_url': 'data:image/png;base64,' +
+                    _b64.b64encode(data).decode('ascii')}
                 for name, data in tex_files
             ]
         return jsonify(response)
@@ -1038,4 +1041,5 @@ if __name__ == '__main__':
     # всё время выполнения долгого /api/roblox/avatar3d/fetch — именно из-за
     # этого приложение выглядело "зависшим" целиком, а не только диалог
     # скачивания аватара.
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False, threaded=True)
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False,
+                  use_reloader=False, threaded=True)
