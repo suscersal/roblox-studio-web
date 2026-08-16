@@ -130,4 +130,4 @@ With file: `python3 app.py place.rbxl`
 ![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/1.png)
 ![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/2.png)
 ![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/3.png)
-
+![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/4.png)
