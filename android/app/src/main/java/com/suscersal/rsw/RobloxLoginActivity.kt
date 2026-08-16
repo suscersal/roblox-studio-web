@@ -37,17 +37,36 @@ class RobloxLoginActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private val handler = Handler(Looper.getMainLooper())
     private var finished = false
+    // true, как только WebView хоть раз показал именно /login — нужно,
+    // чтобы отличать "мы ещё не покидали страницу входа" (кука может уже
+    // быть, но это гостевая/техническая) от "юзер реально залогинился и
+    // Roblox увёл его на другую страницу".
+    private var sawLoginPage = false
 
     private val pollCookies = object : Runnable {
         override fun run() {
             if (finished) return
-            val cookie = extractRoblosecurity()
-            if (cookie != null) {
-                finishWithCookie(cookie)
-            } else {
-                handler.postDelayed(this, POLL_INTERVAL_MS)
+            if (sawLoginPage && loggedInByUrl()) {
+                val cookie = extractRoblosecurity()
+                if (cookie != null) {
+                    finishWithCookie(cookie)
+                    return
+                }
             }
+            handler.postDelayed(this, POLL_INTERVAL_MS)
         }
+    }
+
+    /** true, если текущий URL WebView больше не страница логина —
+     * значит форма отправлена и Roblox увёл нас дальше (домой/на
+     * подтверждение и т.п.). Именно ЭТОТ момент, а не факт наличия
+     * .ROBLOSECURITY, надёжно говорит о реальном входе: гостевая версия
+     * куки присутствует уже на самой странице /login, до ввода пароля. */
+    private fun loggedInByUrl(): Boolean {
+        val url = webView.url ?: return false
+        return !url.contains("/login", ignoreCase = true) &&
+            !url.contains("/signup", ignoreCase = true) &&
+            (url.contains("roblox.com", ignoreCase = true))
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -84,7 +103,14 @@ class RobloxLoginActivity : AppCompatActivity() {
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
         cookieManager.setAcceptThirdPartyCookies(webView, true)
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                if (url.contains("/login", ignoreCase = true)) {
+                    sawLoginPage = true
+                }
+            }
+        }
         webView.loadUrl(LOGIN_URL)
 
         findViewById<android.widget.Button>(R.id.closeLoginBtn).setOnClickListener {

@@ -3132,34 +3132,58 @@
             URL.revokeObjectURL(url);
         }
 
+        function _avatarProgressHtml(steps, activeIndex, errorText) {
+            const rows = steps.map((label, i) => {
+                let icon = '⚪';
+                let style = 'opacity:.5';
+                if (i < activeIndex) { icon = '✅'; style = ''; }
+                else if (i === activeIndex && !errorText) { icon = '⏳'; style = 'font-weight:600'; }
+                else if (i === activeIndex && errorText) { icon = '❌'; style = 'font-weight:600;color:#f87171'; }
+                return '<div style="display:flex;gap:8px;align-items:center;padding:4px 0;' + style + '">' +
+                    '<span>' + icon + '</span><span>' + label + '</span></div>';
+            }).join('');
+            const errBlock = errorText
+                ? '<div style="margin-top:10px;padding:8px;background:#3f1d1d;border-radius:6px;color:#fca5a5;font-size:13px;white-space:pre-wrap;word-break:break-word">' + errorText + '</div>'
+                : '';
+            return '<h3>🧍 Скачивание 3D-аватара</h3>' + rows + errBlock +
+                '<div class="modal-row" style="margin-top:12px">' +
+                (errorText
+                    ? '<button onclick="showAvatar3dDialog()">Назад</button>'
+                    : '<button onclick="closeModal()">Свернуть</button>') +
+                '</div>';
+        }
+
         async function doDownloadAvatar3d() {
             const userId = (document.getElementById('av-uid').value || '').trim();
             if (!/^[0-9]+$/.test(userId)) {
                 notify('Введите числовой Roblox User ID', 'err');
                 return;
             }
-            closeModal();
 
-            const STATE_LABELS = {
-                'Pending': 'Roblox готовит модель…',
-                'InProgress': 'Roblox генерирует модель…',
-            };
+            // Генерация модели у Roblox обычно занимает секунд 10-30, но
+            // иногда дольше — поэтому это пошаговый прогресс внутри
+            // модалки (легко читается, не перекрывается другими
+            // всплывающими уведомлениями), а не серия notify().
+            const steps = ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Готово'];
+            let step = 0;
+            showModal(_avatarProgressHtml(steps, step));
 
-            const maxWaitMs = 120000; // до 2 минут — генерация иногда небыстрая
-            const pollEveryMs = 2500;
+            const maxWaitMs = 120000;
+            const pollEveryMs = 1500;
             const startedAt = Date.now();
             let bundleUrl = null;
+            let sawGenerating = false;
 
             while (Date.now() - startedAt < maxWaitMs) {
                 let st;
                 try {
                     st = await api('GET', '/api/roblox/avatar3d/status?userId=' + encodeURIComponent(userId));
                 } catch (e) {
-                    notify('Сеть/сервер: ' + (e && e.message || e), 'err');
+                    showModal(_avatarProgressHtml(steps, step, 'Сеть/сервер: ' + (e && e.message || e)));
                     return;
                 }
                 if (!st.ok) {
-                    notify(st.message || st.error || 'Не удалось запросить статус', 'err');
+                    showModal(_avatarProgressHtml(steps, step, st.message || st.error || 'Не удалось запросить статус'));
                     return;
                 }
                 if (st.ready) {
@@ -3167,28 +3191,33 @@
                     break;
                 }
                 if (st.state === 'Error') {
-                    notify('Roblox не смог сгенерировать модель для этого User ID', 'err');
+                    showModal(_avatarProgressHtml(steps, step, 'Roblox не смог сгенерировать модель для этого User ID'));
                     return;
                 }
-                notify(STATE_LABELS[st.state] || ('Ожидание… (' + st.state + ')'));
+                if (!sawGenerating) {
+                    sawGenerating = true;
+                    step = 1;
+                    showModal(_avatarProgressHtml(steps, step));
+                }
                 await new Promise(res => setTimeout(res, pollEveryMs));
             }
 
             if (!bundleUrl) {
-                notify('Roblox слишком долго готовит модель — попробуйте ещё раз чуть позже', 'err');
+                showModal(_avatarProgressHtml(steps, step, 'Roblox слишком долго готовит модель — попробуйте ещё раз чуть позже'));
                 return;
             }
 
-            notify('Модель готова, скачиваю файлы…');
+            step = 2;
+            showModal(_avatarProgressHtml(steps, step));
             let r;
             try {
                 r = await api('GET', '/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl));
             } catch (e) {
-                notify('Ошибка скачивания: ' + (e && e.message || e), 'err');
+                showModal(_avatarProgressHtml(steps, step, 'Ошибка скачивания: ' + (e && e.message || e)));
                 return;
             }
             if (!r.ok) {
-                notify(r.message || r.error || 'Не удалось скачать файлы', 'err');
+                showModal(_avatarProgressHtml(steps, step, r.message || r.error || 'Не удалось скачать файлы'));
                 return;
             }
 
@@ -3197,6 +3226,10 @@
             (r.textures || []).forEach(tex => {
                 _downloadBlob(_b64ToBlob(tex.data_b64, 'image/png'), tex.name);
             });
+
+            step = 3;
+            showModal(_avatarProgressHtml(steps, step));
+            setTimeout(() => { closeModal(); }, 1200);
             notify('✅ Аватар скачан (' + (2 + (r.textures || []).length) + ' файлов)');
         }
 

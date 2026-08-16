@@ -12,6 +12,7 @@ import subprocess
 import os
 
 
+
 def _ensure(pkg, imp=None):
     try:
         __import__(imp or pkg)
@@ -651,6 +652,18 @@ def api_roblox_avatar3d_status():
     try:
         resp = _rbx_get_json(
             f'https://thumbnails.roblox.com/v1/users/avatar-3d?userId={user_id}')
+        if 'data' not in resp or not resp['data']:
+            # Roblox не вернул ожидаемую структуру — обычно значит, что
+            # кука невалидна/просрочена и thumbnails.roblox.com ответил
+            # телом вида {"errors":[{"message": "..."}]} вместо {"data":[...]}.
+            rb_errors = resp.get('errors')
+            reason = (rb_errors[0].get('message') if rb_errors else None) \
+                or 'Roblox вернул неожиданный ответ'
+            return jsonify({
+                'ok': False,
+                'error': reason,
+                'message': f'Roblox отклонил запрос: {reason}. Попробуйте выйти и войти в аккаунт заново.',
+            }), 502
         item = resp['data'][0]
         state_ = item.get('state')
         return jsonify({
