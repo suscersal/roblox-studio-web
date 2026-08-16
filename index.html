@@ -3458,7 +3458,18 @@
                 return texByName[clean] || url;
             });
 
+            // ФИКС ПРОЗРАЧНОСТИ: THREE.MTLLoader (r128) трактует тег "Tr"
+            // (transparency, 1 = полностью прозрачно) БЕЗ инверсии, как
+            // если бы это было "d" (dissolve, 1 = непрозрачно) — это
+            // старый баг лоадера. Roblox иногда пишет в .mtl именно "Tr",
+            // из-за чего материалы получают заниженный opacity и весь
+            // аватар выглядит полупрозрачным ("призрачным"). invertTrProperty
+            // чинит семантику, а принудительный сброс ниже — подстраховка
+            // на случай других полей (d/Tr с "мусорными" значениями),
+            // потому что реальной художественной прозрачности у Roblox-
+            // аватара (кроме альфы в текстурах ресниц/волос) быть не должно.
             const mtlLoader = new THREE.MTLLoader(manager);
+            mtlLoader.setMaterialOptions({ invertTrProperty: true });
             const materials = mtlLoader.parse(mtlText, '');
             materials.preload();
             // ФИКС КАЧЕСТВА 1/2: MTLLoader по умолчанию делает материалы
@@ -3470,6 +3481,11 @@
             for (const key in materials.materials) {
                 const m = materials.materials[key];
                 m.side = THREE.DoubleSide;
+                // Принудительно делаем непрозрачным: ошибочно распарсенный
+                // d/Tr — самая частая причина "полупрозрачного" аватара.
+                m.transparent = false;
+                m.opacity = 1;
+                m.alphaTest = 0;
                 m.needsUpdate = true;
             }
 
@@ -3552,6 +3568,27 @@
                     parent: parent,
                 });
                 if (r.ok) ref = r.ref;
+                if (ref !== null) {
+                    // КРИТИЧНЫЙ ФИКС: свежий Part создаётся на сервере без
+                    // Position/CFrame (дефолт (0,0,0)). /api/scene фильтрует
+                    // объекты по дистанции от камеры (cx/cy/cz/r) — визуально
+                    // объект стоит рядом с камерой (см. object.position выше),
+                    // но сервер думает, что он в (0,0,0), и при первом же
+                    // reloadScene() (вызывается ниже через loadTree()) он
+                    // вылетает за радиус видимости и пропадает из ответа
+                    // сервера => не попадает ни в Explorer, ни в счётчик
+                    // объектов, ни обратно в сцену. Пишем реальную позицию.
+                    const size = box.getSize(new THREE.Vector3());
+                    await api('POST', '/api/instance/' + ref, {
+                        prop: 'Position',
+                        value: { x: object.position.x, y: object.position.y, z: object.position.z },
+                    });
+                    await api('POST', '/api/instance/' + ref, {
+                        prop: 'Size',
+                        value: { x: size.x || 1, y: size.y || 1, z: size.z || 1 },
+                    });
+                    await api('POST', '/api/instance/' + ref, { prop: 'Anchored', value: true });
+                }
             }
             if (ref !== null) {
                 window._avatarMeshCache = window._avatarMeshCache || {};
