@@ -1,6 +1,3 @@
-<img width="3839" height="1899" alt="Снимок экрана 2026-08-16 220011" src="https://github.com/user-attachments/assets/d53d4e80-d7b7-406b-93ca-7baf4f3a7b7d" />
-<img width="2470" height="1237" alt="Снимок экрана 2026-08-16 215948" src="https://github.com/user-attachments/assets/db9a285a-9ae0-422f-b4e1-82a4f022de95" />
-<img width="3839" height="1907" alt="Снимок экрана 2026-08-16 215407" src="https://github.com/user-attachments/assets/e24d0bd6-f1f3-4dde-aaf5-8850a77170c1" />
 Part of the code and the README were written by Claude Sonnet 4.6 (I’m not familiar with binary files, and I don’t have the time to write the README myself right now).
 
 [![Download](https://img.shields.io/github/downloads/suscersal/roblox-studio-web/total?label=Downloads&style=for-the-badge)](https://github.com/suscersal/roblox-studio-web/releases)
