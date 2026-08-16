@@ -715,6 +715,7 @@
     <div id="toolbar-top">
         <span class="title">🎮 RbxStudio</span>
         <div class="sep"></div>
+        <button onclick="newProject()" data-i18n-title="tb_new_title" title="New empty scene"><span data-i18n="tb_new">🆕 New</span></button>
         <button onclick="openFileBrowser('open')" data-i18n-title="tb_open_title" title="Open file (Ctrl+O)"><span data-i18n="tb_open">📂 Open</span></button>
         <button class="green" onclick="saveFile()" data-i18n-title="tb_save_title" title="Save (Ctrl+S)"><span data-i18n="tb_save">💾 Save</span></button>
         <button onclick="openFileBrowser('save')" data-i18n-title="tb_saveas_title" title="Save as"><span data-i18n="tb_saveas">💾 As...</span></button>
@@ -805,6 +806,7 @@
         // by adding a new key here (falls back to "en" for missing strings).
         const I18N = {
             en: {
+                tb_new: '🆕 New', tb_new_title: 'New empty scene',
                 tb_open: '📂 Open', tb_open_title: 'Open file (Ctrl+O)',
                 tb_save: '💾 Save', tb_save_title: 'Save (Ctrl+S)',
                 tb_saveas: '💾 As...', tb_saveas_title: 'Save as',
@@ -882,6 +884,7 @@
                 avatar_save_cancelled: 'Save cancelled',
             },
             ru: {
+                tb_new: '🆕 Новый', tb_new_title: 'Новая пустая сцена',
                 tb_open: '📂 Открыть', tb_open_title: 'Открыть файл (Ctrl+O)',
                 tb_save: '💾 Сохранить', tb_save_title: 'Сохранить (Ctrl+S)',
                 tb_saveas: '💾 Как...', tb_saveas_title: 'Сохранить как',
@@ -3057,6 +3060,26 @@
             const r = await api('POST', '/api/save', { path: path });
             if (r.ok) notify('💾 ' + r.path);
             else notify(r.error || t('notify_error'), 'err');
+        }
+
+        async function newProject() {
+            // Создаёт пустую сцену на сервере (набор стандартных сервисов
+            // Roblox верхнего уровня — Workspace/Lighting/... — см. /api/new
+            // в app.py) без файла на диске. Путь появится только при
+            // первом Save/Save As — saveFile() уже сам открывает диалог
+            // "Сохранить как", если file_path ещё не задан, так что
+            // ничего дополнительно чинить для сохранения не нужно.
+            if (!confirm(t('confirm_discard_unsaved') || 'Текущая сцена (если не сохранена) будет заменена пустой. Продолжить?')) return;
+            const r = await api('POST', '/api/new', {});
+            if (!r.ok) {
+                notify(r.error || t('notify_error'), 'err');
+                return;
+            }
+            selectedRef = null;
+            expanded.clear();
+            window._avatarMeshCache = {};
+            await loadTree();
+            notify(t('notify_new_scene') || 'Создана новая пустая сцена');
         }
 
         async function saveFile() {

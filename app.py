@@ -294,6 +294,49 @@ def api_open():
         return jsonify({'ok': False, 'error': str(e)}), 400
 
 
+@flask_app.route('/api/new', methods=['POST'])
+def api_new():
+    """Создаёт пустую сцену в памяти сервера (без файла на диске) — набор
+    стандартных сервисов Roblox верхнего уровня, как в новом плейсе.
+    Нужно, чтобы фичи вроде импорта Instance (например, 3D-аватара)
+    работали даже без предварительно открытого .rbxl — раньше PUT
+    /api/instance молча отваливался с ok:false, если state['parsed']
+    был None, и объект оставался только визуальным в вьюпорте, не
+    попадая ни в Explorer, ни в сохраняемый файл. save_rbxl умеет
+    полностью пересобрать бинарник даже без _raw_chunks/_raw_data
+    (см. ветку "с нуля" в save_rbxl), так что Save/Save As после этого
+    работает как обычно — путь просто нужно будет выбрать при сохранении."""
+    services = [
+        'Workspace', 'Lighting', 'ReplicatedStorage', 'ReplicatedFirst',
+        'ServerScriptService', 'ServerStorage', 'StarterGui', 'StarterPack',
+        'StarterPlayer', 'SoundService', 'Players', 'Teams', 'Chat',
+        'TextChatService',
+    ]
+    referent_to_class = {}
+    parent_map = {}
+    props = {}
+    for i, cls in enumerate(services, start=1):
+        referent_to_class[i] = cls
+        parent_map[i] = -1
+        props[i] = {'Name': cls}
+
+    state['parsed'] = {
+        'referent_to_class': referent_to_class,
+        'parent_map': parent_map,
+        'props': props,
+        'class_id_to_name': {},
+        'class_id_to_referents': {},
+        'skipped_prop_chunks': 0,
+        '_modified': True,
+        # Намеренно НЕ добавляем '_raw_chunks'/'_raw_data' — их отсутствие
+        # заставляет save_rbxl собирать бинарник с нуля из
+        # referent_to_class/parent_map/props вместо попытки переиспользовать
+        # чужие сырые чанки.
+    }
+    state['file_path'] = None
+    return jsonify({'ok': True, 'count': len(referent_to_class)})
+
+
 @flask_app.route('/api/tree')
 def api_tree():
     parsed = state['parsed']
