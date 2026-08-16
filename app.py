@@ -29,7 +29,20 @@ _ensure('flask')
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-ICONS_DIR = Path(__file__).parent / 'icons'
+# На Android иконки (icons/, icons.txt) НИКОГДА не проходят через
+# OTA-хотфикс (см. OtaUpdater.kt) — только через полную пересборку APK.
+# Но bridge_launcher.py при наличии хотфикса подменяет __file__ этого
+# модуля на путь внутри filesDir/hotpatch, где icons/ и icons.txt
+# физически не существуют. Раньше это молча обнуляло CLASS_ICONS и
+# гасило все иконки в Explorer/Properties. RSW_ICONS_DIR — явный путь к
+# ПОСТОЯННОЙ (baked-in) папке приложения, который bridge_launcher.py
+# прокидывает через переменную окружения именно на такой случай; если
+# её нет (обычный запуск `python app.py` с ПК), используем прежнее
+# поведение — путь рядом с этим файлом.
+_ICONS_BASE = Path(os.environ['RSW_ICONS_DIR']) if os.environ.get('RSW_ICONS_DIR') \
+    else Path(__file__).parent
+
+ICONS_DIR = _ICONS_BASE / 'icons'
 PORT = 47182  # нестандартный порт — 8080 часто занят другими приложениями/ADB
 
 CLASS_ICONS = {}
@@ -38,8 +51,8 @@ _icon_b64 = {}
 
 def _load_icons():
     global CLASS_ICONS
-    for p in [Path(__file__).parent / 'icons.json',
-              Path(__file__).parent / 'icons.txt']:
+    for p in [_ICONS_BASE / 'icons.json',
+              _ICONS_BASE / 'icons.txt']:
         if not p.exists():
             continue
         try:
@@ -69,7 +82,10 @@ _load_icons()
 
 
 def icon_src(cls):
-    fn = CLASS_ICONS.get(cls, 'Instance.png')
+    # 'Instance.png' в icons/ никогда не было — любой класс без записи в
+    # CLASS_ICONS раньше молча оставался без иконки. 'Unknown.png' там
+    # реально есть.
+    fn = CLASS_ICONS.get(cls, 'Unknown.png')
     return _icon_b64.get(fn, '')
 
 

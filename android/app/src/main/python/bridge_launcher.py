@@ -12,18 +12,32 @@ import sys
 def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     os.environ.setdefault("FLASK_DEBUG", "False")
 
-    # Если Kotlin-сторона скачала обновлённые app.py/index.html/icons.txt/
-    # icons/ (см. MainActivity.checkForOtaUpdate -> OtaUpdater), они лежат в
+    # ВАЖНО: этот модуль (bridge_launcher.py) сам НИКОГДА не проходит через
+    # OTA-хотфикс — Kotlin-сторона качает только app.py/rbxl_parser.py/
+    # index.html (см. OtaUpdater.kt), а bridge_launcher.py грузится
+    # исключительно из того, что зашито в APK при сборке. Поэтому его
+    # собственный __file__ в момент вызова этой функции — это всегда
+    # ПОСТОЯННЫЙ (baked-in) путь внутри APK, и именно рядом с ним лежат
+    # icons/ и icons.txt, никогда не подменяемые хотфиксом. Запоминаем
+    # этот путь ДО того, как ниже подменим sys.path/cwd на hotpatch_dir.
+    baked_dir = os.path.dirname(os.path.abspath(__file__))
+    os.environ["RSW_ICONS_DIR"] = baked_dir
+
+    # Если Kotlin-сторона скачала обновлённые app.py/index.html (см.
+    # MainActivity.checkForOtaUpdate -> OtaUpdater), они лежат в
     # hotpatch_dir. Подсовываем эту папку В НАЧАЛО sys.path, чтобы
     # `import app` нашёл именно скачанную версию, а не ту, что зашита в APK
-    # при сборке. app.py сам вычисляет ICONS_DIR относительно своего
-    # __file__, поэтому вместе с app.py подхватятся и icons/ из той же
-    # папки — пересборка APK для этого не нужна.
+    # при сборке. icons.txt и icons/ в hotpatch_dir НЕ приезжают (см.
+    # комментарий в OtaUpdater.kt) — раньше это молча гасило все иконки в
+    # Explorer/Properties, т.к. app.py вычислял ICONS_DIR относительно
+    # своего __file__ (который после этой подмены указывает в hotpatch_dir).
+    # Явный RSW_ICONS_DIR выше чинит это — app.py теперь всегда берёт
+    # иконки из baked_dir, даже когда сам код запущен из hotpatch_dir.
     if hotpatch_dir and os.path.isdir(hotpatch_dir):
         sys.path.insert(0, hotpatch_dir)
         here = hotpatch_dir
     else:
-        here = os.path.dirname(os.path.abspath(__file__))
+        here = baked_dir
 
     # app.py открывает index.html/icons.txt по ОТНОСИТЕЛЬНОМУ пути
     # (open("index.html", ...)) — это работало локально только потому,
