@@ -722,10 +722,29 @@ def api_roblox_avatar3d_status():
 def api_roblox_avatar3d_fetch():
     """Вызывается клиентом ТОЛЬКО после того, как /status вернул
     ready=true — сразу скачивает obj/mtl/текстуры по уже готовому
-    bundleUrl (без повторного ожидания)."""
+    bundleUrl (без повторного ожидания) и упаковывает их в ОДИН .zip,
+    записанный на диск (а не base64 в JSON — see below).
+
+    userId нужен для имени файла, savePath — папка, куда класть zip
+    (на Android клиент передаёт window.AndroidBridge.getDataDir(),
+    потому что писать напрямую в выбранное пользователем место сервер
+    не может — нет доступа к SAF-Uri; см. androidSaveConfirm() в
+    index.html, тот же паттерн, что уже используется для .rbxl).
+
+    Раньше файлы отдавались как base64 внутри JSON, а на клиенте
+    создавался <a download> с blob: URL — внутри Android WebView это
+    НЕ настоящее скачивание, ссылка просто "кликалась в никуда" и
+    пользователь не понимал, куда делись файлы."""
+    import zipfile
+    import tempfile as _tempfile
+
     bundle_url = request.args.get('bundleUrl', '').strip()
+    user_id = request.args.get('userId', '').strip() or 'unknown'
+    save_dir = request.args.get('savePath', '').strip()
     if not bundle_url.startswith('https://'):
         return jsonify({'ok': False, 'error': 'bundleUrl отсутствует или некорректен'}), 400
+    if not save_dir:
+        return jsonify({'ok': False, 'error': 'savePath отсутствует'}), 400
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'error': 'not_logged_in',
                          'message': 'Сначала войдите в аккаунт Roblox.'}), 401
@@ -745,26 +764,28 @@ def api_roblox_avatar3d_fetch():
 
             obj_bytes = obj_future.result()
             mtl_bytes = mtl_future.result()
-            textures = []
+            tex_files = []
             for tex_hash, fut in zip(tex_hashes, tex_futures):
-                textures.append({
-                    'name': _re.sub(r'[^a-zA-Z0-9._-]+', '_', tex_hash) + '.png',
-                    'data_b64': _b64.b64encode(fut.result()).decode('ascii'),
-                })
+                tex_files.append((
+                    _re.sub(r'[^a-zA-Z0-9._-]+', '_', tex_hash) + '.png',
+                    fut.result(),
+                ))
+
+        zip_name = f'roblox_avatar_{user_id}.zip'
+        zip_path = str(Path(save_dir) / zip_name)
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('avatar.obj', obj_bytes)
+            zf.writestr('avatar.mtl', mtl_bytes)
+            for name, data in tex_files:
+                zf.writestr(name, data)
+            meta = {'userId': user_id, 'camera': bundle.get('camera'), 'aabb': bundle.get('aabb')}
+            zf.writestr('meta.json', json.dumps(meta, ensure_ascii=False, indent=2))
 
         return jsonify({
             'ok': True,
-            'obj': {
-                'name': _re.sub(r'[^a-zA-Z0-9._-]+', '_', bundle['obj']) + '.obj',
-                'data_b64': _b64.b64encode(obj_bytes).decode('ascii'),
-            },
-            'mtl': {
-                'name': _re.sub(r'[^a-zA-Z0-9._-]+', '_', bundle['mtl']) + '.mtl',
-                'data_b64': _b64.b64encode(mtl_bytes).decode('ascii'),
-            },
-            'textures': textures,
-            'camera': bundle.get('camera'),
-            'aabb': bundle.get('aabb'),
+            'zipPath': zip_path,
+            'zipName': zip_name,
+            'fileCount': 3 + len(tex_files),
         })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 502

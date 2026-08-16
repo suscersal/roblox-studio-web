@@ -3186,7 +3186,7 @@
             // иногда дольше — поэтому это пошаговый прогресс внутри
             // модалки (легко читается, не перекрывается другими
             // всплывающими уведомлениями), а не серия notify().
-            const steps = ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Готово'];
+            const steps = ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Выберите, куда сохранить'];
             let step = 0;
             showModal(_avatarProgressHtml(steps, step));
 
@@ -3235,9 +3235,28 @@
 
             step = 2;
             showModal(_avatarProgressHtml(steps, step));
+
+            // На Android реальное место на диске сервер выбрать не может
+            // (нет доступа к SAF-Uri) — поэтому пишем zip во внутреннее
+            // хранилище приложения (getDataDir(), тот же путь, что уже
+            // используется для сохранения .rbxl), а последний шаг —
+            // системный диалог "Сохранить как" через существующий мост
+            // exportRbxlFile (он универсален, несмотря на название).
+            const dataDir = (typeof IS_ANDROID !== 'undefined' && IS_ANDROID)
+                ? window.AndroidBridge.getDataDir() : null;
+            if (!dataDir) {
+                showModal(_avatarProgressHtml(steps, step, 'Сохранение аватара доступно только в Android-приложении'));
+                return;
+            }
+
             let r;
             try {
-                r = await _apiAbortable('/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl), signal);
+                r = await _apiAbortable(
+                    '/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl) +
+                    '&userId=' + encodeURIComponent(userId) +
+                    '&savePath=' + encodeURIComponent(dataDir),
+                    signal
+                );
             } catch (e) {
                 if (_avatar3dCancelled || e.name === 'AbortError') return;
                 showModal(_avatarProgressHtml(steps, step, 'Ошибка скачивания: ' + (e && e.message || e)));
@@ -3249,17 +3268,26 @@
                 return;
             }
 
-            _downloadBlob(_b64ToBlob(r.obj.data_b64, 'text/plain'), r.obj.name);
-            _downloadBlob(_b64ToBlob(r.mtl.data_b64, 'text/plain'), r.mtl.name);
-            (r.textures || []).forEach(tex => {
-                _downloadBlob(_b64ToBlob(tex.data_b64, 'image/png'), tex.name);
-            });
-
             step = 3;
             showModal(_avatarProgressHtml(steps, step));
-            setTimeout(() => { closeModal(); }, 1200);
-            notify('✅ Аватар скачан (' + (2 + (r.textures || []).length) + ' файлов)');
+            // Тот же поток, что уже работает для сохранения .rbxl:
+            // Kotlin откроет системный диалог "Сохранить как", скопирует
+            // zip по выбранному пользователем месту и вызовет
+            // window.onAndroidFileExported(ok).
+            window.AndroidBridge.exportRbxlFile(r.zipPath, r.zipName);
         }
+
+        // Тот же колбэк уже используется для сохранения .rbxl — здесь
+        // просто закрываем прогресс-модалку аватара, если она открыта.
+        const _prevOnAndroidFileExported = window.onAndroidFileExported;
+        window.onAndroidFileExported = function (ok) {
+            if (_prevOnAndroidFileExported) _prevOnAndroidFileExported(ok);
+            const overlay = document.getElementById('modal-overlay');
+            if (overlay && overlay.classList.contains('show')) {
+                closeModal();
+            }
+            notify(ok ? '✅ Аватар сохранён' : 'Сохранение отменено', ok ? undefined : 'err');
+        };
 
         function showModal(html) {
             document.getElementById('modal-content').innerHTML = html;
