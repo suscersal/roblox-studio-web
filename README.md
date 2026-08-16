@@ -127,7 +127,7 @@ With file: `python3 app.py place.rbxl`
 
 ### Screenshots
 
-![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/1.jpg)
-![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/2.jpg)
-![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/3.jpg)
+![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/1.png)
+![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/2.png)
+![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/3.png)
 
