@@ -771,6 +771,20 @@ def api_roblox_avatar3d_fetch():
                     fut.result(),
                 ))
 
+        # БАГ-ФИКС: Roblox отдаёт .mtl со ссылками на текстуры БЕЗ
+        # расширения (например "map_Kd 30DAY-abc123"), а сами файлы мы
+        # сохраняем как "30DAY-abc123.png" — без этой правки Blender и
+        # другие вьюеры не находят текстуры при импорте. Дописываем
+        # ".png" к каждой ссылке, которая совпадает с одним из hash.
+        mtl_text = mtl_bytes.decode('utf-8', 'replace')
+        for tex_hash, _fname in zip(tex_hashes, [f[0] for f in tex_files]):
+            mtl_text = _re.sub(
+                r'(?<![\w.])' + _re.escape(tex_hash) + r'(?!\.\w)',
+                tex_hash + '.png',
+                mtl_text,
+            )
+        mtl_bytes = mtl_text.encode('utf-8')
+
         zip_name = f'roblox_avatar_{user_id}.zip'
         zip_path = str(Path(save_dir) / zip_name)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -781,12 +795,24 @@ def api_roblox_avatar3d_fetch():
             meta = {'userId': user_id, 'camera': bundle.get('camera'), 'aabb': bundle.get('aabb')}
             zf.writestr('meta.json', json.dumps(meta, ensure_ascii=False, indent=2))
 
-        return jsonify({
+        response = {
             'ok': True,
             'zipPath': zip_path,
             'zipName': zip_name,
             'fileCount': 3 + len(tex_files),
-        })
+        }
+        # Для импорта прямо в 3D-сцену редактора клиенту не нужен
+        # повторный поход на диск/сеть — сразу отдаём текст OBJ/MTL и
+        # текстуры как base64 (data URL). Это НЕ дублирует запись zip —
+        # zip всё равно нужен для варианта "просто скачать себе на диск".
+        if request.args.get('includeAssets') == '1':
+            response['obj_text'] = obj_bytes.decode('utf-8', 'replace')
+            response['mtl_text'] = mtl_text
+            response['textures'] = [
+                {'name': name, 'data_url': 'data:image/png;base64,' + _b64.b64encode(data).decode('ascii')}
+                for name, data in tex_files
+            ]
+        return jsonify(response)
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 502
 

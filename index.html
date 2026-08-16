@@ -1003,6 +1003,30 @@
             }
             tryLoad(0);
         })();
+
+        // OBJLoader/MTLLoader грузятся ЛЕНИВО, только когда реально нужен
+        // импорт модели — не тормозят обычный старт редактора. r128-совместимые
+        // UMD-версии (не ES-модули), вешают THREE.OBJLoader/THREE.MTLLoader
+        // на уже загруженный глобальный THREE.
+        let _objMtlLoadersPromise = null;
+        function ensureObjMtlLoaders() {
+            if (_objMtlLoadersPromise) return _objMtlLoadersPromise;
+            _objMtlLoadersPromise = new Promise((resolve, reject) => {
+                const urls = [
+                    'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js',
+                    'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
+                ];
+                let remaining = urls.length;
+                urls.forEach(u => {
+                    const s = document.createElement('script');
+                    s.src = u;
+                    s.onload = () => { if (--remaining === 0) resolve(); };
+                    s.onerror = () => reject(new Error('Не удалось загрузить ' + u));
+                    document.head.appendChild(s);
+                });
+            });
+            return _objMtlLoadersPromise;
+        }
     </script>
 
     <script>
@@ -3104,10 +3128,13 @@
             }
 
             showModal(
-                '<h3>🧍 Скачать 3D-аватар</h3>' +
+                '<h3>🧍 3D-аватар по User ID</h3>' +
                 '<input id="av-uid" placeholder="Roblox User ID">' +
                 '<div class="modal-row">' +
-                '<button onclick="doDownloadAvatar3d()" style="background:#7c3aed">Скачать</button>' +
+                '<button onclick="doDownloadAvatar3d(\'import\')" style="background:#7c3aed">🎬 Импортировать на сцену</button>' +
+                '<button onclick="doDownloadAvatar3d(\'save\')">💾 Скачать .zip</button>' +
+                '</div>' +
+                '<div class="modal-row">' +
                 '<button onclick="window.AndroidBridge && window.AndroidBridge.logoutRoblox(); closeModal();">Выйти из аккаунта</button>' +
                 '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
@@ -3171,7 +3198,7 @@
             return r.json();
         }
 
-        async function doDownloadAvatar3d() {
+        async function doDownloadAvatar3d(mode) {
             const userId = (document.getElementById('av-uid').value || '').trim();
             if (!/^[0-9]+$/.test(userId)) {
                 notify('Введите числовой Roblox User ID', 'err');
@@ -3182,11 +3209,9 @@
             _avatar3dAbort = new AbortController();
             const signal = _avatar3dAbort.signal;
 
-            // Генерация модели у Roblox обычно занимает секунд 10-30, но
-            // иногда дольше — поэтому это пошаговый прогресс внутри
-            // модалки (легко читается, не перекрывается другими
-            // всплывающими уведомлениями), а не серия notify().
-            const steps = ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Выберите, куда сохранить'];
+            const steps = mode === 'import'
+                ? ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Добавляю на сцену']
+                : ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Выберите, куда сохранить'];
             let step = 0;
             showModal(_avatarProgressHtml(steps, step));
 
@@ -3236,27 +3261,24 @@
             step = 2;
             showModal(_avatarProgressHtml(steps, step));
 
-            // На Android реальное место на диске сервер выбрать не может
-            // (нет доступа к SAF-Uri) — поэтому пишем zip во внутреннее
-            // хранилище приложения (getDataDir(), тот же путь, что уже
-            // используется для сохранения .rbxl), а последний шаг —
-            // системный диалог "Сохранить как" через существующий мост
-            // exportRbxlFile (он универсален, несмотря на название).
+            // savePath: на Android — приватная папка приложения (для SAF-
+            // экспорта нужен реальный путь на диске), на десктопе — рядом
+            // с самим app.py. Сервер всегда пишет .zip независимо от mode
+            // (дёшево и на будущее пригодится), а для mode='import'
+            // дополнительно просим includeAssets=1 — тогда в ответе сразу
+            // приходят готовые для three.js текст OBJ/MTL и текстуры,
+            // без повторного похода на сервер.
             const dataDir = (typeof IS_ANDROID !== 'undefined' && IS_ANDROID)
-                ? window.AndroidBridge.getDataDir() : null;
-            if (!dataDir) {
-                showModal(_avatarProgressHtml(steps, step, 'Сохранение аватара доступно только в Android-приложении'));
-                return;
-            }
+                ? window.AndroidBridge.getDataDir() : '.';
+
+            let fetchUrl = '/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl) +
+                '&userId=' + encodeURIComponent(userId) +
+                '&savePath=' + encodeURIComponent(dataDir);
+            if (mode === 'import') fetchUrl += '&includeAssets=1';
 
             let r;
             try {
-                r = await _apiAbortable(
-                    '/api/roblox/avatar3d/fetch?bundleUrl=' + encodeURIComponent(bundleUrl) +
-                    '&userId=' + encodeURIComponent(userId) +
-                    '&savePath=' + encodeURIComponent(dataDir),
-                    signal
-                );
+                r = await _apiAbortable(fetchUrl, signal);
             } catch (e) {
                 if (_avatar3dCancelled || e.name === 'AbortError') return;
                 showModal(_avatarProgressHtml(steps, step, 'Ошибка скачивания: ' + (e && e.message || e)));
@@ -3270,11 +3292,70 @@
 
             step = 3;
             showModal(_avatarProgressHtml(steps, step));
+
+            if (mode === 'import') {
+                try {
+                    await importAvatarIntoScene(r.obj_text, r.mtl_text, r.textures, userId);
+                } catch (e) {
+                    showModal(_avatarProgressHtml(steps, step, 'Не удалось импортировать: ' + (e && e.message || e)));
+                    return;
+                }
+                closeModal();
+                notify('✅ Аватар добавлен на сцену');
+                return;
+            }
+
+            if (!IS_ANDROID) {
+                showModal(_avatarProgressHtml(steps, step, 'Сохранение .zip доступно только в Android-приложении (в десктоп-режиме файл уже записан рядом с app.py: ' + r.zipPath + ')'));
+                return;
+            }
             // Тот же поток, что уже работает для сохранения .rbxl:
             // Kotlin откроет системный диалог "Сохранить как", скопирует
             // zip по выбранному пользователем месту и вызовет
             // window.onAndroidFileExported(ok).
             window.AndroidBridge.exportRbxlFile(r.zipPath, r.zipName);
+        }
+
+        // Загружает OBJ+MTL+текстуры (уже скачанные с сервера как текст/
+        // data URL) в текущую three.js сцену редактора как обычный объект.
+        // Текстуры подставляются через LoadingManager.setURLModifier —
+        // MTLLoader пытается идти в сеть за файлами по имени, а мы вместо
+        // этого подсовываем уже готовые data: URL.
+        async function importAvatarIntoScene(objText, mtlText, textures, userId) {
+            await ensureObjMtlLoaders();
+
+            const texByName = {};
+            (textures || []).forEach(t => { texByName[t.name] = t.data_url; });
+
+            const manager = new THREE.LoadingManager();
+            manager.setURLModifier((url) => {
+                const clean = url.split('/').pop();
+                return texByName[clean] || url;
+            });
+
+            const mtlLoader = new THREE.MTLLoader(manager);
+            const materials = mtlLoader.parse(mtlText, '');
+            materials.preload();
+
+            const objLoader = new THREE.OBJLoader(manager);
+            objLoader.setMaterials(materials);
+            const object = objLoader.parse(objText);
+
+            object.name = 'RobloxAvatar_' + userId;
+            // Аватар из Roblox приходит в масштабе их студийных единиц —
+            // сцена редактора использует ту же шкалу (studs), поэтому без
+            // доп. масштабирования; ставим в центр текущего вида камеры.
+            if (typeof scene !== 'undefined' && scene) {
+                scene.add(object);
+            } else {
+                throw new Error('3D-сцена ещё не готова, попробуйте через секунду');
+            }
+            if (typeof camera !== 'undefined' && camera) {
+                // Небольшой сдвиг перед камерой, чтобы сразу было видно.
+                const dir = new THREE.Vector3();
+                camera.getWorldDirection(dir);
+                object.position.copy(camera.position).add(dir.multiplyScalar(15));
+            }
         }
 
         // Тот же колбэк уже используется для сохранения .rbxl — здесь
