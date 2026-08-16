@@ -30,7 +30,7 @@ _ensure('flask')
 sys.path.insert(0, str(Path(__file__).parent))
 
 ICONS_DIR = Path(__file__).parent / 'icons'
-PORT = 8080
+PORT = 47182  # нестандартный порт — 8080 часто занят другими приложениями/ADB
 
 CLASS_ICONS = {}
 _icon_b64 = {}

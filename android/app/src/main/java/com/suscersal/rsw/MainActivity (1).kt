@@ -25,7 +25,7 @@ class MainActivity : AppCompatActivity() {
         // только один раз за жизнь процесса (см. комментарий в maxclient:
         // повторный вызов app.run() на уже занятом порту упадёт).
         private var serverStarted = false
-        private const val PORT = 8080
+        private const val PORT = 47182 // держим синхронно с PORT в app.py; 8080 часто занят другими приложениями/ADB
     }
 
     private lateinit var webView: WebView

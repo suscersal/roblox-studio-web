@@ -48,9 +48,35 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     # безвредны при импорте, т.к. flask уже установлен через chaquopy pip.
     import app as rsw_app  # это ваш существующий app.py
 
+    # Подстраховка от SystemExit(1) из werkzeug при "Address already in
+    # use": пробуем запрошенный порт, а если занят — перебираем следующие
+    # 20. Реальный порт нигде дополнительно не публикуется — Kotlin-сторона
+    # всё равно ждёт именно исходный PORT в waitForServerThenLoad(), так
+    # что это чисто аварийный fallback для случая внешнего конфликта (не
+    # спасёт от повторного вызова start_server в этом же процессе — тот
+    # случай уже прикрыт флагом serverStarted в MainActivity.kt).
+    import socket as _socket
+
+    def _port_free(p):
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        try:
+            s.bind(("127.0.0.1", p))
+            return True
+        except OSError:
+            return False
+        finally:
+            s.close()
+
+    actual_port = int(port)
+    if not _port_free(actual_port):
+        for candidate in range(int(port) + 1, int(port) + 21):
+            if _port_free(candidate):
+                actual_port = candidate
+                break
+
     rsw_app.flask_app.run(
         host="127.0.0.1",
-        port=int(port),
+        port=actual_port,
         debug=False,
         use_reloader=False,
         threaded=True,
