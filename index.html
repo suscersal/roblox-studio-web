@@ -1824,12 +1824,23 @@
                     .map(item => item.obj);
             }
 
-            const hits = raycaster.intersectObjects(objectsToCheck, false);
+            // recursive: true — обычным Mesh'ам без детей это ничего не
+            // стоит, а импортированным аватарам (THREE.Group из OBJLoader,
+            // без собственной геометрии) необходимо, иначе луч не попадает
+            // ни во что и клик по аватару не выбирает его вообще.
+            const hits = raycaster.intersectObjects(objectsToCheck, true);
 
             if (hits.length) {
-                const hit = hits[0];
-                if (hit.object && hit.object.userData && hit.object.userData.ref) {
-                    selectRef(parseInt(hit.object.userData.ref));
+                // У аватара userData.ref есть только на корневой Group —
+                // у её дочерних мешей (реальная цель попадания луча при
+                // recursive:true) его нет, поэтому поднимаемся по родителям
+                // до первого объекта с userData.ref.
+                let obj = hits[0].object;
+                while (obj && !(obj.userData && obj.userData.ref)) {
+                    obj = obj.parent;
+                }
+                if (obj && obj.userData && obj.userData.ref) {
+                    selectRef(parseInt(obj.userData.ref));
                     return;
                 }
             }
@@ -2008,6 +2019,25 @@
                 // (а его вызывает даже простое движение камеры).
                 const cached = window._avatarMeshCache && window._avatarMeshCache[o.ref];
                 const mesh = cached ? cached.object : buildMeshFromObj(o, geoCache, matCache);
+                if (cached) {
+                    // Геометрия закэширована и не перестраивается, но
+                    // Position/Rotation инстанса могли поменяться (правка в
+                    // панели свойств) — без этого синка аватар навсегда
+                    // оставался бы в точке первого импорта, несмотря на
+                    // сохранённые на сервере новые координаты.
+                    mesh.position.set(o.px || 0, o.py || 0, o.pz || 0);
+                    if (o.rot && o.rot.length >= 9) {
+                        const rm = new THREE.Matrix4();
+                        rm.set(
+                            o.rot[0], o.rot[1], o.rot[2], 0,
+                            o.rot[3], o.rot[4], o.rot[5], 0,
+                            o.rot[6], o.rot[7], o.rot[8], 0,
+                            0, 0, 0, 1
+                        );
+                        mesh.quaternion.setFromRotationMatrix(rm);
+                    }
+                    mesh.userData.ref = o.ref;
+                }
                 scene.add(mesh);
                 sceneObjs[o.ref] = mesh;
             }
@@ -2822,6 +2852,13 @@
                 input.onchange = async () => {
                     const newValue = { ...value };
                     newValue[coord] = parseFloat(input.value) || 0;
+                    // ВАЖНО: value — общий объект для всех трёх инпутов
+                    // (X/Y/Z), созданных в этом вызове addVector3Prop.
+                    // Панель не перерисовывается после каждой правки, так
+                    // что без этой строки следующий изменённый инпут (Y)
+                    // отправлял бы {...value} со СТАРЫМ X — правка X
+                    // визуально "откатывалась" при следующей же правке Y/Z.
+                    value[coord] = newValue[coord];
                     await api('POST', '/api/instance/' + ref, {
                         prop: propName,
                         value: newValue
@@ -3782,6 +3819,10 @@
                 }
             }
             if (ref !== null) {
+                // Без userData.ref луч в pick() не может определить, какому
+                // Instance принадлежит эта Group — клик по аватару в сцене
+                // никогда не выбирал его.
+                object.userData.ref = ref;
                 window._avatarMeshCache = window._avatarMeshCache || {};
                 window._avatarMeshCache[ref] = { object, centerOffset: centerOffset };
                 sceneObjs[ref] = object;

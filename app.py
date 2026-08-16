@@ -531,6 +531,23 @@ def api_roblox_userid():
         return jsonify({'ok': False, 'error': 'Пользователь не найден'}), 404
 
 
+def build_rot_matrix_from_deg(rx_deg, ry_deg, rz_deg):
+    """Строит 3x3-матрицу поворота (row-major, 9 элементов) из углов в
+    градусах — той же конвенцией, что get_rot_matrix() и разложение в
+    rbxl_parser.py (R = Rx(rx) * Ry(ry) * Rz(rz)), чтобы Rotation и CFrame
+    оставались согласованы в обе стороны."""
+    rx, ry, rz = math.radians(rx_deg), math.radians(
+        ry_deg), math.radians(rz_deg)
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
+    return [
+        cy*cz, -cy*sz, sy,
+        sx*sy*cz+cx*sz, -sx*sy*sz+cx*cz, -sx*cy,
+        -cx*sy*cz+sx*sz, cx*sy*sz+sx*cz, cx*cy
+    ]
+
+
 @flask_app.route('/api/instance/<int:ref>', methods=['POST'])
 def api_set_prop(ref):
     parsed = state['parsed']
@@ -540,8 +557,51 @@ def api_set_prop(ref):
     prop = data.get('prop')
     val = data.get('value')
     if prop is not None and ref in parsed['referent_to_class']:
-        parsed['props'].setdefault(ref, {})[prop] = val
+        props = parsed['props'].setdefault(ref, {})
+        props[prop] = val
         parsed['_modified'] = True
+
+        # CFrame в make_scene_objects имеет приоритет над Position/Rotation —
+        # если объект уже содержит CFrame, правка этих полей визуально
+        # ничего не меняла (сцена всё равно бралась из старого CFrame).
+        # Синхронизируем оба случая.
+        if prop == 'Position' and isinstance(val, dict):
+            x = safe_float(val.get('x', 0))
+            y = safe_float(val.get('y', 0))
+            z = safe_float(val.get('z', 0))
+            cf = props.get('CFrame')
+            if isinstance(cf, dict) and isinstance(cf.get('matrix'), (list, tuple)) and len(cf['matrix']) >= 12:
+                mat = list(cf['matrix'])
+                mat[3], mat[7], mat[11] = x, y, z
+                cf['matrix'] = mat
+            elif isinstance(cf, dict) and 'position' in cf:
+                cf['position'] = {'x': x, 'y': y, 'z': z}
+            else:
+                # CFrame отсутствовал — создаём с единичным поворотом
+                props['CFrame'] = {
+                    'matrix': [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z]
+                }
+        elif prop == 'Rotation' and isinstance(val, dict):
+            rx = safe_float(val.get('x', 0))
+            ry = safe_float(val.get('y', 0))
+            rz = safe_float(val.get('z', 0))
+            r00, r01, r02, r10, r11, r12, r20, r21, r22 = build_rot_matrix_from_deg(
+                rx, ry, rz)
+            cf = props.get('CFrame')
+            if isinstance(cf, dict) and isinstance(cf.get('matrix'), (list, tuple)) and len(cf['matrix']) >= 12:
+                mat = list(cf['matrix'])
+                px, py, pz = mat[3], mat[7], mat[11]
+            else:
+                pos = props.get('Position', {})
+                px = safe_float(pos.get('x', 0)) if isinstance(
+                    pos, dict) else 0
+                py = safe_float(pos.get('y', 0)) if isinstance(
+                    pos, dict) else 0
+                pz = safe_float(pos.get('z', 0)) if isinstance(
+                    pos, dict) else 0
+            props['CFrame'] = {
+                'matrix': [r00, r01, r02, px, r10, r11, r12, py, r20, r21, r22, pz]
+            }
     return jsonify({'ok': True})
 
 
@@ -557,7 +617,27 @@ def api_add():
     new_ref = max(parsed['referent_to_class'].keys(), default=0) + 1
     parsed['referent_to_class'][new_ref] = cls
     parsed['parent_map'][new_ref] = parent
-    parsed['props'][new_ref] = {'Name': name}
+
+    props = {'Name': name}
+    if cls in PART_CLASSES:
+        # Без начальных Position/Size/CFrame новый объект оказывается
+        # в (0,0,0) с нулевым/дефолтным размером и накладывается на
+        # другие части — визуально выглядит как "не появился".
+        px, py, pz = data.get('px', 0), data.get('py', 5), data.get('pz', 0)
+        sx, sy, sz = data.get('sx', 4), data.get('sy', 1), data.get('sz', 2)
+        props['Position'] = {'x': safe_float(
+            px), 'y': safe_float(py), 'z': safe_float(pz)}
+        props['Rotation'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        props['Size'] = {'x': safe_float(sx, 4), 'y': safe_float(
+            sy, 1), 'z': safe_float(sz, 2)}
+        props['CFrame'] = {
+            'matrix': [1, 0, 0, safe_float(px), 0, 1, 0, safe_float(py, 5), 0, 0, 1, safe_float(pz)]
+        }
+        props['Anchored'] = data.get('anchored', True)
+        props['CanCollide'] = data.get('cancollide', True)
+        props['Color'] = data.get('color', {'r': 0.63, 'g': 0.63, 'b': 0.63})
+
+    parsed['props'][new_ref] = props
     parsed['_modified'] = True
     return jsonify({'ok': True, 'ref': new_ref})
 
