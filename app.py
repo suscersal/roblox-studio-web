@@ -613,10 +613,19 @@ def _rbx_get_json(url):
     r = _req.Request(url, headers=_roblox_headers())
     try:
         with _req.urlopen(r, timeout=20) as resp:
-            return json.loads(resp.read().decode('utf-8'))
+            raw_text = resp.read().decode('utf-8', 'replace')
     except _urlerr.HTTPError as e:
         body = e.read().decode('utf-8', 'replace')[:300]
         raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        # Не JSON — почти всегда значит, что вместо API-ответа пришла
+        # HTML-страница (антибот-проверка Cloudflare/PerimeterX, редирект
+        # на логин и т.п.). Показываем начало тела как есть — так сразу
+        # видно, что это не наш баг, а блокировка со стороны Roblox.
+        snippet = raw_text[:300].replace('\n', ' ')
+        raise RuntimeError(f'Roblox вернул не-JSON ответ (похоже на антибот-страницу): {snippet}')
 
 
 def _rbx_get_bytes(url):
@@ -652,19 +661,30 @@ def api_roblox_avatar3d_status():
     try:
         resp = _rbx_get_json(
             f'https://thumbnails.roblox.com/v1/users/avatar-3d?userId={user_id}')
-        if 'data' not in resp or not resp['data']:
-            # Roblox не вернул ожидаемую структуру — обычно значит, что
-            # кука невалидна/просрочена и thumbnails.roblox.com ответил
-            # телом вида {"errors":[{"message": "..."}]} вместо {"data":[...]}.
-            rb_errors = resp.get('errors')
-            reason = (rb_errors[0].get('message') if rb_errors else None) \
-                or 'Roblox вернул неожиданный ответ'
+
+        if isinstance(resp, dict) and 'data' in resp and resp['data']:
+            item = resp['data'][0]
+        elif isinstance(resp, dict) and 'targetId' in resp and 'state' in resp:
+            # Roblox иногда отдаёт этот эндпоинт без обёртки {"data":[...]}
+            # — плоским объектом напрямую.
+            item = resp
+        elif isinstance(resp, dict) and resp.get('errors'):
+            reason = resp['errors'][0].get('message', 'нет описания')
             return jsonify({
                 'ok': False,
                 'error': reason,
                 'message': f'Roblox отклонил запрос: {reason}. Попробуйте выйти и войти в аккаунт заново.',
             }), 502
-        item = resp['data'][0]
+        else:
+            # Незнакомый формат — показываем сырой ответ целиком, чтобы
+            # можно было понять, что реально прислал Roblox (например,
+            # HTML-страницу антибот-проверки вместо JSON).
+            raw = json.dumps(resp, ensure_ascii=False)[:400]
+            return jsonify({
+                'ok': False,
+                'error': 'unexpected_response_shape',
+                'message': f'Roblox вернул формат ответа, который скрипт не понимает. Сырой ответ: {raw}',
+            }), 502
         state_ = item.get('state')
         return jsonify({
             'ok': True,
