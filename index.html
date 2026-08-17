@@ -2130,7 +2130,7 @@
         // Физику считаем не для всей загруженной сцены (при Quality=High это
         // могут быть тысячи объектов и телефон не тянет), а только для тех,
         // что ближе всего к точке спавна — это отдельный от рендер-LOD лимит.
-        const MAX_PHYSICS_BODIES = 900;
+        const MAX_PHYSICS_BODIES = 1600;
         // Раньше геометрия для физики запрашивалась ОДИН раз при старте
         // Play, вокруг точки спавна — стоило отойти достаточно далеко, и
         // под ногами/вокруг просто не оставалось ни одного тела: пол
@@ -2140,8 +2140,8 @@
         let lastStreamPos = { x: null, y: null, z: null };
         let streamInFlight = false;
         let fallingSinceMs = null; // когда персонаж начал падать без опоры под ногами
-        const STREAM_REFRESH_DIST = 50;   // студов сместились — пора подгрузить ещё
-        const STREAM_REFRESH_MS = 1500;   // не чаще этого, даже если стоим на месте
+        const STREAM_REFRESH_DIST = 20;   // студов сместились — пора подгрузить ещё
+        const STREAM_REFRESH_MS = 600;    // не чаще этого, даже если стоим на месте
         const STREAM_PRUNE_DIST = 500;    // дальше этого от игрока — выгружаем тело
         const MAX_STREAMED_BODIES = 1400; // жёсткий потолок общего числа тел за сеанс Play
 
@@ -2249,7 +2249,7 @@
             try {
                 const params = new URLSearchParams({
                     cx: Math.round(cx), cy: Math.round(cy), cz: Math.round(cz),
-                    limit: MAX_PHYSICS_BODIES
+                    limit: MAX_PHYSICS_BODIES, chunk: 1
                 });
                 const sceneResp = await api('GET', '/api/scene?' + params.toString());
                 if (!isPlaying || !sceneResp || !sceneResp.ok) return; // Play могли остановить, пока шёл запрос
@@ -2310,7 +2310,7 @@
             // редакторе (это могла быть совсем другая часть карты).
             const params = new URLSearchParams({
                 cx: Math.round(spawn.x), cy: Math.round(spawn.y), cz: Math.round(spawn.z),
-                limit: MAX_PHYSICS_BODIES
+                limit: MAX_PHYSICS_BODIES, chunk: 1
             });
             const sceneResp = await api('GET', '/api/scene?' + params.toString());
             if (!sceneResp.ok || !sceneResp.objects.length) {
@@ -2431,20 +2431,30 @@
         function buildCannonShape(mesh) {
             const shapeName = mesh.userData.shape;
             const sx = mesh.userData.sx || 1, sy = mesh.userData.sy || 1, sz = mesh.userData.sz || 1;
+            // Реальные тонкие плиты пола (трава, базплейты и т.п.) толщиной
+            // <1 стада — на них cannon.js без CCD регулярно "проваливает"
+            // сферу персонажа: за один сабстеп контакт просто не успевает
+            // сгенерироваться. Форму для физики утолщаем до безопасного
+            // минимума, сам меш (визуал) остаётся тонким как в файле.
+            const MIN_COLLIDER_THICKNESS = 1.0;
             switch (shapeName) {
                 case 'sphere': {
                     const r = Math.max(sx, sy, sz) * 0.5;
                     return new CANNON.Sphere(r);
                 }
                 case 'cylinder':
-                    return new CANNON.Cylinder(sx * 0.5, sz * 0.5, sy, 8);
+                    return new CANNON.Cylinder(sx * 0.5, sz * 0.5, Math.max(sy, MIN_COLLIDER_THICKNESS), 8);
                 // Wedge/Cone у cannon.js нет готовой формы — приближаем боксом
                 // по габаритам. Для точных скатов нужен ConvexPolyhedron.
                 case 'wedge':
                 case 'cone':
                 case 'box':
                 default:
-                    return new CANNON.Box(new CANNON.Vec3(sx * 0.5, sy * 0.5, sz * 0.5));
+                    return new CANNON.Box(new CANNON.Vec3(
+                        Math.max(sx * 0.5, MIN_COLLIDER_THICKNESS * 0.5),
+                        Math.max(sy * 0.5, MIN_COLLIDER_THICKNESS * 0.5),
+                        Math.max(sz * 0.5, MIN_COLLIDER_THICKNESS * 0.5)
+                    ));
             }
         }
 
@@ -2499,8 +2509,10 @@
             // Не ждём обычный троттлинг подгрузки — пробуем немедленно.
             if (!canJump && charBody.velocity.y < -5) {
                 const now = performance.now();
-                if (fallingSinceMs === null) fallingSinceMs = now;
-                else if (now - fallingSinceMs > 350 && !streamInFlight) {
+                if (fallingSinceMs === null && !streamInFlight) {
+                    fallingSinceMs = now;
+                    refreshStreamedGeometry();
+                } else if (fallingSinceMs !== null && now - fallingSinceMs > 200 && !streamInFlight) {
                     fallingSinceMs = now;
                     refreshStreamedGeometry();
                 }

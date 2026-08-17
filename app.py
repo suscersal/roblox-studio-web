@@ -183,7 +183,84 @@ def serialize_prop(v):
         return str(v)
 
 
-def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None):
+CHUNK_SIZE = 48.0   # студов — целевой размер стороны одного фрагмента
+CHUNK_MAX_GRID = 16  # ограничение и по X, и по Z из соображений пользователя
+# Порог, ниже которого объект не режем — нет смысла плодить фрагменты
+# для условного забора 60x2x2.
+CHUNK_MIN_DIM = 64.0
+
+
+def _rot_axis_world(rot, col):
+    # rot — построчная 3x3 матрица (см. get_rot_matrix); мировое направление
+    # локальной оси col — это СТОЛБЕЦ col матрицы (умножение R * e_col).
+    return (rot[col], rot[3 + col], rot[6 + col])
+
+
+def chunk_box_object(o):
+    """Режет один box-объект на сетку под-фрагментов по двум наибольшим
+    измерениям (третье — обычно толщина — не трогаем). Каждый фрагмент —
+    самостоятельный объект с честным центром и размером, чтобы дистанция
+    до игрока считалась по кускам, а не по гигантскому исходнику."""
+    dims = [('sx', o['sx']), ('sy', o['sy']), ('sz', o['sz'])]
+    # индексы измерений от большего к меньшему
+    order = sorted(range(3), key=lambda i: -dims[i][1])
+    big_a, big_b, keep = order[0], order[1], order[2]
+    dim_names = ['sx', 'sy', 'sz']
+
+    size_a = dims[big_a][1]
+    size_b = dims[big_b][1]
+    if max(size_a, size_b) < CHUNK_MIN_DIM:
+        return [o]
+
+    grid_a = max(1, min(CHUNK_MAX_GRID, math.ceil(size_a / CHUNK_SIZE)))
+    grid_b = max(1, min(CHUNK_MAX_GRID, math.ceil(size_b / CHUNK_SIZE)))
+    if grid_a == 1 and grid_b == 1:
+        return [o]
+
+    cell_a = size_a / grid_a
+    cell_b = size_b / grid_b
+
+    axis_a = _rot_axis_world(o['rot'], big_a)
+    axis_b = _rot_axis_world(o['rot'], big_b)
+
+    out = []
+    for i in range(grid_a):
+        # смещение центра фрагмента i вдоль локальной оси big_a от центра
+        # исходного объекта (в студах, в локальных координатах)
+        off_a = -size_a * 0.5 + cell_a * (i + 0.5)
+        for j in range(grid_b):
+            off_b = -size_b * 0.5 + cell_b * (j + 0.5)
+            wx = o['px'] + axis_a[0] * off_a + axis_b[0] * off_b
+            wy = o['py'] + axis_a[1] * off_a + axis_b[1] * off_b
+            wz = o['pz'] + axis_a[2] * off_a + axis_b[2] * off_b
+
+            new_sizes = {dim_names[big_a]: cell_a,
+                         dim_names[big_b]: cell_b,
+                         dim_names[keep]: dims[keep][1]}
+
+            chunk = dict(o)
+            chunk.update(new_sizes)
+            chunk['px'], chunk['py'], chunk['pz'] = wx, wy, wz
+            # синтетический, но уникальный ref — реальный ref детали
+            # закодирован в старших разрядах, коллизий с настоящими
+            # referent-ами (обычно < 10^6) быть не должно
+            chunk['ref'] = o['ref'] * 100000 + i * CHUNK_MAX_GRID + j
+            chunk['source_ref'] = o['ref']
+            out.append(chunk)
+    return out
+
+
+def chunk_large_objects(objs):
+    out = []
+    for o in objs:
+        if o.get('shape') == 'box':
+            out.extend(chunk_box_object(o))
+        else:
+            out.append(o)
+    return out
+
+
+def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=False):
     parsed = state['parsed']
     if not parsed:
         return [], 0
@@ -269,12 +346,28 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None):
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
+    if chunk:
+        objs = chunk_large_objects(objs)
+
     if cx is not None and cy is not None and cz is not None:
-        def d2(o):
-            return (o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2
+        def dist_to_nearest_point(o):
+            # Расстояние до центра занижает приоритет больших объектов:
+            # у длинной плиты пола центр может быть в сотне студов от
+            # игрока, а край — прямо под ногами. Аппроксимируем нижней
+            # оценкой расстояния до объекта — вычитаем полудиагональ
+            # его габаритов (радиус описанной сферы) из расстояния до
+            # центра. Оценка консервативная (может немного занижать
+            # реальную дистанцию до OBB), но гарантированно не отбросит
+            # объект, который на самом деле рядом.
+            center_d = math.sqrt(
+                (o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
+            bounding_radius = math.sqrt(
+                o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
+            return max(0.0, center_d - bounding_radius)
+
         if r is not None:
-            objs = [o for o in objs if d2(o) <= r * r]
-        objs.sort(key=d2)
+            objs = [o for o in objs if dist_to_nearest_point(o) <= r]
+        objs.sort(key=dist_to_nearest_point)
 
     total = len(objs)
     if limit is not None:
@@ -419,7 +512,8 @@ def api_scene():
     cz = request.args.get('cz', type=float)
     r = request.args.get('r', type=float)
     limit = request.args.get('limit', type=int)
-    objs, total = make_scene_objects(cx, cy, cz, r, limit)
+    chunk = request.args.get('chunk', type=int, default=0) == 1
+    objs, total = make_scene_objects(cx, cy, cz, r, limit, chunk=chunk)
     return jsonify({'ok': True, 'objects': objs, 'total': total})
 
 
