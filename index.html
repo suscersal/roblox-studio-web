@@ -1193,7 +1193,7 @@
                 maxObjects: 1000,
                 lodDistance: 50,
                 renderDistance: 250,
-                playBodies: 500,
+                playBodies: 500, // потолок Play-объектов один на все пресеты — см. medium/high ниже
             },
             medium: {
                 antialias: false,
@@ -1209,7 +1209,10 @@
                 maxObjects: 3000,
                 lodDistance: 100,
                 renderDistance: 500,
-                playBodies: 900,
+                playBodies: 500, // было 900 — при 4-6к-парт картах (Castle Warfare)
+                // даже это заметно роняло FPS на мобильном GPU; единый
+                // потолок 500 держит Play play лёгким на всех пресетах,
+                // качество (текстуры/тени/AA) при этом остаётся по пресету.
             },
             high: {
                 antialias: true,
@@ -1225,7 +1228,13 @@
                 maxObjects: 99999,
                 lodDistance: 200,
                 renderDistance: 1200,
-                playBodies: 1600,
+                playBodies: 500, // было 1600 — тот самый случай из скриншота
+                // (High, 10 FPS, 4000+ обj): в редакторе High даёт полную
+                // дальность и детализацию, это ок (статичная сцена, камера
+                // не двигается по 60 раз в секунду). Но в Play каждое тело —
+                // это ещё и физика (cannon.js) каждый кадр, а не только
+                // рендер, так что даже 900-1600 тел на телефоне были
+                // неподъёмны. Единый потолок 500 для всех пресетов.
             }
         };
 
@@ -1698,8 +1707,17 @@
                 const _dbgPR = renderer ? renderer.getPixelRatio() : '?';
                 const _dbgSize = renderer ? renderer.getSize(new THREE.Vector2()) : { x: '?', y: '?' };
                 const _dbgAniso = renderer ? renderer.capabilities.getMaxAnisotropy() : '?';
+                // Раньше тут был Object.keys(sceneObjs).length — общий
+                // размер словаря мешей, включая те, что сейчас скрыты
+                // (visible=false) стрим-обрезкой. Это вводило в заблуждение:
+                // счётчик не падал после ужатия видимого набора, хотя
+                // реально рисуется куда меньше. Считаем именно видимые.
+                let _visibleObjCount = 0;
+                for (const _m of Object.values(sceneObjs)) {
+                    if (_m.visible) _visibleObjCount++;
+                }
                 document.getElementById('fps-counter').textContent =
-                    'FPS: ' + currentFPS + ' | ' + Object.keys(sceneObjs).length + ' obj' +
+                    'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
                     ' | aniso:' + _dbgAniso;
                 fpsFrames = 0;
@@ -2360,6 +2378,18 @@
                 delete sceneObjs[ref];
                 delete playSnapshot[ref];
                 playOnlyRefs.delete(ref);
+            } else {
+                // Объект был в сцене ещё до Play (подгружен редактором,
+                // не через стриминг) — из сцены его не убираем (сохраняем
+                // снапшот для восстановления после Stop), но раз тело
+                // вытеснено за пределы стрим-лимита, рисовать его тоже
+                // не нужно. Без этого mesh.visible застревал на последнем
+                // значении навсегда — тело переставало отслеживаться, а
+                // меш как был виден, так и оставался, и с каждым шагом
+                // игрока таких "осиротевших" видимых мешей копилось всё
+                // больше (отсюда тысячи объектов в кадре вместо streamCap).
+                const mesh = sceneObjs[ref];
+                if (mesh) mesh.visible = false;
             }
         }
 
@@ -2387,13 +2417,20 @@
                 // (замок у спавна) это означало пересоздание физ-тел и
                 // мешей каждые 600мс ДАЖЕ СТОЯ НА МЕСТЕ (запрос лимитирован
                 // тем же центром) — и просаживало FPS без всякого ввода.
-                // Теперь запрос уже ограничен streamCap (см. limit выше), и
-                // вдобавок не добавляем новое тело, если лимит уже выбран —
-                // набор стабилизируется и перестаёт дёргаться, пока персонаж
-                // реально не сдвинется.
+                // Раньше тут был ранний continue, если physicsBodies.length
+                // уже >= streamCap — идея была не пересоздавать тела зря,
+                // стоя на месте. На деле это ломало саму подгрузку: сервер
+                // и так возвращает только streamCap БЛИЖАЙШИХ к текущей
+                // позиции объектов (сортировка по dist в make_scene_objects),
+                // но раз лимит уже "выбран" старыми телами позади игрока
+                // (STREAM_PRUNE_DIST=500 намного больше реального радиуса
+                // отрисовки ~300, так что они висят в памяти ещё долго),
+                // новые объекты ВПЕРЕДИ просто переставали добавляться —
+                // ты идёшь, а сцена не подгружается. Добавляем все объекты
+                // от сервера (они уже ближайшие), а вытеснение лишних до
+                // streamCap делает трим по дистанции чуть ниже.
                 const streamCap = maxStreamedBodies();
                 for (const o of sceneResp.objects) {
-                    if (!physicsBodies[o.ref] && Object.keys(physicsBodies).length >= streamCap) continue;
                     addPhysicsBodyForObj(o);
                 }
 
@@ -2490,8 +2527,32 @@
             playSnapshot = {};
             playOnlyRefs = new Set();
 
+            // Меши, оставшиеся в сцене от редактора (загружены раньше,
+            // вокруг позиции камеры редактора, с её renderDistance/
+            // maxObjects — необязательно рядом со спавном и необязательно
+            // в пределах streamCap), стрим-система не отслеживает и никогда
+            // не скрывает. Без явного сброса они просто продолжают
+            // рисоваться все Play целиком, независимо от лимита — это и
+            // даёт в кадре тысячи объектов вместо streamCap. Прячем всё,
+            // видимость дальше выставляется только для того, что реально
+            // попало в physicsBodies (см. цикл ниже).
+            for (const mesh of Object.values(sceneObjs)) {
+                mesh.visible = false;
+            }
+
             for (const o of sceneResp.objects) {
                 addPhysicsBodyForObj(o);
+            }
+
+            {
+                const cutoff = playRenderCutoff();
+                for (const refStr of Object.keys(physicsBodies)) {
+                    const mesh = sceneObjs[refStr];
+                    if (!mesh) continue;
+                    const body = physicsBodies[refStr];
+                    const d = Math.hypot(body.position.x - spawn.x, body.position.y - spawn.y, body.position.z - spawn.z);
+                    mesh.visible = d <= cutoff;
+                }
             }
 
             // Персонаж — сфера (без вращения, чтобы камера не крутило),
@@ -2550,7 +2611,15 @@
 
             for (const [refStr, mesh] of Object.entries(sceneObjs)) {
                 const ref = parseInt(refStr);
-                if (!(ref in playSnapshot)) continue;
+                if (!(ref in playSnapshot)) {
+                    // Не был подгружен стримингом за время Play вообще
+                    // (значит, это меш из редактора, которого startPlay
+                    // скрыл про запас, дальней обрезки на нём никогда не
+                    // применялось) — просто снимаем скрытие, снятие
+                    // матрицы тут не нужно, физика его не трогала.
+                    mesh.visible = true;
+                    continue;
+                }
                 if (playOnlyRefs.has(ref)) {
                     // Загружен только ради Play — убираем совсем, иначе
                     // задвоится с обычной подгрузкой редактора при следующем
