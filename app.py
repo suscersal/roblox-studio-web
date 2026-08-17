@@ -397,6 +397,58 @@ def api_open():
         return jsonify({'ok': False, 'error': str(e)}), 400
 
 
+@flask_app.route('/api/open/upload', methods=['POST'])
+def api_open_upload():
+    """Открытие .rbxl/.rbxlx, выбранного через ОБЫЧНЫЙ системный файловый
+    менеджер (<input type=file> на фронте, см. pickRbxlFileForOpen() в
+    index.html) — используется везде, кроме Android-APK с SAF-мостом (там
+    Kotlin уже кладёт файл в приватное хранилище приложения и передаёт
+    сюда обычный /api/open реальный путь на диске).
+
+    В отличие от /api/open, здесь путь на диске СЕРВЕРА для выбранного
+    пользователем файла в принципе не существует — браузер отдаёт только
+    БАЙТЫ (это касается и десктопа: сервер и вкладка браузера физически
+    не обязаны быть одной машиной). Поэтому сохраняем во временный файл
+    и парсим его как обычно."""
+    import tempfile
+
+    if 'file' not in request.files:
+        return jsonify({'ok': False, 'error': 'Файл не передан'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'ok': False, 'error': 'Имя файла пустое'}), 400
+
+    suffix = Path(file.filename).suffix or '.rbxl'
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            file.save(tmp.name)
+            tmp_path = tmp.name
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Не удалось сохранить файл: {e}'}), 500
+
+    try:
+        parsed = parse_rbxl(tmp_path)
+        state['parsed'] = parsed
+        # Реального пути на диске пользователя у нас нет (временный файл
+        # сейчас будет удалён) — оставляем file_path пустым, чтобы Ctrl+S/
+        # saveFile() сам открыл "Сохранить как" вместо тихой записи в
+        # исчезнувший temp-файл.
+        state['file_path'] = None
+        return jsonify({
+            'ok': True,
+            'count': len(parsed['referent_to_class']),
+            'name': file.filename,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
 @flask_app.route('/api/new', methods=['POST'])
 def api_new():
     """Создаёт пустую сцену в памяти сервера (без файла на диске) — набор
@@ -797,6 +849,49 @@ def api_publish():
         return jsonify({'ok': status == 200, 'status': status, 'text': text})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@flask_app.route('/api/save/download')
+def api_save_download():
+    """Сохранение "как" через обычную браузерную загрузку (нативный
+    менеджер загрузок ОС/браузера) вместо самописного проводника по
+    файловой системе СЕРВЕРА (см. /api/browse ниже) — тот путь вообще
+    не имел смысла всякий раз, когда сервер и вкладка браузера физически
+    не одна машина (в первую очередь — мобильный кейс). Пишем во
+    временный файл на диске сервера (как уже делает Android-ветка
+    сохранения через SAF), читаем байты в память и отдаём как
+    attachment, временный файл сразу удаляем."""
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'Нет данных'}), 400
+
+    name = os.path.basename(request.args.get('name') or 'place.rbxl') or 'place.rbxl'
+    ext = Path(name).suffix.lower()
+    if ext not in ('.rbxl', '.rbxlx'):
+        name += '.rbxl'
+        ext = '.rbxl'
+
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(suffix=ext)
+    os.close(fd)
+    try:
+        save_rbxl(parsed, tmp_path)
+        with open(tmp_path, 'rb') as f:
+            data = f.read()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    return Response(
+        data,
+        mimetype='application/octet-stream',
+        headers={'Content-Disposition': f'attachment; filename="{name}"'},
+    )
 
 
 @flask_app.route('/api/browse')

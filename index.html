@@ -6,6 +6,20 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
     <title>Roblox Studio Mobile</title>
 
+    <script>
+        // ВРЕМЕННАЯ ДИАГНОСТИКА (нет доступа к консоли разработчика) —
+        // ловим ЛЮБУЮ необработанную ошибку JS где угодно на странице.
+        // Если что-то падает при первой загрузке скрипта, это может тихо
+        // остановить выполнение остального кода (в т.ч. не даст
+        // определиться функции openFileBrowser) — и тогда клик по кнопке
+        // не будет делать вообще ничего, без единого алерта из самой
+        // функции. Этот перехватчик покажет такую ошибку.
+        window.addEventListener('error', function (e) {
+            alert('DEBUG GLOBAL ERROR: ' + e.message +
+                '\n' + (e.filename || '') + ':' + e.lineno + ':' + e.colno);
+        });
+    </script>
+
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
 
@@ -1251,6 +1265,16 @@
                 applyPixelRatio();
                 resize();
             }
+            if (scene) {
+                // См. комментарий у инициализации scene.fog — при переключении
+                // пресета (в т.ч. прямо во время Play кнопками Low/Med/High в
+                // HUD) туман должен пересчитываться вместе с остальным, иначе
+                // граница подгрузки резко "оголяется" на High. В Play дальность
+                // отрисовки — playRenderCutoff(), а не редакторская
+                // renderDistance (у High это 1200 против ~300 в игре).
+                const far = isPlaying ? playRenderCutoff() : (qualitySettings.fog ? 400 : qualitySettings.renderDistance);
+                scene.fog = new THREE.Fog(0x0f172a, 50, far);
+            }
             updateHelpers();
             reloadScene();
             notify(t('notify_quality') + level.toUpperCase());
@@ -1475,9 +1499,16 @@
 
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0f172a);
-            if (qualitySettings.fog) {
-                scene.fog = new THREE.Fog(0x0f172a, 50, 400);
-            }
+            // qualitySettings.fog отключён на High (fog:false) — это ок для
+            // редактора (статичная сцена, границы подгрузки не так заметны),
+            // но в Play с потоковой подгрузкой это означает, что край
+            // отрисовки/ещё не пришедшая с сервера геометрия видна как
+            // резкий переход в чистый фон сцены — читается как "дыра в
+            // пустоту". Обычный туман настраивается позже под конкретную
+            // сцену; здесь — временная лёгкая версия сразу при инициализации,
+            // чтобы граница видимости уже не была жёсткой ни на одном
+            // пресете. startPlay() ниже донастраивает её под playRenderCutoff.
+            scene.fog = new THREE.Fog(0x0f172a, 50, qualitySettings.fog ? 400 : qualitySettings.renderDistance);
 
             camera = new THREE.PerspectiveCamera(60, 1, 0.5, 500);
 
@@ -2237,6 +2268,7 @@
 
         // ============ PLAY-РЕЖИМ (ФИЗИКА + ПЕРСОНАЖ) ============
         let isPlaying = false;
+        let prevFogFar = null; // scene.fog.far на момент старта Play — восстанавливается в stopPlay()
         let physicsWorld = null;
         let physicsBodies = {};   // ref -> CANNON.Body
         let playSnapshot = {};    // ref -> THREE.Matrix4 до запуска
@@ -2246,7 +2278,13 @@
         let canJump = false;
         let prevCameraState = null;
         const GRAVITY_STUDS = -196.2; // workspace.Gravity в настоящем Roblox
-        const CHAR_RADIUS = 2.2;      // примерный радиус капсулы персонажа
+        const CHAR_RADIUS = 1.4;      // примерный радиус капсулы персонажа
+        // (было 2.2 — со стандартным Roblox-персонажем шириной ~2 стада
+        // это ощутимо толще самого перса; на стыках чанкованной геометрии
+        // и в узких проходах такая толщина иногда утапливала камеру
+        // (она сидит в центре сферы, см. followCharacterCamera) прямо в
+        // стену — оттуда сплошная серая заливка вблизи + чёрная пустота
+        // за ней, вместо нормального вида).
         const CHAR_SPEED = 16;        // стадов/сек — дефолтный Humanoid.WalkSpeed
         const STEP_HEIGHT = 3.2;      // студов — низкий бордюр перешагиваем автоматически
         const JUMP_VELOCITY = 50;
@@ -2393,18 +2431,46 @@
             }
         }
 
-        // Подгружает геометрию рядом с текущей позицией персонажа и
-        // выгружает то, что осталось далеко позади — иначе после
+        // Подгружает геометрию рядом с позицией персонажа и по лучу взгляда
+        // камеры, выгружает то, что осталось далеко позади — иначе после
         // единоразовой загрузки вокруг спавна пол и стены просто
         // заканчивались, стоило отойти подальше (отсюда и "проваливаюсь",
         // и ground-check, которому не во что было упираться лучом).
+        let streamRaycaster = null;
         async function refreshStreamedGeometry() {
             if (!isPlaying || !charBody || streamInFlight) return;
+            if (!streamRaycaster) streamRaycaster = new THREE.Raycaster();
             const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
             streamInFlight = true;
             try {
+                // Точка запроса — куда СМОТРИТ камера, а не куда движется
+                // персонаж (раньше был сдвиг по вектору скорости — работал,
+                // но грузил по курсу ходьбы, а не по факту обзора). Луч
+                // пускается из камеры по направлению взгляда и проверяется
+                // против УЖЕ загруженной геометрии (sceneObjs) — если он
+                // упирается в неё, дальше этой точки смысла запрашивать нет
+                // (она перекрыта стеной, всё равно не видно), берём именно
+                // точку попадания. Если луч ушёл в пустоту (ничего
+                // загруженного на пути — открытое место или ещё не
+                // подгруженный участок), целимся вперёд по лучу на
+                // ограниченную дистанцию, а не в бесконечность.
+                const camDir = new THREE.Vector3();
+                camera.getWorldDirection(camDir);
+                streamRaycaster.set(camera.position, camDir);
+                streamRaycaster.far = STREAM_PRUNE_DIST;
+                const hits = streamRaycaster.intersectObjects(Object.values(sceneObjs), false);
+                const LOOKAHEAD_CAP = Math.min(playRenderCutoff() * 1.3, 220);
+                let qx, qy, qz;
+                if (hits.length > 0) {
+                    const p = hits[0].point;
+                    qx = p.x; qy = p.y; qz = p.z;
+                } else {
+                    qx = camera.position.x + camDir.x * LOOKAHEAD_CAP;
+                    qy = camera.position.y + camDir.y * LOOKAHEAD_CAP;
+                    qz = camera.position.z + camDir.z * LOOKAHEAD_CAP;
+                }
                 const params = new URLSearchParams({
-                    cx: Math.round(cx), cy: Math.round(cy), cz: Math.round(cz),
+                    cx: Math.round(qx), cy: Math.round(qy), cz: Math.round(qz),
                     limit: maxStreamedBodies(), chunk: 1
                 });
                 const sceneResp = await api('GET', '/api/scene?' + params.toString());
@@ -2592,6 +2658,13 @@
             streamInFlight = false;
             playGeoCache = {};
             playMatCache = {};
+            // Реальная дальность отрисовки в Play — playRenderCutoff()
+            // (~300), а не renderDistance пресета (у High это 1200) — если
+            // не подвинуть туман под неё отдельно, край подгружаемой зоны
+            // всё равно останется резкой "дырой в пустоту" ещё до того, как
+            // дойдёт до тумана, настроенного под редакторскую дальность.
+            prevFogFar = scene.fog ? scene.fog.far : null;
+            if (scene.fog) scene.fog.far = playRenderCutoff();
             document.getElementById('play-btn').textContent = t('notify_stop');
             document.getElementById('play-btn').classList.add('red');
             document.getElementById('play-btn').classList.remove('green');
@@ -2608,6 +2681,8 @@
             charBody = null;
             canJump = false;
             jumpQueued = false;
+            if (scene.fog && prevFogFar !== null) scene.fog.far = prevFogFar;
+            prevFogFar = null;
 
             for (const [refStr, mesh] of Object.entries(sceneObjs)) {
                 const ref = parseInt(refStr);
@@ -3226,27 +3301,143 @@
         let _fbMode = 'open';
         let _fbPath = '';
 
+        // ============ СОХРАНЕНИЕ "КАК" ============
+        // Раньше "Сохранить как" вне Android открывало самописный
+        // проводник (fbModal/browseTo), который ходил по файловой системе
+        // СЕРВЕРА через /api/browse — на телефоне (и вообще всегда, когда
+        // сервер и вкладка браузера не одна машина) это в принципе не
+        // могло показать реальные файлы пользователя. Теперь везде —
+        // только системный путь: на Android это SAF-диалог "Сохранить
+        // как" через мост, в браузере — обычная нативная загрузка
+        // (менеджер загрузок ОС/браузера, см. /api/save/download).
         async function openFileBrowser(mode) {
             _fbMode = mode;
 
-            // На Android нет доступа к произвольным путям на диске (scoped
-            // storage) — вместо самописного браузера по /api/browse
-            // используем системный пикер (SAF). Открытие идёт через
-            // Android-интент, сохранение — через отдельный лёгкий диалог
-            // с именем файла (см. androidSaveModal).
-            if (IS_ANDROID) {
-                if (mode === 'open') {
-                    window.AndroidBridge.pickRbxlFile();
-                } else {
-                    showModal(androidSaveModal());
-                }
+            // ОТКРЫТИЕ — см. pickRbxlFileForOpen().
+            if (mode === 'open') {
+                pickRbxlFileForOpen();
                 return;
             }
 
-            const r = await api('GET', '/api/status');
-            _fbPath = r.file ? r.file.replace(/[/\\][^/\\]+$/, '') : '.';
-            showModal(fbModal());
-            browseTo(_fbPath);
+            showModal(saveAsModal());
+        }
+
+        function saveAsModal() {
+            return '<h3>' + t('fb_saveas_title') + '</h3>' +
+                '<input id="fb-name" placeholder="' + t('fb_name_ph') + '" value="place.rbxl">' +
+                '<div class="modal-row">' +
+                '<button onclick="confirmSaveAs()" style="background:#065f46">' + t('btn_save') + '</button>' +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
+                '</div>';
+        }
+
+        async function confirmSaveAs() {
+            const nm = document.getElementById('fb-name');
+            const name = (nm && nm.value.trim()) || 'place.rbxl';
+            closeModal();
+
+            if (window.AndroidBridge && typeof window.AndroidBridge.getDataDir === 'function' &&
+                typeof window.AndroidBridge.exportRbxlFile === 'function') {
+                // Android: сервер сначала пишет .rbxl во временный файл в
+                // приватном хранилище приложения (сервер видит только
+                // его — SAF-Uri для него недоступны), а Kotlin показывает
+                // системный диалог "Сохранить как" и копирует туда байты.
+                const dataDir = window.AndroidBridge.getDataDir();
+                const tempPath = dataDir + '/export_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
+                const r = await api('POST', '/api/save', { path: tempPath });
+                if (!r.ok) {
+                    notify(r.error || t('notify_error'), 'err');
+                    return;
+                }
+                window.AndroidBridge.exportRbxlFile(tempPath, name);
+                return;
+            }
+
+            // Браузер: обычная нативная загрузка файла — вызывается сразу
+            // в рамках того же клика, без alert()/await между кликом и
+            // созданием ссылки, чтобы не потерять user-activation (см.
+            // pickRbxlFileForOpen для той же проблемы на открытии).
+            const a = document.createElement('a');
+            a.href = '/api/save/download?name=' + encodeURIComponent(name);
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            notify('💾 ' + name);
+        }
+
+        // Вызывается из Kotlin после того как пользователь выбрал место
+        // через SAF и файл скопирован (или отменил диалог / произошла ошибка).
+        window.onAndroidFileExported = function (ok) {
+            notify(ok ? t('notify_saved_simple') : t('notify_save_cancelled'), ok ? undefined : 'err');
+        };
+
+        // Открытие .rbxl/.rbxlx нативным способом ОС вместо /api/browse.
+        // На Android — SAF через мост (Kotlin копирует файл в приватное
+        // хранилище приложения и вызывает onAndroidFileImported с локальным
+        // путём). Везде остальном — обычный <input type=file>: браузер сам
+        // показывает системный файловый менеджер, а выбранный файл
+        // отправляется на сервер как multipart/form-data (тот же паттерн,
+        // что уже используется для импорта аватара — см.
+        // pickAvatarFileForImport()).
+        function pickRbxlFileForOpen() {
+            // ВАЖНО: здесь раньше стояли блокирующие alert() между кликом
+            // пользователя и вызовом fileInput.click(). Нативный пикер
+            // файлов браузер показывает только в рамках "живого"
+            // пользовательского жеста (transient user activation) —
+            // alert() требует отдельного тапа "OK" и к моменту его закрытия
+            // этот жест уже израсходован/истёк, поэтому fileInput.click()
+            // молча ничего не делал. Используем console.log вместо alert —
+            // он ничего не блокирует и не трогает user-activation.
+            console.log('pickRbxlFileForOpen вызвана. AndroidBridge=' +
+                (typeof window.AndroidBridge) +
+                ', pickRbxlFile=' +
+                (window.AndroidBridge ? typeof window.AndroidBridge.pickRbxlFile : 'n/a'));
+
+            if (window.AndroidBridge && typeof window.AndroidBridge.pickRbxlFile === 'function') {
+                window.AndroidBridge.pickRbxlFile();
+                return;
+            }
+
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.rbxl,.rbxlx';
+            fileInput.style.display = 'none';
+            document.body.appendChild(fileInput);
+
+            fileInput.addEventListener('change', function (event) {
+                const file = event.target.files[0];
+                if (!file) {
+                    document.body.removeChild(fileInput);
+                    return;
+                }
+
+                console.log('выбран файл ' + file.name + ', размер ' + file.size + ' байт. Отправляю на /api/open/upload...');
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/api/open/upload', { method: 'POST', body: formData })
+                    .then(response => response.json())
+                    .then(data => {
+                        document.body.removeChild(fileInput);
+                        if (data.ok) {
+                            notify(t('notify_loaded_count', { n: data.count }));
+                            loadTree();
+                        } else {
+                            notify(data.error || t('notify_error'), 'err');
+                        }
+                    })
+                    .catch(err => {
+                        document.body.removeChild(fileInput);
+                        console.error('Ошибка загрузки файла:', err);
+                        notify(t('notify_error'), 'err');
+                    });
+            });
+
+            // Вызывается сразу, синхронно, в рамках того же клика — без
+            // alert()/await между ними, иначе браузер молча откажет.
+            fileInput.click();
         }
 
         // Вызывается из Kotlin (MainActivity.AndroidBridge) после того как
@@ -3261,114 +3452,6 @@
                 notify(r.error || t('notify_error'), 'err');
             }
         };
-
-        function androidSaveModal() {
-            return '<h3>' + t('fb_saveas_title') + '</h3>' +
-                '<input id="fb-name" placeholder="' + t('fb_name_ph') + '" value="place.rbxl">' +
-                '<div class="modal-row">' +
-                '<button onclick="androidSaveConfirm()" style="background:#065f46">' + t('btn_save') + '</button>' +
-                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
-                '</div>';
-        }
-
-        // Сохранение на Android — двухшаговое: сервер сначала пишет .rbxl во
-        // временный файл в приватном хранилище приложения (сервер видит
-        // только его — SAF-Uri для него недоступны), а затем Kotlin
-        // предлагает пользователю выбрать реальное место через системный
-        // диалог "Сохранить как" и копирует туда байты.
-        async function androidSaveConfirm() {
-            const nm = document.getElementById('fb-name');
-            const name = (nm && nm.value.trim()) || 'place.rbxl';
-            closeModal();
-            const dataDir = window.AndroidBridge.getDataDir();
-            const tempPath = dataDir + '/export_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
-            const r = await api('POST', '/api/save', { path: tempPath });
-            if (!r.ok) {
-                notify(r.error || t('notify_error'), 'err');
-                return;
-            }
-            window.AndroidBridge.exportRbxlFile(tempPath, name);
-        }
-
-        // Вызывается из Kotlin после того как пользователь выбрал место
-        // через SAF и файл скопирован (или отменил диалог / произошла ошибка).
-        window.onAndroidFileExported = function (ok) {
-            notify(ok ? t('notify_saved_simple') : t('notify_save_cancelled'), ok ? undefined : 'err');
-        };
-
-        function fbModal() {
-            return '<h3>' + (_fbMode === 'open' ? t('fb_open_title') : t('fb_saveas_title')) + '</h3>' +
-                '<div id="fb-path"></div>' +
-                '<div id="fb-list"></div>' +
-                (_fbMode === 'save' ? '<input id="fb-name" placeholder="' + t('fb_name_ph') + '">' : '') +
-                '<div class="modal-row">' +
-                (_fbMode === 'save' ? '<button onclick="fbSave()" style="background:#065f46">' + t('btn_save') + '</button>' : '') +
-                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
-                '</div>';
-        }
-
-        async function browseTo(path) {
-            _fbPath = path;
-            const r = await api('GET', '/api/browse?path=' + encodeURIComponent(path));
-            if (!r.ok) {
-                notify(r.error, 'err');
-                return;
-            }
-            document.getElementById('fb-path').textContent = r.path;
-            const list = document.getElementById('fb-list');
-            list.innerHTML = '';
-            for (const e of r.entries) {
-                // В режиме "Открыть" выбрать можно только .rbxl — остальное
-                // не показываем вовсе, чтобы нельзя было случайно ткнуть не
-                // туда (парсер всё равно понимает только бинарный .rbxl).
-                if (_fbMode === 'open' && e.type !== 'dir' && e.type !== 'rbxl') continue;
-
-                const row = document.createElement('div');
-                let cls = 'fb-entry';
-                if (e.type === 'dir') cls += ' dir';
-                else if (e.type === 'rbxl' || e.type === 'rbxlx') cls += ' file-rbxl';
-                else if (e.type === 'json') cls += ' file-json';
-                row.className = cls;
-                const icon = e.type === 'dir' ? '📁' :
-                    e.type === 'rbxl' || e.type === 'rbxlx' ? '🎮' :
-                        e.type === 'json' ? '📋' : '📄';
-                row.innerHTML = '<span>' + icon + '</span><span>' + esc(e.name) + '</span>';
-                if (e.size) {
-                    const sz = document.createElement('span');
-                    sz.className = 'fb-size';
-                    sz.textContent = e.size > 1048576 ? (e.size / 1048576).toFixed(1) + 'MB' :
-                        e.size > 1024 ? (e.size / 1024).toFixed(0) + 'KB' : e.size + 'B';
-                    row.appendChild(sz);
-                }
-                row.onclick = () => {
-                    if (e.type === 'dir') browseTo(e.path);
-                    else if (_fbMode === 'open' && e.type === 'rbxl') fbOpen(e.path);
-                };
-                list.appendChild(row);
-            }
-        }
-
-        async function fbOpen(path) {
-            closeModal();
-            const r = await api('POST', '/api/open', { path: path });
-            if (r.ok) {
-                notify(t('notify_loaded_count', { n: r.count }));
-                loadTree();
-            } else {
-                notify(r.error, 'err');
-            }
-        }
-
-        function fbSave() {
-            const nm = document.getElementById('fb-name');
-            if (!nm || !nm.value.trim()) {
-                notify(t('notify_enter_name'), 'warn');
-                return;
-            }
-            const path = _fbPath.replace(/\/$/, '') + '/' + nm.value.trim();
-            closeModal();
-            doSave(path);
-        }
 
         async function doSave(path) {
             const r = await api('POST', '/api/save', { path: path });
