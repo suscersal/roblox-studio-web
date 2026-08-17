@@ -1448,6 +1448,22 @@
             renderer.shadowMap.enabled = qualitySettings.shadows;
             vp.appendChild(renderer.domElement);
 
+            // ВРЕМЕННАЯ ДИАГНОСТИКА: если WebView не даёт доступ к
+            // реальному GPU и откатывается на софтверный рендерер
+            // (SwiftShader/llvmpipe/Google SwiftShader), картинка будет
+            // мыльной ВНЕ ЗАВИСИМОСТИ от pixelRatio/anisotropy — это
+            // ограничение системы, а не наших настроек качества.
+            try {
+                const dbgExt = renderer.getContext().getExtension('WEBGL_debug_renderer_info');
+                const gpuInfo = dbgExt
+                    ? renderer.getContext().getParameter(dbgExt.UNMASKED_RENDERER_WEBGL)
+                    : 'н/д (расширение недоступно)';
+                notify('GPU: ' + gpuInfo, 'warn');
+                console.log('WebGL renderer:', gpuInfo);
+            } catch (e) {
+                console.log('Не удалось получить инфо о GPU:', e);
+            }
+
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0f172a);
             if (qualitySettings.fog) {
@@ -1673,8 +1689,19 @@
             const now = performance.now();
             if (now - fpsTime >= 1000) {
                 currentFPS = Math.round(fpsFrames / ((now - fpsTime) / 1000));
+                // ВРЕМЕННАЯ ДИАГНОСТИКА: реальный pixelRatio, физическое
+                // разрешение canvas-буфера и максимальная анизотропия,
+                // которую отдаёт GPU/драйвер устройства. Нужно, чтобы
+                // понять, действительно ли на телефоне применяются наши
+                // фиксы, или там что-то ограничивает их на уровне
+                // WebView/GPU. Уберите после диагностики.
+                const _dbgPR = renderer ? renderer.getPixelRatio() : '?';
+                const _dbgSize = renderer ? renderer.getSize(new THREE.Vector2()) : { x: '?', y: '?' };
+                const _dbgAniso = renderer ? renderer.capabilities.getMaxAnisotropy() : '?';
                 document.getElementById('fps-counter').textContent =
-                    'FPS: ' + currentFPS + ' | ' + Object.keys(sceneObjs).length + ' obj';
+                    'FPS: ' + currentFPS + ' | ' + Object.keys(sceneObjs).length + ' obj' +
+                    ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
+                    ' | aniso:' + _dbgAniso;
                 fpsFrames = 0;
                 fpsTime = now;
             }
