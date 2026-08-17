@@ -657,14 +657,31 @@
             }
         }
 
+        /* Раньше стик нужно было ловить пальцем ровно в границах круга
+           112px — на телефоне, когда не смотришь на большой палец, это
+           стабильно промахивается. Теперь есть широкая невидимая зона
+           #joy-zone (выше и вокруг круга), и стик "всплывает" туда, куда
+           реально попал палец, а не наоборот. */
+        #joy-zone {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 112px;
+            height: 240px;
+            pointer-events: all;
+            touch-action: none;
+        }
+
         #joy-base {
             width: 112px;
             height: 112px;
             border-radius: 50%;
             background: rgba(31, 41, 55, 0.55);
             border: 1px solid #4b5563;
-            position: relative;
-            pointer-events: all;
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            pointer-events: none;
             touch-action: none;
         }
 
@@ -686,7 +703,11 @@
             flex-direction: column;
             gap: 4px;
             align-items: center;
-            pointer-events: all
+            pointer-events: all;
+            /* joy-base/joy-zone больше не в потоке flex (position:absolute),
+               поэтому место под них резервируем отступом вручную: 112px
+               (диаметр) + 14px (тот же gap, что был у #mobile-pad раньше) */
+            margin-left: 126px;
         }
 
         .pad-btn {
@@ -784,6 +805,7 @@
                 ⌨️ WASD — move | F — focus | Esc — deselect
             </div>
             <div id="mobile-pad">
+                <div id="joy-zone"></div>
                 <div id="joy-base">
                     <div id="joy-thumb"></div>
                 </div>
@@ -1171,6 +1193,7 @@
                 maxObjects: 1000,
                 lodDistance: 50,
                 renderDistance: 250,
+                playBodies: 500,
             },
             medium: {
                 antialias: false,
@@ -1186,6 +1209,7 @@
                 maxObjects: 3000,
                 lodDistance: 100,
                 renderDistance: 500,
+                playBodies: 900,
             },
             high: {
                 antialias: true,
@@ -1201,6 +1225,7 @@
                 maxObjects: 99999,
                 lodDistance: 200,
                 renderDistance: 1200,
+                playBodies: 1600,
             }
         };
 
@@ -1487,14 +1512,34 @@
         }
 
         function initJoystick() {
+            const zone = document.getElementById('joy-zone');
             const base = document.getElementById('joy-base');
             const thumb = document.getElementById('joy-thumb');
-            if (!base || !thumb) return;
-            const maxR = 34; // px, максимальный вылет ручки стика
+            if (!zone || !base || !thumb) return;
+            const maxR = 34;   // px, максимальный вылет ручки стика от центра base
+            const deadZone = 6; // px — маленький дрожащий сдвиг пальца не должен давать ход
             let touchId = null;
 
             function setThumb(dx, dy) {
                 thumb.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
+            }
+
+            // "Всплывающий" стик: на touchstart сам круг базы переезжает
+            // туда, где реально коснулся палец (по вертикали — зона выше
+            // круга специально высокая, ловит палец, куда бы он ни лёг),
+            // а не требует от игрока попасть точно в фиксированные 112px.
+            function placeBase(clientX, clientY) {
+                const zr = zone.getBoundingClientRect();
+                // база квадратная 112×112, центрируем её на пальце, но не
+                // даём уехать за пределы зоны (иначе стик может вылезти
+                // за экран или наехать на кнопки прыжка/спуска)
+                const half = 56;
+                let localCX = clientX - zr.left;
+                let localCY = clientY - zr.top;
+                localCX = Math.max(half, Math.min(zr.width - half, localCX));
+                localCY = Math.max(half, Math.min(zr.height - half, localCY));
+                base.style.left = (localCX - half) + 'px';
+                base.style.bottom = (zr.height - localCY - half) + 'px';
             }
 
             function handleMove(clientX, clientY) {
@@ -1504,6 +1549,12 @@
                 let dx = clientX - cx;
                 let dy = clientY - cy;
                 const dist = Math.hypot(dx, dy);
+                if (dist < deadZone) {
+                    setThumb(0, 0);
+                    joyVector.x = 0;
+                    joyVector.y = 0;
+                    return;
+                }
                 if (dist > maxR) {
                     dx = dx / dist * maxR;
                     dy = dy / dist * maxR;
@@ -1518,17 +1569,21 @@
                 joyVector.x = 0;
                 joyVector.y = 0;
                 setThumb(0, 0);
+                // возвращаем базу в исходный угол зоны для следующего касания
+                base.style.left = '0px';
+                base.style.bottom = '0px';
             }
 
-            base.addEventListener('touchstart', e => {
+            zone.addEventListener('touchstart', e => {
                 e.preventDefault();
                 e.stopPropagation();
                 const t = e.changedTouches[0];
                 touchId = t.identifier;
+                placeBase(t.clientX, t.clientY);
                 handleMove(t.clientX, t.clientY);
             }, { passive: false });
 
-            base.addEventListener('touchmove', e => {
+            zone.addEventListener('touchmove', e => {
                 e.preventDefault();
                 e.stopPropagation();
                 for (const t of e.changedTouches) {
@@ -1539,7 +1594,7 @@
                 }
             }, { passive: false });
 
-            ['touchend', 'touchcancel'].forEach(ev => base.addEventListener(ev, e => {
+            ['touchend', 'touchcancel'].forEach(ev => zone.addEventListener(ev, e => {
                 for (const t of e.changedTouches) {
                     if (t.identifier === touchId) {
                         resetJoy();
@@ -2130,7 +2185,22 @@
         // Физику считаем не для всей загруженной сцены (при Quality=High это
         // могут быть тысячи объектов и телефон не тянет), а только для тех,
         // что ближе всего к точке спавна — это отдельный от рендер-LOD лимит.
-        const MAX_PHYSICS_BODIES = 1600;
+        //
+        // Раньше этот потолок был константой (1600), одинаковой для всех
+        // Quality — то есть даже на Low телефон всё равно получал те же
+        // ~1600 отдельных мешей во время Play (каждое физ-тело = свой
+        // draw call), и именно это "проседание FPS" со временем и было:
+        // Low ограничивает объекты редактора (maxObjects), но не то, что
+        // догружается по ходу Play. Теперь лимит берётся из качества.
+        //
+        // Раньше у запроса к серверу (limit) был отдельный, чуть больший
+        // потолок, чем у клиентской обрезки (streamCap) — "с запасом".
+        // На деле это давало обратный эффект: сервер каждый раз честно
+        // возвращал тот же самый избыток сверх streamCap, клиент тут же
+        // обрезал его назад — а на плотной карте у спавна (замок) это
+        // означало пересоздание физ-тел и мешей каждые 600мс даже стоя на
+        // месте. Запрашиваем сразу ровно streamCap — избытка просто нет.
+        function maxStreamedBodies() { return qualitySettings.playBodies; }
         // Раньше геометрия для физики запрашивалась ОДИН раз при старте
         // Play, вокруг точки спавна — стоило отойти достаточно далеко, и
         // под ногами/вокруг просто не оставалось ни одного тела: пол
@@ -2143,7 +2213,12 @@
         const STREAM_REFRESH_DIST = 20;   // студов сместились — пора подгрузить ещё
         const STREAM_REFRESH_MS = 600;    // не чаще этого, даже если стоим на месте
         const STREAM_PRUNE_DIST = 500;    // дальше этого от игрока — выгружаем тело
-        const MAX_STREAMED_BODIES = 1400; // жёсткий потолок общего числа тел за сеанс Play
+        // За пределами этой дистанции меш всё ещё физически существует
+        // (тело нужно, чтобы пол/стены не исчезали резко под ногами), но
+        // рендерить его смысла нет — он и так почти не виден и просто ест
+        // draw call'ы. Даёт запас до STREAM_PRUNE_DIST, где тело выгрузится
+        // совсем, так что видимость не "мигает" на границе выгрузки.
+        function playRenderCutoff() { return Math.min(qualitySettings.renderDistance, STREAM_PRUNE_DIST * 0.6); }
 
         function togglePlay() {
             if (isPlaying) stopPlay(); else startPlay();
@@ -2249,12 +2324,25 @@
             try {
                 const params = new URLSearchParams({
                     cx: Math.round(cx), cy: Math.round(cy), cz: Math.round(cz),
-                    limit: MAX_PHYSICS_BODIES, chunk: 1
+                    limit: maxStreamedBodies(), chunk: 1
                 });
                 const sceneResp = await api('GET', '/api/scene?' + params.toString());
                 if (!isPlaying || !sceneResp || !sceneResp.ok) return; // Play могли остановить, пока шёл запрос
 
+                // Раньше здесь был отдельный, чуть больший потолок для
+                // запроса к серверу, чем для клиентской обрезки (streamCap).
+                // Сервер каждый раз честно возвращал этот избыток, а мы его
+                // тут же обрезали обратно до streamCap — на плотной карте
+                // (замок у спавна) это означало пересоздание физ-тел и
+                // мешей каждые 600мс ДАЖЕ СТОЯ НА МЕСТЕ (запрос лимитирован
+                // тем же центром) — и просаживало FPS без всякого ввода.
+                // Теперь запрос уже ограничен streamCap (см. limit выше), и
+                // вдобавок не добавляем новое тело, если лимит уже выбран —
+                // набор стабилизируется и перестаёт дёргаться, пока персонаж
+                // реально не сдвинется.
+                const streamCap = maxStreamedBodies();
                 for (const o of sceneResp.objects) {
+                    if (!physicsBodies[o.ref] && Object.keys(physicsBodies).length >= streamCap) continue;
                     addPhysicsBodyForObj(o);
                 }
 
@@ -2271,14 +2359,28 @@
                 // фиксированной дистанции), и рано или поздно это начинает
                 // тормозить и провоцировать пропуски кадров физики.
                 const refs = Object.keys(physicsBodies);
-                if (refs.length > MAX_STREAMED_BODIES) {
+                if (refs.length > streamCap) {
                     const withDist = refs.map(refStr => {
                         const body = physicsBodies[refStr];
                         return [refStr, Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz)];
                     }).sort((a, b) => b[1] - a[1]);
-                    for (let i = 0; i < withDist.length - MAX_STREAMED_BODIES; i++) {
+                    for (let i = 0; i < withDist.length - streamCap; i++) {
                         removePhysicsBodyForRef(parseInt(withDist[i][0]));
                     }
+                }
+
+                // Тело физически держит пол/стены на месте и дальше этой
+                // границы, но рисовать их отдельными draw call'ами, когда
+                // они еле видны вдалеке — чистые потери FPS. Скрываем меш,
+                // не трогая физику: коллизия остаётся, GPU эту геометрию
+                // больше не получает.
+                const renderCutoff = playRenderCutoff();
+                for (const refStr of Object.keys(physicsBodies)) {
+                    const mesh = sceneObjs[refStr];
+                    if (!mesh) continue;
+                    const body = physicsBodies[refStr];
+                    const d = Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz);
+                    mesh.visible = d <= renderCutoff;
                 }
             } finally {
                 streamInFlight = false;
@@ -2310,7 +2412,7 @@
             // редакторе (это могла быть совсем другая часть карты).
             const params = new URLSearchParams({
                 cx: Math.round(spawn.x), cy: Math.round(spawn.y), cz: Math.round(spawn.z),
-                limit: MAX_PHYSICS_BODIES, chunk: 1
+                limit: maxStreamedBodies(), chunk: 1
             });
             const sceneResp = await api('GET', '/api/scene?' + params.toString());
             if (!sceneResp.ok || !sceneResp.objects.length) {
@@ -2407,6 +2509,7 @@
                     delete sceneObjs[ref];
                 } else {
                     mesh.matrix.copy(playSnapshot[ref]);
+                    mesh.visible = true; // сняли дальнюю обрезку рендера, введённую во время Play
                 }
             }
             playSnapshot = {};
