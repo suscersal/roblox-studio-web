@@ -1239,6 +1239,7 @@
             document.getElementById('q-' + level).classList.add('active');
             if (renderer) {
                 renderer.shadowMap.enabled = qualitySettings.shadows;
+                applyPixelRatio();
                 resize();
             }
             updateHelpers();
@@ -1433,10 +1434,17 @@
 
             renderer = new THREE.WebGLRenderer({
                 antialias: qualitySettings.antialias,
-                powerPreference: "low-power",
-                precision: "mediump"
+                powerPreference: currentQuality === 'high' ? "high-performance" : "low-power",
+                precision: currentQuality === 'high' ? "highp" : "mediump"
             });
-            renderer.setPixelRatio(1);
+            // ФИКС ЧЁТКОСТИ НА ТЕЛЕФОНЕ: раньше pixelRatio был жёстко = 1,
+            // независимо от реальной плотности пикселей экрана. На ПК
+            // (DPR≈1) это почти незаметно, но на телефоне (DPR обычно 2-3)
+            // рендер шёл в 2-3 раза ниже реального разрешения экрана и
+            // затем растягивался — отсюда "мыло" по сравнению с ПК даже
+            // на пресете High. Используем настоящий devicePixelRatio
+            // (ограниченный сверху, чтобы не сажать слабые телефоны).
+            applyPixelRatio();
             renderer.shadowMap.enabled = qualitySettings.shadows;
             vp.appendChild(renderer.domElement);
 
@@ -1627,11 +1635,27 @@
             notify(qualitySettings.helpers ? t('notify_helpers_on') : t('notify_helpers_off'));
         }
 
+        // Максимальный DPR, который реально используем. На High
+        // разрешаем до 2x — этого достаточно для чёткости и не убивает
+        // FPS на большинстве телефонов. На Low/Medium сознательно держим
+        // ниже (экономия производительности важнее там).
+        function applyPixelRatio() {
+            if (!renderer) return;
+            const cap = currentQuality === 'high' ? 2 : currentQuality === 'medium' ? 1.5 : 1;
+            const dpr = Math.min(window.devicePixelRatio || 1, cap);
+            renderer.setPixelRatio(dpr);
+        }
+
         function resize() {
             const vp = document.getElementById('viewport');
             const scale = qualitySettings.resolutionScale;
             const w = Math.floor(vp.clientWidth * scale);
             const h = Math.floor(vp.clientHeight * scale);
+            // ВАЖНО: setSize принимает CSS-размер (третий аргумент false —
+            // не трогать style самим three.js, стиль задаём вручную ниже).
+            // Реальный размер буфера отрисовки = w*pixelRatio x h*pixelRatio,
+            // это считает сам renderer — раньше повышенная плотность
+            // экрана телефона никак не учитывалась.
             renderer.setSize(w, h, false);
             renderer.domElement.style.width = '100%';
             renderer.domElement.style.height = '100%';
@@ -3807,7 +3831,17 @@
                     if (n.geometry) n.geometry.computeVertexNormals();
                     const mats = Array.isArray(n.material) ? n.material : [n.material];
                     mats.forEach(m => {
-                        if (m && m.map) { m.map.encoding = THREE.sRGBEncoding; m.map.needsUpdate = true; }
+                        if (m && m.map) {
+                            m.map.encoding = THREE.sRGBEncoding;
+                            // ФИКС ЗЕРНИСТОСТИ ТЕКСТУР НА ТЕЛЕФОНЕ: без
+                            // анизотропной фильтрации текстуры кожи/одежды
+                            // "шумят" и теряют детали под углом к камере —
+                            // на высокоплотном экране телефона это заметнее,
+                            // чем на мониторе ПК. getMaxAnisotropy() отдаёт
+                            // максимум, который поддерживает GPU устройства.
+                            m.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                            m.map.needsUpdate = true;
+                        }
                     });
                 }
             });
