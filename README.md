@@ -1,5 +1,3 @@
-Part of the code and the README were written by Claude Sonnet 4.6 (I’m not familiar with binary files, and I don’t have the time to write the README myself right now).
-
 [![Download](https://img.shields.io/github/downloads/suscersal/roblox-studio-web/total?label=Downloads&style=for-the-badge)](https://github.com/suscersal/roblox-studio-web/releases)
 
 # 🎮 Roblox Studio Web
@@ -131,3 +129,6 @@ With file: `python3 app.py place.rbxl`
 ![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/2.png)
 ![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/3.png)
 ![](https://github.com/suscersal/roblox-studio-web/blob/main/screenshots/4.png)
+
+
+Part of the code and the README were written by Claude Sonnet 4.6 (I’m not familiar with binary files, and I don’t have the time to write the README myself right now).
