@@ -20,8 +20,86 @@
         });
     </script>
 
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
+    <script>
+        // ============ ОФЛАЙН-КЕШ БИБЛИОТЕК (без Service Worker) ============
+        // Всё в одном index.html: CodeMirror/Three.js/Cannon.js грузятся
+        // с CDN один раз (когда есть интернет), их исходный код целиком
+        // сохраняется как ТЕКСТ в localStorage. При повторных запусках
+        // (в т.ч. без интернета) код читается из localStorage и
+        // подставляется на страницу так же, как обычный <script>/<style>,
+        // включая объявление функций в ГЛОБАЛЬНОЙ области видимости — это
+        // важно, т.к. вся остальная разметка использует
+        // onclick="имяФункции()" и требует именно глобальных функций.
+        //
+        // Ограничение: localStorage работает только там, где страница
+        // считается "полноценным origin" — при открытии как обычный файл
+        // (file://index.html) или через http(s)-сервер всё работает; если
+        // почему-то не работает в вашей среде — запустите рядом любой
+        // локальный веб-сервер (python -m http.server) и откройте через
+        // http://localhost:PORT/.
+
+        function _libCacheKey(url) { return 'rbxlib:' + url; }
+
+        // СИНХРОННАЯ загрузка — нужна для CodeMirror: он должен быть
+        // определён ДО того, как остальной код страницы начнёт его
+        // использовать (см. `CodeMirror.fromTextArea` ниже по файлу),
+        // а весь остальной код — это один большой обычный <script>, не
+        // async/module, так что дождаться async-загрузки не получится
+        // без риска что-то сломать. Поэтому: сначала смотрим в
+        // localStorage (это синхронное API), а если там пусто —
+        // синхронный XHR (устаревший приём, но именно то, что нужно —
+        // ведёт себя как обычный блокирующий <script src>).
+        function loadLibSync(url) {
+            const key = _libCacheKey(url);
+            const cached = localStorage.getItem(key);
+            if (cached !== null) return cached;
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', url, false); // false = синхронный запрос
+            xhr.send(null);
+            if (xhr.status !== 200 && xhr.status !== 0) {
+                throw new Error('Нет интернета и нет кеша для библиотеки: ' + url);
+            }
+            const text = xhr.responseText;
+            try { localStorage.setItem(key, text); } catch (e) {
+                // localStorage переполнен или недоступен — просто не
+                // кешируем, на текущую загрузку страницы это не влияет.
+            }
+            return text;
+        }
+
+        // document.write работает только пока страница ещё парсится
+        // (т.е. пока мы в <head>) — этим и пользуемся, чтобы вставить
+        // код библиотеки СИНХРОННО, в правильном порядке, в глобальную
+        // область видимости.
+        function writeLibScript(url) {
+            document.write('<script>' + loadLibSync(url) + '<\/script>');
+        }
+        function writeLibStyle(url) {
+            document.write('<style>' + loadLibSync(url) + '<\/style>');
+        }
+
+        // АСИНХРОННАЯ версия — для библиотек, которые и так грузятся
+        // лениво через JS (Three.js, OBJ/MTL-лоадеры, Cannon.js).
+        // Возвращает Promise<строка с исходным кодом>.
+        function loadLibAsync(url) {
+            const key = _libCacheKey(url);
+            const cached = localStorage.getItem(key);
+            if (cached !== null) return Promise.resolve(cached);
+            return fetch(url).then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status + ' для ' + url);
+                return r.text();
+            }).then(function (text) {
+                try { localStorage.setItem(key, text); } catch (e) { }
+                return text;
+            });
+        }
+    </script>
+
+    <script>
+        writeLibStyle('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css');
+        writeLibStyle('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css');
+    </script>
 
 
     <style>
@@ -1071,93 +1149,102 @@
         }
     </script>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+    <script>
+        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js');
+        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js');
+        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js');
+        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js');
+    </script>
 
     <script>
-        // Three.js загрузка
+        // Вставляет код библиотеки (полученный из loadLibAsync — из кеша
+        // localStorage или свежескачанный) как обычный <script> в
+        // глобальную область видимости, синхронно относительно момента
+        // вызова (в отличие от src=url, которому нужен ещё один сетевой
+        // круг + событие onload).
+        function injectLibCode(code) {
+            const s = document.createElement('script');
+            s.textContent = code;
+            document.head.appendChild(s);
+        }
+
+        // Three.js загрузка. Сначала пробуем локальный файл three.min.js
+        // (если пользователь вручную положил его рядом с index.html) —
+        // он не кешируется через localStorage, т.к. и так уже локальный.
+        // Иначе — CDN через loadLibAsync (кешируется в localStorage,
+        // так что при следующих запусках работает офлайн).
         (function () {
-            const scripts = [
-                'three.min.js',
-                'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'
-            ];
             let loaded = false;
-            function tryLoad(i) {
-                if (i >= scripts.length) {
-                    console.error('Three.js не загружен');
-                    document.getElementById('fps-counter').textContent = '3D: ошибка';
-                    return;
-                }
+            function onThreeReady() {
+                if (loaded) return;
+                loaded = true;
+                initThree();
+            }
+            function tryLocalThenCdn() {
                 const s = document.createElement('script');
-                s.src = scripts[i];
-                s.onload = () => {
-                    if (!loaded) {
-                        loaded = true;
-                        console.log('Three.js загружен из: ' + scripts[i]);
-                        initThree();
-                    }
-                };
-                s.onerror = () => {
-                    console.warn('Не удалось загрузить: ' + scripts[i]);
-                    tryLoad(i + 1);
+                s.src = 'three.min.js';
+                s.onload = onThreeReady;
+                s.onerror = function () {
+                    loadLibAsync('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js')
+                        .then(function (code) {
+                            injectLibCode(code);
+                            onThreeReady();
+                        })
+                        .catch(function (err) {
+                            console.error('Three.js не загружен: ' + err);
+                            const el = document.getElementById('fps-counter');
+                            if (el) el.textContent = '3D: ошибка';
+                        });
                 };
                 document.head.appendChild(s);
             }
-            tryLoad(0);
+            tryLocalThenCdn();
         })();
 
         // OBJLoader/MTLLoader грузятся ЛЕНИВО, только когда реально нужен
         // импорт модели — не тормозят обычный старт редактора. r128-совместимые
         // UMD-версии (не ES-модули), вешают THREE.OBJLoader/THREE.MTLLoader
-        // на уже загруженный глобальный THREE.
+        // на уже загруженный глобальный THREE. Кешируются через
+        // loadLibAsync так же, как Three.js.
         let _objMtlLoadersPromise = null;
         function ensureObjMtlLoaders() {
             if (_objMtlLoadersPromise) return _objMtlLoadersPromise;
-            _objMtlLoadersPromise = new Promise((resolve, reject) => {
-                const urls = [
-                    'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js',
-                    'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
-                ];
-                let remaining = urls.length;
-                urls.forEach(u => {
-                    const s = document.createElement('script');
-                    s.src = u;
-                    s.onload = () => { if (--remaining === 0) resolve(); };
-                    s.onerror = () => reject(new Error('Не удалось загрузить ' + u));
-                    document.head.appendChild(s);
-                });
+            const urls = [
+                'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js',
+                'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
+            ];
+            _objMtlLoadersPromise = Promise.all(urls.map(loadLibAsync)).then(function (codes) {
+                codes.forEach(injectLibCode);
             });
             return _objMtlLoadersPromise;
         }
     </script>
 
     <script>
-        // Cannon.js загрузка (физика для Play-режима)
+        // Cannon.js загрузка (физика для Play-режима). Та же схема:
+        // локальный cannon.min.js в приоритете, иначе CDN через
+        // loadLibAsync (кешируется в localStorage для офлайн-работы).
         (function () {
-            const scripts = [
-                'cannon.min.js',
-                'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js'
-            ];
             let loaded = false;
-            function tryLoad(i) {
-                if (i >= scripts.length) {
-                    console.error('Cannon.js не загружен — Play-режим недоступен');
-                    return;
-                }
-                const s = document.createElement('script');
-                s.src = scripts[i];
-                s.onload = () => {
-                    if (!loaded) {
-                        loaded = true;
-                        console.log('Cannon.js загружен из: ' + scripts[i]);
-                    }
-                };
-                s.onerror = () => tryLoad(i + 1);
-                document.head.appendChild(s);
+            function onCannonReady() {
+                if (loaded) return;
+                loaded = true;
+                console.log('Cannon.js загружен');
             }
-            tryLoad(0);
+            const s = document.createElement('script');
+            s.src = 'cannon.min.js';
+            s.onload = onCannonReady;
+            s.onerror = function () {
+                loadLibAsync('https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js')
+                    .then(function (code) {
+                        injectLibCode(code);
+                        onCannonReady();
+                    })
+                    .catch(function (err) {
+                        console.error('Cannon.js не загружен — Play-режим недоступен: ' + err);
+                    });
+            };
+            document.head.appendChild(s);
         })();
     </script>
 
@@ -1254,7 +1341,7 @@
                 maxObjects: 99999,
                 lodDistance: 200,
                 renderDistance: 1200,
-                playBodies: 1000 // было 1600 — тот самый случай из скриншота
+                playBodies: 500, // При 500 fps 50, при 1000 fps 20(странно)было 1600 — тот самый случай из скриншота
                 // (High, 10 FPS, 4000+ обj): в редакторе High даёт полную
                 // дальность и детализацию, это ок (статичная сцена, камера
                 // не двигается по 60 раз в секунду). Но в Play каждое тело —
