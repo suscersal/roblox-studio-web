@@ -1208,6 +1208,18 @@
                 lodDistance: 50,
                 renderDistance: 250,
                 playBodies: 500, // потолок Play-объектов один на все пресеты — см. medium/high ниже
+                // Раньше здесь была плотность веера лучей (rayGrid) —
+                // весь подход на raycast-based стриминге снесён (см.
+                // refreshStreamedGeometry): камера-направленные лучи
+                // систематически давали "дыры" под неудобным углом и были
+                // источником большинства багов последних правок. Теперь
+                // подгрузка — chunk-based, как в Minecraft/UE5 World
+                // Partition: просто радиус вокруг ИГРОКА, направление
+                // взгляда вообще не участвует. loadRadius — студов вокруг
+                // игрока, в пределах которых объекты гарантированно
+                // подгружены (физика), независимо от того, куда смотрит
+                // камера.
+                loadRadius: 350,
             },
             medium: {
                 antialias: false,
@@ -1226,7 +1238,7 @@
                 playBodies: 500, // было 900 — при 4-6к-парт картах (Castle Warfare)
                 // даже это заметно роняло FPS на мобильном GPU; единый
                 // потолок 500 держит Play play лёгким на всех пресетах,
-                // качество (текстуры/тени/AA) при этом остаётся по пресету.
+                loadRadius: 550,
             },
             high: {
                 antialias: true,
@@ -1242,15 +1254,16 @@
                 maxObjects: 99999,
                 lodDistance: 200,
                 renderDistance: 1200,
-                playBodies: 500, // было 1600 — тот самый случай из скриншота
+                playBodies: 1000 // было 1600 — тот самый случай из скриншота
                 // (High, 10 FPS, 4000+ обj): в редакторе High даёт полную
                 // дальность и детализацию, это ок (статичная сцена, камера
                 // не двигается по 60 раз в секунду). Но в Play каждое тело —
                 // это ещё и физика (cannon.js) каждый кадр, а не только
                 // рендер, так что даже 900-1600 тел на телефоне были
                 // неподъёмны. Единый потолок 500 для всех пресетов.
+                loadRadius: 900,
             }
-        };
+        }
 
         let currentQuality = 'low';
         let qualitySettings = QUALITY_PRESETS.low;
@@ -1272,7 +1285,7 @@
                 // граница подгрузки резко "оголяется" на High. В Play дальность
                 // отрисовки — playRenderCutoff(), а не редакторская
                 // renderDistance (у High это 1200 против ~300 в игре).
-                const far = isPlaying ? playRenderCutoff() : (qualitySettings.fog ? 400 : qualitySettings.renderDistance);
+                const far = isPlaying ? STREAM_PRUNE_DIST : (qualitySettings.fog ? 400 : qualitySettings.renderDistance);
                 scene.fog = new THREE.Fog(0x0f172a, 50, far);
             }
             updateHelpers();
@@ -1750,7 +1763,7 @@
                 document.getElementById('fps-counter').textContent =
                     'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
-                    ' | aniso:' + _dbgAniso;
+                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '');
                 fpsFrames = 0;
                 fpsTime = now;
             }
@@ -2319,13 +2332,28 @@
         let fallingSinceMs = null; // когда персонаж начал падать без опоры под ногами
         const STREAM_REFRESH_DIST = 20;   // студов сместились — пора подгрузить ещё
         const STREAM_REFRESH_MS = 600;    // не чаще этого, даже если стоим на месте
-        const STREAM_PRUNE_DIST = 500;    // дальше этого от игрока — выгружаем тело
+        const STREAM_PRUNE_DIST = 5000;    // общий "дальний" предел (fog/начальный вид) — НЕ радиус подгрузки, см. qualitySettings.loadRadius
+        const UNLOAD_MARGIN = 150;   // студов сверх loadRadius — гистерезис, чтобы объект
+        // на самой границе загрузки/выгрузки не мигал каждый refresh-цикл
+        // от малейшего дрожания позиции (стандартный приём в chunk-based
+        // стриминге: unload-радиус чуть больше load-радиуса).
         // За пределами этой дистанции меш всё ещё физически существует
         // (тело нужно, чтобы пол/стены не исчезали резко под ногами), но
         // рендерить его смысла нет — он и так почти не виден и просто ест
-        // draw call'ы. Даёт запас до STREAM_PRUNE_DIST, где тело выгрузится
-        // совсем, так что видимость не "мигает" на границе выгрузки.
-        function playRenderCutoff() { return Math.min(qualitySettings.renderDistance, STREAM_PRUNE_DIST * 0.6); }
+        // draw call'ы.
+        //
+        // ВАЖНО: не может быть больше qualitySettings.loadRadius — иначе
+        // мы пытаемся рендерить дальше, чем вообще грузим физику, и
+        // разница между loadRadius и этим числом становится мёртвой зоной,
+        // которая никогда не заполнится (там просто нет тел, чтобы их
+        // рендерить), сколько её ни "включай". Вычитаем небольшой запас
+        // (loadMargin) — иначе рендер догоняет загрузку впритык, и
+        // геометрия появляется буквально в кадре шага ходьбы, а не
+        // заранее.
+        function playRenderCutoff() {
+            const loadMargin = 100;
+            return Math.min(qualitySettings.renderDistance, STREAM_PRUNE_DIST * 0.6, qualitySettings.loadRadius - loadMargin);
+        }
 
         function togglePlay() {
             if (isPlaying) stopPlay(); else startPlay();
@@ -2431,87 +2459,63 @@
             }
         }
 
-        // Подгружает геометрию рядом с позицией персонажа и по лучу взгляда
-        // камеры, выгружает то, что осталось далеко позади — иначе после
-        // единоразовой загрузки вокруг спавна пол и стены просто
-        // заканчивались, стоило отойти подальше (отсюда и "проваливаюсь",
-        // и ground-check, которому не во что было упираться лучом).
-        let streamRaycaster = null;
+        // Подгружает геометрию вокруг позиции персонажа, выгружает то, что
+        // осталось далеко позади — иначе после единоразовой загрузки вокруг
+        // спавна пол и стены просто заканчивались, стоило отойти подальше.
+        //
+        // ВАЖНО: раньше это было завязано на направление взгляда камеры —
+        // сначала один центральный луч, потом веер лучей (5 → 24-96),
+        // потом лучи с радиусом, потом лучи неограниченной длины. Все эти
+        // итерации чинили ОДИН класс проблем (что-то не задето лучом) и
+        // тут же создавали новый (лишний трафик/CPU на лучи, объекты
+        // "мигают" в момент, когда камера отворачивается, зелёные точки
+        // мешают обзору). Оказалось, что camera-direction-based стриминг —
+        // это вообще не то, как это принято делать: ни Minecraft, ни
+        // Unreal World Partition, ни Unity streaming не используют
+        // направление камеры для решения "что подгрузить" — только
+        // РАССТОЯНИЕ от игрока (см. get_chunk_index/CHUNK_CELL_SIZE в
+        // app.py). Мир на сервере один раз разбит на сетку ячеек ~100
+        // студов; при каждом обновлении сервер просто берёт все ячейки в
+        // радиусе loadRadius от игрока — направление взгляда вообще не
+        // участвует в решении. Луч смотрит в стену слева — объекты справа
+        // всё равно подгружены, потому что они физически рядом.
         async function refreshStreamedGeometry() {
             if (!isPlaying || !charBody || streamInFlight) return;
-            if (!streamRaycaster) streamRaycaster = new THREE.Raycaster();
             const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
             streamInFlight = true;
             try {
-                // Точка запроса — куда СМОТРИТ камера, а не куда движется
-                // персонаж (раньше был сдвиг по вектору скорости — работал,
-                // но грузил по курсу ходьбы, а не по факту обзора). Луч
-                // пускается из камеры по направлению взгляда и проверяется
-                // против УЖЕ загруженной геометрии (sceneObjs) — если он
-                // упирается в неё, дальше этой точки смысла запрашивать нет
-                // (она перекрыта стеной, всё равно не видно), берём именно
-                // точку попадания. Если луч ушёл в пустоту (ничего
-                // загруженного на пути — открытое место или ещё не
-                // подгруженный участок), целимся вперёд по лучу на
-                // ограниченную дистанцию, а не в бесконечность.
-                const camDir = new THREE.Vector3();
-                camera.getWorldDirection(camDir);
-                streamRaycaster.set(camera.position, camDir);
-                streamRaycaster.far = STREAM_PRUNE_DIST;
-                const hits = streamRaycaster.intersectObjects(Object.values(sceneObjs), false);
-                const LOOKAHEAD_CAP = Math.min(playRenderCutoff() * 1.3, 220);
-                let qx, qy, qz;
-                if (hits.length > 0) {
-                    const p = hits[0].point;
-                    qx = p.x; qy = p.y; qz = p.z;
-                } else {
-                    qx = camera.position.x + camDir.x * LOOKAHEAD_CAP;
-                    qy = camera.position.y + camDir.y * LOOKAHEAD_CAP;
-                    qz = camera.position.z + camDir.z * LOOKAHEAD_CAP;
-                }
-                const params = new URLSearchParams({
-                    cx: Math.round(qx), cy: Math.round(qy), cz: Math.round(qz),
-                    limit: maxStreamedBodies(), chunk: 1
+                const loadRadius = qualitySettings.loadRadius || 350;
+                const sceneResp = await api('POST', '/api/scene', {
+                    cx: Math.round(cx), cy: Math.round(cy), cz: Math.round(cz),
+                    load_radius: loadRadius,
+                    limit: maxStreamedBodies(), chunk: true
                 });
-                const sceneResp = await api('GET', '/api/scene?' + params.toString());
                 if (!isPlaying || !sceneResp || !sceneResp.ok) return; // Play могли остановить, пока шёл запрос
 
-                // Раньше здесь был отдельный, чуть больший потолок для
-                // запроса к серверу, чем для клиентской обрезки (streamCap).
-                // Сервер каждый раз честно возвращал этот избыток, а мы его
-                // тут же обрезали обратно до streamCap — на плотной карте
-                // (замок у спавна) это означало пересоздание физ-тел и
-                // мешей каждые 600мс ДАЖЕ СТОЯ НА МЕСТЕ (запрос лимитирован
-                // тем же центром) — и просаживало FPS без всякого ввода.
-                // Раньше тут был ранний continue, если physicsBodies.length
-                // уже >= streamCap — идея была не пересоздавать тела зря,
-                // стоя на месте. На деле это ломало саму подгрузку: сервер
-                // и так возвращает только streamCap БЛИЖАЙШИХ к текущей
-                // позиции объектов (сортировка по dist в make_scene_objects),
-                // но раз лимит уже "выбран" старыми телами позади игрока
-                // (STREAM_PRUNE_DIST=500 намного больше реального радиуса
-                // отрисовки ~300, так что они висят в памяти ещё долго),
-                // новые объекты ВПЕРЕДИ просто переставали добавляться —
-                // ты идёшь, а сцена не подгружается. Добавляем все объекты
-                // от сервера (они уже ближайшие), а вытеснение лишних до
-                // streamCap делает трим по дистанции чуть ниже.
-                const streamCap = maxStreamedBodies();
                 for (const o of sceneResp.objects) {
                     addPhysicsBodyForObj(o);
                 }
 
+                // Выгрузка — с запасом (UNLOAD_MARGIN) поверх loadRadius,
+                // а не строго на той же границе: иначе объект ровно на
+                // границе загрузки/выгрузки то появляется, то пропадает
+                // каждый следующий refresh при малейшем дрожании позиции
+                // (стандартный приём — гистерезис, см. про "loading range
+                // should be at least cell size larger than unload range").
+                const unloadDist = loadRadius + UNLOAD_MARGIN;
                 for (const refStr of Object.keys(physicsBodies)) {
                     const body = physicsBodies[refStr];
                     const d = Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz);
-                    if (d > STREAM_PRUNE_DIST) {
+                    if (d > unloadDist) {
                         removePhysicsBodyForRef(parseInt(refStr));
                     }
                 }
 
-                // Жёсткий потолок на случай долгой прогулки по большой
-                // карте — иначе набор тел только растёт (пруним лишь по
-                // фиксированной дистанции), и рано или поздно это начинает
-                // тормозить и провоцировать пропуски кадров физики.
+                // Жёсткий потолок числа тел на случай очень плотной области
+                // (сервер и так уже прислал не больше streamCap ближайших,
+                // но physicsBodies накапливает несколько таких ответов
+                // подряд, пока игрок идёт) — вытесняем самые дальние.
+                const streamCap = maxStreamedBodies();
                 const refs = Object.keys(physicsBodies);
                 if (refs.length > streamCap) {
                     const withDist = refs.map(refStr => {
@@ -2527,7 +2531,10 @@
                 // границы, но рисовать их отдельными draw call'ами, когда
                 // они еле видны вдалеке — чистые потери FPS. Скрываем меш,
                 // не трогая физику: коллизия остаётся, GPU эту геометрию
-                // больше не получает.
+                // больше не получает. Раньше тут была куча спецслучаев
+                // (объект под прицелом рендерится дальше остальных) — с
+                // chunk-based подгрузкой они не нужны: видимость просто
+                // равномерно зависит от дистанции, для ВСЕХ объектов одинаково.
                 const renderCutoff = playRenderCutoff();
                 for (const refStr of Object.keys(physicsBodies)) {
                     const mesh = sceneObjs[refStr];
@@ -2542,7 +2549,17 @@
         }
 
         function maybeStreamGeometry() {
-            if (!isPlaying || !charBody) return;
+            // ВАЖНО: streamInFlight проверяем ДО таймера, а не внутри
+            // refreshStreamedGeometry. Раньше таймер (lastStreamPos.time)
+            // сбрасывался каждый раз, когда проходило 600мс, даже если
+            // предыдущий запрос ещё не завершился — refreshStreamedGeometry
+            // просто тихо обрывался по своей же проверке streamInFlight,
+            // ничего не запросив, но таймер-то уже сброшен. На тяжёлых
+            // сценах (много лучей/объектов) один запрос легко занимает
+            // больше 600мс, и каждая такая "пустая" попытка откладывала
+            // реальное обновление ещё на 600мс вперёд — отсюда нарастающая,
+            // на глаз "очень долгая" задержка после движения камеры.
+            if (!isPlaying || !charBody || streamInFlight) return;
             const now = performance.now();
             const moved = lastStreamPos.x === null ? Infinity :
                 Math.hypot(charBody.position.x - lastStreamPos.x,
@@ -2664,7 +2681,7 @@
             // всё равно останется резкой "дырой в пустоту" ещё до того, как
             // дойдёт до тумана, настроенного под редакторскую дальность.
             prevFogFar = scene.fog ? scene.fog.far : null;
-            if (scene.fog) scene.fog.far = playRenderCutoff();
+            if (scene.fog) scene.fog.far = STREAM_PRUNE_DIST;
             document.getElementById('play-btn').textContent = t('notify_stop');
             document.getElementById('play-btn').classList.add('red');
             document.getElementById('play-btn').classList.remove('green');

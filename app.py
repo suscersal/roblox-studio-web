@@ -260,10 +260,130 @@ def chunk_large_objects(objs):
     return out
 
 
-def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=False):
-    parsed = state['parsed']
+
+# Счётчик версий сцены: правки в редакторе (добавление/удаление/смена
+# свойств объекта) мутируют state['parsed'] НА МЕСТЕ, не пересоздавая сам
+# словарь — значит id(parsed) не меняется, и кэши ниже (build_all_scene_
+# objects/get_chunk_index), завязанные только на id(parsed), продолжали бы
+# молча отдавать данные до правки.
+# Каждая точка мутации (см. api_edit_prop/api_add_instance/api_delete)
+# зовёт bump_scene_version() — кэши ключуются на (id(parsed), version), так
+# что любая правка честно инвалидирует их все разом.
+_scene_version = {'v': 0}
+
+
+def bump_scene_version():
+    _scene_version['v'] += 1
+
+
+# ---- Chunk-based стриминг (как в Minecraft / Unreal World Partition) ----
+#
+# Все предыдущие итерации (один луч → веер лучей → лучи с радиусом →
+# лучи неограниченной длины) пытались решить "что подгрузить" через
+# направление взгляда камеры. Это НЕ то, как это принято делать —
+# ни один крупный движок с open-world стримингом не завязывает загрузку
+# геометрии на направление камеры, только на РАССТОЯНИЕ от игрока: мир
+# один раз (при открытии карты) режется на равномерную 2D-сетку ячеек
+# по осям X/Z (высота Y внутри ячейки не ограничивается — верхушка
+# высокой башни остаётся в той же ячейке, что и её основание), а на
+# каждый тик просто берутся все ячейки в радиусе loadRadius от игрока.
+# Ни рейкаста, ни направления камеры — только позиция.
+CHUNK_CELL_SIZE = 100.0  # студов на сторону ячейки
+
+_chunk_index_cache = {'parsed_id': None, 'index': None}
+
+
+def get_chunk_index():
+    parsed = state.get('parsed')
     if not parsed:
-        return [], 0
+        return {}
+    pid = (id(parsed), _scene_version['v'])
+    if _chunk_index_cache['parsed_id'] != pid:
+        # Крупные объекты дробим (chunk_large_objects, уже есть для
+        # .rbxl экспорта) ПЕРЕД раскладкой по ячейкам — иначе стена в
+        # 300 студов длиной попадёт только в одну ячейку по своему
+        # центру и не найдётся, когда игрок стоит в соседней, хотя
+        # физически стена прямо перед ним.
+        objs = chunk_large_objects(build_all_scene_objects())
+        index = {}
+        for o in objs:
+            # Полуразмер по X/Z (без учёта поворота — консервативная
+            # оценка чуть больше настоящей OBB, зато дешёвая и без
+            # риска пропустить ячейку, которую объект реально задевает).
+            half_x = math.sqrt(o['sx'] ** 2 + o['sz'] ** 2) * 0.5
+            min_cx = int(math.floor((o['px'] - half_x) / CHUNK_CELL_SIZE))
+            max_cx = int(math.floor((o['px'] + half_x) / CHUNK_CELL_SIZE))
+            min_cz = int(math.floor((o['pz'] - half_x) / CHUNK_CELL_SIZE))
+            max_cz = int(math.floor((o['pz'] + half_x) / CHUNK_CELL_SIZE))
+            for ccx in range(min_cx, max_cx + 1):
+                for ccz in range(min_cz, max_cz + 1):
+                    index.setdefault((ccx, ccz), []).append(o)
+        _chunk_index_cache.update(parsed_id=pid, index=index)
+    return _chunk_index_cache['index']
+
+
+def gather_objects_in_radius(cx, cy, cz, radius):
+    # Круговой (в плане X/Z) отбор объектов вокруг игрока — сетка ячеек
+    # используется только как быстрый способ НЕ перебирать все объекты
+    # карты (кандидаты берутся из квадрата ячеек, задевающих окружность
+    # радиуса radius), фильтрация "входит ли в радиус" — по честной
+    # euclidean-дистанции.
+    index = get_chunk_index()
+    if not index:
+        return []
+    min_cx = int(math.floor((cx - radius) / CHUNK_CELL_SIZE))
+    max_cx = int(math.floor((cx + radius) / CHUNK_CELL_SIZE))
+    min_cz = int(math.floor((cz - radius) / CHUNK_CELL_SIZE))
+    max_cz = int(math.floor((cz + radius) / CHUNK_CELL_SIZE))
+    seen_refs = set()
+    result = []
+    for ccx in range(min_cx, max_cx + 1):
+        for ccz in range(min_cz, max_cz + 1):
+            for o in index.get((ccx, ccz), ()):
+                if o['ref'] in seen_refs:
+                    continue  # объект мог попасть в несколько соседних ячеек
+                seen_refs.add(o['ref'])
+                d = math.sqrt((o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
+                if d <= radius:
+                    result.append((d, o))
+
+    # Сортируем НЕ по чистой дистанции, а с поправкой на размер объекта.
+    # Без этого, когда общий бюджет (limit/streamCap в api_scene) меньше,
+    # чем всего объектов в радиусе, топ забивают ближние мелкие детали
+    # (трава, мусор, декор в упор у игрока) — а структурно важная дальняя
+    # стена или пол, которые реально нужны для обзора, просто не попадают
+    # в отсечку. Крупные объекты получают скидку к своей "эффективной"
+    # дистанции (логарифм — чтобы один гигантский terrain-кусок не забил
+    # собой весь бюджет монопольно, но обычная стена/пол ощутимо выигрывает
+    # у россыпи мелочи на той же дистанции).
+    def sort_key(pair):
+        d, o = pair
+        bounding_radius = math.sqrt(o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
+        return max(0.0, d - bounding_radius) / (1.0 + math.log1p(bounding_radius))
+
+    result.sort(key=sort_key)
+    return result
+
+
+_scene_build_cache = {'parsed_id': None, 'objs': None}
+
+
+def build_all_scene_objects():
+    # Раньше этот разбор (CFrame/матрицы поворота, поиск SpecialMesh для
+    # формы, цвет, Anchored/CanCollide) заново гонялся по ВСЕМ объектам
+    # карты на КАЖДЫЙ вызов /api/scene — а стриминг дёргает его каждые
+    # ~600мс. На картах в несколько тысяч частей (Castle Warfare) это и
+    # была основная причина тормозов: сами raycast/сортировка по факту
+    # быстрые, но каждый запрос сначала заново пересобирал ВЕСЬ список
+    # объектов с нуля. Карта между открытиями не меняется — кэшируем
+    # построенный список по id распарсенной карты, как и get_chunk_index.
+    parsed = state.get('parsed')
+    if not parsed:
+        return []
+    pid = (id(parsed), _scene_version['v'])
+    if _scene_build_cache['parsed_id'] == pid:
+        return _scene_build_cache['objs']
+
     objs = []
     for ref, cls in parsed['referent_to_class'].items():
         if cls not in PART_CLASSES:
@@ -346,10 +466,29 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=Fals
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
+    _scene_build_cache.update(parsed_id=pid, objs=objs)
+    return objs
+
+
+def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=False, points=None):
+    parsed = state['parsed']
+    if not parsed:
+        return [], 0
+    objs = build_all_scene_objects()
+
     if chunk:
         objs = chunk_large_objects(objs)
 
-    if cx is not None and cy is not None and cz is not None:
+    # Можно передать несколько точек (не только cx,cy,cz) — дистанция
+    # объекта берётся как минимум до любой из них. Используется вторым,
+    # points-based путём в api_scene (обычная загрузка сцены редактора);
+    # основной Play-стриминг теперь идёт через chunk-based
+    # gather_objects_in_radius выше и этот путь не задействует.
+    query_points = list(points) if points else (
+        [(cx, cy, cz)] if cx is not None and cy is not None and cz is not None else []
+    )
+
+    if query_points:
         def dist_to_nearest_point(o):
             # Расстояние до центра занижает приоритет больших объектов:
             # у длинной плиты пола центр может быть в сотне студов от
@@ -359,11 +498,16 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=Fals
             # центра. Оценка консервативная (может немного занижать
             # реальную дистанцию до OBB), но гарантированно не отбросит
             # объект, который на самом деле рядом.
-            center_d = math.sqrt(
-                (o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
             bounding_radius = math.sqrt(
                 o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
-            return max(0.0, center_d - bounding_radius)
+            best = None
+            for (qx, qy, qz) in query_points:
+                center_d = math.sqrt(
+                    (o['px'] - qx) ** 2 + (o['py'] - qy) ** 2 + (o['pz'] - qz) ** 2)
+                d = max(0.0, center_d - bounding_radius)
+                if best is None or d < best:
+                    best = d
+            return best
 
         if r is not None:
             objs = [o for o in objs if dist_to_nearest_point(o) <= r]
@@ -557,15 +701,74 @@ def api_tree():
     return jsonify({'ok': True, 'tree': roots})
 
 
-@flask_app.route('/api/scene')
+@flask_app.route('/api/scene', methods=['GET', 'POST'])
 def api_scene():
-    cx = request.args.get('cx', type=float)
-    cy = request.args.get('cy', type=float)
-    cz = request.args.get('cz', type=float)
-    r = request.args.get('r', type=float)
-    limit = request.args.get('limit', type=int)
-    chunk = request.args.get('chunk', type=int, default=0) == 1
-    objs, total = make_scene_objects(cx, cy, cz, r, limit, chunk=chunk)
+    # POST с телом {cx,cy,cz,load_radius,limit,chunk} — используется
+    # Play-стримингом (см. index.html, refreshStreamedGeometry): просто
+    # "все объекты в радиусе load_radius от игрока", без рейкаста и без
+    # направления камеры (см. get_chunk_index/gather_objects_in_radius
+    # выше — chunk-based подход, как в Minecraft/UE5 World Partition).
+    # GET с query-параметрами остаётся как был для остальных вызовов
+    # (обычная загрузка сцены редактора) и для pts= из более старых версий.
+    body = request.get_json(silent=True) if request.method == 'POST' else None
+    body = body or {}
+
+    def num(name, cast=float):
+        if name in body:
+            try:
+                return cast(body[name])
+            except (TypeError, ValueError):
+                return None
+        return request.args.get(name, type=cast)
+
+    cx = num('cx')
+    cy = num('cy')
+    cz = num('cz')
+    r = num('r')
+    limit = num('limit', int)
+    if 'chunk' in body:
+        chunk = bool(body['chunk'])
+    else:
+        chunk = request.args.get('chunk', type=int, default=0) == 1
+
+    load_radius = num('load_radius')
+    if load_radius is not None and cx is not None and cy is not None and cz is not None:
+        # Chunk-based путь: быстрый отбор кандидатов через сетку ячеек
+        # (gather_objects_in_radius), уже отсортированных по дистанции —
+        # берём просто ближайшие limit.
+        by_dist = gather_objects_in_radius(cx, cy, cz, load_radius)
+        objs = [o for _, o in by_dist]
+        total = len(objs)
+        if chunk:
+            objs = chunk_large_objects(objs)
+            # chunk_large_objects дробит крупные объекты уже ПОСЛЕ отбора
+            # по радиусу здесь (в отличие от get_chunk_index, где дробление
+            # идёт до раскладки по ячейкам) — порядок по дистанции при этом
+            # не портится: части одного большого объекта остаются рядом
+            # друг с другом в списке.
+        if limit is not None:
+            objs = objs[:limit]
+        return jsonify({'ok': True, 'objects': objs, 'total': total})
+
+    # Старый points-based путь (используется остальными вызовами —
+    # обычная загрузка сцены в редакторе, где рейкаст/радиус не нужны).
+    points = []
+    if cx is not None and cy is not None and cz is not None:
+        points.append((cx, cy, cz))
+
+    # pts=x,y,z;x,y,z;... — обратная совместимость.
+    pts_raw = body.get('pts') if 'pts' in body else request.args.get('pts')
+    if pts_raw:
+        groups = pts_raw if isinstance(pts_raw, list) else pts_raw.split(';')
+        for group in groups:
+            parts = group.split(',') if isinstance(group, str) else group
+            if len(parts) == 3:
+                try:
+                    points.append((float(parts[0]), float(parts[1]), float(parts[2])))
+                except (ValueError, TypeError):
+                    pass
+
+    objs, total = make_scene_objects(cx, cy, cz, r, limit, chunk=chunk, points=points or None)
     return jsonify({'ok': True, 'objects': objs, 'total': total})
 
 
@@ -706,6 +909,7 @@ def api_set_prop(ref):
         props = parsed['props'].setdefault(ref, {})
         props[prop] = val
         parsed['_modified'] = True
+        bump_scene_version()
 
         # CFrame в make_scene_objects имеет приоритет над Position/Rotation —
         # если объект уже содержит CFrame, правка этих полей визуально
@@ -785,6 +989,7 @@ def api_add():
 
     parsed['props'][new_ref] = props
     parsed['_modified'] = True
+    bump_scene_version()
     return jsonify({'ok': True, 'ref': new_ref})
 
 
@@ -796,6 +1001,7 @@ def api_delete(ref):
     for d in ('referent_to_class', 'parent_map', 'props'):
         parsed[d].pop(ref, None)
     parsed['_modified'] = True
+    bump_scene_version()
     return jsonify({'ok': True})
 
 
