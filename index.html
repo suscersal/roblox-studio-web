@@ -20,86 +20,8 @@
         });
     </script>
 
-    <script>
-        // ============ ОФЛАЙН-КЕШ БИБЛИОТЕК (без Service Worker) ============
-        // Всё в одном index.html: CodeMirror/Three.js/Cannon.js грузятся
-        // с CDN один раз (когда есть интернет), их исходный код целиком
-        // сохраняется как ТЕКСТ в localStorage. При повторных запусках
-        // (в т.ч. без интернета) код читается из localStorage и
-        // подставляется на страницу так же, как обычный <script>/<style>,
-        // включая объявление функций в ГЛОБАЛЬНОЙ области видимости — это
-        // важно, т.к. вся остальная разметка использует
-        // onclick="имяФункции()" и требует именно глобальных функций.
-        //
-        // Ограничение: localStorage работает только там, где страница
-        // считается "полноценным origin" — при открытии как обычный файл
-        // (file://index.html) или через http(s)-сервер всё работает; если
-        // почему-то не работает в вашей среде — запустите рядом любой
-        // локальный веб-сервер (python -m http.server) и откройте через
-        // http://localhost:PORT/.
-
-        function _libCacheKey(url) { return 'rbxlib:' + url; }
-
-        // СИНХРОННАЯ загрузка — нужна для CodeMirror: он должен быть
-        // определён ДО того, как остальной код страницы начнёт его
-        // использовать (см. `CodeMirror.fromTextArea` ниже по файлу),
-        // а весь остальной код — это один большой обычный <script>, не
-        // async/module, так что дождаться async-загрузки не получится
-        // без риска что-то сломать. Поэтому: сначала смотрим в
-        // localStorage (это синхронное API), а если там пусто —
-        // синхронный XHR (устаревший приём, но именно то, что нужно —
-        // ведёт себя как обычный блокирующий <script src>).
-        function loadLibSync(url) {
-            const key = _libCacheKey(url);
-            const cached = localStorage.getItem(key);
-            if (cached !== null) return cached;
-
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', url, false); // false = синхронный запрос
-            xhr.send(null);
-            if (xhr.status !== 200 && xhr.status !== 0) {
-                throw new Error('Нет интернета и нет кеша для библиотеки: ' + url);
-            }
-            const text = xhr.responseText;
-            try { localStorage.setItem(key, text); } catch (e) {
-                // localStorage переполнен или недоступен — просто не
-                // кешируем, на текущую загрузку страницы это не влияет.
-            }
-            return text;
-        }
-
-        // document.write работает только пока страница ещё парсится
-        // (т.е. пока мы в <head>) — этим и пользуемся, чтобы вставить
-        // код библиотеки СИНХРОННО, в правильном порядке, в глобальную
-        // область видимости.
-        function writeLibScript(url) {
-            document.write('<script>' + loadLibSync(url) + '<\/script>');
-        }
-        function writeLibStyle(url) {
-            document.write('<style>' + loadLibSync(url) + '<\/style>');
-        }
-
-        // АСИНХРОННАЯ версия — для библиотек, которые и так грузятся
-        // лениво через JS (Three.js, OBJ/MTL-лоадеры, Cannon.js).
-        // Возвращает Promise<строка с исходным кодом>.
-        function loadLibAsync(url) {
-            const key = _libCacheKey(url);
-            const cached = localStorage.getItem(key);
-            if (cached !== null) return Promise.resolve(cached);
-            return fetch(url).then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status + ' для ' + url);
-                return r.text();
-            }).then(function (text) {
-                try { localStorage.setItem(key, text); } catch (e) { }
-                return text;
-            });
-        }
-    </script>
-
-    <script>
-        writeLibStyle('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css');
-        writeLibStyle('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css');
-    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
 
 
     <style>
@@ -1149,102 +1071,93 @@
         }
     </script>
 
-    <script>
-        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js');
-        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js');
-        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js');
-        writeLibScript('https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js');
-    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
 
     <script>
-        // Вставляет код библиотеки (полученный из loadLibAsync — из кеша
-        // localStorage или свежескачанный) как обычный <script> в
-        // глобальную область видимости, синхронно относительно момента
-        // вызова (в отличие от src=url, которому нужен ещё один сетевой
-        // круг + событие onload).
-        function injectLibCode(code) {
-            const s = document.createElement('script');
-            s.textContent = code;
-            document.head.appendChild(s);
-        }
-
-        // Three.js загрузка. Сначала пробуем локальный файл three.min.js
-        // (если пользователь вручную положил его рядом с index.html) —
-        // он не кешируется через localStorage, т.к. и так уже локальный.
-        // Иначе — CDN через loadLibAsync (кешируется в localStorage,
-        // так что при следующих запусках работает офлайн).
+        // Three.js загрузка
         (function () {
+            const scripts = [
+                'three.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'
+            ];
             let loaded = false;
-            function onThreeReady() {
-                if (loaded) return;
-                loaded = true;
-                initThree();
-            }
-            function tryLocalThenCdn() {
+            function tryLoad(i) {
+                if (i >= scripts.length) {
+                    console.error('Three.js не загружен');
+                    document.getElementById('fps-counter').textContent = '3D: ошибка';
+                    return;
+                }
                 const s = document.createElement('script');
-                s.src = 'three.min.js';
-                s.onload = onThreeReady;
-                s.onerror = function () {
-                    loadLibAsync('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js')
-                        .then(function (code) {
-                            injectLibCode(code);
-                            onThreeReady();
-                        })
-                        .catch(function (err) {
-                            console.error('Three.js не загружен: ' + err);
-                            const el = document.getElementById('fps-counter');
-                            if (el) el.textContent = '3D: ошибка';
-                        });
+                s.src = scripts[i];
+                s.onload = () => {
+                    if (!loaded) {
+                        loaded = true;
+                        console.log('Three.js загружен из: ' + scripts[i]);
+                        initThree();
+                    }
+                };
+                s.onerror = () => {
+                    console.warn('Не удалось загрузить: ' + scripts[i]);
+                    tryLoad(i + 1);
                 };
                 document.head.appendChild(s);
             }
-            tryLocalThenCdn();
+            tryLoad(0);
         })();
 
         // OBJLoader/MTLLoader грузятся ЛЕНИВО, только когда реально нужен
         // импорт модели — не тормозят обычный старт редактора. r128-совместимые
         // UMD-версии (не ES-модули), вешают THREE.OBJLoader/THREE.MTLLoader
-        // на уже загруженный глобальный THREE. Кешируются через
-        // loadLibAsync так же, как Three.js.
+        // на уже загруженный глобальный THREE.
         let _objMtlLoadersPromise = null;
         function ensureObjMtlLoaders() {
             if (_objMtlLoadersPromise) return _objMtlLoadersPromise;
-            const urls = [
-                'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js',
-                'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
-            ];
-            _objMtlLoadersPromise = Promise.all(urls.map(loadLibAsync)).then(function (codes) {
-                codes.forEach(injectLibCode);
+            _objMtlLoadersPromise = new Promise((resolve, reject) => {
+                const urls = [
+                    'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js',
+                    'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
+                ];
+                let remaining = urls.length;
+                urls.forEach(u => {
+                    const s = document.createElement('script');
+                    s.src = u;
+                    s.onload = () => { if (--remaining === 0) resolve(); };
+                    s.onerror = () => reject(new Error('Не удалось загрузить ' + u));
+                    document.head.appendChild(s);
+                });
             });
             return _objMtlLoadersPromise;
         }
     </script>
 
     <script>
-        // Cannon.js загрузка (физика для Play-режима). Та же схема:
-        // локальный cannon.min.js в приоритете, иначе CDN через
-        // loadLibAsync (кешируется в localStorage для офлайн-работы).
+        // Cannon.js загрузка (физика для Play-режима)
         (function () {
+            const scripts = [
+                'cannon.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js'
+            ];
             let loaded = false;
-            function onCannonReady() {
-                if (loaded) return;
-                loaded = true;
-                console.log('Cannon.js загружен');
+            function tryLoad(i) {
+                if (i >= scripts.length) {
+                    console.error('Cannon.js не загружен — Play-режим недоступен');
+                    return;
+                }
+                const s = document.createElement('script');
+                s.src = scripts[i];
+                s.onload = () => {
+                    if (!loaded) {
+                        loaded = true;
+                        console.log('Cannon.js загружен из: ' + scripts[i]);
+                    }
+                };
+                s.onerror = () => tryLoad(i + 1);
+                document.head.appendChild(s);
             }
-            const s = document.createElement('script');
-            s.src = 'cannon.min.js';
-            s.onload = onCannonReady;
-            s.onerror = function () {
-                loadLibAsync('https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js')
-                    .then(function (code) {
-                        injectLibCode(code);
-                        onCannonReady();
-                    })
-                    .catch(function (err) {
-                        console.error('Cannon.js не загружен — Play-режим недоступен: ' + err);
-                    });
-            };
-            document.head.appendChild(s);
+            tryLoad(0);
         })();
     </script>
 
@@ -1307,6 +1220,24 @@
                 // подгружены (физика), независимо от того, куда смотрит
                 // камера.
                 loadRadius: 350,
+                // Раньше физика (playBodies) и рендер были одним и тем же
+                // потолком: раз бюджет физ-тел исчерпан, объект не грузился
+                // вообще, даже просто как картинка. Это и создавало "дыры" —
+                // дальняя стена в кадре, до которой физически не дойти в
+                // ближайшие секунды, соревновалась за тот же лимит с
+                // объектами под ногами. Меш без CANNON.Body — это просто
+                // геометрия на GPU, физику каждый кадр не считает, поэтому
+                // может позволить себе МНОГО больше, чем playBodies.
+                //
+                // ВАЖНО: ограничение визуала — по РАССТОЯНИЮ (visualRadius),
+                // а не по количеству. visualBodies ниже — это не "грузим
+                // ровно 2000 штук", а аварийный потолок на случай очень
+                // плотного участка карты (иначе там, где в 2000 студах
+                // реально лежат 50000 мелких деталей, сервер отдал бы их
+                // все разом). В норме количество определяется тем, сколько
+                // объектов физически лежит в пределах visualRadius.
+                visualRadius: 2000,
+                visualBodies: 3000,
             },
             medium: {
                 antialias: false,
@@ -1326,6 +1257,8 @@
                 // даже это заметно роняло FPS на мобильном GPU; единый
                 // потолок 500 держит Play play лёгким на всех пресетах,
                 loadRadius: 550,
+                visualRadius: 2000,
+                visualBodies: 3000,
             },
             high: {
                 antialias: true,
@@ -1341,7 +1274,7 @@
                 maxObjects: 99999,
                 lodDistance: 200,
                 renderDistance: 1200,
-                playBodies: 500, // При 500 fps 50, при 1000 fps 20(странно)было 1600 — тот самый случай из скриншота
+                playBodies: 500, // было 1600 — тот самый случай из скриншота
                 // (High, 10 FPS, 4000+ обj): в редакторе High даёт полную
                 // дальность и детализацию, это ок (статичная сцена, камера
                 // не двигается по 60 раз в секунду). Но в Play каждое тело —
@@ -1349,6 +1282,8 @@
                 // рендер, так что даже 900-1600 тел на телефоне были
                 // неподъёмны. Единый потолок 500 для всех пресетов.
                 loadRadius: 900,
+                visualRadius: 2000,
+                visualBodies: 3000,
             }
         }
 
@@ -2373,6 +2308,14 @@
         let physicsBodies = {};   // ref -> CANNON.Body
         let playSnapshot = {};    // ref -> THREE.Matrix4 до запуска
         let playOnlyRefs = new Set(); // ref-ы мешей, подгруженных только для Play
+        // Позиция каждого загруженного (в Play) объекта — независимо от
+        // того, есть ли у него физ-тело. Вся геометрия статична (mass=0,
+        // см. addPhysicsBodyForObj), так что позиция не меняется после
+        // добавления — читать её из physicsBodies[ref].position раньше
+        // работало только для объектов С физикой; с разделением
+        // рендер/физика визуальным мешам физ-тела вообще нет, так что
+        // дистанцию для них берём отсюда.
+        let loadedObjPos = {}; // ref -> {x,y,z}
         let charBody = null;
         let jumpQueued = false;
         let canJump = false;
@@ -2408,6 +2351,7 @@
         // означало пересоздание физ-тел и мешей каждые 600мс даже стоя на
         // месте. Запрашиваем сразу ровно streamCap — избытка просто нет.
         function maxStreamedBodies() { return qualitySettings.playBodies; }
+        function maxVisualBodies() { return qualitySettings.visualBodies || qualitySettings.playBodies; }
         // Раньше геометрия для физики запрашивалась ОДИН раз при старте
         // Play, вокруг точки спавна — стоило отойти достаточно далеко, и
         // под ногами/вокруг просто не оставалось ни одного тела: пол
@@ -2429,17 +2373,20 @@
         // рендерить его смысла нет — он и так почти не виден и просто ест
         // draw call'ы.
         //
-        // ВАЖНО: не может быть больше qualitySettings.loadRadius — иначе
-        // мы пытаемся рендерить дальше, чем вообще грузим физику, и
-        // разница между loadRadius и этим числом становится мёртвой зоной,
-        // которая никогда не заполнится (там просто нет тел, чтобы их
-        // рендерить), сколько её ни "включай". Вычитаем небольшой запас
-        // (loadMargin) — иначе рендер догоняет загрузку впритык, и
-        // геометрия появляется буквально в кадре шага ходьбы, а не
-        // заранее.
+        // ВАЖНО: не может быть больше qualitySettings.visualRadius — иначе
+        // мы пытаемся рендерить дальше, чем вообще грузим геометрию (даже
+        // визуально, без физики), и разница становится мёртвой зоной,
+        // которая никогда не заполнится (там просто нет мешей, чтобы их
+        // рендерить), сколько её ни "включай". Именно visualRadius, а не
+        // loadRadius — тот теперь только про физику (playBodies), рендер
+        // может честно уходить дальше него без коллайдеров. Вычитаем
+        // небольшой запас (loadMargin) — иначе рендер догоняет загрузку
+        // впритык, и геометрия появляется буквально в кадре шага ходьбы,
+        // а не заранее.
         function playRenderCutoff() {
             const loadMargin = 100;
-            return Math.min(qualitySettings.renderDistance, STREAM_PRUNE_DIST * 0.6, qualitySettings.loadRadius - loadMargin);
+            const visualRadius = qualitySettings.visualRadius || qualitySettings.loadRadius || 350;
+            return Math.min(qualitySettings.renderDistance, STREAM_PRUNE_DIST * 0.6, visualRadius - loadMargin);
         }
 
         function togglePlay() {
@@ -2480,6 +2427,7 @@
             if (!(o.ref in playSnapshot)) {
                 playSnapshot[o.ref] = mesh.matrix.clone();
             }
+            loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
 
             const pos = new THREE.Vector3();
             const quat = new THREE.Quaternion();
@@ -2515,14 +2463,49 @@
             physicsBodies[o.ref] = body;
         }
 
-        // Убирает физическое тело (и, если меш был подгружен только ради
-        // Play, сам меш) для объекта, который остался далеко позади.
+        // Только меш, без CANNON.Body — для объектов, которые видно, но до
+        // которых игрок физически не дойдёт в ближайшее время (не входят
+        // в ближайшие playBodies по честной дистанции). GPU эту геометрию
+        // рисует как обычно, но она не участвует в физическом шаге, так
+        // что таких объектов можно позволить себе на порядок больше, чем
+        // полноценных физ-тел (см. qualitySettings.visualBodies).
+        function addVisualMeshForObj(o) {
+            if (sceneObjs[o.ref]) {
+                loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+                return; // уже загружен (визуально или физически) — трогать не нужно
+            }
+            const mesh = buildMeshFromObj(o, playGeoCache, playMatCache);
+            scene.add(mesh);
+            sceneObjs[o.ref] = mesh;
+            playOnlyRefs.add(o.ref);
+            if (!(o.ref in playSnapshot)) {
+                playSnapshot[o.ref] = mesh.matrix.clone();
+            }
+            loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+        }
+
+        // Разжалование из физики в чисто визуальный меш: объект больше не
+        // входит в ближайшие playBodies по дистанции, но всё ещё в пределах
+        // loadRadius — убираем CANNON.Body (дорогая часть), меш оставляем
+        // как есть (см. addVisualMeshForObj выше — то же самое состояние).
+        function demoteToVisualOnly(ref) {
+            const body = physicsBodies[ref];
+            if (body) {
+                physicsWorld.removeBody(body);
+                delete physicsBodies[ref];
+            }
+        }
+
+        // Убирает физическое тело (если было) и, если меш был подгружен
+        // только ради Play, сам меш — для объекта, который остался
+        // полностью за пределами loadRadius (и физика, и рендер не нужны).
         function removePhysicsBodyForRef(ref) {
             const body = physicsBodies[ref];
             if (body) {
                 physicsWorld.removeBody(body);
                 delete physicsBodies[ref];
             }
+            delete loadedObjPos[ref];
             if (playOnlyRefs.has(ref)) {
                 const mesh = sceneObjs[ref];
                 if (mesh) {
@@ -2571,46 +2554,73 @@
             const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
             streamInFlight = true;
             try {
-                const loadRadius = qualitySettings.loadRadius || 350;
+                const loadRadius = qualitySettings.loadRadius || 350;     // физика — до этой дистанции
+                const visualRadius = qualitySettings.visualRadius || 2000; // рендер — до этой (без физики)
+                const visualCap = maxVisualBodies(); // аварийный потолок на количество, см. пресеты
                 const sceneResp = await api('POST', '/api/scene', {
                     cx: Math.round(cx), cy: Math.round(cy), cz: Math.round(cz),
-                    load_radius: loadRadius,
-                    limit: maxStreamedBodies(), chunk: true
+                    load_radius: visualRadius,
+                    limit: visualCap, chunk: true
                 });
                 if (!isPlaying || !sceneResp || !sceneResp.ok) return; // Play могли остановить, пока шёл запрос
 
-                for (const o of sceneResp.objects) {
-                    addPhysicsBodyForObj(o);
-                }
+                // Сервер сортирует ответ с поправкой на размер объекта
+                // (важность), чтобы при обрезке до visualCap не терять
+                // крупные структурные части. Но физика (playBodies) — это
+                // отдельный, гораздо более тесный бюджет, и там важна
+                // именно честная дистанция: физически столкнуться игрок
+                // может только с тем, что реально ближе всего, а не с тем,
+                // что визуально "важнее". Плюс жёсткий потолок по дистанции
+                // (loadRadius) — иначе на разреженном участке карты, где
+                // в пределах physicsCap ближайших объектов меньше 500, тело
+                // могло бы получить физику, даже стоя за 1800 студов от
+                // игрока, чего вообще не должно происходить.
+                const physicsCap = maxStreamedBodies();
+                const withDist = sceneResp.objects.map(o => [o, Math.hypot(o.px - cx, o.py - cy, o.pz - cz)]);
+                withDist.sort((a, b) => a[1] - b[1]);
 
-                // Выгрузка — с запасом (UNLOAD_MARGIN) поверх loadRadius,
-                // а не строго на той же границе: иначе объект ровно на
-                // границе загрузки/выгрузки то появляется, то пропадает
-                // каждый следующий refresh при малейшем дрожании позиции
-                // (стандартный приём — гистерезис, см. про "loading range
-                // should be at least cell size larger than unload range").
-                const unloadDist = loadRadius + UNLOAD_MARGIN;
+                const nearRefs = new Set();
+                let physicsAssigned = 0;
+                for (let i = 0; i < withDist.length; i++) {
+                    const [o, d] = withDist[i];
+                    if (physicsAssigned < physicsCap && d <= loadRadius) {
+                        nearRefs.add(o.ref);
+                        physicsAssigned++;
+                        addPhysicsBodyForObj(o);
+                    } else {
+                        // Видно, но физически ещё далеко (или бюджет
+                        // physicsCap исчерпан) — просто меш, без
+                        // CANNON.Body (см. addVisualMeshForObj выше).
+                        addVisualMeshForObj(o);
+                    }
+                }
+                // Объект раньше был среди ближайших physicsCap, а теперь
+                // игрок отошёл — физику снимаем, но меш не удаляем: он
+                // всё ещё в visualRadius, значит должен быть виден.
                 for (const refStr of Object.keys(physicsBodies)) {
-                    const body = physicsBodies[refStr];
-                    const d = Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz);
-                    if (d > unloadDist) {
-                        removePhysicsBodyForRef(parseInt(refStr));
+                    if (!nearRefs.has(parseInt(refStr))) {
+                        demoteToVisualOnly(parseInt(refStr));
                     }
                 }
 
-                // Жёсткий потолок числа тел на случай очень плотной области
-                // (сервер и так уже прислал не больше streamCap ближайших,
-                // но physicsBodies накапливает несколько таких ответов
-                // подряд, пока игрок идёт) — вытесняем самые дальние.
-                const streamCap = maxStreamedBodies();
-                const refs = Object.keys(physicsBodies);
-                if (refs.length > streamCap) {
-                    const withDist = refs.map(refStr => {
-                        const body = physicsBodies[refStr];
-                        return [refStr, Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz)];
-                    }).sort((a, b) => b[1] - a[1]);
-                    for (let i = 0; i < withDist.length - streamCap; i++) {
-                        removePhysicsBodyForRef(parseInt(withDist[i][0]));
+                // Полная выгрузка (и физика, и меш) — с запасом
+                // (UNLOAD_MARGIN) поверх visualRadius (не loadRadius —
+                // это была бы дистанция для физики, а меш должен жить
+                // до гораздо более дальней границы), а не строго на той
+                // же границе: иначе объект ровно на границе загрузки/
+                // выгрузки то появляется, то пропадает каждый следующий
+                // refresh при малейшем дрожании позиции (стандартный
+                // приём — гистерезис). Проверяем ВСЕ загруженные
+                // Play-объекты (playOnlyRefs), а не только те, у кого
+                // есть физика — иначе чисто визуальные меши никогда бы не
+                // выгружались, уходя всё дальше за спину игрока.
+                const unloadDist = visualRadius + UNLOAD_MARGIN;
+                for (const ref of Array.from(playOnlyRefs)) {
+                    const p = loadedObjPos[ref];
+                    if (!p) continue;
+                    const d = Math.hypot(p.x - cx, p.y - cy, p.z - cz);
+                    if (d > unloadDist) {
+                        removePhysicsBodyForRef(ref);
                     }
                 }
 
@@ -2618,16 +2628,15 @@
                 // границы, но рисовать их отдельными draw call'ами, когда
                 // они еле видны вдалеке — чистые потери FPS. Скрываем меш,
                 // не трогая физику: коллизия остаётся, GPU эту геометрию
-                // больше не получает. Раньше тут была куча спецслучаев
-                // (объект под прицелом рендерится дальше остальных) — с
-                // chunk-based подгрузкой они не нужны: видимость просто
-                // равномерно зависит от дистанции, для ВСЕХ объектов одинаково.
+                // больше не получает. Видимость равномерно зависит от
+                // дистанции для ВСЕХ загруженных объектов одинаково —
+                // и физических, и чисто визуальных.
                 const renderCutoff = playRenderCutoff();
-                for (const refStr of Object.keys(physicsBodies)) {
-                    const mesh = sceneObjs[refStr];
+                for (const ref of Object.keys(loadedObjPos)) {
+                    const mesh = sceneObjs[ref];
                     if (!mesh) continue;
-                    const body = physicsBodies[refStr];
-                    const d = Math.hypot(body.position.x - cx, body.position.y - cy, body.position.z - cz);
+                    const p = loadedObjPos[ref];
+                    const d = Math.hypot(p.x - cx, p.y - cy, p.z - cz);
                     mesh.visible = d <= renderCutoff;
                 }
             } finally {
@@ -2813,6 +2822,7 @@
             }
             playSnapshot = {};
             playOnlyRefs = new Set();
+            loadedObjPos = {};
 
             if (prevCameraState) {
                 spherical = prevCameraState.spherical;
