@@ -1445,6 +1445,9 @@
         let joyVector = { x: 0, y: 0 }; // аналоговый стик: x — влево/вправо, y — вперёд/назад
         let moveSpeed = 1.0;
         let fpsFrames = 0;
+        acseration = 0;
+        speed = 0;
+        time_move = 0;
         let fpsTime = performance.now();
         let currentFPS = 0;
         let lastCameraUpdate = 0;
@@ -1615,7 +1618,7 @@
             const base = document.getElementById('joy-base');
             const thumb = document.getElementById('joy-thumb');
             if (!zone || !base || !thumb) return;
-            const maxR = 34;   // px, максимальный вылет ручки стика от центра base
+            const maxR = 30;   // px, максимальный вылет ручки стика от центра base
             const deadZone = 6; // px — маленький дрожащий сдвиг пальца не должен давать ход
             let touchId = null;
 
@@ -1782,8 +1785,7 @@
                 for (const _m of Object.values(sceneObjs)) {
                     if (_m.visible) _visibleObjCount++;
                 }
-                document.getElementById('fps-counter').textContent =
-                    'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
+                document.getElementById('fps-counter').textContent = 'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
                     ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '');
                 fpsFrames = 0;
@@ -1791,7 +1793,7 @@
             }
 
             // WASD + аналоговый стик — свободный полёт камеры (только в режиме
-            // редактирования; во время Play движением управляет тело персонажа)
+            // редактирования; во время Play движением управляет 'тело' персонажа)
             if (!isPlaying) {
                 const forward = Math.max(-1, Math.min(1,
                     (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
@@ -1800,13 +1802,27 @@
                 const vertical = (keysPressed['e'] ? 1 : 0) - (keysPressed['q'] ? 1 : 0);
 
                 const anyMove = forward !== 0 || strafe !== 0 || vertical !== 0;
+                
 
                 if (anyMove) {
+                    
+                
                     const direction = new THREE.Vector3();
                     camera.getWorldDirection(direction);
                     const right = new THREE.Vector3();
                     right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
-                    const speed = moveSpeed * (spherical.r / 30) * 0.5;
+                    speed = moveSpeed * (spherical.r / 30) * 0.25;
+                     //acseration надо в правильный переменовать;
+                    if (forward){
+                    acseration = acseration + 0.1;
+                    if (acseration > 1){
+speed= speed + acseration/50}
+                    }
+if (now - time_move > 100){
+acseration = 0;}
+                   time_move = now
+
+
 
                     target.x += direction.x * speed * forward + right.x * speed * strafe;
                     target.z += direction.z * speed * forward + right.z * speed * strafe;
