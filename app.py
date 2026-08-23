@@ -159,6 +159,34 @@ PART_CLASSES = {
     'SpawnLocation', 'Seat', 'VehicleSeat', 'SpherePart',
 }
 
+# Классы 2D-интерфейса (Roblox GUI) — рендерятся отдельным DOM-оверлеем
+# поверх 3D-вьюпорта в Play (см. index.html, buildGuiOverlay/#gui-overlay),
+# а не как объекты сцены three.js/cannon.js, как PART_CLASSES.
+GUI_ROOT_CLASSES = {'ScreenGui', 'BillboardGui'}
+GUI_CONTAINER_CLASSES = {'Frame', 'ScrollingFrame'}
+GUI_LEAF_CLASSES = {
+    'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
+}
+GUI_CLASSES = GUI_ROOT_CLASSES | GUI_CONTAINER_CLASSES | GUI_LEAF_CLASSES
+
+# Свойства, которые реально нужны фронтенду для рисования GUI-оверлея —
+# сознательно узкий список (как и SCRIPT_CLASSES выше по духу), чтобы не
+# гонять по сети произвольные бинарные/редкие свойства ради одного div'а.
+GUI_PROPS = (
+    'Name', 'Position', 'Size', 'AnchorPoint', 'Visible', 'Enabled',
+    'ZIndex', 'BackgroundColor3', 'BackgroundTransparency', 'BorderSizePixel',
+    'BorderColor3', 'Text', 'TextColor3', 'TextTransparency', 'TextSize',
+    'TextScaled', 'TextWrapped', 'TextXAlignment', 'TextYAlignment', 'Font',
+    'Image', 'ScaleType', 'ClipsDescendants',
+)
+
+# Script/LocalScript исполняются в РАЗНЫХ средах в настоящем Roblox
+# (сервер и клиент соответственно) — 'side' используется фронтендом
+# (index.html, /api/scripts) только для того, чтобы пометить бейджем и в
+# Output, откуда пришёл вывод; сам движок остаётся с одной общей Lua VM
+# (нет настоящей сети клиент↔сервер), см. комментарий у api_scripts ниже.
+SCRIPT_SIDE = {'Script': 'server', 'LocalScript': 'client', 'ModuleScript': 'shared'}
+
 
 def safe_float(v, default=0.0):
     try:
@@ -789,8 +817,49 @@ def api_scripts():
             'name': props.get('Name', cls),
             'source': props.get('Source', '') or '',
             'parent': pm.get(ref, -1),
+            # 'server' для Script, 'client' для LocalScript — см.
+            # SCRIPT_SIDE выше. Фронтенд использует это только для
+            # отображения (бейдж в Output/Properties), не для настоящей
+            # сетевой изоляции.
+            'side': SCRIPT_SIDE.get(cls, 'server'),
         })
     return jsonify({'ok': True, 'scripts': out})
+
+
+@flask_app.route('/api/gui_tree')
+def api_gui_tree():
+    # Плоский список всех GUI-инстансов (ScreenGui и его потомки —
+    # Frame/TextLabel/TextButton/TextBox/ImageLabel/ImageButton) с узким
+    # набором свойств (GUI_PROPS), которых достаточно, чтобы фронтенд
+    # (buildGuiOverlay в index.html) собрал DOM-дерево оверлея поверх
+    # 3D-вьюпорта в Play. По духу — то же самое, что /api/scripts делает
+    # для Script/LocalScript: один запрос вместо N обращений к
+    # /api/instance/<ref> на каждый GUI-объект.
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False}), 400
+    r2c = parsed['referent_to_class']
+    pm = parsed['parent_map']
+    pr = parsed['props']
+
+    out = []
+    for ref, cls in r2c.items():
+        if cls not in GUI_CLASSES:
+            continue
+        props = pr.get(ref, {})
+        enabled = props.get('Enabled', True)
+        if isinstance(enabled, str):
+            enabled = enabled.lower() in ('true', '1')
+        item = {
+            'ref': ref, 'cls': cls,
+            'parent': pm.get(ref, -1),
+            'enabled': enabled,
+        }
+        for pname in GUI_PROPS:
+            if pname in props:
+                item[pname] = props[pname]
+        out.append(item)
+    return jsonify({'ok': True, 'elements': out})
 
 
 @flask_app.route('/api/tree')

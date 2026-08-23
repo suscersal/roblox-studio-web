@@ -274,6 +274,41 @@
             display: block
         }
 
+        /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
+        #gui-overlay {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+        }
+
+        #gui-overlay.active {
+            display: block;
+        }
+
+        .rbx-gui-el {
+            position: absolute;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            white-space: pre-wrap;
+            font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+
+        .rbx-gui-el[data-cls="TextButton"],
+        .rbx-gui-el[data-cls="ImageButton"] {
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        .rbx-gui-el[data-cls="TextBox"] {
+            pointer-events: auto;
+        }
+
         #vp-label {
             position: absolute;
             bottom: 8px;
@@ -862,6 +897,7 @@
     </div>
     <div class="resizer" id="resizer-1"></div>
     <div id="viewport" tabindex="0">
+        <div id="gui-overlay"></div>
         <div id="fps-counter">FPS: --</div>
         <div id="speed-indicator">🚀 x1.0</div>
         <div id="quality-selector">
@@ -3096,8 +3132,15 @@ acseration = 0;}
             return fengariLoadPromise;
         }
 
-        let luaL = null;         // главный lua_State — луа-глобалы, реестр функций
-        let luaWaits = [];       // [{co, resumeAt}] — корутины, спящие в wait()
+        // Два НЕЗАВИСИМЫХ lua_State — как сервер и клиент в настоящем
+        // Roblox: у сервера и клиента разные глобальные таблицы, разный
+        // кэш wrap()-объектов, разные локальные переменные скриптов —
+        // Script (luaServerL) физически не может прочитать upvalue/global
+        // из LocalScript (luaClientL), и наоборот. Единственный канал
+        // между ними — RemoteEvent (__fire_remote/fireLuaSignal ниже).
+        let luaServerL = null;
+        let luaClientL = null;
+        let luaWaits = [];       // [{co, resumeAt}] — корутины, спящие в wait() (общий шедулер на обе VM)
         let luaOutputLines = []; // {level, text} — для панели #lua-output
 
         const LUA_PRELUDE = `
@@ -3117,6 +3160,22 @@ Vector3.__tostring = function(v) return v.X .. ", " .. v.Y .. ", " .. v.Z end
 function Vector3.new_magnitude(v) return math.sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z) end
 
 local InstanceMT = {}
+
+-- Event:Connect(fn) — тонкая Lua-обёртка над __connect/__disconnect
+-- (см. installLuaBridge). Специально без :Wait() и без поддержки yield
+-- внутри обработчика — колбэк выполняется синхронным pcall на стороне JS
+-- (fireLuaSignal), а не как отдельная корутина.
+local function makeEvent(ref, evName)
+    return setmetatable({}, { __index = {
+        Connect = function(self, fn)
+            local id = __connect(ref, evName, fn)
+            return setmetatable({}, { __index = {
+                Disconnect = function() __disconnect(id) end,
+            } })
+        end,
+    } })
+end
+
 -- __mode="v" — слабые значения: если Lua-код нигде больше не держит ссылку
 -- на обёртку, она может быть собрана сборщиком мусора, а не висеть вечно.
 local instances = setmetatable({}, {__mode = "v"})
@@ -3174,6 +3233,20 @@ InstanceMT.__index = function(t, k)
                 if c ~= -1 then __destroy(c) end
             end
         end
+    end
+    -- Сигналы: RemoteEvent.OnServerEvent/OnClientEvent и
+    -- TextButton.MouseButton1Click отдают объект с методом :Connect(fn),
+    -- как настоящий RBXScriptSignal (упрощённый — без :Wait()/:Once()).
+    if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseButton1Click" then
+        return makeEvent(ref, k)
+    end
+    if k == "FireServer" then
+        return function(self, ...) __fire_remote(ref, "server", ...) end
+    end
+    if k == "FireClient" then
+        -- первый аргумент — Player, у нас всегда ровно один
+        -- (LocalPlayer) — просто отбрасываем его.
+        return function(self, player, ...) __fire_remote(ref, "client", ...) end
     end
     local ok, v = pcall(__get_prop, ref, k)
     if ok then return v end
@@ -3239,6 +3312,20 @@ game = setmetatable({}, {
         // источником (как в реальной Roblox Studio — там Output всегда
         // показывает, из какого скрипта пришло сообщение, это не опционально).
         const luaScriptNameByCo = new WeakMap();
+        // co -> 'server'/'client'/'shared', заполняется вместе с
+        // luaScriptNameByCo в runLuaScript — используется и Output'ом
+        // (logLuaOutput), и бейджем в шапке вкладки Script (renderProps).
+        const luaScriptSideByCo = new WeakMap();
+
+        // Разделение Script (сервер) / LocalScript (клиент) / ModuleScript
+        // (общий код, сам по себе не исполняется — только через require()).
+        // Раньше все три класса выглядели и вели себя в UI одинаково, хотя
+        // в реальном Roblox это принципиально разные среды выполнения.
+        const SCRIPT_BADGES = {
+            Script: { icon: '🖥️', label: 'Server', color: '#f87171' },
+            LocalScript: { icon: '💻', label: 'Client', color: '#60a5fa' },
+            ModuleScript: { icon: '📦', label: 'Module', color: '#a3a3a3' },
+        };
 
         function luaArgToDisplay(L, idx) {
             const { lua, lauxlib } = window.fengari;
@@ -3267,8 +3354,8 @@ game = setmetatable({}, {
         // source — имя скрипта-источника (для print/warn/error) или null для
         // системных сообщений (загрузка fengari, ошибка компиляции и т.п.),
         // trace — необязательный текст traceback'а (только для ошибок).
-        function logLuaOutput(level, text, source, trace) {
-            luaOutputLines.push({ level, text, source: source || null, trace: trace || null, time: luaTimestamp() });
+        function logLuaOutput(level, text, source, trace, sideCls) {
+            luaOutputLines.push({ level, text, source: source || null, trace: trace || null, sideCls: sideCls || null, time: luaTimestamp() });
             if (luaOutputLines.length > 300) luaOutputLines.shift();
             renderLuaOutput();
             (level === 'error' || level === 'warn' ? console.warn : console.log)(
@@ -3291,7 +3378,9 @@ game = setmetatable({}, {
     const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
     const icons = { error: '⛔', warn: '⚠️', print: '' };
     el.innerHTML = luaOutputLines.slice(-200).map(l => {
+        const sideBadge = SCRIPT_BADGES[l.sideCls];
         const head = '<span style="color:#6b7280">' + l.time + '</span> ' +
+            (sideBadge ? '<span style="color:' + sideBadge.color + '" title="' + sideBadge.label + '">' + sideBadge.icon + '</span> ' : '') +
             (l.source ? '<span style="color:#60a5fa">[' + esc(l.source) + ']</span> ' : '') +
             (icons[l.level] || '');
         const trace = l.trace
@@ -3337,6 +3426,17 @@ game = setmetatable({}, {
                 const v = virtualInstanceProps[ref][name];
                 return v !== undefined ? v : null;
             }
+            // GUI-объекты (ScreenGui/Frame/TextLabel/...) не имеют меша —
+            // их свойства читаются из guiPropsByRef (см. loadGuiOverlay).
+            if (guiPropsByRef[ref] && name in guiPropsByRef[ref]) {
+                const v = guiPropsByRef[ref][name];
+                // Position/Size — составные UDim2-объекты, мост может
+                // передавать в Lua только числа/строки/булевы (см. коммент
+                // у installLuaBridge) — отдаём их как JSON-строку, этого
+                // достаточно для script.Parent:GetPropertyChangedSignal-
+                // независимого чтения/логирования, не для арифметики над UDim2.
+                return (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
+            }
             const mesh = sceneObjs[ref];
             if (name === 'Transparency') {
                 return mesh && mesh.material ? 1 - (mesh.material.opacity !== undefined ? mesh.material.opacity : 1) : 0;
@@ -3350,6 +3450,15 @@ game = setmetatable({}, {
         function luaSetGenericProp(ref, name, value) {
             if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
             if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
+            // GUI: Text/Visible/BackgroundTransparency/TextTransparency и
+            // прочие простые (число/строка/булево) свойства патчатся прямо
+            // в DOM-оверлей — см. guiPatchProp/applyGuiElementStyle.
+            // Color3/UDim2 через мост не проставить (мост несёт только
+            // числа/строки/булевы, см. installLuaBridge), поэтому для
+            // BackgroundColor3/TextColor3/Position/Size это ограничение.
+            if (guiPropsByRef[ref]) {
+                if (guiPatchProp(ref, name, value)) return;
+            }
             const mesh = sceneObjs[ref];
             if (name === 'Transparency' && mesh && mesh.material) {
                 mesh.material.transparent = value > 0;
@@ -3361,7 +3470,7 @@ game = setmetatable({}, {
                 if (body) body.collisionFilterMask = value ? 1 : 0;
                 return;
             }
-            logLuaOutput('warn', 'свойство "' + name + '" пока не поддержано Lua-мостом (только Position/Transparency/CanCollide + произвольные на Instance.new())');
+            logLuaOutput('warn', 'свойство "' + name + '" пока не поддержано Lua-мостом (только Position/Transparency/CanCollide, GUI Text/Visible/... + произвольные на Instance.new())');
         }
         // Отдельный, СЫРОЙ индекс иерархии для Lua-моста — специально НЕ
         // переиспользует treeByRef/parentByRef (те строятся из /api/tree,
@@ -3382,6 +3491,66 @@ game = setmetatable({}, {
         let luaNextVirtualRef = -1000; // счётчик вниз — не пересекается ни с
         // реальными ref'ами карты (положительные), ни с сентинелом "нет
         // инстанса" (-1, см. wrap() в LUA_PRELUDE).
+
+        // ============ Сигналы/RemoteEvent — общее для обеих VM состояние ============
+        let luaSignalConns = {};   // id -> {L, fnRef, ref, evName}
+        let luaSignalsByKey = {};  // "ref|evName" -> [id, ...]
+        let luaNextSignalId = 1;
+        let remoteQueue = [];      // [{ref, targetSide, args, dueAt}] — см. __fire_remote
+
+        // Резолвит и дёргает все Connect-колбэки для (ref, evName) — общий
+        // механизм и для RemoteEvent.OnServerEvent/OnClientEvent, и для
+        // TextButton.MouseButton1Click (см. guiCreateDomNode). Каждый
+        // колбэк вызывается на СВОЁМ L (сервер или клиент — там, где был
+        // сделан :Connect), поэтому сервер и клиент физически не могут
+        // прочитать локальные переменные друг друга — это и есть изоляция.
+        function fireLuaSignal(ref, evName, args) {
+            const { lua } = window.fengari;
+            const ids = (luaSignalsByKey[ref + '|' + evName] || []).slice();
+            for (const id of ids) {
+                const conn = luaSignalConns[id];
+                if (!conn) continue;
+                lua.lua_rawgeti(conn.L, lua.LUA_REGISTRYINDEX, conn.fnRef);
+                let n = 0;
+                for (const a of (args || [])) {
+                    if (typeof a === 'number') lua.lua_pushnumber(conn.L, a);
+                    else if (typeof a === 'boolean') lua.lua_pushboolean(conn.L, a);
+                    else if (a === null || a === undefined) lua.lua_pushnil(conn.L);
+                    else lua.lua_pushstring(conn.L, String(a));
+                    n++;
+                }
+                const status = lua.lua_pcall(conn.L, n, 0, 0);
+                if (status !== lua.LUA_OK) {
+                    logLuaOutput('error', lua.lua_tojsstring(conn.L, -1), evName, null, conn.L === luaServerL ? 'Script' : 'LocalScript');
+                    lua.lua_pop(conn.L, 1);
+                }
+            }
+        }
+
+        // Обрабатывает очередь __fire_remote — вызывается из того же тика
+        // rAF, что и updateLuaScheduler (см. play-loop). targetSide
+        // 'server' -> событие OnServerEvent на серверной VM (клиент дёрнул
+        // FireServer), 'client' -> OnClientEvent на клиентской (сервер
+        // дёрнул FireClient) — сознательная асимметрия названий события
+        // как в самом Roblox.
+        function processRemoteQueue() {
+            if (!remoteQueue.length) return;
+            const now = performance.now();
+            const ready = remoteQueue.filter(x => x.dueAt <= now);
+            if (!ready.length) return;
+            remoteQueue = remoteQueue.filter(x => x.dueAt > now);
+            for (const item of ready) {
+                const evName = item.targetSide === 'server' ? 'OnServerEvent' : 'OnClientEvent';
+                fireLuaSignal(item.ref, evName, item.args);
+            }
+        }
+
+        function luaResetSignals() {
+            luaSignalConns = {};
+            luaSignalsByKey = {};
+            luaNextSignalId = 1;
+            remoteQueue = [];
+        }
 
         function luaWorkspaceRef() {
             for (const ref in luaByRef) {
@@ -3440,13 +3609,13 @@ game = setmetatable({}, {
             def('print', function (L2) {
                 const n = lua.lua_gettop(L2), parts = [];
                 for (let i = 1; i <= n; i++) parts.push(luaArgToDisplay(L2, i));
-                logLuaOutput('print', parts.join('\t'), luaScriptNameByCo.get(L2));
+                logLuaOutput('print', parts.join('\t'), luaScriptNameByCo.get(L2), null, luaScriptSideByCo.get(L2));
                 return 0;
             });
             def('warn', function (L2) {
                 const n = lua.lua_gettop(L2), parts = [];
                 for (let i = 1; i <= n; i++) parts.push(luaArgToDisplay(L2, i));
-                logLuaOutput('warn', parts.join('\t'), luaScriptNameByCo.get(L2));
+                logLuaOutput('warn', parts.join('\t'), luaScriptNameByCo.get(L2), null, luaScriptSideByCo.get(L2));
                 return 0;
             });
             def('tick', function (L2) { lua.lua_pushnumber(L2, performance.now() / 1000); return 1; });
@@ -3533,6 +3702,58 @@ game = setmetatable({}, {
                 lua.lua_pushnumber(L2, luaFindServiceRef(lua.lua_tojsstring(L2, 1)));
                 return 1;
             });
+            // ============ Сигналы (:Connect) и RemoteEvent ============
+            // __connect(ref, eventName, fn) — вызывается из Event:Connect
+            // (см. LUA_PRELUDE, makeEvent). Функция fn кладётся в реестр
+            // ТОГО L-стейта, из которого пришёл вызов (сервер и клиент —
+            // разные lua_State, поэтому luaSignalConns хранит L явно и
+            // резолвит функцию через luaL_ref именно на нём — см.
+            // fireLuaSignal). Возвращает числовой id соединения для
+            // Disconnect().
+            def('__connect', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const evName = lua.lua_tojsstring(L2, 2);
+                const fnRef = lauxlib.luaL_ref(L2, lua.LUA_REGISTRYINDEX); // снимает fn (arg 3, top) со стека
+                const id = luaNextSignalId++;
+                luaSignalConns[id] = { L: L2, fnRef, ref, evName };
+                const key = ref + '|' + evName;
+                (luaSignalsByKey[key] = luaSignalsByKey[key] || []).push(id);
+                lua.lua_pushnumber(L2, id);
+                return 1;
+            });
+            def('__disconnect', function (L2) {
+                const id = lua.lua_tonumber(L2, 1);
+                const conn = luaSignalConns[id];
+                if (conn) {
+                    lauxlib.luaL_unref(conn.L, lua.LUA_REGISTRYINDEX, conn.fnRef);
+                    const key = conn.ref + '|' + conn.evName;
+                    luaSignalsByKey[key] = (luaSignalsByKey[key] || []).filter(x => x !== id);
+                    delete luaSignalConns[id];
+                }
+                return 0;
+            });
+            // __fire_remote(ref, targetSide, ...) — RemoteEvent:FireServer()/
+            // :FireClient(player, ...) (player-аргумент отбрасывается: у нас
+            // всегда ровно один виртуальный LocalPlayer, адресовать некому).
+            // Кладётся в очередь и обрабатывается СЛЕДУЮЩИМ кадром
+            // (processRemoteQueue) — как и в настоящем Roblox, Remote-вызов
+            // не выполняется мгновенно и синхронно, а реплицируется с
+            // задержкой (у нас — один тик rAF вместо сетевого пинга).
+            def('__fire_remote', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const targetSide = lua.lua_tojsstring(L2, 2);
+                const n = lua.lua_gettop(L2);
+                const args = [];
+                for (let i = 3; i <= n; i++) {
+                    const ty = lua.lua_type(L2, i);
+                    if (ty === lua.LUA_TNUMBER) args.push(lua.lua_tonumber(L2, i));
+                    else if (ty === lua.LUA_TBOOLEAN) args.push(!!lua.lua_toboolean(L2, i));
+                    else if (ty === lua.LUA_TSTRING) args.push(lua.lua_tojsstring(L2, i));
+                    else args.push(null);
+                }
+                remoteQueue.push({ ref, targetSide, args, dueAt: performance.now() + 16 });
+                return 0;
+            });
         }
 
         // luaL_loadstring/luaL_loadbuffer работают с байтовыми буферами
@@ -3577,40 +3798,92 @@ game = setmetatable({}, {
             if (status === lua.LUA_YIELD) return; // ушёл в wait(), уже в luaWaits
             if (status !== lua.LUA_OK) {
                 const msg = lua.lua_tojsstring(co, -1);
-                logLuaOutput('error', msg, name, luaGetTraceback(co));
+                logLuaOutput('error', msg, name, luaGetTraceback(co), luaScriptSideByCo.get(co));
             }
         }
 
-        function runLuaScript(scr) {
+        function runLuaScript(scr, L) {
             const { lua } = window.fengari;
             // function(script) ... end — превращает `script` в upvalue КОНКРЕТНОЙ
             // корутины, а не общий global: несколько скриптов выполняются
             // "параллельно" через кооперативные корутины (см. wait()), общий
             // global script их бы перепутал между собой.
             const wrapped = 'return function(script)\n' + scr.source + '\nend';
-            let status = loadLuaChunk(luaL, wrapped, scr.name);
+            let status = loadLuaChunk(L, wrapped, scr.name);
             if (status !== lua.LUA_OK) {
-                logLuaOutput('error', 'ошибка компиляции: ' + lua.lua_tojsstring(luaL, -1), scr.name);
-                lua.lua_pop(luaL, 1);
+                logLuaOutput('error', 'ошибка компиляции: ' + lua.lua_tojsstring(L, -1), scr.name, null, scr.cls);
+                lua.lua_pop(L, 1);
                 return;
             }
-            status = lua.lua_pcall(luaL, 0, 1, 0);
+            status = lua.lua_pcall(L, 0, 1, 0);
             if (status !== lua.LUA_OK) {
-                logLuaOutput('error', lua.lua_tojsstring(luaL, -1), scr.name);
-                lua.lua_pop(luaL, 1);
+                logLuaOutput('error', lua.lua_tojsstring(L, -1), scr.name, null, scr.cls);
+                lua.lua_pop(L, 1);
                 return;
             }
-            const co = lua.lua_newthread(luaL);  // пушится на стек luaL, возвращается co
-            lua.lua_pushvalue(luaL, -2);         // копия функции под свежесозданным потоком
-            lua.lua_xmove(luaL, co, 1);          // переносим функцию на стек co
+            const co = lua.lua_newthread(L);     // пушится на стек L, возвращается co
+            lua.lua_pushvalue(L, -2);            // копия функции под свежесозданным потоком
+            lua.lua_xmove(L, co, 1);             // переносим функцию на стек co
             lua.lua_getglobal(co, '__wrap');
             lua.lua_pushnumber(co, scr.ref);
             lua.lua_call(co, 1, 1);              // co: [функция, script-инстанс]
-            lua.lua_pop(luaL, 2);                // со стека luaL убираем саму функцию и поток
+            lua.lua_pop(L, 2);                   // со стека L убираем саму функцию и поток
             // (поток жив, пока жива JS-ссылка co — см. luaWaits/резюмирование;
             // сборка Lua-мусора у fengari завязана на JS GC)
             luaScriptNameByCo.set(co, scr.name);
+            luaScriptSideByCo.set(co, scr.cls);
             resumeLuaCoroutine(co, scr.name, 1);
+        }
+
+        // Клонирует поддерево StarterGui в PlayerGui конкретного клиента —
+        // как настоящий Roblox: содержимое StarterGui копируется в
+        // PlayerGui игрока целиком, у клона свои refs, и LocalScript'ы
+        // внутри исполняются от лица КЛОНА (их script.Parent указывает на
+        // объект в PlayerGui, а не на шаблон в StarterGui). Возвращает
+        // Map(originalRef -> clonedRef).
+        function cloneStarterGuiIntoPlayerGui(playerGuiRef) {
+            const starterGuiRef = luaFindServiceRef('StarterGui');
+            const refMap = {};
+            if (starterGuiRef === -1) return refMap;
+
+            function cloneNode(origRef, newParentRef) {
+                const origInfo = luaByRef[origRef];
+                if (!origInfo) return;
+                const newRef = luaCreateVirtualInstance(origInfo.cls);
+                luaByRef[newRef].name = origInfo.name;
+                luaSetParent(newRef, newParentRef);
+                refMap[origRef] = newRef;
+                if (guiPropsByRef[origRef]) {
+                    guiPropsByRef[newRef] = Object.assign({}, guiPropsByRef[origRef], { cls: origInfo.cls, ref: newRef, parent: newParentRef });
+                }
+                for (const childRef of (luaChildrenByRef[origRef] || [])) {
+                    if (childRef !== newRef) cloneNode(childRef, newRef);
+                }
+            }
+            for (const childRef of (luaChildrenByRef[starterGuiRef] || []).slice()) {
+                cloneNode(childRef, playerGuiRef);
+            }
+            return refMap;
+        }
+
+        // Создаёт game.Players.LocalPlayer (виртуальный, как и всё Play-only
+        // дерево — luaCreateVirtualInstance) с дочерними PlayerGui и
+        // Backpack, и клонирует в PlayerGui содержимое StarterGui. Это и
+        // есть "полностью локальные" объекты — они существуют ТОЛЬКО в
+        // клиентской половине рантайма и пропадают по Stop.
+        function bootstrapClientPlayer() {
+            let playersRef = luaFindServiceRef('Players');
+            if (playersRef === -1) playersRef = luaCreateVirtualInstance('Players');
+            const playerRef = luaCreateVirtualInstance('Player');
+            luaByRef[playerRef].name = 'LocalPlayer';
+            luaSetParent(playerRef, playersRef);
+
+            const playerGuiRef = luaCreateVirtualInstance('PlayerGui');
+            luaSetParent(playerGuiRef, playerRef);
+            luaCreateVirtualInstance('Backpack'); // существует для полноты API; не рендерится
+
+            const refMap = cloneStarterGuiIntoPlayerGui(playerGuiRef);
+            return { playerRef, playerGuiRef, refMap };
         }
 
         async function startLuaScripts() {
@@ -3644,39 +3917,240 @@ game = setmetatable({}, {
             }
             if (!isPlaying) return; // Play могли остановить, пока шёл запрос
 
-            const { lua, lauxlib, lualib } = window.fengari;
-            luaL = lauxlib.luaL_newstate();
-            lualib.luaL_openlibs(luaL);
-            installLuaBridge(luaL);
+            // GUI-дерево (для клонирования StarterGui->PlayerGui и для
+            // самого рендера оверлея) грузим ДО запуска скриптов — иначе
+            // клонировать будет нечего.
+            const guiR = await api('GET', '/api/gui_tree');
+            guiPropsByRef = {};
+            guiChildrenByRef = {};
+            if (guiR.ok && guiR.elements) {
+                for (const item of guiR.elements) guiPropsByRef[item.ref] = item;
+            }
 
-            const preludeStatus = doLuaString(luaL, LUA_PRELUDE, 'prelude');
-            if (preludeStatus !== lua.LUA_OK) {
-                logLuaOutput('error', 'Lua prelude: ' + lua.lua_tojsstring(luaL, -1));
-                luaL = null;
-                return;
+            const { lua, lauxlib, lualib } = window.fengari;
+            luaServerL = lauxlib.luaL_newstate();
+            lualib.luaL_openlibs(luaServerL);
+            installLuaBridge(luaServerL);
+            luaClientL = lauxlib.luaL_newstate();
+            lualib.luaL_openlibs(luaClientL);
+            installLuaBridge(luaClientL);
+
+            for (const [L, label] of [[luaServerL, 'сервера'], [luaClientL, 'клиента']]) {
+                const preludeStatus = doLuaString(L, LUA_PRELUDE, 'prelude');
+                if (preludeStatus !== lua.LUA_OK) {
+                    logLuaOutput('error', 'Lua prelude (' + label + '): ' + lua.lua_tojsstring(L, -1));
+                    luaServerL = null; luaClientL = null;
+                    return;
+                }
             }
 
             luaWaits = [];
+            luaResetSignals();
+
+            // Server-скрипты (Script) выполняются как есть — по одному
+            // разу, "на сервере", видят реальную (нефильтрованную) карту.
             for (const scr of r.scripts) {
-                try { runLuaScript(scr); }
-                catch (e) { logLuaOutput('error', scr.name + ': ' + e.message); }
+                if (scr.cls !== 'Script') continue;
+                try { runLuaScript(scr, luaServerL); }
+                catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, scr.cls); }
             }
+
+            // Client: сначала bootstrapClientPlayer() клонирует StarterGui
+            // в PlayerGui (получаем refMap: оригинальный ref -> клон), ПОТОМ
+            // LocalScript'ы, лежавшие внутри StarterGui, запускаются с
+            // ПОДМЕНЁННЫМ ref — от лица своего клона в PlayerGui, а не
+            // шаблона. LocalScript'ы вне StarterGui (например, в
+            // StarterPlayerScripts) запускаются как есть.
+            const { refMap } = bootstrapClientPlayer();
+            for (const scr of r.scripts) {
+                if (scr.cls !== 'LocalScript') continue;
+                const clonedRef = refMap[scr.ref];
+                const runAs = clonedRef !== undefined ? Object.assign({}, scr, { ref: clonedRef }) : scr;
+                try { runLuaScript(runAs, luaClientL); }
+                catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, scr.cls); }
+            }
+
+            renderGuiOverlayFromClient();
         }
 
         function stopLuaScripts() {
-            luaL = null;   // JS-ссылки отпущены — и главный стейт, и все корутины
-            luaWaits = []; // станут доступны для сборки мусора JS-движком
+            luaServerL = null; // JS-ссылки отпущены — обе VM и все их корутины
+            luaClientL = null; // станут доступны для сборки мусора JS-движком
+            luaWaits = [];
             luaOutputLines = [];
             luaByRef = {};
             luaParentByRef = {};
             luaChildrenByRef = {};
             virtualInstanceProps = {};
             luaNextVirtualRef = -1000;
+            luaResetSignals();
             renderLuaOutput();
+            clearGuiOverlay();
+        }
+
+        // ============ GUI (ScreenGui/Frame/TextLabel/TextButton/... в Play) ============
+        //
+        // Roblox-интерфейс рендерится ОТДЕЛЬНЫМ DOM-оверлеем (#gui-overlay)
+        // поверх 3D-вьюпорта, а не как объекты three.js-сцены — GUI не имеет
+        // геометрии/меша, у него есть только 2D-раскладка (UDim2 Position/
+        // Size, экран-относительная). Строится один раз при входе в Play (из
+        // /api/gui_tree, см. app.py GUI_CLASSES) и live-обновляется, когда
+        // Lua-скрипт меняет свойство через __set_prop (см. luaSetGenericProp).
+        let guiPropsByRef = {};    // ref -> {cls, parent, ...GUI_PROPS}
+        let guiChildrenByRef = {}; // ref -> [childRef, ...]
+        let guiDomByRef = {};      // ref -> HTMLElement
+
+        function color3ToCss(c, transparency) {
+            if (!c || typeof c !== 'object') return '#ffffff';
+            const r = Math.round((c.r ?? 1) * 255), g = Math.round((c.g ?? 1) * 255), b = Math.round((c.b ?? 1) * 255);
+            const a = 1 - (typeof transparency === 'number' ? transparency : 0);
+            return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+        }
+
+        // UDim2 {x:{scale,offset}, y:{scale,offset}} -> CSS calc(), точно как
+        // в самом Roblox: итоговый пиксель = scale * размер_родителя + offset.
+        // Родитель здесь всегда сам #gui-overlay (100% вьюпорта) — вложенные
+        // Frame'ы позиционируются относительно родительского DOM-узла через
+        // обычное position:absolute, так что calc(%) уже считается верно.
+        function udim2ToCssPos(pos) {
+            const x = pos && pos.x ? pos.x : { scale: 0, offset: 0 };
+            const y = pos && pos.y ? pos.y : { scale: 0, offset: 0 };
+            return {
+                left: 'calc(' + ((x.scale || 0) * 100) + '% + ' + (x.offset || 0) + 'px)',
+                top: 'calc(' + ((y.scale || 0) * 100) + '% + ' + (y.offset || 0) + 'px)',
+            };
+        }
+
+        function udim2ToCssSize(size) {
+            const x = size && size.x ? size.x : { scale: 1, offset: 0 };
+            const y = size && size.y ? size.y : { scale: 1, offset: 0 };
+            return {
+                width: 'calc(' + ((x.scale || 0) * 100) + '% + ' + (x.offset || 0) + 'px)',
+                height: 'calc(' + ((y.scale || 0) * 100) + '% + ' + (y.offset || 0) + 'px)',
+            };
+        }
+
+        function applyGuiElementStyle(el, props) {
+            const cls = props.cls;
+            const pos = udim2ToCssPos(props.Position);
+            const size = udim2ToCssSize(props.Size);
+            el.style.left = pos.left;
+            el.style.top = pos.top;
+            el.style.width = size.width;
+            el.style.height = size.height;
+            el.style.zIndex = String(props.ZIndex || 1);
+            el.style.display = (props.Visible === false) ? 'none' : 'flex';
+
+            if (cls === 'Frame' || cls === 'ScrollingFrame') {
+                el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
+                el.style.border = (props.BorderSizePixel || 1) > 0
+                    ? (props.BorderSizePixel || 1) + 'px solid ' + color3ToCss(props.BorderColor3)
+                    : 'none';
+                if (props.ClipsDescendants) el.style.overflow = 'hidden';
+            } else if (cls === 'TextLabel' || cls === 'TextButton' || cls === 'TextBox') {
+                el.style.background = (props.BackgroundTransparency >= 1)
+                    ? 'transparent' : color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
+                el.style.color = color3ToCss(props.TextColor3, props.TextTransparency);
+                el.style.fontSize = (props.TextSize || 14) + 'px';
+                el.style.whiteSpace = props.TextWrapped === false ? 'nowrap' : 'pre-wrap';
+                el.style.border = 'none';
+                el.textContent = props.Text != null ? String(props.Text) : '';
+                if (cls === 'TextBox') {
+                    el.contentEditable = 'true';
+                }
+            } else if (cls === 'ImageLabel' || cls === 'ImageButton') {
+                el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
+                el.textContent = '';
+                el.title = props.Image || '';
+            }
+        }
+
+        function guiCreateDomNode(ref, props) {
+            const el = document.createElement(props.cls === 'TextButton' || props.cls === 'ImageButton' ? 'button' : 'div');
+            el.className = 'rbx-gui-el';
+            el.dataset.ref = ref;
+            el.dataset.cls = props.cls;
+            applyGuiElementStyle(el, props);
+            if (props.cls === 'TextButton' || props.cls === 'ImageButton') {
+                el.style.outline = 'none';
+                // Клик по кнопке — настоящий Lua-сигнал (fireLuaSignal),
+                // а не просто визуальная реакция: любой LocalScript,
+                // сделавший button.MouseButton1Click:Connect(fn), получит
+                // вызов на клиентской VM (см. installLuaBridge/__connect).
+                el.addEventListener('click', () => fireLuaSignal(ref, 'MouseButton1Click', []));
+            }
+            return el;
+        }
+
+        function guiRenderNode(ref, parentEl) {
+            const props = guiPropsByRef[ref];
+            if (!props) return;
+            const el = guiCreateDomNode(ref, props);
+            guiDomByRef[ref] = el;
+            parentEl.appendChild(el);
+            for (const childRef of (guiChildrenByRef[ref] || [])) {
+                guiRenderNode(childRef, el);
+            }
+        }
+
+        // Рендерит DOM-оверлей из уже готового guiPropsByRef (собранного
+        // в startLuaScripts: /api/gui_tree + клоны StarterGui->PlayerGui).
+        // Показываем ТОЛЬКО клоны (отрицательные refs — см.
+        // luaCreateVirtualInstance) и любые ScreenGui, чей родитель — не
+        // StarterGui: сам StarterGui — это шаблон, в реальном Roblox он
+        // тоже не рендерится напрямую, только его копии в PlayerGui.
+        function renderGuiOverlayFromClient() {
+            const overlay = document.getElementById('gui-overlay');
+            if (!overlay) return;
+            overlay.innerHTML = '';
+            guiDomByRef = {};
+            guiChildrenByRef = {};
+            for (const [refStr, props] of Object.entries(guiPropsByRef)) {
+                const ref = Number(refStr);
+                const parentRef = luaParentByRef[ref];
+                if (parentRef !== undefined && parentRef !== -1) {
+                    (guiChildrenByRef[parentRef] = guiChildrenByRef[parentRef] || []).push(ref);
+                }
+            }
+            for (const [refStr, props] of Object.entries(guiPropsByRef)) {
+                const ref = Number(refStr);
+                if (props.cls !== 'ScreenGui' && props.cls !== 'BillboardGui') continue;
+                const parentRef = luaParentByRef[ref];
+                const parentInfo = parentRef !== undefined ? luaByRef[parentRef] : null;
+                const isTemplateUnderStarterGui = parentInfo && parentInfo.cls === 'StarterGui';
+                if (isTemplateUnderStarterGui) continue; // шаблон — не рендерим, рендерим клон в PlayerGui
+                if (props.enabled === false) continue;
+                guiRenderNode(ref, overlay);
+            }
+            overlay.classList.add('active');
+        }
+
+        function clearGuiOverlay() {
+            const overlay = document.getElementById('gui-overlay');
+            if (overlay) { overlay.innerHTML = ''; overlay.classList.remove('active'); }
+            guiPropsByRef = {};
+            guiChildrenByRef = {};
+            guiDomByRef = {};
+        }
+
+        // Патчит уже отрисованный DOM-узел после того, как Lua-скрипт
+        // (Script/LocalScript) поменял GUI-свойство через __set_prop —
+        // без этого overlay оставался бы статичным снимком на момент
+        // старта Play, а .Text/.Visible/.BackgroundColor3 из скрипта
+        // молча ни на что не влияли бы.
+        function guiPatchProp(ref, name, value) {
+            const props = guiPropsByRef[ref];
+            const el = guiDomByRef[ref];
+            if (!props || !el) return false;
+            props[name] = value;
+            applyGuiElementStyle(el, props);
+            return true;
         }
 
         function updateLuaScheduler() {
-            if (!luaL || !luaWaits.length) return;
+            if (!luaServerL && !luaClientL) return;
+            processRemoteQueue();
+            if (!luaWaits.length) return;
             const now = performance.now();
             const ready = luaWaits.filter(w => w.resumeAt <= now);
             if (!ready.length) return;
@@ -4103,7 +4577,15 @@ game = setmetatable({}, {
             }
 
             if (SCLS.includes(r.cls)) {
-                document.getElementById('script-name').textContent = r.cls + ': ' + (r.props.Name || '?');
+                // Script выполняется на сервере, LocalScript — на клиенте,
+                // ModuleScript ни там, ни там сам по себе (только через
+                // require() из другого скрипта) — бейдж в шапке вкладки
+                // Script делает эту разницу видимой, а не молчаливо
+                // одинаковой, как раньше (см. SCRIPT_BADGES ниже).
+                const badge = SCRIPT_BADGES[r.cls] || SCRIPT_BADGES.Script;
+                document.getElementById('script-name').innerHTML =
+                    '<span style="color:' + badge.color + '">' + badge.icon + ' ' + badge.label + '</span>'
+                    + ' — ' + esc(r.cls) + ': ' + esc(r.props.Name || '?');
                 if (cmEditor) cmEditor.setValue(r.props.Source || '');
                 currentScriptRef = r.ref;
                 currentScriptOrigSource = r.props.Source || '';
