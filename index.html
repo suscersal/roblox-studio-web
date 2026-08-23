@@ -814,6 +814,16 @@
                 <button onclick="setQuality('medium')" id="q-medium">Med</button>
                 <button onclick="setQuality('high')" id="q-high">High</button>
             </div>
+            <div id="lua-output-panel" style="display:none;position:absolute;left:8px;bottom:8px;width:320px;max-width:80vw;background:rgba(17,24,39,0.95);border:1px solid rgba(255,255,255,0.15);border-radius:8px;z-index:40;box-shadow:0 4px 16px rgba(0,0,0,0.4);">
+                <div id="lua-output-header" style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;cursor:move;background:rgba(255,255,255,0.06);border-radius:8px 8px 0 0;user-select:none;touch-action:none;">
+                    <span style="font:12px/1 sans-serif;color:#e5e7eb;font-weight:600;">Lua Output</span>
+                    <span>
+                        <button onclick="luaOutputLines=[];renderLuaOutput();" title="Clear" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;padding:2px 6px;">🗑</button>
+                        <button onclick="document.getElementById('lua-output-panel').style.display='none';" title="Close" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;padding:2px 6px;">✕</button>
+                    </span>
+                </div>
+                <div id="lua-output" style="max-height:220px;overflow-y:auto;padding:6px 8px;font:12px/1.5 monospace;white-space:pre-wrap;word-break:break-word;"></div>
+            </div>
             <div id="vp-label" data-i18n-html="vp_hint">
                 🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
                 ⌨️ WASD — move | F — focus | Esc — deselect
@@ -1169,6 +1179,11 @@
         // с произвольным доступом нет, нужен системный пикер (SAF)".
         const IS_ANDROID = typeof window.AndroidBridge !== 'undefined';
 
+        // Цвет неба (фон сцены + туман) — единая константа, чтобы оба места
+        // (initThreeJS при старте и setQuality при переключении пресета)
+        // не могли разъехаться в разные оттенки.
+        const SKY_COLOR = 0x87ceeb;
+
         // ============ CODEMIRROR ============
         let cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
             mode: 'lua',
@@ -1308,7 +1323,7 @@
                 // отрисовки — playRenderCutoff(), а не редакторская
                 // renderDistance (у High это 1200 против ~300 в игре).
                 const far = isPlaying ? STREAM_PRUNE_DIST : (qualitySettings.fog ? 400 : qualitySettings.renderDistance);
-                scene.fog = new THREE.Fog(0x0f172a, 50, far);
+                scene.fog = new THREE.Fog(SKY_COLOR, 50, far);
             }
             updateHelpers();
             reloadScene();
@@ -1428,6 +1443,21 @@
 
         // ============ THREE.JS ПЕРЕМЕННЫЕ ============
         let selectedRef = null;
+        // Ref открытого сейчас в CodeMirror скрипта и его последний
+        // сохранённый (или загруженный с сервера) исходник — чтобы понимать,
+        // есть ли несохранённые правки. Раньше переключение на другой объект
+        // в Explorer просто перезаписывало cmEditor новым содержимым — если
+        // до этого правил скрипт и не нажал "💾 Save script", правки тихо
+        // терялись без предупреждения.
+        let currentScriptRef = null;
+        let currentScriptOrigSource = null;
+        async function saveCurrentScriptIfDirty() {
+            if (currentScriptRef === null || !cmEditor) return;
+            const src = cmEditor.getValue();
+            if (src === currentScriptOrigSource) return; // ничего не поменялось — лишний запрос не нужен
+            await api('POST', '/api/instance/' + currentScriptRef, { prop: 'Source', value: src });
+            currentScriptOrigSource = src;
+        }
         let expanded = new Set();
         let treeData = [];
         let searchText = '';
@@ -1536,7 +1566,7 @@
             }
 
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x0f172a);
+            scene.background = new THREE.Color(SKY_COLOR); // голубое небо вместо тёмно-синего/чёрного фона
             // qualitySettings.fog отключён на High (fog:false) — это ок для
             // редактора (статичная сцена, границы подгрузки не так заметны),
             // но в Play с потоковой подгрузкой это означает, что край
@@ -1546,7 +1576,7 @@
             // сцену; здесь — временная лёгкая версия сразу при инициализации,
             // чтобы граница видимости уже не была жёсткой ни на одном
             // пресете. startPlay() ниже донастраивает её под playRenderCutoff.
-            scene.fog = new THREE.Fog(0x0f172a, 50, qualitySettings.fog ? 400 : qualitySettings.renderDistance);
+            scene.fog = new THREE.Fog(SKY_COLOR, 50, qualitySettings.fog ? 400 : qualitySettings.renderDistance);
 
             camera = new THREE.PerspectiveCamera(60, 1, 0.5, 500);
 
@@ -2688,6 +2718,12 @@ acseration = 0;}
                 return;
             }
 
+            // Иначе Play запускал бы Lua-скрипты по последней СОХРАНЁННОЙ
+            // версии на сервере, а не по тому, что реально видно в CodeMirror
+            // прямо сейчас — правки "на лету" перед проверкой было легко
+            // потерять, забыв нажать Save.
+            await saveCurrentScriptIfDirty();
+
             const spawn = await findSpawnPoint();
 
             // Геометрия для физики запрашивается заново, центрированная на
@@ -2801,10 +2837,12 @@ acseration = 0;}
             if (padE) { padE.textContent = '⤴'; padE.title = t('pad_jump_title'); }
             if (padQ) { padQ.style.visibility = 'hidden'; }
             notify(t('notify_play_started', { n: Object.keys(physicsBodies).length }));
+            startLuaScripts(); // асинхронно — не блокирует появление игрока на спавне
         }
 
         function stopPlay() {
             isPlaying = false;
+            stopLuaScripts();
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
@@ -2854,6 +2892,698 @@ acseration = 0;}
             if (padE) { padE.textContent = '⬆'; padE.title = t('pad_up_title'); }
             if (padQ) { padQ.style.visibility = 'visible'; }
             notify(t('notify_stop'));
+        }
+
+        // ============ LUA (Script/LocalScript в Play) ============
+        //
+        // Исполнение через fengari — готовая, активно поддерживаемая Lua VM,
+        // портированная в JS ES6 (не транспилятор, честная реализация стека
+        // и корутин, см. https://fengari.io). Загружается лениво прямо с CDN
+        // при первом входе в Play, только если на карте вообще есть
+        // включённые Script/LocalScript — если нет, ни лишнего запроса, ни
+        // лишней инициализации VM.
+        //
+        // Мост JS<->Lua устроен НАМЕРЕННО узко: через границу ходят только
+        // числа/строки/булевы (это единственная часть API fengari, чьё
+        // поведение однозначно документировано и не зависит от тонкостей
+        // автомаршалинга сложных объектов, которые невозможно перепроверить
+        // без живого браузера). Все "объектные" вещи — Vector3, обёртка
+        // Instance с Parent/GetChildren/Position и т.п. — реализованы
+        // ЦЕЛИКОМ в Lua (см. LUA_PRELUDE), поверх десятка простых функций
+        // вида __get_prop(ref, name) -> value.
+        //
+        // wait() — честная кооперативная многозадачность через корутины
+        // fengari (lua_newthread/lua_resume/lua_yield), а не имитация:
+        // каждый Script/LocalScript выполняется в своём собственном потоке
+        // Lua, wait(n) реально приостанавливает именно этот поток и ничего
+        // больше, планировщик (updateLuaScheduler) возобновляет его через n
+        // секунд из общего игрового цикла.
+        let fengariLoadPromise = null;
+        function ensureFengariLoaded() {
+            if (window.fengari) return Promise.resolve(true);
+            if (fengariLoadPromise) return fengariLoadPromise;
+            fengariLoadPromise = new Promise((resolve) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js';
+                s.onload = () => resolve(!!window.fengari);
+                s.onerror = () => { console.error('[Lua] fengari не загрузился (нет сети?)'); resolve(false); };
+                document.head.appendChild(s);
+            });
+            return fengariLoadPromise;
+        }
+
+        let luaL = null;         // главный lua_State — луа-глобалы, реестр функций
+        let luaWaits = [];       // [{co, resumeAt}] — корутины, спящие в wait()
+        let luaOutputLines = []; // {level, text} — для панели #lua-output
+
+        const LUA_PRELUDE = `
+Vector3 = {}
+Vector3.__index = Vector3
+function Vector3.new(x, y, z)
+    return setmetatable({X = x or 0, Y = y or 0, Z = z or 0}, Vector3)
+end
+Vector3.__add = function(a, b) return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z) end
+Vector3.__sub = function(a, b) return Vector3.new(a.X - b.X, a.Y - b.Y, a.Z - b.Z) end
+Vector3.__mul = function(a, b)
+    if type(b) == "number" then return Vector3.new(a.X * b, a.Y * b, a.Z * b) end
+    return Vector3.new(a.X * b.X, a.Y * b.Y, a.Z * b.Z)
+end
+Vector3.__unm = function(a) return Vector3.new(-a.X, -a.Y, -a.Z) end
+Vector3.__tostring = function(v) return v.X .. ", " .. v.Y .. ", " .. v.Z end
+function Vector3.new_magnitude(v) return math.sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z) end
+
+local InstanceMT = {}
+-- __mode="v" — слабые значения: если Lua-код нигде больше не держит ссылку
+-- на обёртку, она может быть собрана сборщиком мусора, а не висеть вечно.
+local instances = setmetatable({}, {__mode = "v"})
+
+-- ВАЖНО: -1 (и только -1) — "нет инстанса" (так JS-мост сигналит "родитель
+-- не найден"/"ребёнок не найден"). Виртуальные инстансы из Instance.new()
+-- используют ДРУГИЕ отрицательные ref'ы (см. __instance_new) — это валидные
+-- объекты, их заворачивать НУЖНО, поэтому проверяем именно "== -1", а не
+-- "< 0".
+local function wrap(ref)
+    if ref == nil or ref == -1 then return nil end
+    local existing = instances[ref]
+    if existing then return existing end
+    local t = setmetatable({}, InstanceMT)
+    rawset(t, "__ref", ref)
+    instances[ref] = t
+    return t
+end
+__wrap = wrap
+
+InstanceMT.__index = function(t, k)
+    local ref = rawget(t, "__ref")
+    if k == "Parent" then return wrap(__get_parent(ref)) end
+    if k == "Name" then return __get_name(ref) end
+    if k == "ClassName" or k == "className" then return __get_class(ref) end
+    if k == "Position" then
+        local x, y, z = __get_position(ref)
+        return Vector3.new(x, y, z)
+    end
+    if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
+        return function(self, name) return wrap(__find_first_child(ref, name)) end
+    end
+    if k == "GetChildren" or k == "children" or k == "getChildren" then
+        return function(self)
+            local n = __child_count(ref)
+            local out = {}
+            for i = 1, n do out[i] = wrap(__child_at(ref, i - 1)) end
+            return out
+        end
+    end
+    if k == "IsA" or k == "isA" then
+        return function(self, cls) return __get_class(ref) == cls end
+    end
+    if k == "Destroy" or k == "remove" or k == "Remove" then
+        return function(self) __destroy(ref) end
+    end
+    if k == "GetFullName" or k == "getFullName" then
+        return function(self) return __get_name(ref) end
+    end
+    if k == "ClearAllChildren" then
+        return function(self)
+            local n = __child_count(ref)
+            for i = n, 1, -1 do
+                local c = __child_at(ref, i - 1)
+                if c ~= -1 then __destroy(c) end
+            end
+        end
+    end
+    local ok, v = pcall(__get_prop, ref, k)
+    if ok then return v end
+    return nil
+end
+InstanceMT.__newindex = function(t, k, v)
+    local ref = rawget(t, "__ref")
+    if k == "Position" then
+        __set_position(ref, v.X, v.Y, v.Z)
+        return
+    end
+    if k == "Parent" then
+        __set_parent(ref, v and rawget(v, "__ref") or -1)
+        return
+    end
+    __set_prop(ref, k, v)
+end
+InstanceMT.__tostring = function(t) return __get_name(rawget(t, "__ref")) end
+
+-- Instance.new(className [, parent]) — создаёт НОВЫЙ виртуальный инстанс
+-- (свой отрицательный ref, ниже -1, не пересекается с реальными объектами
+-- карты). У него нет меша/физики — это просто узел иерархии с именем,
+-- классом и набором произвольных свойств (см. __instance_new/luaGetGenericProp
+-- на стороне JS). Для классов без визуального смысла в этом движке (Message,
+-- IntValue, Sound и т.п.) этого достаточно, чтобы скрипт не падал.
+Instance = {}
+function Instance.new(className, parent)
+    local ref = __instance_new(className)
+    local inst = wrap(ref)
+    if parent then inst.Parent = parent end
+    return inst
+end
+
+workspace = wrap(__workspace_ref())
+
+-- game.Players / game.Lighting / game:GetService(...) / game:service(...)
+-- (последнее — устаревший, но часто встречающийся в старых скриптах,
+-- 2008-2011 годов, вызов) — сначала ищем РЕАЛЬНЫЙ сервис среди корневых
+-- объектов карты, и только если такого нет — создаём виртуальный контейнер
+-- (пустой, но не роняющий скрипт).
+local serviceCache = {}
+local function getService(name)
+    if serviceCache[name] then return serviceCache[name] end
+    local ref = __find_service(name)
+    if ref == -1 then ref = __instance_new(name) end
+    local inst = wrap(ref)
+    serviceCache[name] = inst
+    return inst
+end
+game = setmetatable({}, {
+    __index = function(t, k)
+        if k == "GetService" or k == "getService" or k == "service" then
+            return function(self, name) return getService(name) end
+        end
+        return getService(k)
+    end
+})
+`;
+
+
+        // co -> имя скрипта, которому принадлежит эта корутина — заполняется
+        // в runLuaScript. Нужно, чтобы print/warn могли подписать строку
+        // источником (как в реальной Roblox Studio — там Output всегда
+        // показывает, из какого скрипта пришло сообщение, это не опционально).
+        const luaScriptNameByCo = new WeakMap();
+
+        function luaArgToDisplay(L, idx) {
+            const { lua, lauxlib } = window.fengari;
+            const ty = lua.lua_type(L, idx);
+            if (ty === lua.LUA_TSTRING) return lua.lua_tojsstring(L, idx);
+            if (ty === lua.LUA_TNUMBER) return String(lua.lua_tonumber(L, idx));
+            if (ty === lua.LUA_TBOOLEAN) return lua.lua_toboolean(L, idx) ? 'true' : 'false';
+            if (ty === lua.LUA_TNIL) return 'nil';
+            try {
+                lauxlib.luaL_tolstring(L, idx, null);
+                const s = lua.lua_tojsstring(L, -1);
+                lua.lua_pop(L, 1);
+                return s;
+            } catch (e) {
+                return '<' + (ty === lua.LUA_TTABLE ? 'table' : ty === lua.LUA_TFUNCTION ? 'function' : 'value') + '>';
+            }
+        }
+
+        function luaTimestamp() {
+            const d = new Date();
+            const p2 = n => String(n).padStart(2, '0');
+            const p3 = n => String(n).padStart(3, '0');
+            return p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) + '.' + p3(d.getMilliseconds());
+        }
+
+        // source — имя скрипта-источника (для print/warn/error) или null для
+        // системных сообщений (загрузка fengari, ошибка компиляции и т.п.),
+        // trace — необязательный текст traceback'а (только для ошибок).
+        function logLuaOutput(level, text, source, trace) {
+            luaOutputLines.push({ level, text, source: source || null, trace: trace || null, time: luaTimestamp() });
+            if (luaOutputLines.length > 300) luaOutputLines.shift();
+            renderLuaOutput();
+            (level === 'error' || level === 'warn' ? console.warn : console.log)(
+                '[Lua' + (source ? ':' + source : '') + '] ' + text + (trace ? '\n' + trace : '')
+            );
+        }
+
+        function renderLuaOutput() {
+            const panel = document.getElementById('lua-output-panel');
+            const el = document.getElementById('lua-output');
+            if (!panel || !el) return;
+            // Раньше показ/скрытие висело на самом #lua-output (внутренний
+            // скролл-контейнер) — снаружи он обёрнут в панель с заголовком
+            // (#lua-output-panel), и скрывать нужно именно панель целиком,
+            // иначе при пустом логе виден пустой заголовок без содержимого.
+            if (!luaOutputLines.length) { panel.style.display = 'none'; return; }
+            panel.style.display = 'block';
+            const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
+            const icons = { error: '⛔', warn: '⚠️', print: '' };
+            el.innerHTML = luaOutputLines.slice(-80).map(l => {
+                const head = '<span style="color:#6b7280">' + l.time + '</span> ' +
+                    (l.source ? '<span style="color:#60a5fa">[' + esc(l.source) + ']</span> ' : '') +
+                    (icons[l.level] || '');
+                const trace = l.trace
+                    ? '<div style="color:#9ca3af;padding-left:14px;white-space:pre-wrap;">' + esc(l.trace) + '</div>'
+                    : '';
+                return '<div style="color:' + (colors[l.level] || '#e5e7eb') + ';margin-bottom:2px;">' +
+                    head + esc(l.text) + '</div>' + trace;
+            }).join('');
+            el.scrollTop = el.scrollHeight;
+        }
+
+        // Перетаскивание панели лога — тот же принцип, что у #explorer/
+        // #properties (сохранение в localStorage), но свободное 2D-позиционирование
+        // вместо изменения ширины: хватаем за заголовок мышью или пальцем.
+        function initLuaOutputDrag() {
+            const panel = document.getElementById('lua-output-panel');
+            const header = document.getElementById('lua-output-header');
+            if (!panel || !header) return;
+
+            try {
+                const saved = JSON.parse(localStorage.getItem('rbxstudio-lua-output-pos') || 'null');
+                if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+                    panel.style.left = saved.left + 'px';
+                    panel.style.top = saved.top + 'px';
+                    panel.style.bottom = 'auto';
+                }
+            } catch (e) { }
+
+            let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+            function begin(x, y) {
+                dragging = true;
+                const rect = panel.getBoundingClientRect();
+                startX = x; startY = y;
+                startLeft = rect.left; startTop = rect.top;
+                panel.style.left = rect.left + 'px';
+                panel.style.top = rect.top + 'px';
+                panel.style.bottom = 'auto';
+            }
+            function move(x, y) {
+                if (!dragging) return;
+                const vp = document.getElementById('viewport');
+                const vpRect = vp ? vp.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+                let left = startLeft + (x - startX);
+                let top = startTop + (y - startY);
+                // Не даём утащить панель за пределы вьюпорта — иначе на
+                // маленьком экране телефона её легко потерять насовсем,
+                // а обратно вытащить нечем (нет пункта меню "вернуть панель").
+                left = Math.max(vpRect.left, Math.min(left, vpRect.right - 60));
+                top = Math.max(vpRect.top, Math.min(top, vpRect.bottom - 30));
+                panel.style.left = left + 'px';
+                panel.style.top = top + 'px';
+            }
+            function end() {
+                if (!dragging) return;
+                dragging = false;
+                try {
+                    localStorage.setItem('rbxstudio-lua-output-pos', JSON.stringify({
+                        left: parseFloat(panel.style.left), top: parseFloat(panel.style.top)
+                    }));
+                } catch (e) { }
+            }
+
+            header.addEventListener('mousedown', (e) => { begin(e.clientX, e.clientY); e.preventDefault(); });
+            window.addEventListener('mousemove', (e) => move(e.clientX, e.clientY));
+            window.addEventListener('mouseup', end);
+
+            header.addEventListener('touchstart', (e) => {
+                const t = e.touches[0];
+                begin(t.clientX, t.clientY);
+            }, { passive: true });
+            window.addEventListener('touchmove', (e) => {
+                if (!dragging) return;
+                const t = e.touches[0];
+                move(t.clientX, t.clientY);
+                e.preventDefault();
+            }, { passive: false });
+            window.addEventListener('touchend', end);
+        }
+
+        // ---- Мост к объектам сцены: только числа/строки/булевы, см. коммент выше ----
+        function luaPositionOfRef(ref) {
+            const body = physicsBodies[ref];
+            if (body) return { x: body.position.x, y: body.position.y, z: body.position.z };
+            const p = loadedObjPos[ref];
+            if (p) return p;
+            const mesh = sceneObjs[ref];
+            if (mesh) {
+                const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+                mesh.matrix.decompose(pos, q, sc);
+                return { x: pos.x, y: pos.y, z: pos.z };
+            }
+            return { x: 0, y: 0, z: 0 };
+        }
+        function luaSetPositionOfRef(ref, x, y, z) {
+            const body = physicsBodies[ref];
+            if (body) body.position.set(x, y, z);
+            if (loadedObjPos[ref]) loadedObjPos[ref] = { x, y, z };
+            const mesh = sceneObjs[ref];
+            if (mesh) {
+                const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+                mesh.matrix.decompose(pos, q, sc);
+                mesh.matrix.compose(new THREE.Vector3(x, y, z), q, sc);
+            }
+        }
+        function luaGetGenericProp(ref, name) {
+            if (name === 'Name' && luaByRef[ref]) return luaByRef[ref].name;
+            // Instance.new() — нет меша/тела вообще, все свойства просто
+            // лежат в обычном JS-объекте, заведённом при создании.
+            if (virtualInstanceProps[ref]) {
+                const v = virtualInstanceProps[ref][name];
+                return v !== undefined ? v : null;
+            }
+            const mesh = sceneObjs[ref];
+            if (name === 'Transparency') {
+                return mesh && mesh.material ? 1 - (mesh.material.opacity !== undefined ? mesh.material.opacity : 1) : 0;
+            }
+            if (name === 'CanCollide') {
+                const body = physicsBodies[ref];
+                return body ? body.collisionFilterMask !== 0 : true;
+            }
+            return null;
+        }
+        function luaSetGenericProp(ref, name, value) {
+            if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
+            if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
+            const mesh = sceneObjs[ref];
+            if (name === 'Transparency' && mesh && mesh.material) {
+                mesh.material.transparent = value > 0;
+                mesh.material.opacity = 1 - value;
+                return;
+            }
+            if (name === 'CanCollide') {
+                const body = physicsBodies[ref];
+                if (body) body.collisionFilterMask = value ? 1 : 0;
+                return;
+            }
+            logLuaOutput('warn', 'свойство "' + name + '" пока не поддержано Lua-мостом (только Position/Transparency/CanCollide + произвольные на Instance.new())');
+        }
+        // Отдельный, СЫРОЙ индекс иерархии для Lua-моста — специально НЕ
+        // переиспользует treeByRef/parentByRef (те строятся из /api/tree,
+        // а это ровно то дерево, что рисует Explorer: часть классов скрыта
+        // (HIDDEN на сервере), есть предел глубины). Lua-скрипту, который
+        // делает script.Parent, плевать, показывает ли Explorer этот
+        // объект — родитель должен быть виден ВСЕГДА, если он вообще
+        // существует в файле. Заполняется в startLuaScripts() из
+        // /api/all_instances (см. app.py) — полного нефильтрованного
+        // списка ref/class/name/parent.
+        let luaByRef = {};          // ref -> {cls, name}
+        let luaParentByRef = {};    // ref -> parentRef
+        let luaChildrenByRef = {};  // ref -> [childRef, ...]
+        // Instance.new() создаёт объекты без меша/физики — их произвольные
+        // свойства (кроме Name/Parent, у тех есть отдельная логика) хранятся
+        // здесь, а не считываются откуда-то из сцены.
+        let virtualInstanceProps = {}; // ref -> {propName: value}
+        let luaNextVirtualRef = -1000; // счётчик вниз — не пересекается ни с
+        // реальными ref'ами карты (положительные), ни с сентинелом "нет
+        // инстанса" (-1, см. wrap() в LUA_PRELUDE).
+
+        function luaWorkspaceRef() {
+            for (const ref in luaByRef) {
+                if (luaByRef[ref].cls === 'Workspace') return parseInt(ref);
+            }
+            return -1;
+        }
+        function luaFindServiceRef(name) {
+            for (const ref in luaByRef) {
+                if (luaByRef[ref].cls === name && luaParentByRef[ref] === -1) return parseInt(ref);
+            }
+            return -1;
+        }
+        function luaCreateVirtualInstance(className) {
+            const ref = luaNextVirtualRef--;
+            luaByRef[ref] = { cls: className, name: className };
+            luaParentByRef[ref] = -1;
+            virtualInstanceProps[ref] = {};
+            return ref;
+        }
+        function luaSetParent(ref, parentRef) {
+            const oldParent = luaParentByRef[ref];
+            if (oldParent !== undefined && luaChildrenByRef[oldParent]) {
+                luaChildrenByRef[oldParent] = luaChildrenByRef[oldParent].filter(c => c !== ref);
+            }
+            luaParentByRef[ref] = parentRef;
+            if (parentRef !== -1) {
+                (luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef] || []).push(ref);
+            }
+        }
+        function luaDestroyRef(ref) {
+            if (playOnlyRefs.has(ref)) {
+                removePhysicsBodyForRef(ref);
+            } else {
+                const mesh = sceneObjs[ref];
+                if (mesh) mesh.visible = false;
+                const body = physicsBodies[ref];
+                if (body && physicsWorld) { physicsWorld.removeBody(body); delete physicsBodies[ref]; }
+            }
+            const parentRef = luaParentByRef[ref];
+            if (parentRef !== undefined && luaChildrenByRef[parentRef]) {
+                luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef].filter(c => c !== ref);
+            }
+            delete luaByRef[ref];
+            delete luaParentByRef[ref];
+            delete luaChildrenByRef[ref];
+            delete virtualInstanceProps[ref];
+        }
+
+        function installLuaBridge(L) {
+            const { lua } = window.fengari;
+            function def(name, fn) {
+                lua.lua_pushcfunction(L, fn);
+                lua.lua_setglobal(L, name);
+            }
+            def('print', function (L2) {
+                const n = lua.lua_gettop(L2), parts = [];
+                for (let i = 1; i <= n; i++) parts.push(luaArgToDisplay(L2, i));
+                logLuaOutput('print', parts.join('\t'), luaScriptNameByCo.get(L2));
+                return 0;
+            });
+            def('warn', function (L2) {
+                const n = lua.lua_gettop(L2), parts = [];
+                for (let i = 1; i <= n; i++) parts.push(luaArgToDisplay(L2, i));
+                logLuaOutput('warn', parts.join('\t'), luaScriptNameByCo.get(L2));
+                return 0;
+            });
+            def('tick', function (L2) { lua.lua_pushnumber(L2, performance.now() / 1000); return 1; });
+            def('wait', function (L2) {
+                const secs = lua.lua_isnumber(L2, 1) ? lua.lua_tonumber(L2, 1) : 0.03;
+                luaWaits.push({ co: L2, resumeAt: performance.now() + Math.max(0, secs) * 1000 });
+                return lua.lua_yield(L2, 0);
+            });
+            def('__get_parent', function (L2) {
+                const ref = luaParentByRef[lua.lua_tonumber(L2, 1)];
+                lua.lua_pushnumber(L2, ref === undefined ? -1 : ref);
+                return 1;
+            });
+            def('__get_name', function (L2) {
+                const inst = luaByRef[lua.lua_tonumber(L2, 1)];
+                lua.lua_pushstring(L2, inst ? inst.name : ('ref' + lua.lua_tonumber(L2, 1)));
+                return 1;
+            });
+            def('__get_class', function (L2) {
+                const inst = luaByRef[lua.lua_tonumber(L2, 1)];
+                lua.lua_pushstring(L2, inst ? inst.cls : 'Instance');
+                return 1;
+            });
+            def('__get_position', function (L2) {
+                const p = luaPositionOfRef(lua.lua_tonumber(L2, 1));
+                lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
+                return 3;
+            });
+            def('__set_position', function (L2) {
+                luaSetPositionOfRef(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3), lua.lua_tonumber(L2, 4));
+                return 0;
+            });
+            def('__find_first_child', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const name = lua.lua_tojsstring(L2, 2);
+                let found = -1;
+                for (const c of (luaChildrenByRef[ref] || [])) {
+                    if (luaByRef[c] && luaByRef[c].name === name) { found = c; break; }
+                }
+                lua.lua_pushnumber(L2, found);
+                return 1;
+            });
+            def('__child_count', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                lua.lua_pushnumber(L2, (luaChildrenByRef[ref] || []).length);
+                return 1;
+            });
+            def('__child_at', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const i = lua.lua_tonumber(L2, 2);
+                const kids = luaChildrenByRef[ref] || [];
+                lua.lua_pushnumber(L2, kids[i] !== undefined ? kids[i] : -1);
+                return 1;
+            });
+            def('__destroy', function (L2) { luaDestroyRef(lua.lua_tonumber(L2, 1)); return 0; });
+            def('__get_prop', function (L2) {
+                const v = luaGetGenericProp(lua.lua_tonumber(L2, 1), lua.lua_tojsstring(L2, 2));
+                if (v === null || v === undefined) lua.lua_pushnil(L2);
+                else if (typeof v === 'number') lua.lua_pushnumber(L2, v);
+                else if (typeof v === 'boolean') lua.lua_pushboolean(L2, v);
+                else lua.lua_pushstring(L2, String(v));
+                return 1;
+            });
+            def('__set_prop', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), name = lua.lua_tojsstring(L2, 2);
+                const ty = lua.lua_type(L2, 3);
+                let value = null;
+                if (ty === lua.LUA_TNUMBER) value = lua.lua_tonumber(L2, 3);
+                else if (ty === lua.LUA_TBOOLEAN) value = !!lua.lua_toboolean(L2, 3);
+                else if (ty === lua.LUA_TSTRING) value = lua.lua_tojsstring(L2, 3);
+                luaSetGenericProp(ref, name, value);
+                return 0;
+            });
+            def('__workspace_ref', function (L2) { lua.lua_pushnumber(L2, luaWorkspaceRef()); return 1; });
+            def('__set_parent', function (L2) {
+                luaSetParent(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2));
+                return 0;
+            });
+            def('__instance_new', function (L2) {
+                lua.lua_pushnumber(L2, luaCreateVirtualInstance(lua.lua_tojsstring(L2, 1)));
+                return 1;
+            });
+            def('__find_service', function (L2) {
+                lua.lua_pushnumber(L2, luaFindServiceRef(lua.lua_tojsstring(L2, 1)));
+                return 1;
+            });
+        }
+
+        // luaL_loadstring/luaL_loadbuffer работают с байтовыми буферами
+        // (как обычный char* в C), а не с JS-строками напрямую — при не-ASCII
+        // содержимом (кириллица в исходнике скрипта — у нас это норма) байтовая
+        // длина отличается от JS .length, так что нужен честный to_luastring +
+        // luaL_loadbuffer, а не luaL_loadstring "в лоб". Заодно даём чанку имя
+        // (chunkname) — тогда ошибки показывают "ИмяСкрипта:12: ...", а не
+        // безымянный "[string ...]", ближе к тому, как это выглядит в самой
+        // Roblox Studio.
+        function loadLuaChunk(L, code, chunkname) {
+            const { lauxlib, to_luastring } = window.fengari;
+            const buf = to_luastring(code);
+            return lauxlib.luaL_loadbuffer(L, buf, buf.length, to_luastring(chunkname));
+        }
+
+        function doLuaString(L, code, chunkname) {
+            const { lua } = window.fengari;
+            const status = loadLuaChunk(L, code, chunkname || 'chunk');
+            if (status !== lua.LUA_OK) return status;
+            return lua.lua_pcall(L, 0, 0, 0);
+        }
+
+        // luaL_traceback — тот же стек вызовов, что Roblox Studio показывает
+        // под ошибкой в Output (разворачиваемым списком); здесь просто всегда
+        // прикладываем его отдельной, приглушённой строкой под сообщением.
+        function luaGetTraceback(co) {
+            const { lua, lauxlib } = window.fengari;
+            try {
+                lauxlib.luaL_traceback(co, co, null, 1);
+                const s = lua.lua_tojsstring(co, -1);
+                lua.lua_pop(co, 1);
+                return s;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function resumeLuaCoroutine(co, name, nargs) {
+            const { lua } = window.fengari;
+            const status = lua.lua_resume(co, null, nargs);
+            if (status === lua.LUA_YIELD) return; // ушёл в wait(), уже в luaWaits
+            if (status !== lua.LUA_OK) {
+                const msg = lua.lua_tojsstring(co, -1);
+                logLuaOutput('error', msg, name, luaGetTraceback(co));
+            }
+        }
+
+        function runLuaScript(scr) {
+            const { lua } = window.fengari;
+            // function(script) ... end — превращает `script` в upvalue КОНКРЕТНОЙ
+            // корутины, а не общий global: несколько скриптов выполняются
+            // "параллельно" через кооперативные корутины (см. wait()), общий
+            // global script их бы перепутал между собой.
+            const wrapped = 'return function(script)\n' + scr.source + '\nend';
+            let status = loadLuaChunk(luaL, wrapped, scr.name);
+            if (status !== lua.LUA_OK) {
+                logLuaOutput('error', 'ошибка компиляции: ' + lua.lua_tojsstring(luaL, -1), scr.name);
+                lua.lua_pop(luaL, 1);
+                return;
+            }
+            status = lua.lua_pcall(luaL, 0, 1, 0);
+            if (status !== lua.LUA_OK) {
+                logLuaOutput('error', lua.lua_tojsstring(luaL, -1), scr.name);
+                lua.lua_pop(luaL, 1);
+                return;
+            }
+            const co = lua.lua_newthread(luaL);  // пушится на стек luaL, возвращается co
+            lua.lua_pushvalue(luaL, -2);         // копия функции под свежесозданным потоком
+            lua.lua_xmove(luaL, co, 1);          // переносим функцию на стек co
+            lua.lua_getglobal(co, '__wrap');
+            lua.lua_pushnumber(co, scr.ref);
+            lua.lua_call(co, 1, 1);              // co: [функция, script-инстанс]
+            lua.lua_pop(luaL, 2);                // со стека luaL убираем саму функцию и поток
+            // (поток жив, пока жива JS-ссылка co — см. luaWaits/резюмирование;
+            // сборка Lua-мусора у fengari завязана на JS GC)
+            luaScriptNameByCo.set(co, scr.name);
+            resumeLuaCoroutine(co, scr.name, 1);
+        }
+
+        async function startLuaScripts() {
+            luaOutputLines = [];
+            renderLuaOutput();
+            const r = await api('GET', '/api/scripts');
+            if (!isPlaying || !r.ok || !r.scripts || !r.scripts.length) return;
+
+            if (!await ensureFengariLoaded()) {
+                notify('Lua VM (fengari) не загрузилась — проверь интернет', 'err');
+                return;
+            }
+            if (!isPlaying) return; // Play могли остановить, пока грузился fengari
+
+            // Сырой индекс иерархии для script.Parent/GetChildren — из
+            // /api/all_instances (весь файл, без фильтров Explorer-дерева).
+            const allR = await api('GET', '/api/all_instances');
+            luaByRef = {};
+            luaParentByRef = {};
+            luaChildrenByRef = {};
+            if (allR.ok && allR.instances) {
+                for (const inst of allR.instances) {
+                    luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
+                    luaParentByRef[inst.ref] = inst.parent;
+                }
+                for (const inst of allR.instances) {
+                    if (inst.parent !== undefined && inst.parent !== -1) {
+                        (luaChildrenByRef[inst.parent] = luaChildrenByRef[inst.parent] || []).push(inst.ref);
+                    }
+                }
+            }
+            if (!isPlaying) return; // Play могли остановить, пока шёл запрос
+
+            const { lua, lauxlib, lualib } = window.fengari;
+            luaL = lauxlib.luaL_newstate();
+            lualib.luaL_openlibs(luaL);
+            installLuaBridge(luaL);
+
+            const preludeStatus = doLuaString(luaL, LUA_PRELUDE, 'prelude');
+            if (preludeStatus !== lua.LUA_OK) {
+                logLuaOutput('error', 'Lua prelude: ' + lua.lua_tojsstring(luaL, -1));
+                luaL = null;
+                return;
+            }
+
+            luaWaits = [];
+            for (const scr of r.scripts) {
+                try { runLuaScript(scr); }
+                catch (e) { logLuaOutput('error', scr.name + ': ' + e.message); }
+            }
+        }
+
+        function stopLuaScripts() {
+            luaL = null;   // JS-ссылки отпущены — и главный стейт, и все корутины
+            luaWaits = []; // станут доступны для сборки мусора JS-движком
+            luaOutputLines = [];
+            luaByRef = {};
+            luaParentByRef = {};
+            luaChildrenByRef = {};
+            virtualInstanceProps = {};
+            luaNextVirtualRef = -1000;
+            renderLuaOutput();
+        }
+
+        function updateLuaScheduler() {
+            if (!luaL || !luaWaits.length) return;
+            const now = performance.now();
+            const ready = luaWaits.filter(w => w.resumeAt <= now);
+            if (!ready.length) return;
+            luaWaits = luaWaits.filter(w => w.resumeAt > now);
+            for (const w of ready) resumeLuaCoroutine(w.co, 'script', 0);
         }
 
         function buildCannonShape(mesh) {
@@ -3042,6 +3772,7 @@ acseration = 0;}
             }
             followCharacterCamera();
             maybeStreamGeometry();
+            updateLuaScheduler();
         }
 
         // ============ ДЕРЕВО ============
@@ -3052,8 +3783,28 @@ acseration = 0;}
             for (const n of treeData) {
                 expanded.add(n.ref);
             }
+            rebuildTreeIndex();
             renderTree();
             reloadScene();
+        }
+
+        // ref -> node и ref -> parentRef — плоские индексы поверх вложенного
+        // treeData, чтобы Lua-мост (см. блок LUA ниже) мог искать
+        // Parent/GetChildren/FindFirstChild за O(1), а не обходом дерева на
+        // каждый вызов из скрипта.
+        let treeByRef = {};
+        let parentByRef = {};
+        function rebuildTreeIndex() {
+            treeByRef = {};
+            parentByRef = {};
+            function walk(nodes, parentRef) {
+                for (const n of nodes) {
+                    treeByRef[n.ref] = n;
+                    parentByRef[n.ref] = parentRef;
+                    if (n.children && n.children.length) walk(n.children, n.ref);
+                }
+            }
+            walk(treeData, -1);
         }
 
         function updateInventoryCount() {
@@ -3192,6 +3943,7 @@ acseration = 0;}
 
         // ============ ВЫБОР ОБЪЕКТА ============
         async function selectRef(ref) {
+            await saveCurrentScriptIfDirty(); // иначе несохранённые правки терялись при переключении объекта
             selectedRef = ref;
             highlightSelected(ref);
             renderTree();
@@ -3202,7 +3954,10 @@ acseration = 0;}
         }
 
         function deselect() {
+            saveCurrentScriptIfDirty(); // fire-and-forget — иначе клик мимо объекта тоже терял правки
             selectedRef = null;
+            currentScriptRef = null;
+            currentScriptOrigSource = null;
             highlightSelected(null);
             renderTree();
             updateInventoryCount();
@@ -3252,9 +4007,13 @@ acseration = 0;}
             if (SCLS.includes(r.cls)) {
                 document.getElementById('script-name').textContent = r.cls + ': ' + (r.props.Name || '?');
                 cmEditor.setValue(r.props.Source || '');
+                currentScriptRef = r.ref;
+                currentScriptOrigSource = r.props.Source || '';
                 switchTab('script');
                 refreshCM();
             } else {
+                currentScriptRef = null;
+                currentScriptOrigSource = null;
                 switchTab('props');
             }
         }
@@ -3387,6 +4146,7 @@ acseration = 0;}
                 prop: 'Source',
                 value: src
             });
+            currentScriptOrigSource = src; // синхронизируем трекер "грязности" — см. saveCurrentScriptIfDirty
             notify(t('notify_script_saved'));
         }
 
@@ -4372,6 +5132,7 @@ acseration = 0;}
         window.addEventListener('DOMContentLoaded', () => {
             loadLayout();
             initResizers();
+            initLuaOutputDrag();
             refreshCM();
         });
 

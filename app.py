@@ -636,6 +636,65 @@ def api_new():
     return jsonify({'ok': True, 'count': len(referent_to_class)})
 
 
+@flask_app.route('/api/all_instances')
+def api_all_instances():
+    # Плоский СЫРОЙ список ВСЕХ инстансов карты — ref/class/name/parent, без
+    # фильтрации HIDDEN-классов, без ограничения глубины и без вложенной
+    # структуры children (в отличие от /api/tree, который строит именно то,
+    # что рисует Explorer, и намеренно урезан для этого).
+    #
+    # Lua-мосту (см. index.html, startLuaScripts) нужна ПОЛНАЯ картина
+    # иерархии — script.Parent должен работать для любого скрипта, даже
+    # если он вложен внутрь чего-то, что Explorer прячет. Раньше Lua брал
+    # родителя из того же дерева, что и Explorer (/api/tree), и любой
+    # скрипт под отфильтрованной веткой получал Parent=nil без единой
+    # реальной причины на стороне самого скрипта.
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False}), 400
+    r2c = parsed['referent_to_class']
+    pm = parsed['parent_map']
+    pr = parsed['props']
+    out = []
+    for ref, cls in r2c.items():
+        name = pr.get(ref, {}).get('Name', cls)
+        out.append({'ref': ref, 'cls': cls, 'name': name, 'parent': pm.get(ref, -1)})
+    return jsonify({'ok': True, 'instances': out})
+
+
+@flask_app.route('/api/scripts')
+def api_scripts():
+    # Отдаёт все Script/LocalScript с исходником — используется Lua-рантаймом
+    # в Play (см. index.html, startLuaScripts/fengari) для запуска скриптов
+    # одним запросом, а не по одному через /api/instance/<ref> на каждый.
+    # ModuleScript сюда сознательно не входит — Roblox их не исполняет
+    # автоматически, только через require() из другого скрипта, а require()
+    # в этой версии не реализован.
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False}), 400
+    r2c = parsed['referent_to_class']
+    pm = parsed['parent_map']
+    pr = parsed['props']
+    out = []
+    for ref, cls in r2c.items():
+        if cls not in ('Script', 'LocalScript'):
+            continue
+        props = pr.get(ref, {})
+        enabled = props.get('Enabled', True)
+        if isinstance(enabled, str):
+            enabled = enabled.lower() in ('true', '1')
+        if not enabled:
+            continue
+        out.append({
+            'ref': ref, 'cls': cls,
+            'name': props.get('Name', cls),
+            'source': props.get('Source', '') or '',
+            'parent': pm.get(ref, -1),
+        })
+    return jsonify({'ok': True, 'scripts': out})
+
+
 @flask_app.route('/api/tree')
 def api_tree():
     parsed = state['parsed']
