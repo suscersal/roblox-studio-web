@@ -1252,18 +1252,38 @@
         const SKY_COLOR = 0x87ceeb;
 
         // ============ CODEMIRROR ============
-        let cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
-            mode: 'lua',
-            theme: 'monokai',
-            lineNumbers: true,
-            autoCloseBrackets: true,
-            matchBrackets: true,
-            indentUnit: 4,
-            tabSize: 4,
-            indentWithTabs: false,
-            lineWrapping: false,
-            viewportMargin: 50
-        });
+        // ВАЖНО: это не отдельный кусок — весь код игры (включая регистрацию
+        // window.addEventListener('DOMContentLoaded', ...) в самом низу файла,
+        // откуда вызывается initResizers()) находится в ОДНОМ и том же
+        // непрерывном <script>-блоке. Раньше CodeMirror.fromTextArea(...)
+        // вызывался БЕЗ try/catch: если vendor/codemirror.min.js по какой-то
+        // причине не подгрузился (нет сети при первом запуске без setup.sh,
+        // файл не докачался, и т.п.), это исключение обрывало исполнение
+        // ВСЕГО скрипта на этой строке — ни один function/let ниже неё
+        // никогда не выполнялся, включая ту самую регистрацию
+        // DOMContentLoaded. Отсюда одновременно и неработающий ресайзер
+        // (initResizers() ни разу не вызывался), и нерабочие кнопки (их
+        // onclick трогает let/const, объявленные ниже места обрыва — те
+        // так и оставались неинициализированными). CodeMirror — это ТОЛЬКО
+        // редактор скриптов; его отсутствие не должно ронять всё остальное
+        // приложение.
+        let cmEditor = null;
+        try {
+            cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
+                mode: 'lua',
+                theme: 'monokai',
+                lineNumbers: true,
+                autoCloseBrackets: true,
+                matchBrackets: true,
+                indentUnit: 4,
+                tabSize: 4,
+                indentWithTabs: false,
+                lineWrapping: false,
+                viewportMargin: 50
+            });
+        } catch (e) {
+            console.error('CodeMirror не загрузился — редактор скриптов будет недоступен, остальное приложение работает как обычно:', e);
+        }
 
         function refreshCM() {
             requestAnimationFrame(() => {
@@ -4084,7 +4104,7 @@ game = setmetatable({}, {
 
             if (SCLS.includes(r.cls)) {
                 document.getElementById('script-name').textContent = r.cls + ': ' + (r.props.Name || '?');
-                cmEditor.setValue(r.props.Source || '');
+                if (cmEditor) cmEditor.setValue(r.props.Source || '');
                 currentScriptRef = r.ref;
                 currentScriptOrigSource = r.props.Source || '';
                 switchTab('script');
@@ -4217,6 +4237,10 @@ game = setmetatable({}, {
         async function saveScript() {
             if (selectedRef === null) {
                 notify(t('notify_script_none'), 'warn');
+                return;
+            }
+            if (!cmEditor) {
+                notify('Редактор скриптов недоступен (CodeMirror не загрузился)', 'err');
                 return;
             }
             const src = cmEditor.getValue();
