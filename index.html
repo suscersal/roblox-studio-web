@@ -628,6 +628,59 @@
             gap: 6px;
             z-index: 200
         }
+        /* Горизонтальный ресайзер между main и bottom-panel */
+.resizer-h {
+    height: 5px;
+    background: #374151;
+    cursor: row-resize;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+.resizer-h:hover,
+.resizer-h.active {
+    background: #3b82f6;
+}
+
+#bottom-panel {
+    height: 180px;          /* начальная высота, меняется ресайзером */
+    min-height: 80px;
+    max-height: 60vh;
+    background: #1f2937;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    border-top: 1px solid #374151;
+}
+
+#output-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    background: #111827;
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: bold;
+    color: #9ca3af;
+}
+#output-header button {
+    background: none;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 6px;
+}
+
+#output-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px;
+    font: 12px/1.5 monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #0f172a;
+}
 
         .notif {
             background: #065f46;
@@ -794,79 +847,73 @@
     </div>
 
     <div id="main">
-        <div id="explorer">
-            <div id="explorer-header">
-                <span>Explorer</span>
-                <div>
-                    <button onclick="collapseAll()" data-i18n-title="exp_collapse_title" title="Collapse all">◢</button>
-                    <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title"
-                        title="Expand all">◣</button>
-                </div>
-            </div>
-            <input id="search-box" data-i18n-placeholder="exp_search_ph" placeholder="🔍 Search..."
-                oninput="onSearch(this.value)">
-            <div id="tree-scroll">
-                <div id="tree"></div>
+    <div id="explorer">
+        <div id="explorer-header">
+            <span>Explorer</span>
+            <div>
+                <button onclick="collapseAll()" data-i18n-title="exp_collapse_title" title="Collapse all">◢</button>
+                <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title" title="Expand all">◣</button>
             </div>
         </div>
-        <div class="resizer" id="resizer-1"></div>
-        <div id="viewport" tabindex="0">
-            <div id="fps-counter">FPS: --</div>
-            <div id="speed-indicator">🚀 x1.0</div>
-            <div id="quality-selector">
-                <button onclick="setQuality('low')" class="active" id="q-low">Low</button>
-                <button onclick="setQuality('medium')" id="q-medium">Med</button>
-                <button onclick="setQuality('high')" id="q-high">High</button>
-            </div>
-            <!-- Как #explorer: позиция ФИКСИРОВАНА (left/bottom не трогаем
-                 из JS никогда), меняться может только размер — через
-                 нативный CSS resize (перетаскивание за правый нижний угол),
-                 тот же принцип, что и .resizer у Explorer/Properties, просто
-                 браузерным средством вместо своего JS-обработчика. -->
-            <div id="lua-output-panel" style="display:none;position:absolute;left:8px;bottom:8px;width:320px;height:260px;min-width:220px;min-height:120px;max-width:80vw;max-height:70vh;background:rgba(17,24,39,0.95);border:1px solid rgba(255,255,255,0.15);border-radius:8px;z-index:40;box-shadow:0 4px 16px rgba(0,0,0,0.4);resize:both;overflow:hidden;flex-direction:column;">
-                <div id="lua-output-header" style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:rgba(255,255,255,0.06);border-radius:8px 8px 0 0;user-select:none;flex:0 0 auto;">
-                    <span style="font:12px/1 sans-serif;color:#e5e7eb;font-weight:600;">Lua Output</span>
-                    <span>
-                        <button onclick="luaOutputLines=[];renderLuaOutput();" title="Clear" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;padding:2px 6px;">🗑</button>
-                        <button onclick="document.getElementById('lua-output-panel').style.display='none';" title="Close" style="background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;padding:2px 6px;">✕</button>
-                    </span>
-                </div>
-                <div id="lua-output" style="flex:1 1 auto;overflow-y:auto;padding:6px 8px;font:12px/1.5 monospace;white-space:pre-wrap;word-break:break-word;"></div>
-            </div>
-            <div id="vp-label" data-i18n-html="vp_hint">
-                🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
-                ⌨️ WASD — move | F — focus | Esc — deselect
-            </div>
-            <div id="mobile-pad">
-                <div id="joy-zone"></div>
-                <div id="joy-base">
-                    <div id="joy-thumb"></div>
-                </div>
-                <div class="pad-col">
-                    <button class="pad-btn" id="pad-e" data-key="e" data-i18n-title="pad_up_title" title="Up">⬆</button>
-                    <button class="pad-btn" id="pad-q" data-key="q" data-i18n-title="pad_down_title"
-                        title="Down">⬇</button>
-                </div>
-            </div>
+        <input id="search-box" data-i18n-placeholder="exp_search_ph" placeholder="🔍 Search..." oninput="onSearch(this.value)">
+        <div id="tree-scroll">
+            <div id="tree"></div>
         </div>
-        <div class="resizer" id="resizer-2"></div>
-        <div id="rightpanel">
-            <div id="tabs">
-                <div class="tab active" onclick="switchTab('props')">Properties</div>
-                <div class="tab" onclick="switchTab('script')">Script</div>
+    </div>
+    <div class="resizer" id="resizer-1"></div>
+    <div id="viewport" tabindex="0">
+        <div id="fps-counter">FPS: --</div>
+        <div id="speed-indicator">🚀 x1.0</div>
+        <div id="quality-selector">
+            <button onclick="setQuality('low')" class="active" id="q-low">Low</button>
+            <button onclick="setQuality('medium')" id="q-medium">Med</button>
+            <button onclick="setQuality('high')" id="q-high">High</button>
+        </div>
+        <!-- Старый плавающий блок Lua Output удалён -->
+        <div id="vp-label" data-i18n-html="vp_hint">
+            🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
+            ⌨️ WASD — move | F — focus | Esc — deselect
+        </div>
+        <div id="mobile-pad">
+            <div id="joy-zone"></div>
+            <div id="joy-base">
+                <div id="joy-thumb"></div>
             </div>
-            <div id="tab-props">
-                <p style="color:#6b7280;font-size:12px;padding:8px" data-i18n="props_placeholder">← Select an object</p>
-            </div>
-            <div id="tab-script" style="display:none;flex:1;flex-direction:column">
-                <div id="script-name" data-i18n="script_none_selected">No script selected</div>
-                <div id="script-editor-container">
-                    <textarea id="script-editor" spellcheck="false"></textarea>
-                </div>
-                <button id="script-save-btn" onclick="saveScript()" data-i18n="script_save_btn">💾 Save script</button>
+            <div class="pad-col">
+                <button class="pad-btn" id="pad-e" data-key="e" data-i18n-title="pad_up_title" title="Up">⬆</button>
+                <button class="pad-btn" id="pad-q" data-key="q" data-i18n-title="pad_down_title" title="Down">⬇</button>
             </div>
         </div>
     </div>
+    <div class="resizer" id="resizer-2"></div>
+    <div id="rightpanel">
+        <div id="tabs">
+            <div class="tab active" onclick="switchTab('props')">Properties</div>
+            <div class="tab" onclick="switchTab('script')">Script</div>
+            <!-- Вкладка Output удалена, она теперь снизу -->
+        </div>
+        <div id="tab-props">
+            <p style="color:#6b7280;font-size:12px;padding:8px" data-i18n="props_placeholder">← Select an object</p>
+        </div>
+        <div id="tab-script" style="display:none;flex:1;flex-direction:column">
+            <div id="script-name" data-i18n="script_none_selected">No script selected</div>
+            <div id="script-editor-container">
+                <textarea id="script-editor" spellcheck="false"></textarea>
+            </div>
+            <button id="script-save-btn" onclick="saveScript()" data-i18n="script_save_btn">💾 Save script</button>
+        </div>
+    </div>
+</div>
+
+<!-- Горизонтальный ресайзер и нижняя панель Output (после main) -->
+<div class="resizer-h" id="resizer-h"></div>
+<div id="bottom-panel">
+    <div id="output-header">
+        <span>Output</span>
+        <button onclick="clearLuaOutput()" title="Clear">🗑</button>
+    </div>
+    <div id="output-content"></div>
+</div>
 
     <div id="modal-overlay">
         <div id="modal-content" class="modal"></div>
@@ -1352,86 +1399,146 @@
 
         // ============ РАЗДЕЛИТЕЛИ ПАНЕЛЕЙ ============
         function initResizers() {
-            const resizers = document.querySelectorAll('.resizer');
-            let currentResizer = null, startX = 0, startWidth = 0, startRightWidth = 0;
+    const resizers = document.querySelectorAll('.resizer');
+    let currentResizer = null, startX = 0, startWidth = 0, startRightWidth = 0;
 
-            resizers.forEach(resizer => {
-                resizer.addEventListener('mousedown', (e) => {
-                    currentResizer = resizer;
-                    resizer.classList.add('active');
-                    if (resizer.id === 'resizer-1') {
-                        startWidth = document.getElementById('explorer').offsetWidth;
-                        startX = e.clientX;
-                    } else if (resizer.id === 'resizer-2') {
-                        startRightWidth = document.getElementById('rightpanel').offsetWidth;
-                        startX = e.clientX;
-                    }
-                    document.body.style.cursor = 'col-resize';
-                    document.body.style.userSelect = 'none';
-                });
-            });
+    // === Вертикальные ресайзеры (мышь) ===
+    resizers.forEach(resizer => {
+        resizer.addEventListener('mousedown', (e) => {
+            currentResizer = resizer;
+            resizer.classList.add('active');
+            if (resizer.id === 'resizer-1') {
+                startWidth = document.getElementById('explorer').offsetWidth;
+                startX = e.clientX;
+            } else if (resizer.id === 'resizer-2') {
+                startRightWidth = document.getElementById('rightpanel').offsetWidth;
+                startX = e.clientX;
+            }
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+    });
 
-            document.addEventListener('mousemove', (e) => {
-                if (!currentResizer) return;
-                if (currentResizer.id === 'resizer-1') {
-                    let w = Math.max(150, Math.min(400, startWidth + e.clientX - startX));
-                    document.getElementById('explorer').style.width = w + 'px';
-                } else if (currentResizer.id === 'resizer-2') {
-                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.clientX));
-                    document.getElementById('rightpanel').style.width = w + 'px';
-                }
-                refreshCM();
-                resize();
-            });
+    // === Горизонтальный ресайзер (мышь) ===
+    const hResizer = document.getElementById('resizer-h');
+    if (hResizer) {
+        let startY = 0, startHeight = 0;
+        hResizer.addEventListener('mousedown', (e) => {
+            hResizer.classList.add('active');
+            startY = e.clientY;
+            startHeight = document.getElementById('bottom-panel').offsetHeight;
+            document.body.style.cursor = 'row-resize';
+            document.body.style.userSelect = 'none';
+        });
 
-            document.addEventListener('mouseup', () => {
-                if (currentResizer) {
-                    currentResizer.classList.remove('active');
-                    currentResizer = null;
-                    document.body.style.cursor = '';
-                    document.body.style.userSelect = '';
-                    saveLayout();
-                }
-            });
+        document.addEventListener('mousemove', (e) => {
+            if (!hResizer.classList.contains('active')) return;
+            const panel = document.getElementById('bottom-panel');
+            let newH = startHeight + (startY - e.clientY);
+            newH = Math.max(80, Math.min(window.innerHeight * 0.6, newH));
+            panel.style.height = newH + 'px';
+        });
 
-            // Touch support
-            resizers.forEach(resizer => {
-                resizer.addEventListener('touchstart', (e) => {
-                    currentResizer = resizer;
-                    resizer.classList.add('active');
-                    if (resizer.id === 'resizer-1') {
-                        startWidth = document.getElementById('explorer').offsetWidth;
-                        startX = e.touches[0].clientX;
-                    } else if (resizer.id === 'resizer-2') {
-                        startRightWidth = document.getElementById('rightpanel').offsetWidth;
-                        startX = e.touches[0].clientX;
-                    }
-                    document.body.style.userSelect = 'none';
-                });
-            });
+        document.addEventListener('mouseup', () => {
+            if (hResizer.classList.contains('active')) {
+                hResizer.classList.remove('active');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                try {
+                    localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
+                } catch(e) {}
+            }
+        });
 
-            document.addEventListener('touchmove', (e) => {
-                if (!currentResizer) return;
-                if (currentResizer.id === 'resizer-1') {
-                    let w = Math.max(150, Math.min(400, startWidth + e.touches[0].clientX - startX));
-                    document.getElementById('explorer').style.width = w + 'px';
-                } else if (currentResizer.id === 'resizer-2') {
-                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.touches[0].clientX));
-                    document.getElementById('rightpanel').style.width = w + 'px';
-                }
-                refreshCM();
-                resize();
-            });
+        // === Горизонтальный ресайзер (touch) ===
+        hResizer.addEventListener('touchstart', (e) => {
+            hResizer.classList.add('active');
+            startY = e.touches[0].clientY;
+            startHeight = document.getElementById('bottom-panel').offsetHeight;
+            document.body.style.userSelect = 'none';
+        }, { passive: true });
 
-            document.addEventListener('touchend', () => {
-                if (currentResizer) {
-                    currentResizer.classList.remove('active');
-                    currentResizer = null;
-                    document.body.style.userSelect = '';
-                    saveLayout();
-                }
-            });
+        document.addEventListener('touchmove', (e) => {
+            if (!hResizer.classList.contains('active')) return;
+            const panel = document.getElementById('bottom-panel');
+            let newH = startHeight + (startY - e.touches[0].clientY);
+            newH = Math.max(80, Math.min(window.innerHeight * 0.6, newH));
+            panel.style.height = newH + 'px';
+        }, { passive: true });
+
+        document.addEventListener('touchend', () => {
+            if (hResizer.classList.contains('active')) {
+                hResizer.classList.remove('active');
+                document.body.style.userSelect = '';
+                try {
+                    localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
+                } catch(e) {}
+            }
+        });
+    }
+
+    // === Общие обработчики для вертикальных ресайзеров (mousemove/mouseup) ===
+    document.addEventListener('mousemove', (e) => {
+        if (!currentResizer) return;
+        if (currentResizer.id === 'resizer-1') {
+            let w = Math.max(150, Math.min(400, startWidth + e.clientX - startX));
+            document.getElementById('explorer').style.width = w + 'px';
+        } else if (currentResizer.id === 'resizer-2') {
+            let w = Math.max(200, Math.min(500, startRightWidth + startX - e.clientX));
+            document.getElementById('rightpanel').style.width = w + 'px';
         }
+        refreshCM();
+        resize();
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (currentResizer) {
+            currentResizer.classList.remove('active');
+            currentResizer = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            saveLayout();
+        }
+    });
+
+    // === Touch-поддержка для вертикальных ресайзеров ===
+    resizers.forEach(resizer => {
+        resizer.addEventListener('touchstart', (e) => {
+            currentResizer = resizer;
+            resizer.classList.add('active');
+            if (resizer.id === 'resizer-1') {
+                startWidth = document.getElementById('explorer').offsetWidth;
+                startX = e.touches[0].clientX;
+            } else if (resizer.id === 'resizer-2') {
+                startRightWidth = document.getElementById('rightpanel').offsetWidth;
+                startX = e.touches[0].clientX;
+            }
+            document.body.style.userSelect = 'none';
+        }, { passive: true });
+    });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!currentResizer) return;
+        if (currentResizer.id === 'resizer-1') {
+            let w = Math.max(150, Math.min(400, startWidth + e.touches[0].clientX - startX));
+            document.getElementById('explorer').style.width = w + 'px';
+        } else if (currentResizer.id === 'resizer-2') {
+            let w = Math.max(200, Math.min(500, startRightWidth + startX - e.touches[0].clientX));
+            document.getElementById('rightpanel').style.width = w + 'px';
+        }
+        refreshCM();
+        resize();
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => {
+        if (currentResizer) {
+            currentResizer.classList.remove('active');
+            currentResizer = null;
+            document.body.style.userSelect = '';
+            saveLayout();
+        }
+    });
+}
 
         function saveLayout() {
             const layout = {
@@ -1442,24 +1549,32 @@
         }
 
         function loadLayout() {
-            try {
-                const saved = localStorage.getItem('rbxstudio-layout');
-                if (saved) {
-                    const layout = JSON.parse(saved);
-                    document.getElementById('explorer').style.width = layout.explorer || '220px';
-                    document.getElementById('rightpanel').style.width = layout.rightpanel || '260px';
-                }
-            } catch (e) { }
+    try {
+        const saved = localStorage.getItem('rbxstudio-layout');
+        if (saved) {
+            const layout = JSON.parse(saved);
+            document.getElementById('explorer').style.width = layout.explorer || '220px';
+            document.getElementById('rightpanel').style.width = layout.rightpanel || '260px';
         }
+        // Восстанавливаем высоту нижней панели
+        const h = localStorage.getItem('rbxstudio-bottom-height');
+        if (h) {
+            document.getElementById('bottom-panel').style.height = h + 'px';
+        }
+    } catch (e) { }
+}
 
-        function resetLayout() {
-            document.getElementById('explorer').style.width = '220px';
-            document.getElementById('rightpanel').style.width = '260px';
-            localStorage.removeItem('rbxstudio-layout');
-            refreshCM();
-            resize();
-            notify(t('notify_layout_reset'));
-        }
+function resetLayout() {
+    document.getElementById('explorer').style.width = '220px';
+    document.getElementById('rightpanel').style.width = '260px';
+    // Сбрасываем высоту нижней панели на дефолтную
+    document.getElementById('bottom-panel').style.height = '180px';
+    localStorage.removeItem('rbxstudio-layout');
+    localStorage.removeItem('rbxstudio-bottom-height');
+    refreshCM();
+    resize();
+    notify(t('notify_layout_reset'));
+}
 
         // ============ THREE.JS ПЕРЕМЕННЫЕ ============
         let selectedRef = null;
@@ -3140,65 +3255,34 @@ game = setmetatable({}, {
                 '[Lua' + (source ? ':' + source : '') + '] ' + text + (trace ? '\n' + trace : '')
             );
         }
+        
+        function clearLuaOutput() {
+    luaOutputLines = [];
+    renderLuaOutput();
+}
 
         function renderLuaOutput() {
-            const panel = document.getElementById('lua-output-panel');
-            const el = document.getElementById('lua-output');
-            if (!panel || !el) return;
-            // Раньше показ/скрытие висело на самом #lua-output (внутренний
-            // скролл-контейнер) — снаружи он обёрнут в панель с заголовком
-            // (#lua-output-panel), и скрывать нужно именно панель целиком,
-            // иначе при пустом логе виден пустой заголовок без содержимого.
-            if (!luaOutputLines.length) { panel.style.display = 'none'; return; }
-            panel.style.display = 'flex';
-            const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
-            const icons = { error: '⛔', warn: '⚠️', print: '' };
-            el.innerHTML = luaOutputLines.slice(-80).map(l => {
-                const head = '<span style="color:#6b7280">' + l.time + '</span> ' +
-                    (l.source ? '<span style="color:#60a5fa">[' + esc(l.source) + ']</span> ' : '') +
-                    (icons[l.level] || '');
-                const trace = l.trace
-                    ? '<div style="color:#9ca3af;padding-left:14px;white-space:pre-wrap;">' + esc(l.trace) + '</div>'
-                    : '';
-                return '<div style="color:' + (colors[l.level] || '#e5e7eb') + ';margin-bottom:2px;">' +
-                    head + esc(l.text) + '</div>' + trace;
-            }).join('');
-            el.scrollTop = el.scrollHeight;
-        }
-
-        // Панель лога больше НЕ перетаскивается — по тому же принципу, что
-        // #explorer: позиция зафиксирована (left/bottom из inline-стиля),
-        // менять можно только размер (нативный CSS resize за угол панели,
-        // resize:both в разметке). Сохраняем только размер в localStorage —
-        // аналогично тому, как #explorer запоминает свою ширину.
-        function initLuaOutputDrag() {
-            const panel = document.getElementById('lua-output-panel');
-            if (!panel) return;
-
-            try {
-                const saved = JSON.parse(localStorage.getItem('rbxstudio-lua-output-size') || 'null');
-                if (saved && typeof saved.width === 'number' && typeof saved.height === 'number') {
-                    panel.style.width = saved.width + 'px';
-                    panel.style.height = saved.height + 'px';
-                }
-            } catch (e) { }
-
-            // ResizeObserver ловит любой ресайз (мышью или пальцем за угол
-            // панели) — единая точка сохранения вместо отдельных
-            // mouse/touch обработчиков, как раньше было для перетаскивания.
-            let saveTimer = null;
-            const ro = new ResizeObserver(() => {
-                clearTimeout(saveTimer);
-                saveTimer = setTimeout(() => {
-                    try {
-                        localStorage.setItem('rbxstudio-lua-output-size', JSON.stringify({
-                            width: panel.offsetWidth, height: panel.offsetHeight
-                        }));
-                    } catch (e) { }
-                }, 200);
-            });
-            ro.observe(panel);
-        }
+    const el = document.getElementById('output-content');
+    if (!el) return;
+    if (!luaOutputLines.length) {
+        el.innerHTML = '<span style="color:#6b7280;">(no output)</span>';
+        return;
+    }
+    const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
+    const icons = { error: '⛔', warn: '⚠️', print: '' };
+    el.innerHTML = luaOutputLines.slice(-200).map(l => {
+        const head = '<span style="color:#6b7280">' + l.time + '</span> ' +
+            (l.source ? '<span style="color:#60a5fa">[' + esc(l.source) + ']</span> ' : '') +
+            (icons[l.level] || '');
+        const trace = l.trace
+            ? '<div style="color:#9ca3af;padding-left:14px;white-space:pre-wrap;">' + esc(l.trace) + '</div>'
+            : '';
+        return '<div style="color:' + (colors[l.level] || '#e5e7eb') + ';margin-bottom:2px;">' +
+            head + esc(l.text) + '</div>' + trace;
+    }).join('');
+    el.scrollTop = el.scrollHeight;
+}
+        
 
         // ---- Мост к объектам сцены: только числа/строки/булевы, см. коммент выше ----
         function luaPositionOfRef(ref) {
@@ -4145,13 +4229,14 @@ game = setmetatable({}, {
         }
 
         function switchTab(t) {
-            document.querySelectorAll('.tab').forEach((el, i) => {
-                el.classList.toggle('active', (i === 0 && t === 'props') || (i === 1 && t === 'script'));
-            });
-            document.getElementById('tab-props').style.display = t === 'props' ? '' : 'none';
-            document.getElementById('tab-script').style.display = t === 'script' ? 'flex' : 'none';
-            if (t === 'script') refreshCM();
-        }
+    document.querySelectorAll('.tab').forEach((el, i) => {
+        const tabNames = ['props', 'script'];
+        el.classList.toggle('active', tabNames[i] === t);
+    });
+    document.getElementById('tab-props').style.display = t === 'props' ? '' : 'none';
+    document.getElementById('tab-script').style.display = t === 'script' ? 'flex' : 'none';
+    if (t === 'script') refreshCM();
+}
 
         // ============ БЫСТРОЕ ДОБАВЛЕНИЕ ============
         async function quickAdd(cls) {
@@ -5126,7 +5211,7 @@ game = setmetatable({}, {
         window.addEventListener('DOMContentLoaded', () => {
             loadLayout();
             initResizers();
-            initLuaOutputDrag();
+            
             refreshCM();
         });
 
