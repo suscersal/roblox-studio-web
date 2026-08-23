@@ -17,15 +17,59 @@ import os
 import io
 
 
+# Кэш .whl рядом со скриптом — после первой (единственной) установки с
+# сетью pip кладёт сюда скачанные колёса, и все последующие запуски на
+# Termux (в т.ч. без интернета — самолёт, метро, нет сим-карты) ставят
+# зависимости из ЭТОЙ папки через --no-index, а не заново из PyPI.
+#
+# RSW_VENDOR_DIR — та же логика, что у RSW_ICONS_DIR ниже: если app.py
+# запущен из-под APK-обёртки (bridge_launcher.py подменяет __file__ на
+# путь внутри hotpatch, который недоступен на запись), эта переменная
+# указывает на настоящую писабельную папку (например filesDir/vendor).
+# При обычном запуске (`python app.py` в Termux/на ПК) — путь рядом со
+# скриптом, как и раньше.
+VENDOR_DIR = Path(os.environ['RSW_VENDOR_DIR']) if os.environ.get('RSW_VENDOR_DIR') \
+    else Path(__file__).parent / 'vendor'
+_WHEELS_DIR = VENDOR_DIR / 'wheels'
+
+
 def _ensure(pkg, imp=None):
     try:
         __import__(imp or pkg)
+        return
     except ImportError:
-        print(f'[RbxStudio] Устанавливаю {pkg}...')
+        pass
+
+    _WHEELS_DIR.mkdir(parents=True, exist_ok=True)
+    has_cached = any(_WHEELS_DIR.glob(f'{pkg.replace("-", "_")}*'))
+
+    if has_cached:
+        print(f'[RbxStudio] Устанавливаю {pkg} из локального кэша (офлайн)...')
+        try:
+            subprocess.check_call([
+                sys.executable, '-m', 'pip', 'install', pkg,
+                '--break-system-packages', '-q',
+                '--no-index', '--find-links', str(_WHEELS_DIR),
+            ])
+            return
+        except subprocess.CalledProcessError:
+            print(f'[RbxStudio] Офлайн-кэш для {pkg} не подошёл, пробую сеть...')
+
+    print(f'[RbxStudio] Устанавливаю {pkg} (и сохраняю .whl в кэш для офлайн-запусков)...')
+    # Сначала скачиваем колесо в кэш, потом ставим из него — так кэш
+    # пополняется независимо от того, есть у pip install свой кэш или нет.
+    try:
         subprocess.check_call([
-            sys.executable, '-m', 'pip', 'install', pkg,
-            '--break-system-packages', '-q'
+            sys.executable, '-m', 'pip', 'download', pkg,
+            '-d', str(_WHEELS_DIR), '-q',
         ])
+    except subprocess.CalledProcessError:
+        pass  # даже без скачивания .whl обычная установка ниже может сработать
+    subprocess.check_call([
+        sys.executable, '-m', 'pip', 'install', pkg,
+        '--break-system-packages', '-q',
+        '--find-links', str(_WHEELS_DIR),
+    ])
 
 
 _ensure('flask')
@@ -520,6 +564,60 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=Fals
 
 
 flask_app = Flask(__name__)
+
+# Откуда качать, если файла ещё нет локально — тот же список, что в
+# setup_termux.sh. Автозагрузка ниже делает сам setup_termux.sh не
+# обязательным: сервер докачивает недостающее по требованию сам.
+VENDOR_SOURCES = {
+    'codemirror.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css',
+    'monokai.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css',
+    'codemirror.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js',
+    'lua.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js',
+    'closebrackets.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js',
+    'matchbrackets.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js',
+    'three.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
+    'MTLLoader.js': 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js',
+    'OBJLoader.js': 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
+    'cannon.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js',
+    'fengari-web.js': 'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js',
+}
+
+
+def _download_vendor_file(fn):
+    """Качает fn с CDN прямо в VENDOR_DIR. True — успех (файл на диске)."""
+    url = VENDOR_SOURCES.get(fn)
+    if not url:
+        return False
+    try:
+        VENDOR_DIR.mkdir(parents=True, exist_ok=True)
+        req = _req.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with _req.urlopen(req, timeout=15) as resp:
+            data = resp.read()
+        # Пишем во временный файл и переименовываем — если параллельный
+        # запрос на тот же файл долетит одновременно, никто не увидит
+        # частично записанный .js/.css.
+        tmp = VENDOR_DIR / (fn + '.part')
+        tmp.write_bytes(data)
+        tmp.replace(VENDOR_DIR / fn)
+        print(f'[RbxStudio] vendor: скачал {fn} ({len(data)} байт)')
+        return True
+    except (_urlerr.URLError, _urlerr.HTTPError, OSError, TimeoutError) as e:
+        print(f'[RbxStudio] vendor: не смог скачать {fn}: {e}')
+        return False
+
+
+@flask_app.route('/vendor/<path:fn>')
+def vendor_files(fn):
+    # Локальные копии CodeMirror/Three.js/Cannon.js/fengari.
+    # index.html грузит их относительным путём 'vendor/...'; если файла
+    # ещё нет на диске (первый запуск, setup_termux.sh не запускали),
+    # качаем его сюда же по требованию — дальше все запуски офлайн,
+    # без сети вообще, потому что файл уже лежит в VENDOR_DIR.
+    path = VENDOR_DIR / fn
+    if not path.exists():
+        if not _download_vendor_file(fn):
+            return '', 404
+    return send_from_directory(str(VENDOR_DIR), fn)
 
 
 @flask_app.route('/icons/<path:fn>')
