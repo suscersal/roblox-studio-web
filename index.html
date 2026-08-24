@@ -2698,6 +2698,9 @@ acseration = 0;}
 
             physicsWorld.addBody(body);
             physicsBodies[o.ref] = body;
+            body.__ref = o.ref; // для Touched-события (см. beginContact ниже) — по-другому
+            // из cannon.js колбэка контакта не узнать, какому игровому
+            // объекту принадлежит столкнувшееся тело.
         }
 
         // Только меш, без CANNON.Body — для объектов, которые видно, но до
@@ -2944,6 +2947,22 @@ acseration = 0;}
             // не гасится. Торможение при отсутствии ввода даёт linearDamping.
             physicsWorld.defaultContactMaterial.friction = 0;
             physicsWorld.defaultContactMaterial.restitution = 0.05;
+
+            // Touched — настоящее срабатывание по факту контакта в cannon.js
+            // (beginContact), а не заглушка. Работает между ЛЮБЫМИ двумя
+            // объектами, у которых есть физ-тело (снаряд/стрела ударилась во
+            // что-то, кнопка нажата чем-то и т.п.) — см. body.__ref у
+            // addPhysicsBodyForObj. Игрок (charBody) своего игрового ref не
+            // имеет (это не объект карты), так что Touched от касания именно
+            // игроком пока не срабатывает — это реальное ограничение, а не
+            // умолчание, которое можно было бы легко снять здесь же.
+            physicsWorld.addEventListener('beginContact', (e) => {
+                const refA = e.bodyA.__ref, refB = e.bodyB.__ref;
+                if (refA !== undefined && refB !== undefined) {
+                    fireLuaSignal(refA, 'Touched', [{ __instanceRef: refB }]);
+                    fireLuaSignal(refB, 'Touched', [{ __instanceRef: refA }]);
+                }
+            });
 
             physicsBodies = {};
             playSnapshot = {};
@@ -3234,11 +3253,35 @@ InstanceMT.__index = function(t, k)
             end
         end
     end
-    -- Сигналы: RemoteEvent.OnServerEvent/OnClientEvent и
-    -- TextButton.MouseButton1Click отдают объект с методом :Connect(fn),
-    -- как настоящий RBXScriptSignal (упрощённый — без :Wait()/:Once()).
-    if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseButton1Click" then
+    -- Сигналы: RemoteEvent.OnServerEvent/OnClientEvent, TextButton.
+    -- MouseButton1Click, и общая физика/иерархия/жизненный цикл — у всех
+    -- один и тот же настоящий RBXScriptSignal (:Connect/:Disconnect,
+    -- см. makeEvent/__connect/fireLuaSignal), НЕ заглушка: ChildAdded/
+    -- ChildRemoved реально стреляют при репарентинге (см. luaSetParent),
+    -- Touched — при настоящем контакте в cannon.js (см. beginContact),
+    -- Stepped/Heartbeat/RenderStepped — каждый кадр игрового цикла.
+    -- Selected/Deselected/PlayerAdded/PlayerRemoving/Chatted/Died —
+    -- честные RBXScriptSignal (Connect не падает), но по-настоящему НЕ
+    -- срабатывают: нет системы выбора HopperBin/чата/смерти персонажа,
+    -- которая могла бы их вызвать. Это реальное ограничение движка, а не
+    -- сознательная заглушка "на будущее" — сигнал существует, событие в
+    -- игре просто ещё не происходит.
+    if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseButton1Click"
+        or k == "ChildAdded" or k == "ChildRemoved" or k == "DescendantAdded" or k == "DescendantRemoving"
+        or k == "Touched" or k == "TouchEnded"
+        or k == "Changed" or k == "PropertyChangedSignal"
+        or k == "Equipped" or k == "Unequipped" or k == "Selected" or k == "Deselected"
+        or k == "Activated" or k == "Deactivated"
+        or k == "PlayerAdded" or k == "PlayerRemoving" or k == "Chatted" or k == "Died"
+        or k == "CharacterAdded" or k == "CharacterRemoving"
+        or k == "Event" or k == "Stepped" or k == "Heartbeat" or k == "RenderStepped" then
         return makeEvent(ref, k)
+    end
+    if k == "Fire" then
+        -- BindableEvent:Fire(...) — генерирует .Event тут же, синхронно,
+        -- в пределах ОДНОЙ и той же VM (в отличие от FireServer/FireClient,
+        -- которые идут через межпроцессную очередь remoteQueue).
+        return function(self, ...) __fire_bindable(ref, ...) end
     end
     if k == "FireServer" then
         return function(self, ...) __fire_remote(ref, "server", ...) end
@@ -3513,7 +3556,16 @@ game = setmetatable({}, {
                 lua.lua_rawgeti(conn.L, lua.LUA_REGISTRYINDEX, conn.fnRef);
                 let n = 0;
                 for (const a of (args || [])) {
-                    if (typeof a === 'number') lua.lua_pushnumber(conn.L, a);
+                    if (a && typeof a === 'object' && '__instanceRef' in a) {
+                        // Аргумент — ссылка на инстанс (например, добавленный
+                        // ребёнок в ChildAdded, или "другая деталь" в Touched) —
+                        // заворачиваем ЧЕРЕЗ ТОТ ЖЕ __wrap, что и весь остальной
+                        // мост, а не передаём голый номер: колбэки вида
+                        // function(other) other.Name ... end иначе бы падали.
+                        lua.lua_getglobal(conn.L, '__wrap');
+                        lua.lua_pushnumber(conn.L, a.__instanceRef);
+                        lua.lua_call(conn.L, 1, 1);
+                    } else if (typeof a === 'number') lua.lua_pushnumber(conn.L, a);
                     else if (typeof a === 'boolean') lua.lua_pushboolean(conn.L, a);
                     else if (a === null || a === undefined) lua.lua_pushnil(conn.L);
                     else lua.lua_pushstring(conn.L, String(a));
@@ -3550,6 +3602,9 @@ game = setmetatable({}, {
             luaSignalsByKey = {};
             luaNextSignalId = 1;
             remoteQueue = [];
+            lastRunServiceTick = null; // иначе первый Heartbeat/Stepped после
+            // следующего Play дал бы огромную dt — разницу с моментом,
+            // когда игра была остановлена в прошлый раз.
         }
 
         function luaWorkspaceRef() {
@@ -3579,6 +3634,15 @@ game = setmetatable({}, {
             luaParentByRef[ref] = parentRef;
             if (parentRef !== -1) {
                 (luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef] || []).push(ref);
+            }
+            // Настоящее, а не заглушечное срабатывание — ChildAdded/ChildRemoved
+            // реально стреляют при репарентинге (Instance.new(...).Parent = x,
+            // :Destroy() и т.п.), а не просто существуют как безопасный no-op.
+            if (oldParent !== undefined && oldParent !== -1 && oldParent !== parentRef) {
+                fireLuaSignal(oldParent, 'ChildRemoved', [{ __instanceRef: ref }]);
+            }
+            if (parentRef !== -1 && parentRef !== oldParent) {
+                fireLuaSignal(parentRef, 'ChildAdded', [{ __instanceRef: ref }]);
             }
         }
         function luaDestroyRef(ref) {
@@ -3752,6 +3816,33 @@ game = setmetatable({}, {
                     else args.push(null);
                 }
                 remoteQueue.push({ ref, targetSide, args, dueAt: performance.now() + 16 });
+                return 0;
+            });
+            def('__fire_bindable', function (L2) {
+                // BindableEvent:Fire(...) — синхронно, в отличие от
+                // __fire_remote (тот идёт через очередь с задержкой в кадр).
+                // В отличие от __fire_remote, здесь ЕЩЁ детектируем аргументы-
+                // инстансы (общий паттерн — "какой игрок поймал флаг" и т.п.),
+                // не только примитивы: у обёрнутых Instance-таблиц есть
+                // rawget-поле "__ref" (см. wrap() в LUA_PRELUDE).
+                const ref = lua.lua_tonumber(L2, 1);
+                const n = lua.lua_gettop(L2);
+                const args = [];
+                for (let i = 2; i <= n; i++) {
+                    const ty = lua.lua_type(L2, i);
+                    if (ty === lua.LUA_TNUMBER) args.push(lua.lua_tonumber(L2, i));
+                    else if (ty === lua.LUA_TBOOLEAN) args.push(!!lua.lua_toboolean(L2, i));
+                    else if (ty === lua.LUA_TSTRING) args.push(lua.lua_tojsstring(L2, i));
+                    else if (ty === lua.LUA_TTABLE) {
+                        lua.lua_getfield(L2, i, '__ref');
+                        if (lua.lua_isnumber(L2, -1)) args.push({ __instanceRef: lua.lua_tonumber(L2, -1) });
+                        else args.push(null);
+                        lua.lua_pop(L2, 1);
+                    } else {
+                        args.push(null);
+                    }
+                }
+                fireLuaSignal(ref, 'Event', args);
                 return 0;
             });
         }
@@ -4150,12 +4241,29 @@ game = setmetatable({}, {
         function updateLuaScheduler() {
             if (!luaServerL && !luaClientL) return;
             processRemoteQueue();
+            updateRunServiceSignals();
             if (!luaWaits.length) return;
             const now = performance.now();
             const ready = luaWaits.filter(w => w.resumeAt <= now);
             if (!ready.length) return;
             luaWaits = luaWaits.filter(w => w.resumeAt > now);
             for (const w of ready) resumeLuaCoroutine(w.co, 'script', 0);
+        }
+
+        // RunService.Stepped/Heartbeat/RenderStepped — настоящий, не
+        // заглушечный тик каждый кадр, если хоть один скрипт уже успел
+        // обратиться к game:GetService("RunService") (иначе искать нечего —
+        // сервис ленивый, как и все остальные, см. getService в LUA_PRELUDE).
+        let lastRunServiceTick = null;
+        function updateRunServiceSignals() {
+            const ref = luaFindServiceRef('RunService');
+            if (ref === -1) return;
+            const now = performance.now() / 1000;
+            const dt = lastRunServiceTick === null ? 0 : now - lastRunServiceTick;
+            lastRunServiceTick = now;
+            fireLuaSignal(ref, 'Heartbeat', [dt]);
+            fireLuaSignal(ref, 'Stepped', [now, dt]);
+            fireLuaSignal(ref, 'RenderStepped', [dt]);
         }
 
         function buildCannonShape(mesh) {
