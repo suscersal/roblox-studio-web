@@ -3183,16 +3183,25 @@ local InstanceMT = {}
 -- Event:Connect(fn) — тонкая Lua-обёртка над __connect/__disconnect
 -- (см. installLuaBridge). Специально без :Wait() и без поддержки yield
 -- внутри обработчика — колбэк выполняется синхронным pcall на стороне JS
--- (fireLuaSignal), а не как отдельная корутина.
+-- (fireLuaSignal), а не как отдельная корутина. connect/disconnect/wait —
+-- legacy lowercase-алиасы (Roblox 2008-2011 годов, до перехода на
+-- PascalCase) — без них скрипты того времени падали уже на первом же
+-- :connect(), даже когда сам сигнал был честный, не заглушка.
 local function makeEvent(ref, evName)
-    return setmetatable({}, { __index = {
+    local ev = setmetatable({}, { __index = {
         Connect = function(self, fn)
             local id = __connect(ref, evName, fn)
             return setmetatable({}, { __index = {
                 Disconnect = function() __disconnect(id) end,
+                disconnect = function() __disconnect(id) end,
             } })
         end,
+        Wait = function(self) return nil end, -- см. Signal:Wait выше — не блокирующий
     } })
+    local mt = getmetatable(ev).__index
+    mt.connect = mt.Connect
+    mt.wait = mt.Wait
+    return ev
 end
 
 -- __mode="v" — слабые значения: если Lua-код нигде больше не держит ссылку
@@ -3240,6 +3249,18 @@ InstanceMT.__index = function(t, k)
     end
     if k == "Destroy" or k == "remove" or k == "Remove" then
         return function(self) __destroy(ref) end
+    end
+    if k == "Clone" or k == "clone" then
+        -- Настоящая копия — новый виртуальный инстанс (свой ref), с тем же
+        -- классом/именем/позицией, не запараентенный никуда (как и в
+        -- реальном Roblox — Clone() отвязан от дерева, пока сам скрипт не
+        -- выставит .Parent). Для virtual-инстансов (Instance.new()) вместе
+        -- с этим копируются и все произвольные свойства из
+        -- virtualInstanceProps — см. __clone на стороне JS.
+        return function(self)
+            local newRef = __clone(ref)
+            return wrap(newRef)
+        end
     end
     if k == "GetFullName" or k == "getFullName" then
         return function(self) return __get_name(ref) end
@@ -3626,6 +3647,22 @@ game = setmetatable({}, {
             virtualInstanceProps[ref] = {};
             return ref;
         }
+        function luaCloneRef(ref) {
+            // Instance:Clone() — новый виртуальный ref с тем же классом/именем
+            // (+ позицией, если есть) и копией произвольных свойств. Не
+            // запараентен никуда — как и в настоящем Roblox, пока сам скрипт
+            // не выставит .Parent явно.
+            const src = luaByRef[ref];
+            const cls = src ? src.cls : 'Instance';
+            const newRef = luaCreateVirtualInstance(cls);
+            if (src) luaByRef[newRef].name = src.name;
+            if (virtualInstanceProps[ref]) {
+                virtualInstanceProps[newRef] = Object.assign({}, virtualInstanceProps[ref]);
+            }
+            const p = luaPositionOfRef(ref);
+            if (p) luaSetPositionOfRef(newRef, p.x, p.y, p.z);
+            return newRef;
+        }
         function luaSetParent(ref, parentRef) {
             const oldParent = luaParentByRef[ref];
             if (oldParent !== undefined && luaChildrenByRef[oldParent]) {
@@ -3760,6 +3797,10 @@ game = setmetatable({}, {
             });
             def('__instance_new', function (L2) {
                 lua.lua_pushnumber(L2, luaCreateVirtualInstance(lua.lua_tojsstring(L2, 1)));
+                return 1;
+            });
+            def('__clone', function (L2) {
+                lua.lua_pushnumber(L2, luaCloneRef(lua.lua_tonumber(L2, 1)));
                 return 1;
             });
             def('__find_service', function (L2) {
