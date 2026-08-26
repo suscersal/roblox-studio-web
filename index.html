@@ -26,6 +26,10 @@
          файлы можно заменить обратно на CDN-ссылки. -->
     <link rel="stylesheet" href="vendor/codemirror.min.css">
     <link rel="stylesheet" href="vendor/monokai.min.css">
+    <link rel="stylesheet" href="vendor/show-hint.min.css">
+    
+    
+    
 
 
     <style>
@@ -452,6 +456,27 @@
             display: block !important;
         }
 
+        /* Автодополнение (show-hint) в тон monokai-темы редактора */
+        .CodeMirror-hints {
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    background: #272822;
+    border: 1px solid #49483e;
+    color: #f8f8f2;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
+    z-index: 10000 !important;
+    position: absolute;
+}
+
+        .CodeMirror-hint {
+            color: #f8f8f2;
+        }
+
+        li.CodeMirror-hint-active {
+            background: #3e5a1c;
+            color: #fff;
+        }
+
         #script-save-btn {
             background: #065f46;
             border: none;
@@ -706,6 +731,16 @@
     font-size: 13px;
     padding: 2px 6px;
 }
+#output-header select {
+    background: #1f2937;
+    border: 1px solid #374151;
+    color: #d1d5db;
+    font-size: 11px;
+    border-radius: 4px;
+    padding: 2px 4px;
+    margin-left: auto;
+    margin-right: 6px;
+}
 
 #output-content {
     flex: 1;
@@ -946,6 +981,11 @@
 <div id="bottom-panel">
     <div id="output-header">
         <span>Output</span>
+        <select id="output-filter" onchange="renderLuaOutput()" title="Фильтр по среде выполнения">
+            <option value="all">Все</option>
+            <option value="Script">🖥️ Server</option>
+            <option value="LocalScript">💻 Client</option>
+        </select>
         <button onclick="clearLuaOutput()" title="Clear">🗑</button>
     </div>
     <div id="output-content"></div>
@@ -1183,6 +1223,7 @@
     <script src="vendor/closebrackets.min.js"></script>
     <script src="vendor/matchbrackets.min.js"></script>
 
+
     <script>
         // Three.js загрузка
         (function () {
@@ -1273,7 +1314,8 @@
             tryLoad(0);
         })();
     </script>
-
+<script src="vendor/show-hint.min.js"></script>
+<script src="vendor/lua-hint.js"></script>
     <script>
         // ============ ANDROID (SAF) ============
         // Если приложение открыто внутри Android-обёртки, MainActivity.kt
@@ -1303,23 +1345,209 @@
         // так и оставались неинициализированными). CodeMirror — это ТОЛЬКО
         // редактор скриптов; его отсутствие не должно ронять всё остальное
         // приложение.
-        let cmEditor = null;
-        try {
-            cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
-                mode: 'lua',
-                theme: 'monokai',
-                lineNumbers: true,
-                autoCloseBrackets: true,
-                matchBrackets: true,
-                indentUnit: 4,
-                tabSize: 4,
-                indentWithTabs: false,
-                lineWrapping: false,
-                viewportMargin: 50
-            });
-        } catch (e) {
-            console.error('CodeMirror не загрузился — редактор скриптов будет недоступен, остальное приложение работает как обычно:', e);
+        // ---- Автодополнение: словарь Roblox Luau + свой хинтер ----
+        // Ищем не только по началу слова, а по подстроке (как в VS Code),
+        // поэтому обычный anyword-hint не подходит — пишем свой.
+        
+        const ROBLOX_LUA_KEYWORDS = [
+            // Глобальные функции / стандартная библиотека Lua
+            'print', 'warn', 'error', 'assert', 'tick', 'wait', 'require',
+            'typeof', 'type', 'pairs', 'ipairs', 'next', 'select', 'unpack',
+            'collectgarbage', 'tonumber', 'tostring', 'pcall', 'xpcall',
+            'setmetatable', 'getmetatable', 'rawget', 'rawset', 'rawequal',
+            'rawlen', 'spawn', 'delay',
+            'task', 'task.wait', 'task.spawn', 'task.delay', 'task.cancel',
+            'task.defer',
+            'math', 'math.abs', 'math.ceil', 'math.floor', 'math.max',
+            'math.min', 'math.random', 'math.randomseed', 'math.sqrt',
+            'math.sin', 'math.cos', 'math.tan', 'math.pi', 'math.huge',
+            'math.clamp', 'math.sign', 'math.round', 'math.rad', 'math.deg',
+            'table', 'table.insert', 'table.remove', 'table.concat',
+            'table.sort', 'table.find', 'table.clear', 'table.clone',
+            'table.pack', 'table.unpack',
+            'string', 'string.find', 'string.format', 'string.gmatch',
+            'string.gsub', 'string.len', 'string.lower', 'string.upper',
+            'string.match', 'string.rep', 'string.sub', 'string.split',
+            'string.byte', 'string.char',
+            'os', 'os.time', 'os.clock', 'os.date',
+            'coroutine', 'coroutine.create', 'coroutine.resume',
+            'coroutine.yield', 'coroutine.wrap', 'coroutine.status',
+
+            // Глобальные объекты окружения скрипта
+            'game', 'workspace', 'script', 'shared', '_G',
+
+            // Сервисы (game:GetService('...'))
+            'Workspace', 'Lighting', 'ReplicatedStorage', 'ReplicatedFirst',
+            'ServerScriptService', 'ServerStorage', 'StarterGui',
+            'StarterPack', 'StarterPlayer', 'SoundService', 'Players',
+            'Teams', 'Chat', 'TextChatService', 'RunService', 'HttpService',
+            'TweenService', 'CollectionService', 'UserInputService',
+            'ContextActionService', 'MarketplaceService', 'DataStoreService',
+            'TeleportService', 'PhysicsService', 'PathfindingService',
+            'ProximityPromptService', 'BadgeService', 'InsertService',
+            'GetService',
+
+            // Конструкторы дататипов
+            'Instance', 'Instance.new', 'Vector3', 'Vector3.new', 'Vector2',
+            'Vector2.new', 'CFrame', 'CFrame.new', 'CFrame.Angles',
+            'CFrame.lookAt', 'Color3', 'Color3.new', 'Color3.fromRGB',
+            'Color3.fromHSV', 'BrickColor', 'BrickColor.new', 'UDim2',
+            'UDim2.new', 'UDim2.fromScale', 'UDim2.fromOffset', 'UDim',
+            'UDim.new', 'Rect', 'Rect.new', 'Ray', 'Ray.new', 'Region3',
+            'Random', 'Random.new', 'NumberSequence', 'ColorSequence',
+            'NumberRange', 'TweenInfo', 'TweenInfo.new',
+            'Enum', 'EnumItem',
+
+            // Классы Instance
+            'BasePart', 'Part', 'MeshPart', 'WedgePart', 'CornerWedgePart',
+            'TrussPart', 'SpawnLocation', 'Model', 'Folder', 'Humanoid',
+            'HumanoidDescription', 'Tool', 'Accessory', 'Weld', 'WeldConstraint',
+            'Motor6D', 'Attachment', 'BodyPosition', 'BodyVelocity',
+            'BodyGyro', 'BodyForce', 'BodyAngularVelocity', 'AlignPosition',
+            'AlignOrientation', 'LinearVelocity', 'VectorForce',
+            'RemoteEvent', 'RemoteFunction', 'BindableEvent', 'BindableFunction',
+            'NumberValue', 'StringValue', 'BoolValue', 'IntValue', 'ObjectValue',
+            'Vector3Value', 'CFrameValue', 'Color3Value', 'BrickColorValue',
+            'ParticleEmitter', 'Fire', 'Smoke', 'Sparkles', 'Explosion',
+            'Sound', 'SoundGroup', 'PointLight', 'SpotLight', 'SurfaceLight',
+            'Camera', 'Animation', 'AnimationController', 'Animator',
+            'AnimationTrack', 'Player', 'PlayerGui', 'Backpack',
+            'ProximityPrompt', 'Highlight', 'SelectionBox',
+
+            // GUI
+            'ScreenGui', 'BillboardGui', 'SurfaceGui', 'Frame',
+            'ScrollingFrame', 'CanvasGroup', 'TextLabel', 'TextButton',
+            'TextBox', 'ImageLabel', 'ImageButton', 'ViewportFrame',
+            'UIListLayout', 'UIGridLayout', 'UIPadding', 'UICorner',
+            'UIStroke', 'UIGradient', 'UIAspectRatioConstraint',
+            'UISizeConstraint', 'UITextSizeConstraint',
+
+            // Часто используемые методы Instance
+            'FindFirstChild', 'FindFirstChildOfClass', 'FindFirstChildWhichIsA',
+            'FindFirstAncestor', 'FindFirstAncestorOfClass', 'WaitForChild',
+            'GetChildren', 'GetDescendants', 'GetFullName', 'IsA',
+            'IsDescendantOf', 'IsAncestorOf', 'Clone', 'Destroy',
+            'ClearAllChildren', 'SetAttribute', 'GetAttribute',
+            'GetAttributes', 'AddTag', 'RemoveTag', 'HasTag', 'GetTags',
+            'GetPropertyChangedSignal', 'GetPivot', 'PivotTo',
+            'MoveTo', 'BreakJoints', 'GetMass', 'ApplyImpulse',
+            'ToWorldSpace', 'ToObjectSpace', 'PointToWorldSpace',
+
+            // Часто используемые свойства
+            'Name', 'Parent', 'ClassName', 'Position', 'Orientation',
+            'Rotation', 'Size', 'Anchored', 'CanCollide', 'CanTouch',
+            'Transparency', 'Reflectance', 'Color', 'BrickColor', 'Material',
+            'Shape', 'Massless', 'Velocity', 'AssemblyLinearVelocity',
+            'AssemblyAngularVelocity', 'Mass', 'Health', 'MaxHealth',
+            'WalkSpeed', 'JumpPower', 'JumpHeight', 'HipHeight', 'Text',
+            'TextColor3', 'TextSize', 'BackgroundColor3', 'BackgroundTransparency',
+            'BorderSizePixel', 'Visible', 'Image', 'Enabled', 'Value',
+            'PlayerToHideFrom', 'Character', 'CharacterAdded', 'UserId',
+            'DisplayName', 'Team',
+
+            // Часто используемые события
+            'Changed', 'ChildAdded', 'ChildRemoved', 'DescendantAdded',
+            'DescendantRemoving', 'Touched', 'TouchEnded', 'Died',
+            'MouseEnter', 'MouseLeave', 'MouseButton1Click',
+            'MouseButton1Down', 'MouseButton1Up', 'InputBegan', 'InputEnded',
+            'InputChanged', 'RenderStepped', 'Stepped', 'Heartbeat',
+            'PlayerAdded', 'PlayerRemoving', 'OnServerEvent', 'OnClientEvent',
+            'FireServer', 'FireClient', 'FireAllClients', 'InvokeServer',
+            'InvokeClient', 'Connect', 'Disconnect', 'Once', 'Wait',
+        ];
+        
+
+        // Ищет по подстроке (регистронезависимо), а не только по началу слова.
+        // Держим отдельно от lua-hint.js только словарь + подстрочный поиск;
+        // сам показ/подключение теперь ЕДИНСТВЕННЫЙ раз — через
+        // CodeMirror.enableRobloxAutocomplete ниже.
+        function robloxSubstringHint(cm) {
+            const cur = cm.getCursor();
+            const token = cm.getTokenAt(cur);
+            const start = token.start;
+            const end = cur.ch;
+            const prefix = token.string.slice(0, end - start);
+            if (!prefix) return null;
+
+            const lower = prefix.toLowerCase();
+            const starts = [];
+            const contains = [];
+            for (const kw of ROBLOX_LUA_KEYWORDS) {
+                const idx = kw.toLowerCase().indexOf(lower);
+                if (idx === 0) starts.push(kw);
+                else if (idx > 0) contains.push(kw);
+            }
+            const list = starts.sort().concat(contains.sort());
+            if (list.length === 0) return null;
+
+            return {
+                list: list,
+                from: CodeMirror.Pos(cur.line, start),
+                to: CodeMirror.Pos(cur.line, end)
+            };
         }
+
+let cmEditor = null;
+window.addEventListener('DOMContentLoaded', function() {
+    try {
+        cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
+            mode: 'lua',
+            theme: 'monokai',
+            lineNumbers: true,
+            autoCloseBrackets: true,
+            matchBrackets: true,
+            indentUnit: 4,
+            tabSize: 4,
+            indentWithTabs: false,
+            lineWrapping: false,
+            viewportMargin: 50,
+            extraKeys: { 'Ctrl-Space': 'autocomplete' },
+            hintOptions: { hint: robloxSubstringHint, completeSingle: false },
+            // 'textarea' (умолчание CodeMirror 5) на некоторых Android-клавиатурах
+            // не даёт событию inputRead срабатывать надёжно при вводе через
+            // IME/предиктивный текст — сама CodeMirror рекомендует именно
+            // 'contenteditable' как обход для мобильных браузеров. IS_ANDROID
+            // тут не подходит — это флаг именно APK-обёртки (AndroidBridge),
+            // а обычный Chrome на телефоне (как на скринах — с адресной
+            // строкой) под него не попадает; смотрим на User-Agent напрямую.
+            inputStyle: /Android|Mobile/i.test(navigator.userAgent) ? 'contenteditable' : 'textarea'
+        });
+        // ЕДИНСТВЕННОЕ место, где включается автопоказ подсказок — раньше
+        // здесь же ниже был ЕЩЁ один ручной cmEditor.on('inputRead', ...)
+        // (с debug notify()-спамом на каждую букву — реально всплывающее
+        // уведомление при каждом нажатии клавиши!), И в самом низу файла
+        // был ТРЕТИЙ, полностью отдельный IIFE с собственным словарём и
+        // собственным inputRead-обработчиком, который вдобавок пытался найти
+        // редактор через window.cmEditor — а cmEditor объявлен через `let`,
+        // let-переменные НЕ становятся свойством window, так что тот блок
+        // всегда промахивался мимо. Три конкурирующих обработчика на одно и
+        // то же событие — вот что "не показывало подсказки": либо ничего не
+        // всплывало из-за гонки/спама уведомлений, либо всплывало и тут же
+        // закрывалось повторным вызовом. Теперь только один путь — через
+        // lua-hint.js (файл сам решает regex по слову/цепочке точек).
+        if (cmEditor && window.CodeMirror && CodeMirror.enableRobloxAutocomplete) {
+            CodeMirror.enableRobloxAutocomplete(cmEditor);
+        } else if (cmEditor) {
+            console.error('CodeMirror.enableRobloxAutocomplete не найден — vendor/lua-hint.js не загрузился (проверьте путь/файл на сервере)');
+        }
+        // showHint (сама всплывающая панель со списком) — ОТДЕЛЬНЫЙ addon от
+        // lua-hint.js (тот только строит список слов и решает, когда его
+        // показывать). Если vendor/show-hint.min.js не подгрузился,
+        // enableRobloxAutocomplete всё равно "включится" без единой ошибки —
+        // CodeMirror.showRobloxHint внутри себя тихо делает `if (!CodeMirror.
+        // showHint) return;` при каждом нажатии клавиши, то есть подсказки
+        // просто НИКОГДА не появляются, и ни строчки в консоли, чтобы понять
+        // почему. Проверяем это явно один раз при загрузке, а не гадаем.
+        if (!window.CodeMirror || !CodeMirror.showHint) {
+            console.error('CodeMirror.showHint не найден — vendor/show-hint.min.js не загрузился, подсказки не будут появляться ни при вводе, ни по Ctrl+Space');
+            if (typeof notify === 'function') {
+                notify('Автодополнение недоступно: vendor/show-hint.min.js не загрузился', 'warn');
+            }
+        }
+    } catch (e) {
+        console.error('CodeMirror не загрузился:', e);
+    }
+});
 
         function refreshCM() {
             requestAnimationFrame(() => {
@@ -3313,8 +3541,15 @@ InstanceMT.__index = function(t, k)
         return function(self, player, ...) __fire_remote(ref, "client", ...) end
     end
     local ok, v = pcall(__get_prop, ref, k)
-    if ok then return v end
-    return nil
+    if ok and v ~= nil then return v end
+    -- Roblox поддерживает доступ к дочернему объекту прямо через точку —
+    -- part.Engine эквивалентно part:FindFirstChild("Engine"), а не только
+    -- через явный вызов FindFirstChild. Раньше это падало в __get_prop
+    -- (тот про ДАННЫЕ properties, не про детей) и там же тихо давало nil,
+    -- хотя ребёнок с таким именем на самом деле есть — отсюда "field
+    -- 'Engine'"/"field 'Parts'"/"field 'Weapon'" на объектах, которые
+    -- реально существуют в файле карты.
+    return wrap(__find_first_child(ref, k))
 end
 InstanceMT.__newindex = function(t, k, v)
     local ref = rawget(t, "__ref")
@@ -3435,13 +3670,21 @@ game = setmetatable({}, {
         function renderLuaOutput() {
     const el = document.getElementById('output-content');
     if (!el) return;
-    if (!luaOutputLines.length) {
+    const filterSel = document.getElementById('output-filter');
+    const filter = filterSel ? filterSel.value : 'all';
+    // filter — 'all' | 'Script' (Server) | 'LocalScript' (Client). Строки без
+    // sideCls (системные сообщения — ошибка загрузки fengari, ошибка
+    // прелюдии и т.п.) показываются при ЛЮБОМ фильтре — иначе они бы просто
+    // пропадали, а это как раз то немногое, что видно ДО того, как вообще
+    // стало понятно, сервер это или клиент.
+    const lines = filter === 'all' ? luaOutputLines : luaOutputLines.filter(l => !l.sideCls || l.sideCls === filter);
+    if (!lines.length) {
         el.innerHTML = '<span style="color:#6b7280;">(no output)</span>';
         return;
     }
     const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
     const icons = { error: '⛔', warn: '⚠️', print: '' };
-    el.innerHTML = luaOutputLines.slice(-200).map(l => {
+    el.innerHTML = lines.slice(-200).map(l => {
         const sideBadge = SCRIPT_BADGES[l.sideCls];
         const head = '<span style="color:#6b7280">' + l.time + '</span> ' +
             (sideBadge ? '<span style="color:' + sideBadge.color + '" title="' + sideBadge.label + '">' + sideBadge.icon + '</span> ' : '') +
@@ -3909,6 +4152,26 @@ game = setmetatable({}, {
             return lua.lua_pcall(L, 0, 0, 0);
         }
 
+        // Безопасно достаёт текст ошибки с вершины Lua-стека. Обычный
+        // lua_tojsstring возвращает null/undefined, если там НЕ строка —
+        // а Lua error() можно вызвать чем угодно (таблицей, числом, nil),
+        // это законно. Раньше такой null долетал прямо до esc() в
+        // renderLuaOutput() и рушил отрисовку ВСЕГО лога целиком.
+        function luaErrToString(L) {
+            const { lua, lauxlib } = window.fengari;
+            try {
+                const s = lua.lua_tojsstring(L, -1);
+                if (s !== null && s !== undefined) return s;
+            } catch (e) { /* падаем на luaL_tolstring ниже */ }
+            try {
+                lauxlib.luaL_tolstring(L, -1, null);
+                const s2 = lua.lua_tojsstring(L, -1);
+                lua.lua_pop(L, 1);
+                if (s2 !== null && s2 !== undefined) return s2;
+            } catch (e) { /* последний шанс — просто не строка */ }
+            return '(ошибка не строкового типа)';
+        }
+
         // luaL_traceback — тот же стек вызовов, что Roblox Studio показывает
         // под ошибкой в Output (разворачиваемым списком); здесь просто всегда
         // прикладываем его отдельной, приглушённой строкой под сообщением.
@@ -3929,27 +4192,44 @@ game = setmetatable({}, {
             const status = lua.lua_resume(co, null, nargs);
             if (status === lua.LUA_YIELD) return; // ушёл в wait(), уже в luaWaits
             if (status !== lua.LUA_OK) {
-                const msg = lua.lua_tojsstring(co, -1);
+                const msg = luaErrToString(co);
                 logLuaOutput('error', msg, name, luaGetTraceback(co), luaScriptSideByCo.get(co));
             }
         }
 
+        // Полный путь до объекта (A.B.C.ScriptName) — на карте полно РАЗНЫХ
+        // скриптов с одинаковым дефолтным именем "Script"/"RegenScript",
+        // голое имя в логе не давало понять, какой конкретно из них упал.
+        // guard — на случай испорченной/циклической цепочки родителей.
+        function luaFullPathOf(ref) {
+            const parts = [];
+            let cur = ref, guard = 0;
+            while (cur !== undefined && cur !== -1 && guard++ < 50) {
+                const inst = luaByRef[cur];
+                if (!inst) break;
+                parts.unshift(inst.name);
+                cur = luaParentByRef[cur];
+            }
+            return parts.length ? parts.join('.') : (luaByRef[ref] ? luaByRef[ref].name : ('ref' + ref));
+        }
+
         function runLuaScript(scr, L) {
             const { lua } = window.fengari;
+            const path = luaFullPathOf(scr.ref);
             // function(script) ... end — превращает `script` в upvalue КОНКРЕТНОЙ
             // корутины, а не общий global: несколько скриптов выполняются
             // "параллельно" через кооперативные корутины (см. wait()), общий
             // global script их бы перепутал между собой.
             const wrapped = 'return function(script)\n' + scr.source + '\nend';
-            let status = loadLuaChunk(L, wrapped, scr.name);
+            let status = loadLuaChunk(L, wrapped, path);
             if (status !== lua.LUA_OK) {
-                logLuaOutput('error', 'ошибка компиляции: ' + lua.lua_tojsstring(L, -1), scr.name, null, scr.cls);
+                logLuaOutput('error', 'ошибка компиляции: ' + luaErrToString(L), path, null, scr.cls);
                 lua.lua_pop(L, 1);
                 return;
             }
             status = lua.lua_pcall(L, 0, 1, 0);
             if (status !== lua.LUA_OK) {
-                logLuaOutput('error', lua.lua_tojsstring(L, -1), scr.name, null, scr.cls);
+                logLuaOutput('error', luaErrToString(L), path, null, scr.cls);
                 lua.lua_pop(L, 1);
                 return;
             }
@@ -3962,9 +4242,9 @@ game = setmetatable({}, {
             lua.lua_pop(L, 2);                   // со стека L убираем саму функцию и поток
             // (поток жив, пока жива JS-ссылка co — см. luaWaits/резюмирование;
             // сборка Lua-мусора у fengari завязана на JS GC)
-            luaScriptNameByCo.set(co, scr.name);
+            luaScriptNameByCo.set(co, path);
             luaScriptSideByCo.set(co, scr.cls);
-            resumeLuaCoroutine(co, scr.name, 1);
+            resumeLuaCoroutine(co, path, 1);
         }
 
         // Клонирует поддерево StarterGui в PlayerGui конкретного клиента —
@@ -4070,7 +4350,7 @@ game = setmetatable({}, {
             for (const [L, label] of [[luaServerL, 'сервера'], [luaClientL, 'клиента']]) {
                 const preludeStatus = doLuaString(L, LUA_PRELUDE, 'prelude');
                 if (preludeStatus !== lua.LUA_OK) {
-                    logLuaOutput('error', 'Lua prelude (' + label + '): ' + lua.lua_tojsstring(L, -1));
+                    logLuaOutput('error', 'Lua prelude (' + label + '): ' + luaErrToString(L));
                     luaServerL = null; luaClientL = null;
                     return;
                 }
@@ -4659,7 +4939,17 @@ game = setmetatable({}, {
         }
 
         function esc(s) {
-            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // Раньше падал на null/undefined — TypeError здесь обрывает
+            // ВЕСЬ renderLuaOutput() на середине (esc вызывается для КАЖДОЙ
+            // строки лога подряд), из-за чего Output застревал на "(no
+            // output)" навсегда, даже если print() до этого честно
+            // сработал — сам вызов logLuaOutput() уже случился, просто
+            // ПОСЛЕДУЮЩАЯ перерисовка на чём-то ещё в очереди обрывалась
+            // здесь. Причина — Lua error() можно вызвать не строкой (таблицей,
+            // числом, nil), и lua_tojsstring для не-строки возвращает
+            // null/undefined, а не текст ошибки.
+            if (s === null || s === undefined) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
         // ============ ВЫБОР ОБЪЕКТА ============

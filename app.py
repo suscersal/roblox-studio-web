@@ -609,8 +609,13 @@ VENDOR_SOURCES = {
     'OBJLoader.js': 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
     'cannon.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js',
     'fengari-web.js': 'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js',
-}
+    'show-hint.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css',
+    'show-hint.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js',
+   # 'lua-hint.js':# 'https://cloudflare.com',
 
+
+}
+    
 
 def _download_vendor_file(fn):
     """Качает fn с CDN прямо в VENDOR_DIR. True — успех (файл на диске)."""
