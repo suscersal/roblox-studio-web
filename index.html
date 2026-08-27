@@ -27,9 +27,9 @@
     <link rel="stylesheet" href="vendor/codemirror.min.css">
     <link rel="stylesheet" href="vendor/monokai.min.css">
     <link rel="stylesheet" href="vendor/show-hint.min.css">
-    
-    
-    
+
+
+
 
 
     <style>
@@ -466,15 +466,15 @@
 
         /* Автодополнение (show-hint) в тон monokai-темы редактора */
         .CodeMirror-hints {
-    font-family: 'Fira Code', 'Consolas', monospace;
-    font-size: 13px;
-    background: #272822;
-    border: 1px solid #49483e;
-    color: #f8f8f2;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
-    z-index: 10000 !important;
-    position: absolute;
-}
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            background: #272822;
+            border: 1px solid #49483e;
+            color: #f8f8f2;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
+            z-index: 10000 !important;
+            position: absolute;
+        }
 
         .CodeMirror-hint {
             color: #f8f8f2;
@@ -696,69 +696,74 @@
             gap: 6px;
             z-index: 200
         }
+
         /* Горизонтальный ресайзер между main и bottom-panel */
-.resizer-h {
-    height: 5px;
-    background: #374151;
-    cursor: row-resize;
-    flex-shrink: 0;
-    transition: background 0.2s;
-}
-.resizer-h:hover,
-.resizer-h.active {
-    background: #3b82f6;
-}
+        .resizer-h {
+            height: 5px;
+            background: #374151;
+            cursor: row-resize;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
 
-#bottom-panel {
-    height: 180px;          /* начальная высота, меняется ресайзером */
-    min-height: 80px;
-    max-height: 60vh;
-    background: #1f2937;
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    border-top: 1px solid #374151;
-}
+        .resizer-h:hover,
+        .resizer-h.active {
+            background: #3b82f6;
+        }
 
-#output-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 4px 8px;
-    background: #111827;
-    flex-shrink: 0;
-    font-size: 12px;
-    font-weight: bold;
-    color: #9ca3af;
-}
-#output-header button {
-    background: none;
-    border: none;
-    color: #9ca3af;
-    cursor: pointer;
-    font-size: 13px;
-    padding: 2px 6px;
-}
-#output-header select {
-    background: #1f2937;
-    border: 1px solid #374151;
-    color: #d1d5db;
-    font-size: 11px;
-    border-radius: 4px;
-    padding: 2px 4px;
-    margin-left: auto;
-    margin-right: 6px;
-}
+        #bottom-panel {
+            height: 180px;
+            /* начальная высота, меняется ресайзером */
+            min-height: 80px;
+            max-height: 60vh;
+            background: #1f2937;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            border-top: 1px solid #374151;
+        }
 
-#output-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 6px 8px;
-    font: 12px/1.5 monospace;
-    white-space: pre-wrap;
-    word-break: break-word;
-    background: #0f172a;
-}
+        #output-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            background: #111827;
+            flex-shrink: 0;
+            font-size: 12px;
+            font-weight: bold;
+            color: #9ca3af;
+        }
+
+        #output-header button {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            font-size: 13px;
+            padding: 2px 6px;
+        }
+
+        #output-header select {
+            background: #1f2937;
+            border: 1px solid #374151;
+            color: #d1d5db;
+            font-size: 11px;
+            border-radius: 4px;
+            padding: 2px 4px;
+            margin-left: auto;
+            margin-right: 6px;
+        }
+
+        #output-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 6px 8px;
+            font: 12px/1.5 monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #0f172a;
+        }
 
         .notif {
             background: #065f46;
@@ -925,79 +930,82 @@
     </div>
 
     <div id="main">
-    <div id="explorer">
-        <div id="explorer-header">
-            <span>Explorer</span>
-            <div>
-                <button onclick="collapseAll()" data-i18n-title="exp_collapse_title" title="Collapse all">◢</button>
-                <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title" title="Expand all">◣</button>
+        <div id="explorer">
+            <div id="explorer-header">
+                <span>Explorer</span>
+                <div>
+                    <button onclick="collapseAll()" data-i18n-title="exp_collapse_title" title="Collapse all">◢</button>
+                    <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title"
+                        title="Expand all">◣</button>
+                </div>
+            </div>
+            <input id="search-box" data-i18n-placeholder="exp_search_ph" placeholder="🔍 Search..."
+                oninput="onSearch(this.value)">
+            <div id="tree-scroll">
+                <div id="tree"></div>
             </div>
         </div>
-        <input id="search-box" data-i18n-placeholder="exp_search_ph" placeholder="🔍 Search..." oninput="onSearch(this.value)">
-        <div id="tree-scroll">
-            <div id="tree"></div>
+        <div class="resizer" id="resizer-1"></div>
+        <div id="viewport" tabindex="0">
+            <div id="gui-overlay"></div>
+            <div id="fps-counter">FPS: --</div>
+            <div id="speed-indicator">🚀 x1.0</div>
+            <div id="quality-selector">
+                <button onclick="setQuality('low')" class="active" id="q-low">Low</button>
+                <button onclick="setQuality('medium')" id="q-medium">Med</button>
+                <button onclick="setQuality('high')" id="q-high">High</button>
+            </div>
+            <!-- Старый плавающий блок Lua Output удалён -->
+            <div id="vp-label" data-i18n-html="vp_hint">
+                🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
+                ⌨️ WASD — move | F — focus | Esc — deselect
+            </div>
+            <div id="mobile-pad">
+                <div id="joy-zone"></div>
+                <div id="joy-base">
+                    <div id="joy-thumb"></div>
+                </div>
+                <div class="pad-col">
+                    <button class="pad-btn" id="pad-e" data-key="e" data-i18n-title="pad_up_title" title="Up">⬆</button>
+                    <button class="pad-btn" id="pad-q" data-key="q" data-i18n-title="pad_down_title"
+                        title="Down">⬇</button>
+                </div>
+            </div>
+        </div>
+        <div class="resizer" id="resizer-2"></div>
+        <div id="rightpanel">
+            <div id="tabs">
+                <div class="tab active" onclick="switchTab('props')">Properties</div>
+                <div class="tab" onclick="switchTab('script')">Script</div>
+                <!-- Вкладка Output удалена, она теперь снизу -->
+            </div>
+            <div id="tab-props">
+                <p style="color:#6b7280;font-size:12px;padding:8px" data-i18n="props_placeholder">← Select an object</p>
+            </div>
+            <div id="tab-script" style="display:none;flex:1;flex-direction:column">
+                <div id="script-name" data-i18n="script_none_selected">No script selected</div>
+                <div id="script-editor-container">
+                    <textarea id="script-editor" spellcheck="false"></textarea>
+                </div>
+                <button id="script-save-btn" onclick="saveScript()" data-i18n="script_save_btn">💾 Save script</button>
+            </div>
         </div>
     </div>
-    <div class="resizer" id="resizer-1"></div>
-    <div id="viewport" tabindex="0">
-        <div id="gui-overlay"></div>
-        <div id="fps-counter">FPS: --</div>
-        <div id="speed-indicator">🚀 x1.0</div>
-        <div id="quality-selector">
-            <button onclick="setQuality('low')" class="active" id="q-low">Low</button>
-            <button onclick="setQuality('medium')" id="q-medium">Med</button>
-            <button onclick="setQuality('high')" id="q-high">High</button>
-        </div>
-        <!-- Старый плавающий блок Lua Output удалён -->
-        <div id="vp-label" data-i18n-html="vp_hint">
-            🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
-            ⌨️ WASD — move | F — focus | Esc — deselect
-        </div>
-        <div id="mobile-pad">
-            <div id="joy-zone"></div>
-            <div id="joy-base">
-                <div id="joy-thumb"></div>
-            </div>
-            <div class="pad-col">
-                <button class="pad-btn" id="pad-e" data-key="e" data-i18n-title="pad_up_title" title="Up">⬆</button>
-                <button class="pad-btn" id="pad-q" data-key="q" data-i18n-title="pad_down_title" title="Down">⬇</button>
-            </div>
-        </div>
-    </div>
-    <div class="resizer" id="resizer-2"></div>
-    <div id="rightpanel">
-        <div id="tabs">
-            <div class="tab active" onclick="switchTab('props')">Properties</div>
-            <div class="tab" onclick="switchTab('script')">Script</div>
-            <!-- Вкладка Output удалена, она теперь снизу -->
-        </div>
-        <div id="tab-props">
-            <p style="color:#6b7280;font-size:12px;padding:8px" data-i18n="props_placeholder">← Select an object</p>
-        </div>
-        <div id="tab-script" style="display:none;flex:1;flex-direction:column">
-            <div id="script-name" data-i18n="script_none_selected">No script selected</div>
-            <div id="script-editor-container">
-                <textarea id="script-editor" spellcheck="false"></textarea>
-            </div>
-            <button id="script-save-btn" onclick="saveScript()" data-i18n="script_save_btn">💾 Save script</button>
-        </div>
-    </div>
-</div>
 
-<!-- Горизонтальный ресайзер и нижняя панель Output (после main) -->
-<div class="resizer-h" id="resizer-h"></div>
-<div id="bottom-panel">
-    <div id="output-header">
-        <span>Output</span>
-        <select id="output-filter" onchange="renderLuaOutput()" title="Фильтр по среде выполнения">
-            <option value="all">Все</option>
-            <option value="Script">🖥️ Server</option>
-            <option value="LocalScript">💻 Client</option>
-        </select>
-        <button onclick="clearLuaOutput()" title="Clear">🗑</button>
+    <!-- Горизонтальный ресайзер и нижняя панель Output (после main) -->
+    <div class="resizer-h" id="resizer-h"></div>
+    <div id="bottom-panel">
+        <div id="output-header">
+            <span>Output</span>
+            <select id="output-filter" onchange="renderLuaOutput()" title="Фильтр по среде выполнения">
+                <option value="all">Все</option>
+                <option value="Script">🖥️ Server</option>
+                <option value="LocalScript">💻 Client</option>
+            </select>
+            <button onclick="clearLuaOutput()" title="Clear">🗑</button>
+        </div>
+        <div id="output-content"></div>
     </div>
-    <div id="output-content"></div>
-</div>
 
     <div id="modal-overlay">
         <div id="modal-content" class="modal"></div>
@@ -1322,8 +1330,8 @@
             tryLoad(0);
         })();
     </script>
-<script src="vendor/show-hint.min.js"></script>
-<script src="vendor/lua-hint.js"></script>
+    <script src="vendor/show-hint.min.js"></script>
+    <script src="vendor/lua-hint.js"></script>
     <script>
         // ============ ANDROID (SAF) ============
         // Если приложение открыто внутри Android-обёртки, MainActivity.kt
@@ -1356,7 +1364,7 @@
         // ---- Автодополнение: словарь Roblox Luau + свой хинтер ----
         // Ищем не только по началу слова, а по подстроке (как в VS Code),
         // поэтому обычный anyword-hint не подходит — пишем свой.
-        
+
         const ROBLOX_LUA_KEYWORDS = [
             // Глобальные функции / стандартная библиотека Lua
             'print', 'warn', 'error', 'assert', 'tick', 'wait', 'require',
@@ -1463,7 +1471,7 @@
             'FireServer', 'FireClient', 'FireAllClients', 'InvokeServer',
             'InvokeClient', 'Connect', 'Disconnect', 'Once', 'Wait',
         ];
-        
+
 
         // Ищет по подстроке (регистронезависимо), а не только по началу слова.
         // Держим отдельно от lua-hint.js только словарь + подстрочный поиск;
@@ -1495,70 +1503,70 @@
             };
         }
 
-let cmEditor = null;
-window.addEventListener('DOMContentLoaded', function() {
-    try {
-        cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
-            mode: 'lua',
-            theme: 'monokai',
-            lineNumbers: true,
-            autoCloseBrackets: true,
-            matchBrackets: true,
-            indentUnit: 4,
-            tabSize: 4,
-            indentWithTabs: false,
-            lineWrapping: false,
-            viewportMargin: 50,
-            extraKeys: { 'Ctrl-Space': 'autocomplete' },
-            hintOptions: { hint: robloxSubstringHint, completeSingle: false }
-            // inputStyle: 'contenteditable' — пробовал как обход для
-            // Android-клавиатур (мобильный CodeMirror 5 иногда не ловит
-            // inputRead через textarea при IME/предиктивном вводе), но на
-            // практике оказалось СИЛЬНО хуже: contenteditable-режим CM5
-            // экспериментальный и на мобильных клавиатурах ловит нажатия как
-            // навигацию (будто это стрелочки), а не как ввод текста, плюс
-            // ломает поведение скролла страницы при открытии клавиатуры.
-            // 'textarea' (умолчание) — единственный по-настоящему
-            // проверенный вариант на мобильных, оставляем его; проблему с
-            // inputRead на Android решаем ДРУГИМ способом — см. origin-фильтр
-            // в lua-hint.js (там уже убрана жёсткая проверка '+input').
-        });
-        // ЕДИНСТВЕННОЕ место, где включается автопоказ подсказок — раньше
-        // здесь же ниже был ЕЩЁ один ручной cmEditor.on('inputRead', ...)
-        // (с debug notify()-спамом на каждую букву — реально всплывающее
-        // уведомление при каждом нажатии клавиши!), И в самом низу файла
-        // был ТРЕТИЙ, полностью отдельный IIFE с собственным словарём и
-        // собственным inputRead-обработчиком, который вдобавок пытался найти
-        // редактор через window.cmEditor — а cmEditor объявлен через `let`,
-        // let-переменные НЕ становятся свойством window, так что тот блок
-        // всегда промахивался мимо. Три конкурирующих обработчика на одно и
-        // то же событие — вот что "не показывало подсказки": либо ничего не
-        // всплывало из-за гонки/спама уведомлений, либо всплывало и тут же
-        // закрывалось повторным вызовом. Теперь только один путь — через
-        // lua-hint.js (файл сам решает regex по слову/цепочке точек).
-        if (cmEditor && window.CodeMirror && CodeMirror.enableRobloxAutocomplete) {
-            CodeMirror.enableRobloxAutocomplete(cmEditor);
-        } else if (cmEditor) {
-            console.error('CodeMirror.enableRobloxAutocomplete не найден — vendor/lua-hint.js не загрузился (проверьте путь/файл на сервере)');
-        }
-        // showHint (сама всплывающая панель со списком) — ОТДЕЛЬНЫЙ addon от
-        // lua-hint.js (тот только строит список слов и решает, когда его
-        // показывать). Если vendor/show-hint.min.js не подгрузился,
-        // enableRobloxAutocomplete всё равно "включится" без единой ошибки —
-        // CodeMirror.showRobloxHint внутри себя тихо делает `if (!CodeMirror.
-        // showHint) return;` при каждом нажатии клавиши, то есть подсказки
-        // просто НИКОГДА не появляются, и ни строчки в консоли, чтобы понять
-        // почему. Проверяем это явно один раз при загрузке, а не гадаем.
-        if (!window.CodeMirror || !CodeMirror.showHint) {
-            console.error('CodeMirror.showHint не найден — vendor/show-hint.min.js не загрузился, подсказки не будут появляться ни при вводе, ни по Ctrl+Space');
-            if (typeof notify === 'function') {
-                notify('Автодополнение недоступно: vendor/show-hint.min.js не загрузился', 'warn');
+        let cmEditor = null;
+        window.addEventListener('DOMContentLoaded', function () {
+            try {
+                cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
+                    mode: 'lua',
+                    theme: 'monokai',
+                    lineNumbers: true,
+                    autoCloseBrackets: true,
+                    matchBrackets: true,
+                    indentUnit: 4,
+                    tabSize: 4,
+                    indentWithTabs: false,
+                    lineWrapping: false,
+                    viewportMargin: 50,
+                    extraKeys: { 'Ctrl-Space': 'autocomplete' },
+                    hintOptions: { hint: robloxSubstringHint, completeSingle: false }
+                    // inputStyle: 'contenteditable' — пробовал как обход для
+                    // Android-клавиатур (мобильный CodeMirror 5 иногда не ловит
+                    // inputRead через textarea при IME/предиктивном вводе), но на
+                    // практике оказалось СИЛЬНО хуже: contenteditable-режим CM5
+                    // экспериментальный и на мобильных клавиатурах ловит нажатия как
+                    // навигацию (будто это стрелочки), а не как ввод текста, плюс
+                    // ломает поведение скролла страницы при открытии клавиатуры.
+                    // 'textarea' (умолчание) — единственный по-настоящему
+                    // проверенный вариант на мобильных, оставляем его; проблему с
+                    // inputRead на Android решаем ДРУГИМ способом — см. origin-фильтр
+                    // в lua-hint.js (там уже убрана жёсткая проверка '+input').
+                });
+                // ЕДИНСТВЕННОЕ место, где включается автопоказ подсказок — раньше
+                // здесь же ниже был ЕЩЁ один ручной cmEditor.on('inputRead', ...)
+                // (с debug notify()-спамом на каждую букву — реально всплывающее
+                // уведомление при каждом нажатии клавиши!), И в самом низу файла
+                // был ТРЕТИЙ, полностью отдельный IIFE с собственным словарём и
+                // собственным inputRead-обработчиком, который вдобавок пытался найти
+                // редактор через window.cmEditor — а cmEditor объявлен через `let`,
+                // let-переменные НЕ становятся свойством window, так что тот блок
+                // всегда промахивался мимо. Три конкурирующих обработчика на одно и
+                // то же событие — вот что "не показывало подсказки": либо ничего не
+                // всплывало из-за гонки/спама уведомлений, либо всплывало и тут же
+                // закрывалось повторным вызовом. Теперь только один путь — через
+                // lua-hint.js (файл сам решает regex по слову/цепочке точек).
+                if (cmEditor && window.CodeMirror && CodeMirror.enableRobloxAutocomplete) {
+                    CodeMirror.enableRobloxAutocomplete(cmEditor);
+                } else if (cmEditor) {
+                    console.error('CodeMirror.enableRobloxAutocomplete не найден — vendor/lua-hint.js не загрузился (проверьте путь/файл на сервере)');
+                }
+                // showHint (сама всплывающая панель со списком) — ОТДЕЛЬНЫЙ addon от
+                // lua-hint.js (тот только строит список слов и решает, когда его
+                // показывать). Если vendor/show-hint.min.js не подгрузился,
+                // enableRobloxAutocomplete всё равно "включится" без единой ошибки —
+                // CodeMirror.showRobloxHint внутри себя тихо делает `if (!CodeMirror.
+                // showHint) return;` при каждом нажатии клавиши, то есть подсказки
+                // просто НИКОГДА не появляются, и ни строчки в консоли, чтобы понять
+                // почему. Проверяем это явно один раз при загрузке, а не гадаем.
+                if (!window.CodeMirror || !CodeMirror.showHint) {
+                    console.error('CodeMirror.showHint не найден — vendor/show-hint.min.js не загрузился, подсказки не будут появляться ни при вводе, ни по Ctrl+Space');
+                    if (typeof notify === 'function') {
+                        notify('Автодополнение недоступно: vendor/show-hint.min.js не загрузился', 'warn');
+                    }
+                }
+            } catch (e) {
+                console.error('CodeMirror не загрузился:', e);
             }
-        }
-    } catch (e) {
-        console.error('CodeMirror не загрузился:', e);
-    }
-});
+        });
 
         function refreshCM() {
             requestAnimationFrame(() => {
@@ -1694,146 +1702,146 @@ window.addEventListener('DOMContentLoaded', function() {
 
         // ============ РАЗДЕЛИТЕЛИ ПАНЕЛЕЙ ============
         function initResizers() {
-    const resizers = document.querySelectorAll('.resizer');
-    let currentResizer = null, startX = 0, startWidth = 0, startRightWidth = 0;
+            const resizers = document.querySelectorAll('.resizer');
+            let currentResizer = null, startX = 0, startWidth = 0, startRightWidth = 0;
 
-    // === Вертикальные ресайзеры (мышь) ===
-    resizers.forEach(resizer => {
-        resizer.addEventListener('mousedown', (e) => {
-            currentResizer = resizer;
-            resizer.classList.add('active');
-            if (resizer.id === 'resizer-1') {
-                startWidth = document.getElementById('explorer').offsetWidth;
-                startX = e.clientX;
-            } else if (resizer.id === 'resizer-2') {
-                startRightWidth = document.getElementById('rightpanel').offsetWidth;
-                startX = e.clientX;
+            // === Вертикальные ресайзеры (мышь) ===
+            resizers.forEach(resizer => {
+                resizer.addEventListener('mousedown', (e) => {
+                    currentResizer = resizer;
+                    resizer.classList.add('active');
+                    if (resizer.id === 'resizer-1') {
+                        startWidth = document.getElementById('explorer').offsetWidth;
+                        startX = e.clientX;
+                    } else if (resizer.id === 'resizer-2') {
+                        startRightWidth = document.getElementById('rightpanel').offsetWidth;
+                        startX = e.clientX;
+                    }
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                });
+            });
+
+            // === Горизонтальный ресайзер (мышь) ===
+            const hResizer = document.getElementById('resizer-h');
+            if (hResizer) {
+                let startY = 0, startHeight = 0;
+                hResizer.addEventListener('mousedown', (e) => {
+                    hResizer.classList.add('active');
+                    startY = e.clientY;
+                    startHeight = document.getElementById('bottom-panel').offsetHeight;
+                    document.body.style.cursor = 'row-resize';
+                    document.body.style.userSelect = 'none';
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!hResizer.classList.contains('active')) return;
+                    const panel = document.getElementById('bottom-panel');
+                    let newH = startHeight + (startY - e.clientY);
+                    newH = Math.max(80, Math.min(window.innerHeight * 0.6, newH));
+                    panel.style.height = newH + 'px';
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (hResizer.classList.contains('active')) {
+                        hResizer.classList.remove('active');
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                        try {
+                            localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
+                        } catch (e) { }
+                    }
+                });
+
+                // === Горизонтальный ресайзер (touch) ===
+                hResizer.addEventListener('touchstart', (e) => {
+                    hResizer.classList.add('active');
+                    startY = e.touches[0].clientY;
+                    startHeight = document.getElementById('bottom-panel').offsetHeight;
+                    document.body.style.userSelect = 'none';
+                }, { passive: true });
+
+                document.addEventListener('touchmove', (e) => {
+                    if (!hResizer.classList.contains('active')) return;
+                    const panel = document.getElementById('bottom-panel');
+                    let newH = startHeight + (startY - e.touches[0].clientY);
+                    newH = Math.max(80, Math.min(window.innerHeight * 0.6, newH));
+                    panel.style.height = newH + 'px';
+                }, { passive: true });
+
+                document.addEventListener('touchend', () => {
+                    if (hResizer.classList.contains('active')) {
+                        hResizer.classList.remove('active');
+                        document.body.style.userSelect = '';
+                        try {
+                            localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
+                        } catch (e) { }
+                    }
+                });
             }
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-        });
-    });
 
-    // === Горизонтальный ресайзер (мышь) ===
-    const hResizer = document.getElementById('resizer-h');
-    if (hResizer) {
-        let startY = 0, startHeight = 0;
-        hResizer.addEventListener('mousedown', (e) => {
-            hResizer.classList.add('active');
-            startY = e.clientY;
-            startHeight = document.getElementById('bottom-panel').offsetHeight;
-            document.body.style.cursor = 'row-resize';
-            document.body.style.userSelect = 'none';
-        });
+            // === Общие обработчики для вертикальных ресайзеров (mousemove/mouseup) ===
+            document.addEventListener('mousemove', (e) => {
+                if (!currentResizer) return;
+                if (currentResizer.id === 'resizer-1') {
+                    let w = Math.max(150, Math.min(400, startWidth + e.clientX - startX));
+                    document.getElementById('explorer').style.width = w + 'px';
+                } else if (currentResizer.id === 'resizer-2') {
+                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.clientX));
+                    document.getElementById('rightpanel').style.width = w + 'px';
+                }
+                refreshCM();
+                resize();
+            });
 
-        document.addEventListener('mousemove', (e) => {
-            if (!hResizer.classList.contains('active')) return;
-            const panel = document.getElementById('bottom-panel');
-            let newH = startHeight + (startY - e.clientY);
-            newH = Math.max(80, Math.min(window.innerHeight * 0.6, newH));
-            panel.style.height = newH + 'px';
-        });
+            document.addEventListener('mouseup', () => {
+                if (currentResizer) {
+                    currentResizer.classList.remove('active');
+                    currentResizer = null;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    saveLayout();
+                }
+            });
 
-        document.addEventListener('mouseup', () => {
-            if (hResizer.classList.contains('active')) {
-                hResizer.classList.remove('active');
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-                try {
-                    localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
-                } catch(e) {}
-            }
-        });
+            // === Touch-поддержка для вертикальных ресайзеров ===
+            resizers.forEach(resizer => {
+                resizer.addEventListener('touchstart', (e) => {
+                    currentResizer = resizer;
+                    resizer.classList.add('active');
+                    if (resizer.id === 'resizer-1') {
+                        startWidth = document.getElementById('explorer').offsetWidth;
+                        startX = e.touches[0].clientX;
+                    } else if (resizer.id === 'resizer-2') {
+                        startRightWidth = document.getElementById('rightpanel').offsetWidth;
+                        startX = e.touches[0].clientX;
+                    }
+                    document.body.style.userSelect = 'none';
+                }, { passive: true });
+            });
 
-        // === Горизонтальный ресайзер (touch) ===
-        hResizer.addEventListener('touchstart', (e) => {
-            hResizer.classList.add('active');
-            startY = e.touches[0].clientY;
-            startHeight = document.getElementById('bottom-panel').offsetHeight;
-            document.body.style.userSelect = 'none';
-        }, { passive: true });
+            document.addEventListener('touchmove', (e) => {
+                if (!currentResizer) return;
+                if (currentResizer.id === 'resizer-1') {
+                    let w = Math.max(150, Math.min(400, startWidth + e.touches[0].clientX - startX));
+                    document.getElementById('explorer').style.width = w + 'px';
+                } else if (currentResizer.id === 'resizer-2') {
+                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.touches[0].clientX));
+                    document.getElementById('rightpanel').style.width = w + 'px';
+                }
+                refreshCM();
+                resize();
+            }, { passive: true });
 
-        document.addEventListener('touchmove', (e) => {
-            if (!hResizer.classList.contains('active')) return;
-            const panel = document.getElementById('bottom-panel');
-            let newH = startHeight + (startY - e.touches[0].clientY);
-            newH = Math.max(80, Math.min(window.innerHeight * 0.6, newH));
-            panel.style.height = newH + 'px';
-        }, { passive: true });
-
-        document.addEventListener('touchend', () => {
-            if (hResizer.classList.contains('active')) {
-                hResizer.classList.remove('active');
-                document.body.style.userSelect = '';
-                try {
-                    localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
-                } catch(e) {}
-            }
-        });
-    }
-
-    // === Общие обработчики для вертикальных ресайзеров (mousemove/mouseup) ===
-    document.addEventListener('mousemove', (e) => {
-        if (!currentResizer) return;
-        if (currentResizer.id === 'resizer-1') {
-            let w = Math.max(150, Math.min(400, startWidth + e.clientX - startX));
-            document.getElementById('explorer').style.width = w + 'px';
-        } else if (currentResizer.id === 'resizer-2') {
-            let w = Math.max(200, Math.min(500, startRightWidth + startX - e.clientX));
-            document.getElementById('rightpanel').style.width = w + 'px';
+            document.addEventListener('touchend', () => {
+                if (currentResizer) {
+                    currentResizer.classList.remove('active');
+                    currentResizer = null;
+                    document.body.style.userSelect = '';
+                    saveLayout();
+                }
+            });
         }
-        refreshCM();
-        resize();
-    });
-
-    document.addEventListener('mouseup', () => {
-        if (currentResizer) {
-            currentResizer.classList.remove('active');
-            currentResizer = null;
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            saveLayout();
-        }
-    });
-
-    // === Touch-поддержка для вертикальных ресайзеров ===
-    resizers.forEach(resizer => {
-        resizer.addEventListener('touchstart', (e) => {
-            currentResizer = resizer;
-            resizer.classList.add('active');
-            if (resizer.id === 'resizer-1') {
-                startWidth = document.getElementById('explorer').offsetWidth;
-                startX = e.touches[0].clientX;
-            } else if (resizer.id === 'resizer-2') {
-                startRightWidth = document.getElementById('rightpanel').offsetWidth;
-                startX = e.touches[0].clientX;
-            }
-            document.body.style.userSelect = 'none';
-        }, { passive: true });
-    });
-
-    document.addEventListener('touchmove', (e) => {
-        if (!currentResizer) return;
-        if (currentResizer.id === 'resizer-1') {
-            let w = Math.max(150, Math.min(400, startWidth + e.touches[0].clientX - startX));
-            document.getElementById('explorer').style.width = w + 'px';
-        } else if (currentResizer.id === 'resizer-2') {
-            let w = Math.max(200, Math.min(500, startRightWidth + startX - e.touches[0].clientX));
-            document.getElementById('rightpanel').style.width = w + 'px';
-        }
-        refreshCM();
-        resize();
-    }, { passive: true });
-
-    document.addEventListener('touchend', () => {
-        if (currentResizer) {
-            currentResizer.classList.remove('active');
-            currentResizer = null;
-            document.body.style.userSelect = '';
-            saveLayout();
-        }
-    });
-}
 
         function saveLayout() {
             const layout = {
@@ -1844,32 +1852,32 @@ window.addEventListener('DOMContentLoaded', function() {
         }
 
         function loadLayout() {
-    try {
-        const saved = localStorage.getItem('rbxstudio-layout');
-        if (saved) {
-            const layout = JSON.parse(saved);
-            document.getElementById('explorer').style.width = layout.explorer || '220px';
-            document.getElementById('rightpanel').style.width = layout.rightpanel || '260px';
+            try {
+                const saved = localStorage.getItem('rbxstudio-layout');
+                if (saved) {
+                    const layout = JSON.parse(saved);
+                    document.getElementById('explorer').style.width = layout.explorer || '220px';
+                    document.getElementById('rightpanel').style.width = layout.rightpanel || '260px';
+                }
+                // Восстанавливаем высоту нижней панели
+                const h = localStorage.getItem('rbxstudio-bottom-height');
+                if (h) {
+                    document.getElementById('bottom-panel').style.height = h + 'px';
+                }
+            } catch (e) { }
         }
-        // Восстанавливаем высоту нижней панели
-        const h = localStorage.getItem('rbxstudio-bottom-height');
-        if (h) {
-            document.getElementById('bottom-panel').style.height = h + 'px';
-        }
-    } catch (e) { }
-}
 
-function resetLayout() {
-    document.getElementById('explorer').style.width = '220px';
-    document.getElementById('rightpanel').style.width = '260px';
-    // Сбрасываем высоту нижней панели на дефолтную
-    document.getElementById('bottom-panel').style.height = '180px';
-    localStorage.removeItem('rbxstudio-layout');
-    localStorage.removeItem('rbxstudio-bottom-height');
-    refreshCM();
-    resize();
-    notify(t('notify_layout_reset'));
-}
+        function resetLayout() {
+            document.getElementById('explorer').style.width = '220px';
+            document.getElementById('rightpanel').style.width = '260px';
+            // Сбрасываем высоту нижней панели на дефолтную
+            document.getElementById('bottom-panel').style.height = '180px';
+            localStorage.removeItem('rbxstudio-layout');
+            localStorage.removeItem('rbxstudio-bottom-height');
+            refreshCM();
+            resize();
+            notify(t('notify_layout_reset'));
+        }
 
         // ============ THREE.JS ПЕРЕМЕННЫЕ ============
         let selectedRef = null;
@@ -2262,25 +2270,27 @@ function resetLayout() {
                 const vertical = (keysPressed['e'] ? 1 : 0) - (keysPressed['q'] ? 1 : 0);
 
                 const anyMove = forward !== 0 || strafe !== 0 || vertical !== 0;
-                
+
 
                 if (anyMove) {
-                    
-                
+
+
                     const direction = new THREE.Vector3();
                     camera.getWorldDirection(direction);
                     const right = new THREE.Vector3();
                     right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
                     speed = moveSpeed * (spherical.r / 30) * 0.25;
-                     //acseration надо в правильный переменовать;
-                    if (forward){
-                    acseration = acseration + 0.1;
-                    if (acseration > 1){
-speed= speed + acseration/50}
+                    //acseration надо в правильный переменовать;
+                    if (forward) {
+                        acseration = acseration + 0.1;
+                        if (acseration > 1) {
+                            speed = speed + acseration / 50
+                        }
                     }
-if (now - time_move > 100){
-acseration = 0;}
-                   time_move = now
+                    if (now - time_move > 100) {
+                        acseration = 0;
+                    }
+                    time_move = now
 
 
 
@@ -3691,44 +3701,44 @@ game = setmetatable({}, {
                 '[Lua' + (source ? ':' + source : '') + '] ' + text + (trace ? '\n' + trace : '')
             );
         }
-        
+
         function clearLuaOutput() {
-    luaOutputLines = [];
-    renderLuaOutput();
-}
+            luaOutputLines = [];
+            renderLuaOutput();
+        }
 
         function renderLuaOutput() {
-    const el = document.getElementById('output-content');
-    if (!el) return;
-    const filterSel = document.getElementById('output-filter');
-    const filter = filterSel ? filterSel.value : 'all';
-    // filter — 'all' | 'Script' (Server) | 'LocalScript' (Client). Строки без
-    // sideCls (системные сообщения — ошибка загрузки fengari, ошибка
-    // прелюдии и т.п.) показываются при ЛЮБОМ фильтре — иначе они бы просто
-    // пропадали, а это как раз то немногое, что видно ДО того, как вообще
-    // стало понятно, сервер это или клиент.
-    const lines = filter === 'all' ? luaOutputLines : luaOutputLines.filter(l => !l.sideCls || l.sideCls === filter);
-    if (!lines.length) {
-        el.innerHTML = '<span style="color:#6b7280;">(no output)</span>';
-        return;
-    }
-    const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
-    const icons = { error: '⛔', warn: '⚠️', print: '' };
-    el.innerHTML = lines.slice(-200).map(l => {
-        const sideBadge = SCRIPT_BADGES[l.sideCls];
-        const head = '<span style="color:#6b7280">' + l.time + '</span> ' +
-            (sideBadge ? '<span style="color:' + sideBadge.color + '" title="' + sideBadge.label + '">' + sideBadge.icon + '</span> ' : '') +
-            (l.source ? '<span style="color:#60a5fa">[' + esc(l.source) + ']</span> ' : '') +
-            (icons[l.level] || '');
-        const trace = l.trace
-            ? '<div style="color:#9ca3af;padding-left:14px;white-space:pre-wrap;">' + esc(l.trace) + '</div>'
-            : '';
-        return '<div style="color:' + (colors[l.level] || '#e5e7eb') + ';margin-bottom:2px;">' +
-            head + esc(l.text) + '</div>' + trace;
-    }).join('');
-    el.scrollTop = el.scrollHeight;
-}
-        
+            const el = document.getElementById('output-content');
+            if (!el) return;
+            const filterSel = document.getElementById('output-filter');
+            const filter = filterSel ? filterSel.value : 'all';
+            // filter — 'all' | 'Script' (Server) | 'LocalScript' (Client). Строки без
+            // sideCls (системные сообщения — ошибка загрузки fengari, ошибка
+            // прелюдии и т.п.) показываются при ЛЮБОМ фильтре — иначе они бы просто
+            // пропадали, а это как раз то немногое, что видно ДО того, как вообще
+            // стало понятно, сервер это или клиент.
+            const lines = filter === 'all' ? luaOutputLines : luaOutputLines.filter(l => !l.sideCls || l.sideCls === filter);
+            if (!lines.length) {
+                el.innerHTML = '<span style="color:#6b7280;">(no output)</span>';
+                return;
+            }
+            const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
+            const icons = { error: '⛔', warn: '⚠️', print: '' };
+            el.innerHTML = lines.slice(-200).map(l => {
+                const sideBadge = SCRIPT_BADGES[l.sideCls];
+                const head = '<span style="color:#6b7280">' + l.time + '</span> ' +
+                    (sideBadge ? '<span style="color:' + sideBadge.color + '" title="' + sideBadge.label + '">' + sideBadge.icon + '</span> ' : '') +
+                    (l.source ? '<span style="color:#60a5fa">[' + esc(l.source) + ']</span> ' : '') +
+                    (icons[l.level] || '');
+                const trace = l.trace
+                    ? '<div style="color:#9ca3af;padding-left:14px;white-space:pre-wrap;">' + esc(l.trace) + '</div>'
+                    : '';
+                return '<div style="color:' + (colors[l.level] || '#e5e7eb') + ';margin-bottom:2px;">' +
+                    head + esc(l.text) + '</div>' + trace;
+            }).join('');
+            el.scrollTop = el.scrollHeight;
+        }
+
 
         // ---- Мост к объектам сцены: только числа/строки/булевы, см. коммент выше ----
         function luaPositionOfRef(ref) {
@@ -5211,14 +5221,14 @@ game = setmetatable({}, {
         }
 
         function switchTab(t) {
-    document.querySelectorAll('.tab').forEach((el, i) => {
-        const tabNames = ['props', 'script'];
-        el.classList.toggle('active', tabNames[i] === t);
-    });
-    document.getElementById('tab-props').style.display = t === 'props' ? '' : 'none';
-    document.getElementById('tab-script').style.display = t === 'script' ? 'flex' : 'none';
-    if (t === 'script') refreshCM();
-}
+            document.querySelectorAll('.tab').forEach((el, i) => {
+                const tabNames = ['props', 'script'];
+                el.classList.toggle('active', tabNames[i] === t);
+            });
+            document.getElementById('tab-props').style.display = t === 'props' ? '' : 'none';
+            document.getElementById('tab-script').style.display = t === 'script' ? 'flex' : 'none';
+            if (t === 'script') refreshCM();
+        }
 
         // ============ БЫСТРОЕ ДОБАВЛЕНИЕ ============
         async function quickAdd(cls) {
@@ -6193,7 +6203,7 @@ game = setmetatable({}, {
         window.addEventListener('DOMContentLoaded', () => {
             loadLayout();
             initResizers();
-            
+
             refreshCM();
         });
 

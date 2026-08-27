@@ -17,7 +17,6 @@ import os
 import io
 
 
-
 # Кэш .whl рядом со скриптом — после первой (единственной) установки с
 # сетью pip кладёт сюда скачанные колёса, и все последующие запуски на
 # Termux (в т.ч. без интернета — самолёт, метро, нет сим-карты) ставят
@@ -54,9 +53,11 @@ def _ensure(pkg, imp=None):
             ])
             return
         except subprocess.CalledProcessError:
-            print(f'[RbxStudio] Офлайн-кэш для {pkg} не подошёл, пробую сеть...')
+            print(
+                f'[RbxStudio] Офлайн-кэш для {pkg} не подошёл, пробую сеть...')
 
-    print(f'[RbxStudio] Устанавливаю {pkg} (и сохраняю .whl в кэш для офлайн-запусков)...')
+    print(
+        f'[RbxStudio] Устанавливаю {pkg} (и сохраняю .whl в кэш для офлайн-запусков)...')
     # Сначала скачиваем колесо в кэш, потом ставим из него — так кэш
     # пополняется независимо от того, есть у pip install свой кэш или нет.
     try:
@@ -186,7 +187,8 @@ GUI_PROPS = (
 # (index.html, /api/scripts) только для того, чтобы пометить бейджем и в
 # Output, откуда пришёл вывод; сам движок остаётся с одной общей Lua VM
 # (нет настоящей сети клиент↔сервер), см. комментарий у api_scripts ниже.
-SCRIPT_SIDE = {'Script': 'server', 'LocalScript': 'client', 'ModuleScript': 'shared'}
+SCRIPT_SIDE = {'Script': 'server',
+               'LocalScript': 'client', 'ModuleScript': 'shared'}
 
 
 def safe_float(v, default=0.0):
@@ -333,7 +335,6 @@ def chunk_large_objects(objs):
     return out
 
 
-
 # Счётчик версий сцены: правки в редакторе (добавление/удаление/смена
 # свойств объекта) мутируют state['parsed'] НА МЕСТЕ, не пересоздавая сам
 # словарь — значит id(parsed) не меняется, и кэши ниже (build_all_scene_
@@ -416,7 +417,8 @@ def gather_objects_in_radius(cx, cy, cz, radius):
                 if o['ref'] in seen_refs:
                     continue  # объект мог попасть в несколько соседних ячеек
                 seen_refs.add(o['ref'])
-                d = math.sqrt((o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
+                d = math.sqrt((o['px'] - cx) ** 2 +
+                              (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
                 if d <= radius:
                     result.append((d, o))
 
@@ -431,7 +433,8 @@ def gather_objects_in_radius(cx, cy, cz, radius):
     # у россыпи мелочи на той же дистанции).
     def sort_key(pair):
         d, o = pair
-        bounding_radius = math.sqrt(o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
+        bounding_radius = math.sqrt(
+            o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
         return max(0.0, d - bounding_radius) / (1.0 + math.log1p(bounding_radius))
 
     result.sort(key=sort_key)
@@ -611,11 +614,11 @@ VENDOR_SOURCES = {
     'fengari-web.js': 'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js',
     'show-hint.min.css': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css',
     'show-hint.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js',
-   # 'lua-hint.js':# 'https://cloudflare.com',
+    # 'lua-hint.js':# 'https://cloudflare.com',
 
 
 }
-    
+
 
 def _download_vendor_file(fn):
     """Качает fn с CDN прямо в VENDOR_DIR. True — успех (файл на диске)."""
@@ -790,7 +793,8 @@ def api_all_instances():
     out = []
     for ref, cls in r2c.items():
         name = pr.get(ref, {}).get('Name', cls)
-        out.append({'ref': ref, 'cls': cls, 'name': name, 'parent': pm.get(ref, -1)})
+        out.append({'ref': ref, 'cls': cls, 'name': name,
+                   'parent': pm.get(ref, -1)})
     return jsonify({'ok': True, 'instances': out})
 
 
@@ -996,11 +1000,13 @@ def api_scene():
             parts = group.split(',') if isinstance(group, str) else group
             if len(parts) == 3:
                 try:
-                    points.append((float(parts[0]), float(parts[1]), float(parts[2])))
+                    points.append(
+                        (float(parts[0]), float(parts[1]), float(parts[2])))
                 except (ValueError, TypeError):
                     pass
 
-    objs, total = make_scene_objects(cx, cy, cz, r, limit, chunk=chunk, points=points or None)
+    objs, total = make_scene_objects(
+        cx, cy, cz, r, limit, chunk=chunk, points=points or None)
     return jsonify({'ok': True, 'objects': objs, 'total': total})
 
 
@@ -1303,7 +1309,8 @@ def api_save_download():
     if not parsed:
         return jsonify({'ok': False, 'error': 'Нет данных'}), 400
 
-    name = os.path.basename(request.args.get('name') or 'place.rbxl') or 'place.rbxl'
+    name = os.path.basename(request.args.get(
+        'name') or 'place.rbxl') or 'place.rbxl'
     ext = Path(name).suffix.lower()
     if ext not in ('.rbxl', '.rbxlx'):
         name += '.rbxl'
