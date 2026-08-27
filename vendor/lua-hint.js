@@ -141,7 +141,22 @@
   /** Вызвать вручную: CodeMirror.showRobloxHint(cmEditor) */
   CodeMirror.showRobloxHint = function (cm) {
     if (!cm || !CodeMirror.showHint) return;
-    CodeMirror.showHint(cm, robloxHint, {
+    // Раньше здесь ВСЕГДА использовался встроенный список этого файла
+    // (robloxHint/LIST), даже если страница уже настроила cm с более
+    // полным словарём через hintOptions.hint (как делает index.html:
+    // ROBLOX_LUA_KEYWORDS + robloxSubstringHint). Из-за этого на одном
+    // редакторе одновременно жили ДВА независимых источника подсказок —
+    // свой inputRead здесь и отдельный ручной обработчик в index.html,
+    // каждый со своим списком слов, — и они гонялись друг с другом за
+    // каждое нажатие клавиши. На десктопе гонка обычно разрешалась
+    // предсказуемо, на телефоне (другой тайминг событий/IME) — нет,
+    // поэтому подсказки либо мигали, либо не появлялись вовсе.
+    // Используем настроенный на самом cm хинтер, если он есть, и только
+    // если нет — свой список по умолчанию (для случаев, когда
+    // enableRobloxAutocomplete подключают к редактору без hintOptions).
+    var opts = (cm.options && cm.options.hintOptions) || {};
+    var hintFn = opts.hint || robloxHint;
+    CodeMirror.showHint(cm, hintFn, {
       completeSingle: false,
       closeOnUnfocus: true,
       alignWithWord: true
