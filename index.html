@@ -1502,15 +1502,18 @@ window.addEventListener('DOMContentLoaded', function() {
             lineWrapping: false,
             viewportMargin: 50,
             extraKeys: { 'Ctrl-Space': 'autocomplete' },
-            hintOptions: { hint: robloxSubstringHint, completeSingle: false },
-            // 'textarea' (умолчание CodeMirror 5) на некоторых Android-клавиатурах
-            // не даёт событию inputRead срабатывать надёжно при вводе через
-            // IME/предиктивный текст — сама CodeMirror рекомендует именно
-            // 'contenteditable' как обход для мобильных браузеров. IS_ANDROID
-            // тут не подходит — это флаг именно APK-обёртки (AndroidBridge),
-            // а обычный Chrome на телефоне (как на скринах — с адресной
-            // строкой) под него не попадает; смотрим на User-Agent напрямую.
-            inputStyle: /Android|Mobile/i.test(navigator.userAgent) ? 'contenteditable' : 'textarea'
+            hintOptions: { hint: robloxSubstringHint, completeSingle: false }
+            // inputStyle: 'contenteditable' — пробовал как обход для
+            // Android-клавиатур (мобильный CodeMirror 5 иногда не ловит
+            // inputRead через textarea при IME/предиктивном вводе), но на
+            // практике оказалось СИЛЬНО хуже: contenteditable-режим CM5
+            // экспериментальный и на мобильных клавиатурах ловит нажатия как
+            // навигацию (будто это стрелочки), а не как ввод текста, плюс
+            // ломает поведение скролла страницы при открытии клавиатуры.
+            // 'textarea' (умолчание) — единственный по-настоящему
+            // проверенный вариант на мобильных, оставляем его; проблему с
+            // inputRead на Android решаем ДРУГИМ способом — см. origin-фильтр
+            // в lua-hint.js (там уже убрана жёсткая проверка '+input').
         });
         // ЕДИНСТВЕННОЕ место, где включается автопоказ подсказок — раньше
         // здесь же ниже был ЕЩЁ один ручной cmEditor.on('inputRead', ...)
@@ -3408,20 +3411,28 @@ function Vector3.new_magnitude(v) return math.sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z) 
 
 local InstanceMT = {}
 
--- Event:Connect(fn) — тонкая Lua-обёртка над __connect/__disconnect
--- (см. installLuaBridge). Специально без :Wait() и без поддержки yield
--- внутри обработчика — колбэк выполняется синхронным pcall на стороне JS
--- (fireLuaSignal), а не как отдельная корутина. connect/disconnect/wait —
--- legacy lowercase-алиасы (Roblox 2008-2011 годов, до перехода на
--- PascalCase) — без них скрипты того времени падали уже на первом же
--- :connect(), даже когда сам сигнал был честный, не заглушка.
+-- Event:Connect(fn) — функция-колбэк хранится ЦЕЛИКОМ на Lua-стороне (в
+-- обычной Lua-таблице __conns), а не через luaL_ref в JS-реестр — так
+-- проще проверить (тестируется напрямую в lua5.4, без fengari) и не
+-- зависит от того, как именно fengari реализует работу с LUA_REGISTRYINDEX
+-- изнутри JS-биндинга. JS-стороне (__register_conn/__unregister_conn)
+-- нужен только id для маршрутизации: "по этому (ref, событие) вызови
+-- Lua-функцию __invoke_conn(id, ...)" — саму функцию она никогда не видит.
+-- connect/disconnect/wait — legacy lowercase-алиасы (Roblox 2008-2011
+-- годов, до перехода на PascalCase) — без них скрипты того времени падали
+-- уже на первом же :connect(), даже когда сам сигнал был честный.
+local __conns = {}
+local __nextConnId = 1
 local function makeEvent(ref, evName)
     local ev = setmetatable({}, { __index = {
         Connect = function(self, fn)
-            local id = __connect(ref, evName, fn)
+            local id = __nextConnId
+            __nextConnId = __nextConnId + 1
+            __conns[id] = fn
+            __register_conn(id, ref, evName)
             return setmetatable({}, { __index = {
-                Disconnect = function() __disconnect(id) end,
-                disconnect = function() __disconnect(id) end,
+                Disconnect = function() __conns[id] = nil; __unregister_conn(id) end,
+                disconnect = function() __conns[id] = nil; __unregister_conn(id) end,
             } })
         end,
         Wait = function(self) return nil end, -- см. Signal:Wait выше — не блокирующий
@@ -3430,6 +3441,17 @@ local function makeEvent(ref, evName)
     mt.connect = mt.Connect
     mt.wait = mt.Wait
     return ev
+end
+
+-- Вызывается из JS (fireLuaSignal) — по id находит СВОЮ Lua-функцию и
+-- зовёт её обычным pcall, вместо того чтобы JS напрямую дёргал
+-- lua_rawgeti/lua_pcall по значению, снятому через luaL_ref.
+function __invoke_conn(id, ...)
+    local fn = __conns[id]
+    if fn then
+        local ok, err = pcall(fn, ...)
+        if not ok then warn("ошибка в обработчике события: " .. tostring(err)) end
+    end
 end
 
 -- __mode="v" — слабые значения: если Lua-код нигде больше не держит ссылку
@@ -3817,8 +3839,18 @@ game = setmetatable({}, {
             for (const id of ids) {
                 const conn = luaSignalConns[id];
                 if (!conn) continue;
-                lua.lua_rawgeti(conn.L, lua.LUA_REGISTRYINDEX, conn.fnRef);
-                let n = 0;
+                const L = conn.L;
+                // Раньше здесь напрямую доставали саму Lua-функцию через
+                // lua_rawgeti(LUA_REGISTRYINDEX, ...) (см. __register_conn) и
+                // звали её lua_pcall — тот путь давал ошибку вида
+                // "⛔function: 0x..." (объект ошибки — сама функция), из-за
+                // чего непонятно было, что реально пошло не так. Теперь JS
+                // знает только id — саму функцию ищет и вызывает Lua-сторона
+                // (__invoke_conn в LUA_PRELUDE), через обычный pcall внутри
+                // Lua, что и предсказуемее, и проверяемо в изоляции (lua5.4).
+                lua.lua_getglobal(L, '__invoke_conn');
+                lua.lua_pushnumber(L, id);
+                let n = 1;
                 for (const a of (args || [])) {
                     if (a && typeof a === 'object' && '__instanceRef' in a) {
                         // Аргумент — ссылка на инстанс (например, добавленный
@@ -3826,19 +3858,19 @@ game = setmetatable({}, {
                         // заворачиваем ЧЕРЕЗ ТОТ ЖЕ __wrap, что и весь остальной
                         // мост, а не передаём голый номер: колбэки вида
                         // function(other) other.Name ... end иначе бы падали.
-                        lua.lua_getglobal(conn.L, '__wrap');
-                        lua.lua_pushnumber(conn.L, a.__instanceRef);
-                        lua.lua_call(conn.L, 1, 1);
-                    } else if (typeof a === 'number') lua.lua_pushnumber(conn.L, a);
-                    else if (typeof a === 'boolean') lua.lua_pushboolean(conn.L, a);
-                    else if (a === null || a === undefined) lua.lua_pushnil(conn.L);
-                    else lua.lua_pushstring(conn.L, String(a));
+                        lua.lua_getglobal(L, '__wrap');
+                        lua.lua_pushnumber(L, a.__instanceRef);
+                        lua.lua_call(L, 1, 1);
+                    } else if (typeof a === 'number') lua.lua_pushnumber(L, a);
+                    else if (typeof a === 'boolean') lua.lua_pushboolean(L, a);
+                    else if (a === null || a === undefined) lua.lua_pushnil(L);
+                    else lua.lua_pushstring(L, String(a));
                     n++;
                 }
-                const status = lua.lua_pcall(conn.L, n, 0, 0);
+                const status = lua.lua_pcall(L, n, 0, 0);
                 if (status !== lua.LUA_OK) {
-                    logLuaOutput('error', lua.lua_tojsstring(conn.L, -1), evName, null, conn.L === luaServerL ? 'Script' : 'LocalScript');
-                    lua.lua_pop(conn.L, 1);
+                    logLuaOutput('error', luaErrToString(L), evName, null, L === luaServerL ? 'Script' : 'LocalScript');
+                    lua.lua_pop(L, 1);
                 }
             }
         }
@@ -4058,22 +4090,19 @@ game = setmetatable({}, {
             // резолвит функцию через luaL_ref именно на нём — см.
             // fireLuaSignal). Возвращает числовой id соединения для
             // Disconnect().
-            def('__connect', function (L2) {
-                const ref = lua.lua_tonumber(L2, 1);
-                const evName = lua.lua_tojsstring(L2, 2);
-                const fnRef = lauxlib.luaL_ref(L2, lua.LUA_REGISTRYINDEX); // снимает fn (arg 3, top) со стека
-                const id = luaNextSignalId++;
-                luaSignalConns[id] = { L: L2, fnRef, ref, evName };
+            def('__register_conn', function (L2) {
+                const id = lua.lua_tonumber(L2, 1);
+                const ref = lua.lua_tonumber(L2, 2);
+                const evName = lua.lua_tojsstring(L2, 3);
+                luaSignalConns[id] = { L: L2, ref, evName };
                 const key = ref + '|' + evName;
                 (luaSignalsByKey[key] = luaSignalsByKey[key] || []).push(id);
-                lua.lua_pushnumber(L2, id);
-                return 1;
+                return 0;
             });
-            def('__disconnect', function (L2) {
+            def('__unregister_conn', function (L2) {
                 const id = lua.lua_tonumber(L2, 1);
                 const conn = luaSignalConns[id];
                 if (conn) {
-                    lauxlib.luaL_unref(conn.L, lua.LUA_REGISTRYINDEX, conn.fnRef);
                     const key = conn.ref + '|' + conn.evName;
                     luaSignalsByKey[key] = (luaSignalsByKey[key] || []).filter(x => x !== id);
                     delete luaSignalConns[id];
