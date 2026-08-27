@@ -43,7 +43,15 @@
             background: #111827;
             color: #fff;
             font-family: system-ui, sans-serif;
-            height: 100vh;
+            height: 100vh; /* фолбэк для браузеров без поддержки dvh */
+            height: 100dvh; /* 100vh на мобильных — это ВСЯ layout-высота,
+            включая область под виртуальной клавиатурой; когда клавиатура
+            открывается, эта высота не уменьшается сама, и вместе с
+            overflow:hidden ниже получается "экран уплывает" — браузер
+            пытается докрутить фокус в контейнер, который по факту больше
+            видимой области. 100dvh — современная единица, которая САМА
+            учитывает открытую клавиатуру (уменьшается вместе с видимой
+            областью), без единой строчки JS. */
             overflow: hidden;
             display: flex;
             flex-direction: column
@@ -6190,6 +6198,22 @@ game = setmetatable({}, {
         });
 
         window.addEventListener('resize', refreshCM);
+        // Обычный window 'resize' на многих мобильных браузерах/WebView НЕ
+        // срабатывает при появлении/скрытии виртуальной клавиатуры — меняется
+        // только visualViewport (видимая область), а layout-вьюпорт (window.
+        // innerHeight) может остаться прежним. Без этого CodeMirror держал
+        // устаревшие координаты после открытия клавиатуры — от этого и
+        // "экран уплывает" (страница пытается докрутить фокус в старых
+        // координатах), и подсказки могли всплывать не там, где реально
+        // видно (или вовсе за пределами видимой области).
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                refreshCM();
+                if (cmEditor && cmEditor.state && cmEditor.state.completionActive) {
+                    cmEditor.state.completionActive.close(); // старая позиция всё равно неверна — не показывать её "зависшей"
+                }
+            });
+        }
     </script>
 </body>
 
