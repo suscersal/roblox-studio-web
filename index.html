@@ -24,9 +24,9 @@
          (см. корень проекта). После setup.sh приложение работает без сети
          вообще; если запускать без setup.sh (например, сразу с ПК), эти
          файлы можно заменить обратно на CDN-ссылки. -->
-    <link rel="stylesheet" href="vendor/codemirror.min.css">
-    <link rel="stylesheet" href="vendor/monokai.min.css">
-    <link rel="stylesheet" href="vendor/show-hint.min.css">
+    <!-- CodeMirror 5 CSS больше не нужен — CM6 задаёт свою тему целиком через
+         JS (EditorView.theme(...) в entry.mjs), никаких отдельных .css файлов
+         подключать не требуется. -->
 
 
 
@@ -1231,15 +1231,14 @@
         }
     </script>
 
-    <!-- Те же локальные vendor/-копии — статические блокирующие <script>,
-         как и было раньше, но локальные: cmEditor ниже создаётся сразу же
-         на парсинге страницы (не в колбэке), поэтому CodeMirror обязан
-         быть полностью готов синхронно к этому моменту — асинхронная
-         загрузка (динамические <script>, fetch) здесь недопустима. -->
-    <script src="vendor/codemirror.min.js"></script>
-    <script src="vendor/lua.min.js"></script>
-    <script src="vendor/closebrackets.min.js"></script>
-    <script src="vendor/matchbrackets.min.js"></script>
+    <!-- CodeMirror 6, единым офлайн-бандлом (см. entry.mjs/rollup.config.mjs
+         в репозитории — собирается через rollup из официальных пакетов
+         @codemirror/*, вместо CDN-зависимости). Раньше здесь было 4 отдельных
+         файла CM5 (ядро + режим Lua + два аддона) — CM6 такой же блокирующий
+         <script>, но один: cmEditor создаётся в DOMContentLoaded-колбэке чуть
+         ниже, так что достаточно, чтобы бандл успел выполниться до этого
+         события (обычный порядковый <script> это и так гарантирует). -->
+    <script src="vendor/cm6-bundle.min.js"></script>
 
 
     <script>
@@ -1332,8 +1331,9 @@
             tryLoad(0);
         })();
     </script>
-    <script src="vendor/show-hint.min.js"></script>
-    <script src="vendor/lua-hint.js"></script>
+    <!-- show-hint.min.js/lua-hint.js (CodeMirror 5 addon) больше не нужны —
+         автодополнение теперь встроено в CM6-бандл (@codemirror/autocomplete),
+         см. entry.mjs. -->
     <script>
         // ============ ANDROID (SAF) ============
         // Если приложение открыто внутри Android-обёртки, MainActivity.kt
@@ -1352,14 +1352,15 @@
         // window.addEventListener('DOMContentLoaded', ...) в самом низу файла,
         // откуда вызывается initResizers()) находится в ОДНОМ и том же
         // непрерывном <script>-блоке. Раньше CodeMirror.fromTextArea(...)
-        // вызывался БЕЗ try/catch: если vendor/codemirror.min.js по какой-то
-        // причине не подгрузился (нет сети при первом запуске без setup.sh,
-        // файл не докачался, и т.п.), это исключение обрывало исполнение
-        // ВСЕГО скрипта на этой строке — ни один function/let ниже неё
-        // никогда не выполнялся, включая ту самую регистрацию
-        // DOMContentLoaded. Отсюда одновременно и неработающий ресайзер
-        // (initResizers() ни разу не вызывался), и нерабочие кнопки (их
-        // onclick трогает let/const, объявленные ниже места обрыва — те
+        // вызывался БЕЗ try/catch: если редактор (тогда ещё CodeMirror 5, из
+        // нескольких vendor/-файлов; сейчас — единый vendor/cm6-bundle.min.js,
+        // см. ниже) по какой-то причине не подгружался (нет сети при первом
+        // запуске без setup.sh, файл не докачался, и т.п.), это исключение
+        // обрывало исполнение ВСЕГО скрипта на этой строке — ни один
+        // function/let ниже неё никогда не выполнялся, включая ту самую
+        // регистрацию DOMContentLoaded. Отсюда одновременно и неработающий
+        // ресайзер (initResizers() ни разу не вызывался), и нерабочие кнопки
+        // (их onclick трогает let/const, объявленные ниже места обрыва — те
         // так и оставались неинициализированными). CodeMirror — это ТОЛЬКО
         // редактор скриптов; его отсутствие не должно ронять всё остальное
         // приложение.
@@ -1475,115 +1476,44 @@
         ];
 
 
-        // Ищет по подстроке (регистронезависимо), а не только по началу слова.
-        // Держим отдельно от lua-hint.js только словарь + подстрочный поиск;
-        // сам показ/подключение теперь ЕДИНСТВЕННЫЙ раз — через
-        // CodeMirror.enableRobloxAutocomplete ниже.
-        function robloxSubstringHint(cm) {
-            const cur = cm.getCursor();
-            const token = cm.getTokenAt(cur);
-            const start = token.start;
-            const end = cur.ch;
-            const prefix = token.string.slice(0, end - start);
-            if (!prefix) return null;
+        // Раньше здесь была отдельная robloxSubstringHint-функция для
+        // CodeMirror 5's addon/hint/show-hint — теперь автодополнение
+        // делает сам CM6-бандл (@codemirror/autocomplete, встроенный,
+        // с честной поддержкой тачскрина/мобильных клавиатур) — см.
+        // vendor/cm6-bundle.min.js/entry.mjs. Функция ниже больше не нужна.
 
-            const lower = prefix.toLowerCase();
-            const starts = [];
-            const contains = [];
-            for (const kw of ROBLOX_LUA_KEYWORDS) {
-                const idx = kw.toLowerCase().indexOf(lower);
-                if (idx === 0) starts.push(kw);
-                else if (idx > 0) contains.push(kw);
-            }
-            const list = starts.sort().concat(contains.sort());
-            if (list.length === 0) return null;
-
-            return {
-                list: list,
-                from: CodeMirror.Pos(cur.line, start),
-                to: CodeMirror.Pos(cur.line, end)
-            };
-        }
-
+        // ---- CodeMirror 6 вместо CodeMirror 5 ----
+        // Вся история c CM5 на телефоне (клавиатура закрывается/работает как
+        // стрелочки, экран уплывает при открытии клавиатуры, подсказки не
+        // показываются или гоняются друг с другом) — известное ограничение
+        // именно CodeMirror 5: его модель ввода (textarea/contenteditable
+        // hack) изначально не рассчитана на честную поддержку IME/composition
+        // событий современных мобильных клавиатур. CM6 переписан с нуля
+        // именно с этим в уме — редактор занимает единственный
+        // contenteditable-узел, ввод идёт через нативные DOM Selection/Range
+        // API, так что виртуальная клавиатура (Android/iOS) работает с ним
+        // так же, как с любым обычным полем ввода на странице.
+        //
+        // Сам бандл — не CDN-зависимость (офлайн-режим приложения важен),
+        // а собранный через rollup статический файл (vendor/cm6-bundle.min.js,
+        // см. entry.mjs/rollup.config.mjs в репозитории) из официальных
+        // пакетов @codemirror/*. Экспортирует window.CM6.fromTextArea(...) —
+        // обёртку с API, максимально похожим на прежний CodeMirror 5
+        // (getValue/setValue/refresh/focus/state.completionActive), чтобы
+        // остальной код (saveScript/selectRef/refreshCM и т.п.) не пришлось
+        // переписывать.
         let cmEditor = null;
         window.addEventListener('DOMContentLoaded', function () {
             try {
-                cmEditor = CodeMirror.fromTextArea(document.getElementById('script-editor'), {
-                    mode: 'lua',
-                    theme: 'monokai',
-                    lineNumbers: true,
-                    autoCloseBrackets: true,
-                    matchBrackets: true,
-                    indentUnit: 4,
-                    tabSize: 4,
-                    indentWithTabs: false,
-                    lineWrapping: true,
-                    viewportMargin: 50,
-
-                    extraKeys: { 'Ctrl-Space': 'autocomplete' },
-                    hintOptions: { hint: robloxSubstringHint, completeSingle: false }
-                    // inputStyle: 'contenteditable' — пробовал как обход для
-                    // Android-клавиатур (мобильный CodeMirror 5 иногда не ловит
-                    // inputRead через textarea при IME/предиктивном вводе), но на
-                    // практике оказалось СИЛЬНО хуже: contenteditable-режим CM5
-                    // экспериментальный и на мобильных клавиатурах ловит нажатия как
-                    // навигацию (будто это стрелочки), а не как ввод текста, плюс
-                    // ломает поведение скролла страницы при открытии клавиатуры.
-                    // 'textarea' (умолчание) — единственный по-настоящему
-                    // проверенный вариант на мобильных, оставляем его; проблему с
-                    // inputRead на Android решаем ДРУГИМ способом — см. origin-фильтр
-                    // в lua-hint.js (там уже убрана жёсткая проверка '+input').
+                if (!window.CM6) {
+                    console.error('CM6 не найден — vendor/cm6-bundle.min.js не загрузился (проверьте путь/файл на сервере)');
+                    return;
+                }
+                cmEditor = window.CM6.fromTextArea(document.getElementById('script-editor'), {
+                    words: ROBLOX_LUA_KEYWORDS,
                 });
-                // ВАЖНО: раньше здесь ЕЩЁ был ручной cmEditor.on('change', ...),
-                // добавленный как отдельная попытка "почини автодополнение на
-                // Android" — он вызывал cm.showHint(...) на каждое изменение
-                // текста НЕЗАВИСИМО от enableRobloxAutocomplete ниже, который
-                // делает то же самое через 'inputRead' (см. lua-hint.js). Два
-                // независимых обработчика на одно и то же нажатие клавиши,
-                // каждый сам решал, показывать подсказку или нет, и оба звали
-                // cm.showHint — именно это и было причиной того, что на
-                // телефоне подсказки либо мигали, либо не появлялись: они
-                // гонялись друг с другом за каждую букву. Оставляем ОДИН путь —
-                // через lua-hint.js; он уже пропатчен под Android (не полагается
-                // на конкретное имя changeObj.origin) и теперь также уважает
-                // словарь robloxSubstringHint, заданный в hintOptions ниже,
-                // так что список подсказок не стал беднее после удаления
-                // дублирующего обработчика.
-
-                // ЕДИНСТВЕННОЕ место, где включается автопоказ подсказок — раньше
-                // здесь же ниже был ЕЩЁ один ручной cmEditor.on('inputRead', ...)
-                // (с debug notify()-спамом на каждую букву — реально всплывающее
-                // уведомление при каждом нажатии клавиши!), И в самом низу файла
-                // был ТРЕТИЙ, полностью отдельный IIFE с собственным словарём и
-                // собственным inputRead-обработчиком, который вдобавок пытался найти
-                // редактор через window.cmEditor — а cmEditor объявлен через `let`,
-                // let-переменные НЕ становятся свойством window, так что тот блок
-                // всегда промахивался мимо. Три конкурирующих обработчика на одно и
-                // то же событие — вот что "не показывало подсказки": либо ничего не
-                // всплывало из-за гонки/спама уведомлений, либо всплывало и тут же
-                // закрывалось повторным вызовом. Теперь только один путь — через
-                // lua-hint.js (файл сам решает regex по слову/цепочке точек).
-                if (cmEditor && window.CodeMirror && CodeMirror.enableRobloxAutocomplete) {
-                    CodeMirror.enableRobloxAutocomplete(cmEditor);
-                } else if (cmEditor) {
-                    console.error('CodeMirror.enableRobloxAutocomplete не найден — vendor/lua-hint.js не загрузился (проверьте путь/файл на сервере)');
-                }
-                // showHint (сама всплывающая панель со списком) — ОТДЕЛЬНЫЙ addon от
-                // lua-hint.js (тот только строит список слов и решает, когда его
-                // показывать). Если vendor/show-hint.min.js не подгрузился,
-                // enableRobloxAutocomplete всё равно "включится" без единой ошибки —
-                // CodeMirror.showRobloxHint внутри себя тихо делает `if (!CodeMirror.
-                // showHint) return;` при каждом нажатии клавиши, то есть подсказки
-                // просто НИКОГДА не появляются, и ни строчки в консоли, чтобы понять
-                // почему. Проверяем это явно один раз при загрузке, а не гадаем.
-                if (!window.CodeMirror || !CodeMirror.showHint) {
-                    console.error('CodeMirror.showHint не найден — vendor/show-hint.min.js не загрузился, подсказки не будут появляться ни при вводе, ни по Ctrl+Space');
-                    if (typeof notify === 'function') {
-                        notify('Автодополнение недоступно: vendor/show-hint.min.js не загрузился', 'warn');
-                    }
-                }
             } catch (e) {
-                console.error('CodeMirror не загрузился:', e);
+                console.error('CodeMirror 6 не загрузился:', e);
             }
         });
 
@@ -6239,7 +6169,7 @@ game = setmetatable({}, {
             window.visualViewport.addEventListener('resize', () => {
                 refreshCM();
                 if (cmEditor && cmEditor.state && cmEditor.state.completionActive) {
-                    cmEditor.state.completionActive.close(); // старая позиция всё равно неверна — не показывать её "зависшей"
+                    cmEditor.closeCompletion(); // старая позиция всё равно неверна — не показывать её "зависшей"
                 }
             });
         }
