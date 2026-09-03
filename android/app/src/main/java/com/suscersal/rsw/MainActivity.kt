@@ -249,7 +249,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             var up = false
             var attempts = 0
-            while (!up && attempts < 20) {
+            while (!up && attempts < 60) {
                 attempts++
                 try {
                     Socket().use { s ->
