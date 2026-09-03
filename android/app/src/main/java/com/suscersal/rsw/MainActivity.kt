@@ -231,9 +231,16 @@ class MainActivity : AppCompatActivity() {
         val hotpatchPath = hotpatchDir?.absolutePath ?: ""
 
         Thread {
-            val py = Python.getInstance()
-            val launcher = py.getModule("bridge_launcher")
-            launcher.callAttr("start_server", PORT, filesDir.absolutePath, hotpatchPath)
+            try {
+                val py = Python.getInstance()
+                val launcher = py.getModule("bridge_launcher")
+                launcher.callAttr("start_server", PORT, filesDir.absolutePath, hotpatchPath)
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Ошибка запуска сервера", e)
+                runOnUiThread {
+                    findViewById<TextView>(R.id.loadingStatus).text = "Ошибка: ${e.message}"
+                }
+            }
         }.start()
     }
 
@@ -258,7 +265,7 @@ class MainActivity : AppCompatActivity() {
                     status.visibility = View.GONE
                     webView.loadUrl("http://127.0.0.1:$PORT/")
                 } else {
-                    status.text = "Не удалось запустить локальный сервер.\nПерезапустите приложение."
+                    status.text = "Не удалось запустить локальный сервер.\nRestart app."
                 }
             }
         }.start()
