@@ -4,3 +4,6 @@ release.keystore.base64
 *.patch
 *.rej
 fnf.rbxl
+*.zip
+*.rar
+*.7z
