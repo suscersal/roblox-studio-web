@@ -17,6 +17,7 @@ import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
 import org.json.JSONObject
+import android.util.Log
 
 class MainActivity : AppCompatActivity() {
 
@@ -241,7 +242,7 @@ class MainActivity : AppCompatActivity() {
                     findViewById<TextView>(R.id.loadingStatus).text = "Ошибка: ${e.message}"
                 }
             }
-        }.start()
+    }.start()
     }
 
     private fun waitForServerThenLoad() {
@@ -265,7 +266,7 @@ class MainActivity : AppCompatActivity() {
                     status.visibility = View.GONE
                     webView.loadUrl("http://127.0.0.1:$PORT/")
                 } else {
-                    status.text = "Не удалось запустить локальный сервер.\nRestart app."
+                    status.text = "Не удалось запустить локальный сервер.\n Restart app."
                 }
             }
         }.start()
