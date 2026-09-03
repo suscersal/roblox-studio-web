@@ -88,6 +88,19 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
                 actual_port = candidate
                 break
 
+    # Публикуем реальный порт для Kotlin-стороны: waitForServerThenLoad()
+    # раньше был жёстко привязан к исходному PORT и никогда не узнавал,
+    # что сервер фактически поднялся на port+1 (см. комментарий выше) —
+    # из-за этого "через раз" ждал подключения не туда и молча падал по
+    # таймауту, сколько бы попыток ни давали. Файл кладём в data_dir
+    # (filesDir), он читается в MainActivity.waitForServerThenLoad().
+    if data_dir:
+        try:
+            with open(os.path.join(data_dir, "server_port.txt"), "w") as f:
+                f.write(str(actual_port))
+        except OSError:
+            pass
+
     rsw_app.flask_app.run(
         host="127.0.0.1",
         port=actual_port,

@@ -176,11 +176,22 @@ class MainActivity : AppCompatActivity() {
             waitForServerThenLoad()
         }
 
+        // Стартовали ли мы уже через 5-секундный fallback (значит, сервер
+        // работает на СТАРОМ коде, пока OTA ещё тянулась по медленной сети).
+        // Если да и позже придёт updated=true — НЕ убиваем процесс: игрок
+        // может уже активно работать в редакторе, а Runtime.exit(0) посреди
+        // сессии выглядит как "приложение само перезапускается/падает".
+        // Новый hotpatch уже полностью на диске и его версия уже сохранена
+        // в SharedPreferences (см. OtaUpdater.checkAndUpdate) — он просто
+        // подхватится сам на следующем обычном запуске.
+        val startedViaTimeoutFallback = java.util.concurrent.atomic.AtomicBoolean(false)
+
         android.os.Handler(mainLooper).postDelayed({
             if (!proceededOnce.get()) {
                 val existing = OtaUpdater.hotpatchDir(this).let {
                     if (it.exists() && it.listFiles()?.isNotEmpty() == true) it else null
                 }
+                startedViaTimeoutFallback.set(true)
                 loadingStatus.text = "Нет соединения, запуск без обновлений…"
                 proceedWithHotpatch(existing)
             }
@@ -194,13 +205,18 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onFinished(hotpatchDir: File?, updated: Boolean) {
                     runOnUiThread {
-                        if (updated && serverStarted) {
+                        if (updated && serverStarted && !startedViaTimeoutFallback.get()) {
                             // Сервер в этом процессе уже когда-то запускался
                             // со старым кодом — "на лету" его не подменить
                             // (модуль app уже импортирован и закэширован
                             // Python'ом, порт уже занят). Единственный
                             // надёжный способ подхватить свежескачанный
                             // app.py — перезапустить процесс целиком.
+                            //
+                            // Этот путь возможен только если сервер стартовал
+                            // НЕ через 5-секундный fallback (тот случай
+                            // обработан выше отдельно) — например, при
+                            // повторном заходе на уже созданную Activity.
                             loadingStatus.text = "Обновление готово, перезапуск…"
                             restartProcessToApplyUpdate()
                             return@runOnUiThread
@@ -224,10 +240,20 @@ class MainActivity : AppCompatActivity() {
     private fun startPythonServerOnce(hotpatchDir: File?) {
         if (serverStarted) {
             // Сервер в этом процессе уже поднят — просто грузим страницу.
-            webView.post { webView.loadUrl("http://127.0.0.1:$PORT/") }
+            // Порт мог отличаться от PORT (см. waitForServerThenLoad), берём
+            // его из того же файла, а не константы.
+            val portFile = File(filesDir, "server_port.txt")
+            val resolvedPort = portFile.takeIf { it.exists() }
+                ?.readText()?.trim()?.toIntOrNull() ?: PORT
+            webView.post { webView.loadUrl("http://127.0.0.1:$resolvedPort/") }
             return
         }
         serverStarted = true
+
+        // Чистим файл от предыдущего (возможно, уже мёртвого) запуска,
+        // чтобы waitForServerThenLoad не подключился по ошибке к порту,
+        // на котором давно никто не слушает.
+        File(filesDir, "server_port.txt").delete()
 
         val hotpatchPath = hotpatchDir?.absolutePath ?: ""
 
@@ -247,13 +273,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun waitForServerThenLoad() {
         Thread {
+            // bridge_launcher.py может уйти на PORT+1..+20, если исходный
+            // порт ещё не освободился с прошлого запуска процесса (см.
+            // комментарий в bridge_launcher.start_server). Раньше здесь
+            // всегда стучались в фиксированный PORT и не замечали, что
+            // сервер реально поднялся на другом порту — сервер работал,
+            // но webView никогда не подключался. Файл server_port.txt
+            // пишется Python-стороной сразу после успешного bind().
+            val portFile = File(filesDir, "server_port.txt")
+            var resolvedPort = PORT
             var up = false
             var attempts = 0
-            while (!up && attempts < 60) {
+            while (!up && attempts < 100) {
                 attempts++
+                if (portFile.exists()) {
+                    portFile.readText().trim().toIntOrNull()?.let { resolvedPort = it }
+                }
                 try {
                     Socket().use { s ->
-                        s.connect(InetSocketAddress("127.0.0.1", PORT), 700)
+                        s.connect(InetSocketAddress("127.0.0.1", resolvedPort), 700)
                         up = true
                     }
                 } catch (e: Exception) {
@@ -264,7 +302,7 @@ class MainActivity : AppCompatActivity() {
                 val status = findViewById<TextView>(R.id.loadingStatus)
                 if (up) {
                     status.visibility = View.GONE
-                    webView.loadUrl("http://127.0.0.1:$PORT/")
+                    webView.loadUrl("http://127.0.0.1:$resolvedPort/")
                 } else {
                     status.text = "Не удалось запустить локальный сервер.\n Restart app."
                 }

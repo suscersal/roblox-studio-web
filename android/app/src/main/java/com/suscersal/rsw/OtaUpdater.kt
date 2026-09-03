@@ -134,12 +134,30 @@ object OtaUpdater {
 
             dir.mkdirs()
 
+            // Качаем во ВРЕМЕННУЮ папку, а не прямо в hotpatch/, которую
+            // bridge_launcher.py тут же подставляет в sys.path и импортирует.
+            // Раньше при обрыве сети НА СЕРЕДИНЕ докачки (например, app.py
+            // уже перезаписан новой версией, а index.html — ещё старой)
+            // в hotpatch/ оставалась смешанная, несогласованная версия кода,
+            // и приложение либо падало, либо вело себя непредсказуемо в
+            // зависимости от того, что именно успело докачаться до обрыва.
+            // Теперь подменяем файлы одним атомарным rename() только после
+            // того, как ВСЕ файлы успешно скачаны и провалидированы по хэшу.
+            val stagingDir = File(ctx.filesDir, "hotpatch_staging")
+            stagingDir.deleteRecursively()
+            stagingDir.mkdirs()
+            // Начинаем с копии уже имеющихся актуальных файлов — качать
+            // заново будем только то, что реально изменилось.
+            if (dir.exists()) {
+                dir.copyRecursively(stagingDir, overwrite = true)
+            }
+
             val names = remoteFiles.keys().asSequence().toList()
             var done = 0
             var downloaded = 0
             for (name in names) {
                 val expectedHash = remoteFiles.getString(name)
-                val destFile = File(dir, name)
+                val destFile = File(stagingDir, name)
                 val actualHash = if (destFile.exists()) sha256(destFile) else null
                 Log.d(
                     "OtaUpdater",
@@ -161,6 +179,12 @@ object OtaUpdater {
                 if (downloadUrl != null) {
                     destFile.parentFile?.mkdirs()
                     downloadToFile(downloadUrl, destFile)
+                    // Сверяем хэш сразу после скачивания — обрыв связи
+                    // посреди файла не должен молча пройти как "успех".
+                    val gotHash = sha256(destFile)
+                    if (gotHash != expectedHash) {
+                        throw java.io.IOException("Hash mismatch for $name after download")
+                    }
                     downloaded++
                 }
 
@@ -170,6 +194,14 @@ object OtaUpdater {
                     "Скачано $downloaded, проверено $done/${names.size}"
                 )
             }
+
+            // Все файлы на месте и проверены — теперь одним атомарным шагом
+            // подменяем рабочую hotpatch/ на staging-версию. Если процесс
+            // убьют прямо на этой строке, на диске всё равно останется
+            // ЛИБО полностью старая, ЛИБО полностью новая папка — никогда
+            // не смесь.
+            dir.deleteRecursively()
+            stagingDir.renameTo(dir)
 
             prefs.edit().putString(KEY_VERSION, remoteVersion).apply()
             listener.onFinished(dir, true)
