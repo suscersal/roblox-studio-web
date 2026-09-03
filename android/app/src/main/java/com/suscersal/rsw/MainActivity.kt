@@ -253,7 +253,7 @@ class MainActivity : AppCompatActivity() {
                 attempts++
                 try {
                     Socket().use { s ->
-                        s.connect(InetSocketAddress("127.0.0.1", PORT), 300)
+                        s.connect(InetSocketAddress("127.0.0.1", PORT), 700)
                         up = true
                     }
                 } catch (e: Exception) {
