@@ -917,6 +917,7 @@
         <div class="sep"></div>
         <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title"
             title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
+        <button onclick="toggleThirdPerson()" title="1st/3rd person">👤 Вид</button>
         <div class="sep"></div>
         <button onclick="resetCamera()" data-i18n-title="tb_resetcam_title" title="Reset camera"><span
                 data-i18n="tb_resetcam">🏠 Reset</span></button>
@@ -2256,15 +2257,33 @@
             renderer.render(scene, camera);
         }
 
+        let thirdPerson = false; // true — камера позади куба-персонажа, не в глазах
+        const THIRD_PERSON_DIST = 12;
+
         function updateCamera() {
             const { theta, phi } = spherical;
             const dirX = Math.sin(phi) * Math.sin(theta);
             const dirY = Math.cos(phi);
             const dirZ = Math.sin(phi) * Math.cos(theta);
-            // Камера от первого лица: позиция глаза = target,
-            // смотрим в направлении, заданном theta/phi (без отступа на радиус r)
-            camera.position.set(target.x, target.y, target.z);
-            camera.lookAt(target.x - dirX, target.y - dirY, target.z - dirZ);
+            if (isPlaying && thirdPerson) {
+                // dir — направление "назад" (см. lookAt ниже в ветке от первого
+                // лица: смотрим в target-dir, значит dir и есть "за спиной") —
+                // отходим по нему от персонажа и смотрим на него.
+                camera.position.set(target.x + dirX * THIRD_PERSON_DIST, target.y + dirY * THIRD_PERSON_DIST, target.z + dirZ * THIRD_PERSON_DIST);
+                camera.lookAt(target.x, target.y, target.z);
+            } else {
+                // Камера от первого лица: позиция глаза = target,
+                // смотрим в направлении, заданном theta/phi (без отступа на радиус r)
+                camera.position.set(target.x, target.y, target.z);
+                camera.lookAt(target.x - dirX, target.y - dirY, target.z - dirZ);
+            }
+            updateCharMeshVisibility();
+        }
+
+        function toggleThirdPerson() {
+            thirdPerson = !thirdPerson;
+            updateCamera();
+            notify(thirdPerson ? '3-е лицо' : '1-е лицо (от глаз)');
         }
 
         // ============ ПРЕСЕТЫ КАМЕРЫ ============
@@ -2752,6 +2771,11 @@
         // дистанцию для них берём отсюда.
         let loadedObjPos = {}; // ref -> {x,y,z}
         let charBody = null;
+        let charMesh = null; // куб для вида от третьего лица, см. toggleThirdPerson
+
+        function updateCharMeshVisibility() {
+            if (charMesh) charMesh.visible = isPlaying && thirdPerson;
+        }
         let jumpQueued = false;
         let canJump = false;
         let prevCameraState = null;
@@ -3216,6 +3240,17 @@
             });
             physicsWorld.addBody(charBody);
 
+            // Куб-персонаж для вида от третьего лица — виден только когда
+            // thirdPerson включён (от первого лица куб торчал бы прямо перед
+            // камерой, закрывая обзор).
+            if (charMesh) { scene.remove(charMesh); charMesh.geometry.dispose(); charMesh.material.dispose(); }
+            charMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(CHAR_RADIUS * 1.6, CHAR_RADIUS * 3.2, CHAR_RADIUS * 1.6),
+                new THREE.MeshLambertMaterial({ color: 0x4a90d9 })
+            );
+            charMesh.visible = false;
+            scene.add(charMesh);
+
             prevCameraState = {
                 spherical: { ...spherical },
                 target: { ...target },
@@ -3254,6 +3289,7 @@
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
+            if (charMesh) { scene.remove(charMesh); charMesh.geometry.dispose(); charMesh.material.dispose(); charMesh = null; }
             canJump = false;
             jumpQueued = false;
             if (scene.fog && prevFogFar !== null) scene.fog.far = prevFogFar;
@@ -4297,10 +4333,21 @@ game = setmetatable({}, {
         async function startLuaScripts() {
             luaOutputLines = [];
             renderLuaOutput();
+            try { await startLuaScriptsInner(); }
+            catch (e) {
+                logLuaOutput('error', 'Запуск Lua прерван: ' + (e && e.message ? e.message : String(e)));
+                console.error('[Lua] startLuaScripts:', e);
+            }
+        }
+
+        async function startLuaScriptsInner() {
             const r = await api('GET', '/api/scripts');
-            if (!isPlaying || !r.ok || !r.scripts || !r.scripts.length) return;
+            if (!isPlaying) return;
+            if (!r || !r.ok) { logLuaOutput('error', '/api/scripts не ответил'); return; }
+            if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', 'Нет включённых Script/LocalScript на карте'); return; }
 
             if (!await ensureFengariLoaded()) {
+                logLuaOutput('error', 'fengari не загрузилась — проверь интернет');
                 notify('Lua VM (fengari) не загрузилась — проверь интернет', 'err');
                 return;
             }
@@ -4312,7 +4359,7 @@ game = setmetatable({}, {
             luaByRef = {};
             luaParentByRef = {};
             luaChildrenByRef = {};
-            if (allR.ok && allR.instances) {
+            if (allR && allR.ok && allR.instances) {
                 for (const inst of allR.instances) {
                     luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
                     luaParentByRef[inst.ref] = inst.parent;
@@ -4322,6 +4369,8 @@ game = setmetatable({}, {
                         (luaChildrenByRef[inst.parent] = luaChildrenByRef[inst.parent] || []).push(inst.ref);
                     }
                 }
+            } else {
+                logLuaOutput('warn', '/api/all_instances не ответил');
             }
             if (!isPlaying) return; // Play могли остановить, пока шёл запрос
 
@@ -4331,7 +4380,7 @@ game = setmetatable({}, {
             const guiR = await api('GET', '/api/gui_tree');
             guiPropsByRef = {};
             guiChildrenByRef = {};
-            if (guiR.ok && guiR.elements) {
+            if (guiR && guiR.ok && guiR.elements) {
                 for (const item of guiR.elements) guiPropsByRef[item.ref] = item;
             }
 
@@ -4726,6 +4775,10 @@ game = setmetatable({}, {
             target.x = charBody.position.x;
             target.y = charBody.position.y + EYE_HEIGHT;
             target.z = charBody.position.z;
+            if (charMesh) {
+                charMesh.position.set(charBody.position.x, charBody.position.y, charBody.position.z);
+                charMesh.rotation.y = spherical.theta; // куб развёрнут туда же, куда смотрит камера
+            }
             updateCamera();
         }
 
