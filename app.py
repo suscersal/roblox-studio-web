@@ -804,9 +804,15 @@ def api_scripts():
     # Отдаёт все Script/LocalScript с исходником — используется Lua-рантаймом
     # в Play (см. index.html, startLuaScripts/fengari) для запуска скриптов
     # одним запросом, а не по одному через /api/instance/<ref> на каждый.
-    # ModuleScript сюда сознательно не входит — Roblox их не исполняет
-    # автоматически, только через require() из другого скрипта, а require()
-    # в этой версии не реализован.
+    # ModuleScript тоже отдаём (поле 'runnable': False) — сами они НЕ
+    # запускаются автоматически (как и в настоящем Roblox), но их исходник
+    # нужен фронтенду заранее, чтобы require(moduleScriptInstance) мог
+    # скомпилировать/выполнить их по требованию (см. __require_module в
+    # index.html). Раньше ModuleScript сюда не входил вообще, и require()
+    # был не реализован — использовался голый require() из стандартной
+    # библиотеки Lua ("bad argument #1 to 'require' (string expected, got
+    # table)", поскольку скрипты зовут require(instance), а не
+    # require("имя_модуля")).
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False}), 400
@@ -815,19 +821,20 @@ def api_scripts():
     pr = parsed['props']
     out = []
     for ref, cls in r2c.items():
-        if cls not in ('Script', 'LocalScript'):
+        if cls not in ('Script', 'LocalScript', 'ModuleScript'):
             continue
         props = pr.get(ref, {})
         enabled = props.get('Enabled', True)
         if isinstance(enabled, str):
             enabled = enabled.lower() in ('true', '1')
-        if not enabled:
+        if cls != 'ModuleScript' and not enabled:
             continue
         out.append({
             'ref': ref, 'cls': cls,
             'name': props.get('Name', cls),
             'source': props.get('Source', '') or '',
             'parent': pm.get(ref, -1),
+            'runnable': cls in ('Script', 'LocalScript'),
             # 'server' для Script, 'client' для LocalScript — см.
             # SCRIPT_SIDE выше. Фронтенд использует это только для
             # отображения (бейдж в Output/Properties), не для настоящей
@@ -1687,6 +1694,69 @@ def api_status():
         'file': state['file_path'],
         'count': len(parsed['referent_to_class']) if parsed else 0,
     })
+
+
+# Лог-файлы Lua Output — каждый запуск Play пишет в свой файл под logs/, а
+# не только в браузерную панель Output (которая пропадает при закрытии
+# вкладки/обновлении страницы). Одна запись на строку JSON — удобно и
+# смотреть глазами (less/tail), и парсить скриптом при желании.
+LOG_DIR = Path(__file__).resolve().parent / 'logs'
+_log_state = {'file': None, 'session': None}
+
+
+def _current_log_path():
+    # Новый файл на каждую Play-сессию (см. 'session' в теле запроса —
+    # фронтенд генерирует один id при старте Play и шлёт его с каждой
+    # строкой лога этой сессии), не на каждую отдельную запись.
+    return _log_state['file']
+
+
+@flask_app.route('/api/log', methods=['POST'])
+def api_log():
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        data = request.get_json(force=True, silent=True) or {}
+        session = data.get('session') or 'unknown'
+        if _log_state['session'] != session:
+            ts = __import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')
+            _log_state['session'] = session
+            _log_state['file'] = LOG_DIR / f'play_{ts}.log'
+        line = {
+            'time': data.get('time', ''),
+            'level': data.get('level', 'print'),
+            'source': data.get('source', ''),
+            'text': data.get('text', ''),
+        }
+        with open(_current_log_path(), 'a', encoding='utf-8') as f:
+            f.write(json.dumps(line, ensure_ascii=False) + '\n')
+        return jsonify({'ok': True})
+    except Exception as e:
+        # Логирование не должно ронять саму игру — если писать не
+        # получилось (нет прав на диск и т.п.), просто молча отвечаем ok:false.
+        return jsonify({'ok': False, 'error': str(e)}), 200
+
+
+@flask_app.route('/api/log/list')
+def api_log_list():
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        files = sorted(LOG_DIR.glob('play_*.log'), key=lambda p: p.stat().st_mtime, reverse=True)
+        return jsonify({'ok': True, 'files': [f.name for f in files]})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@flask_app.route('/api/log/<path:name>')
+def api_log_get(name):
+    try:
+        # Только файлы вида play_*.log из LOG_DIR — не отдаём произвольный
+        # путь по запросу.
+        safe = Path(name).name
+        if not safe.startswith('play_') or not safe.endswith('.log'):
+            return jsonify({'ok': False, 'error': 'bad name'}), 400
+        return send_from_directory(LOG_DIR, safe, mimetype='text/plain')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 404
 
 
 # Чтение HTML шаблона

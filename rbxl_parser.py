@@ -5,6 +5,11 @@ import os
 import math
 from pathlib import Path
 
+try:
+    import zstandard as _zstd
+except Exception:
+    _zstd = None
+
 # ====================== LZ4 ======================
 
 def lz4_decompress(data: bytes, uncompressed_size: int) -> bytes:
@@ -54,6 +59,24 @@ def read_chunks(path):
         payload = None
         if compsize == 0:
             payload = raw[:uncompsize]
+        elif raw[:4] == b'\x28\xb5\x2f\xfd':
+            # Zstandard frame magic — новые версии Roblox Studio (2024+)
+            # сжимают чанки zstd вместо lz4 (старый Castle Warfare.rbxl был
+            # ещё lz4, отсюда и падение на UTF-8: lz4_decompress() тихо
+            # съедала zstd-байты как будто это lz4-поток и отдавала мусор).
+            if _zstd is None:
+                raise RuntimeError(
+                    "Этот .rbxl сжат zstd, а пакет 'zstandard' не установлен "
+                    "(pip install zstandard --break-system-packages)"
+                )
+            try:
+                payload = _zstd.ZstdDecompressor().decompress(raw, max_output_size=uncompsize)
+                if len(payload) != uncompsize:
+                    payload = None
+            except Exception:
+                payload = None
+            if payload is None:
+                payload = raw
         else:
             try:
                 candidate = lz4_decompress(raw, uncompsize)

@@ -324,18 +324,7 @@
         }
 
         #vp-label {
-            position: absolute;
-            bottom: 8px;
-            left: 8px;
-            font-size: 11px;
-            color: #9ca3af;
-            pointer-events: none;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 6px 10px;
-            border-radius: 6px;
-            line-height: 1.5;
-            z-index: 5;
-            backdrop-filter: blur(4px)
+            display: none; /* подсказка по ЛКМ/ПКМ/WASD убрана по просьбе — загораживала GUI-оверлей снизу */
         }
 
         #fps-counter {
@@ -2015,7 +2004,7 @@
                     e.preventDefault();
                     e.stopPropagation();
                     keysPressed[key] = true;
-                    if (isPlaying && key === 'e') jumpQueued = true;
+                    if (isPlaying && key === 'e' && !luaControlsDisabled) jumpQueued = true;
                     btn.classList.add('active');
                 }, { passive: false });
                 ['touchend', 'touchcancel'].forEach(ev =>
@@ -2320,6 +2309,7 @@
 
         function onMM(e) {
             if (!e.buttons) return;
+            if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — камера тоже не должна крутиться
 
             const dx = e.clientX - prevMouse.x;
             const dy = e.clientY - prevMouse.y;
@@ -2401,6 +2391,7 @@
 
         function onTM(e) {
             e.preventDefault();
+            if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — та же блокировка, что и для мыши (onMM)
             if (e.targetTouches.length === 1) {
                 const t = e.targetTouches[0];
                 if (!_tch[0]) { _tch = [t]; return; }
@@ -3394,7 +3385,10 @@
         let luaServerL = null;
         let luaClientL = null;
         let luaWaits = [];       // [{co, resumeAt}] — корутины, спящие в wait() (общий шедулер на обе VM)
+        let activeTweens = [];   // [{ref, propName, from, to, duration, startTime, composite, completedKey}] — см. TweenService ниже
         let luaSignalWaits = []; // [{co, ref, evName}] — корутины, спящие в Event:Wait()/:wait(), см. __wait_signal
+        let luaModuleSourceByRef = {}; // ModuleScript ref -> Source (для require(), см. __compile_module)
+        let luaModuleNameByRef = {};   // ModuleScript ref -> имя (для сообщений об ошибках/имени чанка)
         let luaOutputLines = []; // {level, text} — для панели #lua-output
 
         const LUA_PRELUDE = `
@@ -3413,6 +3407,144 @@ Vector3.__unm = function(a) return Vector3.new(-a.X, -a.Y, -a.Z) end
 Vector3.__tostring = function(v) return v.X .. ", " .. v.Y .. ", " .. v.Z end
 function Vector3.new_magnitude(v) return math.sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z) end
 
+Color3 = {}
+Color3.__index = Color3
+function Color3.new(r, g, b) return setmetatable({R = r or 0, G = g or 0, B = b or 0}, Color3) end
+function Color3.fromRGB(r, g, b) return Color3.new((r or 0)/255, (g or 0)/255, (b or 0)/255) end
+function Color3.fromHSV(h, s, v)
+    -- Стандартная формула HSV->RGB (h,s,v в диапазоне 0..1, как и в Roblox).
+    local i = math.floor(h * 6)
+    local f = h * 6 - i
+    local p = v * (1 - s)
+    local q = v * (1 - f * s)
+    local t = v * (1 - (1 - f) * s)
+    i = i % 6
+    if i == 0 then return Color3.new(v, t, p)
+    elseif i == 1 then return Color3.new(q, v, p)
+    elseif i == 2 then return Color3.new(p, v, t)
+    elseif i == 3 then return Color3.new(p, q, v)
+    elseif i == 4 then return Color3.new(t, p, v)
+    else return Color3.new(v, p, q) end
+end
+Color3.__tostring = function(c) return c.R .. ", " .. c.G .. ", " .. c.B end
+Color3.__eq = function(a, b) return a.R == b.R and a.G == b.G and a.B == b.B end
+
+-- UDim/UDim2 — только конструкторы и арифметика (+/-), достаточно для
+-- Position/Size любого GUI-скрипта. Само визуальное применение — через
+-- __set_prop -> luaTableToJsPropValue на JS-стороне (см. installLuaBridge):
+-- он узнаёт UDim2 по форме {X={Scale,Offset}, Y={Scale,Offset}}, поэтому
+-- поля здесь называются РОВНО так (не scale/offset).
+UDim = {}
+UDim.__index = UDim
+function UDim.new(scale, offset) return setmetatable({Scale = scale or 0, Offset = offset or 0}, UDim) end
+UDim.__add = function(a, b) return UDim.new(a.Scale + b.Scale, a.Offset + b.Offset) end
+UDim.__sub = function(a, b) return UDim.new(a.Scale - b.Scale, a.Offset - b.Offset) end
+UDim.__tostring = function(u) return u.Scale .. ", " .. u.Offset end
+
+UDim2 = {}
+UDim2.__index = UDim2
+function UDim2.new(xs, xo, ys, yo)
+    return setmetatable({X = UDim.new(xs or 0, xo or 0), Y = UDim.new(ys or 0, yo or 0)}, UDim2)
+end
+function UDim2.fromScale(xs, ys) return UDim2.new(xs, 0, ys, 0) end
+function UDim2.fromOffset(xo, yo) return UDim2.new(0, xo, 0, yo) end
+UDim2.__add = function(a, b) return UDim2.new(a.X.Scale + b.X.Scale, a.X.Offset + b.X.Offset, a.Y.Scale + b.Y.Scale, a.Y.Offset + b.Y.Offset) end
+UDim2.__sub = function(a, b) return UDim2.new(a.X.Scale - b.X.Scale, a.X.Offset - b.X.Offset, a.Y.Scale - b.Y.Scale, a.Y.Offset - b.Y.Offset) end
+UDim2.__tostring = function(u) return "{" .. tostring(u.X) .. "}, {" .. tostring(u.Y) .. "}" end
+
+-- math.clamp/round/sign — расширения Luau, которых нет в обычной Lua 5.3
+-- (см. math в fengari, стандартная библиотека). Были только в списке
+-- подсветки синтаксиса, реально не существовали — "attempt to call a nil
+-- value (field 'clamp')" на первой же строке любого обработчика слайдера/
+-- промокода/чего угодно, что их использует (а их используют ОЧЕНЬ часто —
+-- в этой карте минимум в SettingsMenuScript и Plugin.lua).
+function math.clamp(x, min, max)
+    if x < min then return min end
+    if x > max then return max end
+    return x
+end
+function math.round(x) return math.floor(x + 0.5) end
+function math.sign(x)
+    if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
+end
+
+-- CFrame.new(...) — только конструктор + позиция, БЕЗ полноценной алгебры
+-- поворота (нет "*", нет CFrame.Angles с реальным эффектом) — как и у
+-- чтения part.CFrame выше (см. __get_cframe_vecs), это осознанное
+-- ограничение. camera.CFrame/part.CFrame = CFrame.new(pos) хотя бы
+-- переносит позицию (см. __set_prop), CFrame.new(pos, lookAt) поворот не
+-- считает вообще (для этого нужна честная матрица взгляда, которой тут
+-- нет) — известное ограничение, не притворяемся, что его нет.
+CFrame = {}
+CFrame.__index = CFrame
+function CFrame.new(a, b, c)
+    local x, y, z
+    if type(a) == "table" then x, y, z = a.X, a.Y, a.Z
+    else x, y, z = a or 0, b or 0, c or 0 end
+    return setmetatable({
+        X = x, Y = y, Z = z,
+        Position = Vector3.new(x, y, z), p = Vector3.new(x, y, z),
+        lookVector = Vector3.new(0, 0, -1), LookVector = Vector3.new(0, 0, -1),
+        rightVector = Vector3.new(1, 0, 0), RightVector = Vector3.new(1, 0, 0),
+        upVector = Vector3.new(0, 1, 0), UpVector = Vector3.new(0, 1, 0),
+    }, CFrame)
+end
+function CFrame.fromAxisAngle(axis, angle) return CFrame.new(0, 0, 0) end -- поворот игнорируется — см. коммент выше
+function CFrame.Angles(rx, ry, rz) return CFrame.new(0, 0, 0) end
+CFrame.__tostring = function(c) return c.X .. ", " .. c.Y .. ", " .. c.Z end
+
+-- NumberSequence/NumberSequenceKeypoint/ColorSequence(Keypoint) — просто
+-- данные (чаще всего для UIGradient/ParticleEmitter). Визуального градиента
+-- у UIGradient в этом движке нет — эти конструкторы нужны только чтобы
+-- скрипт не падал НА СТРОКЕ ИХ СОЗДАНИЯ, а не чтобы градиент реально
+-- был виден.
+function NumberSequenceKeypoint_new(time, value, envelope) return { Time = time, Value = value, Envelope = envelope or 0 } end
+NumberSequenceKeypoint = { new = NumberSequenceKeypoint_new }
+function NumberSequence_new(a, b)
+    if type(a) == "table" then return { Keypoints = a } end
+    if b ~= nil then return { Keypoints = { NumberSequenceKeypoint_new(0, a), NumberSequenceKeypoint_new(1, b) } } end
+    return { Keypoints = { NumberSequenceKeypoint_new(0, a), NumberSequenceKeypoint_new(1, a) } }
+end
+NumberSequence = { new = NumberSequence_new }
+function ColorSequenceKeypoint_new(time, value) return { Time = time, Value = value } end
+ColorSequenceKeypoint = { new = ColorSequenceKeypoint_new }
+function ColorSequence_new(a, b)
+    if type(a) == "table" then return { Keypoints = a } end
+    if b ~= nil then return { Keypoints = { ColorSequenceKeypoint_new(0, a), ColorSequenceKeypoint_new(1, b) } } end
+    return { Keypoints = { ColorSequenceKeypoint_new(0, a), ColorSequenceKeypoint_new(1, a) } }
+end
+ColorSequence = { new = ColorSequence_new }
+
+Vector2 = {}
+Vector2.__index = Vector2
+function Vector2.new(x, y) return setmetatable({X = x or 0, Y = y or 0}, Vector2) end
+Vector2.__add = function(a, b) return Vector2.new(a.X + b.X, a.Y + b.Y) end
+Vector2.__sub = function(a, b) return Vector2.new(a.X - b.X, a.Y - b.Y) end
+Vector2.__tostring = function(v) return v.X .. ", " .. v.Y end
+
+-- Enum.* — ленивый и кэширующий: Enum.UserInputType.MouseButton1 создаётся
+-- один раз при первом обращении и потом отдаётся ИЗ КЭША тем же объектом,
+-- поэтому "input.UserInputType == Enum.UserInputType.MouseButton1" в
+-- скриптах сравнивает две ссылки на одну и ту же таблицу (обычное Lua "==",
+-- без __eq) — раньше Enum не существовал вовсе (только в списке подсветки
+-- синтаксиса), и любое обращение к Enum.* падало "attempt to index a nil
+-- value (global 'Enum')".
+local __enumCache = {}
+Enum = setmetatable({}, { __index = function(t, enumType)
+    if not __enumCache[enumType] then
+        __enumCache[enumType] = setmetatable({}, { __index = function(t2, name)
+            local key = enumType .. "." .. name
+            if not __enumCache[key] then
+                __enumCache[key] = setmetatable({ Name = name, EnumType = enumType }, {
+                    __tostring = function(e) return "Enum." .. e.EnumType .. "." .. e.Name end,
+                })
+            end
+            return __enumCache[key]
+        end })
+    end
+    return __enumCache[enumType]
+end })
+
 local InstanceMT = {}
 
 -- Event:Connect(fn) — функция-колбэк хранится ЦЕЛИКОМ на Lua-стороне (в
@@ -3427,12 +3559,30 @@ local InstanceMT = {}
 -- уже на первом же :connect(), даже когда сам сигнал был честный.
 local __conns = {}
 local __nextConnId = 1
+local __nextAnimTrackId = 0 -- см. Animator:LoadAnimation в InstanceMT.__index ниже
+-- InputBegan/InputEnded/InputChanged — единственные события, где JS шлёт
+-- НЕ готовые аргументы колбэка, а "сырые" (typeName, x, y) — само
+-- превращение в InputObject (с Enum.UserInputType и Position) сделано
+-- тут, в момент Connect, а не на JS-стороне: Enum это Lua-таблицы,
+-- строить их из JS было бы либо копированием той же кэширующей логики
+-- дважды, либо синтетическими объектами, не равными настоящим Enum.*.
+local function wrapInputEventFn(fn)
+    return function(typeName, x, y)
+        local input = setmetatable({
+            UserInputType = Enum.UserInputType[typeName],
+            KeyCode = Enum.KeyCode.Unknown,
+            Position = Vector3.new(x or 0, y or 0, 0),
+        }, {})
+        return fn(input, false)
+    end
+end
 local function makeEvent(ref, evName)
     local ev = setmetatable({}, { __index = {
         Connect = function(self, fn)
             local id = __nextConnId
             __nextConnId = __nextConnId + 1
-            __conns[id] = fn
+            local isInputEvent = evName == "InputBegan" or evName == "InputEnded" or evName == "InputChanged"
+            __conns[id] = isInputEvent and wrapInputEventFn(fn) or fn
             __register_conn(id, ref, evName)
             return setmetatable({}, { __index = {
                 Disconnect = function() __conns[id] = nil; __unregister_conn(id) end,
@@ -3490,9 +3640,27 @@ InstanceMT.__index = function(t, k)
     if k == "Parent" then return wrap(__get_parent(ref)) end
     if k == "Name" then return __get_name(ref) end
     if k == "ClassName" or k == "className" then return __get_class(ref) end
+    -- player.Character — модельки настоящего Humanoid-персонажа тут нет,
+    -- но в Play есть тот самый ходящий "куб от первого/третьего лица"
+    -- (charBody/charMesh) — считаем его персонажем игрока: раньше
+    -- player.Character всегда был nil, и "if not player.Character then
+    -- player.CharacterAdded:Wait() end" в Main.lua висел бы вечно (ждал
+    -- события, которое никто никогда не шлёт) — теперь читаем настоящий
+    -- ref через __get_character_ref, so=Wait() до него просто не доходит.
+    if k == "Character" and __get_class(ref) == "Player" then
+        return wrap(__get_character_ref())
+    end
     if k == "Position" then
+        if __is_gui_ref(ref) then
+            local xs, xo, ys, yo = __get_gui_position(ref)
+            return UDim2.new(xs, xo, ys, yo)
+        end
         local x, y, z = __get_position(ref)
         return Vector3.new(x, y, z)
+    end
+    if k == "Size" and __is_gui_ref(ref) then
+        local xs, xo, ys, yo = __get_gui_size(ref)
+        return UDim2.new(xs, xo, ys, yo)
     end
     -- Не полноценный CFrame (без умножения/CFrame.Angles) — только чтение
     -- текущей ориентации как Position + три базисных вектора. Этого
@@ -3513,6 +3681,54 @@ InstanceMT.__index = function(t, k)
     if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
         return function(self, name) return wrap(__find_first_child(ref, name)) end
     end
+    -- AbsolutePosition/AbsoluteSize — реальные пиксельные координаты/размер
+    -- GUI-элемента НА ЭКРАНЕ (посчитанные из его Position/Size — UDim2 —
+    -- и размеров родителей), раньше вообще не существовали ("attempt to
+    -- index a nil value"). Меряем настоящий отрисованный DOM-узел
+    -- (getBoundingClientRect через __get_gui_rect), а не пересчитываем
+    -- UDim2 вручную — так само собой учитывается вся цепочка родителей.
+    -- AbsoluteContentSize — то же самое, но полный (скроллируемый) размер
+    -- содержимого: единственный частый практический случай —
+    -- UIListLayout/UIGridLayout внутри ScrollingFrame (см. SongMenuScript),
+    -- и настоящей раскладки списка (переупорядочивание детей) в этом
+    -- движке нет — просто отдаём scrollWidth/scrollHeight родителя.
+    if k == "AbsolutePosition" then
+        local x, y, w, h = __get_gui_rect(ref)
+        return Vector2.new(x, y)
+    end
+    if k == "AbsoluteSize" then
+        local x, y, w, h = __get_gui_rect(ref)
+        return Vector2.new(w, h)
+    end
+    if k == "AbsoluteContentSize" then
+        local w, h = __get_gui_content_size(ref)
+        return Vector2.new(w, h)
+    end
+    -- FindFirstChildOfClass/FindFirstChildWhichIsA — раньше отсутствовали
+    -- (только в списке ключевых слов подсветки), поэтому такой вызов был
+    -- "attempt to call a nil value" — SongMenuScript ищет так свой
+    -- UIListLayout. Прямой перебор через __child_count/__child_at, класс
+    -- каждого — через уже существующий __get_class.
+    if k == "FindFirstChildOfClass" or k == "findFirstChildOfClass" then
+        return function(self, cls)
+            local n = __child_count(ref)
+            for i = 1, n do
+                local c = __child_at(ref, i - 1)
+                if __get_class(c) == cls then return wrap(c) end
+            end
+            return nil
+        end
+    end
+    if k == "FindFirstChildWhichIsA" or k == "findFirstChildWhichIsA" then
+        return function(self, cls)
+            local n = __child_count(ref)
+            for i = 1, n do
+                local c = __child_at(ref, i - 1)
+                if __get_class(c) == cls then return wrap(c) end
+            end
+            return nil
+        end
+    end
     if k == "GetChildren" or k == "children" or k == "getChildren" then
         return function(self)
             local n = __child_count(ref)
@@ -3521,8 +3737,64 @@ InstanceMT.__index = function(t, k)
             return out
         end
     end
+    -- GetDescendants — раньше вообще не было в мосте (только в списке
+    -- ключевых слов подсветки синтаксиса, не в реальной реализации) —
+    -- "attempt to call a table value (method 'GetDescendants')" означало,
+    -- что __index в принципе не находил такой метод и отдавал пустую
+    -- таблицу вместо функции. Рекурсия чисто на Lua поверх тех же
+    -- __child_count/__child_at, что и GetChildren.
+    if k == "GetDescendants" or k == "getDescendants" then
+        return function(self)
+            local out = {}
+            local function walk(r)
+                local n = __child_count(r)
+                for i = 1, n do
+                    local c = __child_at(r, i - 1)
+                    out[#out + 1] = wrap(c)
+                    walk(c)
+                end
+            end
+            walk(ref)
+            return out
+        end
+    end
     if k == "IsA" or k == "isA" then
         return function(self, cls) return __get_class(ref) == cls end
+    end
+    -- GetPropertyChangedSignal(name) — раньше был только заглушкой в списке
+    -- подсветки синтаксиса ("attempt to call a nil value"). Отдельный
+    -- сигнал на "__prop_<Имя>" (не пересекается с обычными именами событий
+    -- вроде Touched) — стреляет из __set_prop на JS-стороне ПОСЛЕ того,
+    -- как свойство реально применилось (см. installLuaBridge), так что
+    -- scroll.CanvasSize = ... внутри обработчика уже увидит новое значение.
+    if k == "GetPropertyChangedSignal" or k == "getPropertyChangedSignal" then
+        return function(self, propName) return makeEvent(ref, "__prop_" .. tostring(propName)) end
+    end
+    -- Animator:LoadAnimation(animation) — настоящего проигрывания анимаций
+    -- по AssetId тут быть не может (нет доступа к реальным ассетам с
+    -- серверов Roblox — это браузерная песочница), но раньше метод не
+    -- существовал ВООБЩЕ ("attempt to call a nil value (method
+    -- 'LoadAnimation')"), а вызывается он внутри самих интро-анимаций
+    -- (например, Michael_Jackson_-_Billie_Jean.lua) БЕЗ pcall вокруг —
+    -- падение обрывало всю функцию, включая task.delay(...) в конце,
+    -- который двигает игру дальше после интро. Возвращаем "пустой", но
+    -- живой AnimationTrack — .Play()/.Stop() ничего не анимируют, но и не
+    -- падают, KeyframeReached/Ended/Stopped существуют и подключаются, но
+    -- никогда не выстрелят по-настоящему.
+    if k == "LoadAnimation" or k == "loadAnimation" then
+        return function(self, anim)
+            __nextAnimTrackId = __nextAnimTrackId + 1
+            local base = -600000 - __nextAnimTrackId * 4
+            return setmetatable({}, { __index = {
+                Play = function() end, Stop = function() end, Pause = function() end,
+                AdjustSpeed = function() end, AdjustWeight = function() end,
+                GetMarkerReachedSignal = function(self2, name) return makeEvent(base, "Event") end,
+                KeyframeReached = makeEvent(base - 1, "Event"),
+                Ended = makeEvent(base - 2, "Event"),
+                Stopped = makeEvent(base - 3, "Event"),
+                Length = 0, TimePosition = 0, Looped = false, Priority = nil, Speed = 1, IsPlaying = false,
+            } })
+        end
     end
     if k == "Destroy" or k == "remove" or k == "Remove" then
         return function(self) __destroy(ref) end
@@ -3565,6 +3837,9 @@ InstanceMT.__index = function(t, k)
     -- сознательная заглушка "на будущее" — сигнал существует, событие в
     -- игре просто ещё не происходит.
     if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseButton1Click"
+        or k == "MouseButton1Down" or k == "MouseButton1Up" or k == "MouseEnter" or k == "MouseLeave"
+        or k == "InputBegan" or k == "InputEnded" or k == "InputChanged"
+        or k == "FocusLost" or k == "Focused"
         or k == "ChildAdded" or k == "ChildRemoved" or k == "DescendantAdded" or k == "DescendantRemoving"
         or k == "Touched" or k == "TouchEnded"
         or k == "Changed" or k == "PropertyChangedSignal"
@@ -3616,7 +3891,11 @@ end
 InstanceMT.__newindex = function(t, k, v)
     local ref = rawget(t, "__ref")
     if k == "Position" then
-        __set_position(ref, v.X, v.Y, v.Z)
+        if __is_gui_ref(ref) then
+            __set_prop(ref, k, v)
+        else
+            __set_position(ref, v.X, v.Y, v.Z)
+        end
         return
     end
     if k == "Parent" then
@@ -3649,8 +3928,132 @@ workspace = wrap(__workspace_ref())
 -- объектов карты, и только если такого нет — создаём виртуальный контейнер
 -- (пустой, но не роняющий скрипт).
 local serviceCache = {}
+-- DataStoreService — раньше не была особым случаем: game:GetService(...)
+-- создавал ПУСТОЙ виртуальный инстанс без единого метода, отсюда "attempt
+-- to call a nil value (method 'GetDataStore')". Настоящего сетевого
+-- DataStore тут быть не может (это браузер, а не сервер Roblox) — вместо
+-- этого простое ин-memory хранилище: живёт, пока идёт Play, обнуляется по
+-- Stop/Play заново (см. luaResetSignals/serviceCache — этот файл вообще не
+-- хранит состояние между запусками, так что это ограничение как минимум
+-- честное, а не притворяется настоящей персистентностью).
+local __dataStores = {}
+local DataStoreMT = { __index = {
+    GetAsync = function(self, key) return self.__data[key] end,
+    SetAsync = function(self, key, value) self.__data[key] = value end,
+    UpdateAsync = function(self, key, fn)
+        local new = fn(self.__data[key])
+        self.__data[key] = new
+        return new
+    end,
+    IncrementAsync = function(self, key, delta)
+        delta = delta or 1
+        local v = (self.__data[key] or 0) + delta
+        self.__data[key] = v
+        return v
+    end,
+    RemoveAsync = function(self, key)
+        local v = self.__data[key]
+        self.__data[key] = nil
+        return v
+    end,
+    GetSortedAsync = function(self) return { GetCurrentPage = function() return {} end } end,
+} }
+local function getDataStore(name)
+    if not __dataStores[name] then
+        __dataStores[name] = setmetatable({ __name = name, __data = {} }, DataStoreMT)
+    end
+    return __dataStores[name]
+end
+local DataStoreServiceObj = setmetatable({}, { __index = {
+    GetDataStore = function(self, name) return getDataStore(name) end,
+    GetOrderedDataStore = function(self, name) return getDataStore(name) end,
+} })
+-- ContentProvider:PreloadAsync — раньше отсутствовал вообще (виртуальный
+-- пустой сервис без единого метода), из-за чего LoadingScreenScript падал
+-- бы прямо внутри task.defer(...). Там ошибку ловит сам task.spawn (см.
+-- реализацию task выше) и не роняет остальной скрипт — но и не продолжает
+-- его: код ПОСЛЕ PreloadAsync (снятие текста "Готово!", fade-out,
+-- loadingGui:Destroy()) просто никогда не выполнялся, и экран загрузки
+-- оставался висеть навсегда, закрывая собой всё, что должно было
+-- появиться под ним. Тут реальных ассетов не грузим (взять их неоткуда
+-- в браузере) — сразу отвечаем Success по каждому.
+local ContentProviderObj = setmetatable({}, { __index = {
+    PreloadAsync = function(self, assets, callback)
+        for _, assetId in ipairs(assets or {}) do
+            if callback then callback(assetId, Enum.AssetFetchStatus.Success) end
+        end
+    end,
+    GetAssetFetchStatus = function(self, assetId) return Enum.AssetFetchStatus.Success end,
+} })
+-- HttpService:JSONEncode/JSONDecode — реально используются (SongMenuScript,
+-- Main.lua) для разбора чартов песен, оба ЗАВЁРНУТЫ в pcall у авторов
+-- скрипта — поэтому раньше, когда HttpService был пустым виртуальным
+-- сервисом без единого метода, ошибка "attempt to call a nil value" НЕ
+-- падала наружу, а тихо ловилась pcall'ом и просто пропускала песню
+-- ("if not ok2 then continue end") — список песен оставался пустым без
+-- единой видимой ошибки в Output. GetAsync/PostAsync честно рушатся —
+-- настоящих сетевых запросов из браузерной песочницы наружу нет и не
+-- будет, тут врать нечем.
+local HttpServiceObj = setmetatable({}, { __index = {
+    JSONEncode = function(self, v) return __json_encode(v) end,
+    JSONDecode = function(self, s) return __json_decode(s) end,
+    UrlEncode = function(self, s) return tostring(s) end,
+    GetAsync = function(self, url) error("HttpService:GetAsync — реальных сетевых запросов из браузерной песочницы нет", 2) end,
+    PostAsync = function(self, url) error("HttpService:PostAsync — реальных сетевых запросов из браузерной песочницы нет", 2) end,
+} })
+-- TweenService:Create(...):Play() — раньше TweenService был пустым
+-- виртуальным сервисом без единого метода: "attempt to call a nil value
+-- (method 'Create')" на любом месте, где он используется (а используется
+-- он массово — очки в Main.lua, уведомления в SettingsMenuScript, блюр в
+-- AgeWarningModule). Само число-в-число покадровое движение — на JS-
+-- стороне (см. updateTweens/__tween_register), тут только конструкция
+-- объекта Tween с Play/Cancel/Pause и событием Completed.
+local __nextTweenId = 1
+local TweenMT = { __index = {
+    Play = function(self)
+        for name, target in pairs(self.__props) do
+            __tween_register(self.__completedKey, self.__ref, name, target, self.__time)
+        end
+    end,
+    Pause = function(self) end, -- честной паузы нет — покадровый твин на JS-стороне идёт по времени, а не по кадрам
+    Cancel = function(self) end, -- то же самое: остановить конкретный твин посреди пути пока нельзя
+} }
+local TweenServiceObj = setmetatable({}, { __index = {
+    Create = function(self, instance, tweenInfo, props)
+        local id = __nextTweenId
+        __nextTweenId = __nextTweenId + 1
+        local completedKey = -500000 - id -- отдельный диапазон, не пересекается с обычными ref-ами (см. __tween_register)
+        return setmetatable({
+            __ref = rawget(instance, "__ref"), __props = props, __time = (tweenInfo and tweenInfo.Time) or 1,
+            __completedKey = completedKey, Completed = makeEvent(completedKey, "Event"),
+        }, TweenMT)
+    end,
+} })
+TweenInfo = {}
+function TweenInfo.new(time, easingStyle, easingDirection, repeatCount, reverses, delayTime)
+    return {
+        Time = time or 1, EasingStyle = easingStyle, EasingDirection = easingDirection,
+        RepeatCount = repeatCount or 0, Reverses = reverses or false, DelayTime = delayTime or 0,
+    }
+end
 local function getService(name)
     if serviceCache[name] then return serviceCache[name] end
+    if name == "DataStoreService" then
+        serviceCache[name] = DataStoreServiceObj
+        return DataStoreServiceObj
+    end
+    if name == "ContentProvider" then
+        serviceCache[name] = ContentProviderObj
+        return ContentProviderObj
+    end
+    if name == "HttpService" then
+        serviceCache[name] = HttpServiceObj
+        return HttpServiceObj
+    end
+    if name == "TweenService" then
+        serviceCache[name] = TweenServiceObj
+        return TweenServiceObj
+    end
     local ref = __find_service(name)
     if ref == -1 then ref = __instance_new(name) end
     local inst = wrap(ref)
@@ -3662,9 +4065,104 @@ game = setmetatable({}, {
         if k == "GetService" or k == "getService" or k == "service" then
             return function(self, name) return getService(name) end
         end
+        if k == "Name" then return "game" end
+        if k == "ClassName" or k == "className" then return "DataModel" end
+        -- game сам по себе — как обычный Instance с детьми-сервисами
+        -- (Workspace/Players/...), только эти дети лежат не в
+        -- luaChildrenByRef (у него родитель -1, туда не попадает — см.
+        -- __root_count/__root_at), а собираются отдельно. Раньше ничего
+        -- этого не было: game:GetDescendants() уходило в общий "else"
+        -- (getService("GetDescendants")) и создавало виртуальный инстанс с
+        -- таким именем — тот факт, что он ТАБЛИЦА, а не функция, и давал
+        -- "attempt to call a table value".
+        if k == "GetChildren" or k == "getChildren" then
+            return function(self)
+                local n = __root_count()
+                local out = {}
+                for i = 1, n do out[i] = wrap(__root_at(i - 1)) end
+                return out
+            end
+        end
+        if k == "GetDescendants" or k == "getDescendants" then
+            return function(self)
+                local out = {}
+                local function walk(r)
+                    local n = __child_count(r)
+                    for i = 1, n do
+                        local c = __child_at(r, i - 1)
+                        out[#out + 1] = wrap(c)
+                        walk(c)
+                    end
+                end
+                local n = __root_count()
+                for i = 1, n do
+                    local r = __root_at(i - 1)
+                    out[#out + 1] = wrap(r)
+                    walk(r)
+                end
+                return out
+            end
+        end
+        if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
+            return function(self, name) return getService(name) end -- у game "дети" верхнего уровня и есть сервисы
+        end
+        if k == "IsA" or k == "isA" then
+            return function(self, cls) return cls == "DataModel" or cls == "Instance" end
+        end
         return getService(k)
     end
 })
+
+-- require(moduleScriptInstance) — стандартный require() из библиотек Lua
+-- (luaL_openlibs) ждёт СТРОКУ (имя модуля на диске) и падает "bad argument
+-- #1 to 'require' (string expected, got table)" на настоящем Roblox-коде
+-- вида require(ReplicatedStorage.Modules.Foo). Здесь он полностью
+-- переопределён под Roblox-семантику: принимает инстанс ModuleScript,
+-- компилирует и выполняет его Source РОВНО ОДИН РАЗ (см. __compile_module
+-- на стороне JS), кэширует результат по ref и ловит циклический require —
+-- всё как единый Lua-модуль, тем же принципом, что и __conns выше.
+local __moduleCache = {}
+local __moduleHasRun = {}
+local __moduleLoading = {}
+function require(mod)
+    local ref = (type(mod) == "table") and rawget(mod, "__ref") or mod
+    if ref == nil then error("require(): ожидается ModuleScript-инстанс", 2) end
+    if __moduleHasRun[ref] then return __moduleCache[ref] end
+    if __moduleLoading[ref] then
+        error("циклический require() — модуль #" .. tostring(ref) .. " уже выполняется", 2)
+    end
+    local ok, fnOrErr = __compile_module(ref)
+    if not ok then error(fnOrErr, 0) end
+    __moduleLoading[ref] = true
+    local okRun, result = pcall(fnOrErr, wrap(ref))
+    __moduleLoading[ref] = nil
+    if not okRun then error(result, 0) end
+    __moduleHasRun[ref] = true
+    __moduleCache[ref] = result
+    return result
+end
+
+-- task.* (Luau) — старые скрипты почти все на wait()/spawn(), но часть уже
+-- написана под новый task-планировщик. Реализован поверх ТЕХ ЖЕ примитивов
+-- (wait() и стандартной coroutine — обе честно работают, см. фикс
+-- fireLuaSignal/__wait_signal выше), отдельного JS-шедулера не требуется.
+task = {}
+task.wait = function(t) return wait(t) end
+function task.spawn(fn, ...)
+    local co = coroutine.create(fn)
+    local ok, err = coroutine.resume(co, ...)
+    if not ok then warn("ошибка в task.spawn: " .. tostring(err)) end
+    return co
+end
+function task.delay(t, fn, ...)
+    local args = { ... }
+    return task.spawn(function() wait(t); fn(table.unpack(args)) end)
+end
+task.defer = task.spawn
+function task.cancel(co)
+    -- Честной отмены "спящей" в luaWaits корутины отсюда не достать (нет
+    -- ссылки на её запись в шедулере) — no-op, чтобы не падать хотя бы.
+end
 `;
 
 
@@ -3715,6 +4213,12 @@ game = setmetatable({}, {
         // source — имя скрипта-источника (для print/warn/error) или null для
         // системных сообщений (загрузка fengari, ошибка компиляции и т.п.),
         // trace — необязательный текст traceback'а (только для ошибок).
+        // Одна сессия Play — один id, генерируется при старте (см.
+        // startLuaScriptsInner) — сервер группирует записи одной сессии в
+        // один файл logs/play_<время>.log (см. /api/log в app.py). Не
+        // блокирует ничего — если бэкенд недоступен/лог не пишется, игра
+        // продолжает работать как обычно, просто без файла на диске.
+        let luaLogSessionId = null;
         function logLuaOutput(level, text, source, trace, sideCls) {
             luaOutputLines.push({ level, text, source: source || null, trace: trace || null, sideCls: sideCls || null, time: luaTimestamp() });
             if (luaOutputLines.length > 300) luaOutputLines.shift();
@@ -3722,6 +4226,16 @@ game = setmetatable({}, {
             (level === 'error' || level === 'warn' ? console.warn : console.log)(
                 '[Lua' + (source ? ':' + source : '') + '] ' + text + (trace ? '\n' + trace : '')
             );
+            if (luaLogSessionId) {
+                fetch('/api/log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session: luaLogSessionId, time: luaTimestamp(), level,
+                        source: source || sideCls || '', text: trace ? text + '\n' + trace : text,
+                    }),
+                }).catch(() => { /* нет сети/сервера — молча пропускаем, панель Output и так работает */ });
+            }
         }
 
         function clearLuaOutput() {
@@ -3787,16 +4301,29 @@ game = setmetatable({}, {
                 mesh.matrix.compose(new THREE.Vector3(x, y, z), q, sc);
             }
         }
+        // Разумные Roblox-дефолты для свойств, которых у этого движка нет
+        // ни в meshes (Position/Transparency/CanCollide), ни в GUI, ни в
+        // virtualInstanceProps — Sound и подобные "не визуальные" классы
+        // (см. комментарий у Instance.new про такие классы) реально
+        // существуют в самой карте (не через Instance.new), так что для
+        // них не было НИКАКОГО хранилища свойств вообще: чтение всегда
+        // отдавало null. "sound.Volume * k" на первом же чтении падало
+        // "attempt to perform arithmetic on a nil value" — с нужным полем
+        // дефолт хотя бы совпадает с тем, что было бы в настоящем Roblox.
+        const GENERIC_PROP_DEFAULTS = {
+            Volume: 0.5, PlaybackSpeed: 1, TimePosition: 0, SoundId: '',
+            Looped: false, Playing: false, PlayOnRemove: false,
+        };
+        let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
+
         function luaGetGenericProp(ref, name) {
             if (name === 'Name' && luaByRef[ref]) return luaByRef[ref].name;
-            // Instance.new() — нет меша/тела вообще, все свойства просто
-            // лежат в обычном JS-объекте, заведённом при создании.
-            if (virtualInstanceProps[ref]) {
-                const v = virtualInstanceProps[ref][name];
-                return v !== undefined ? v : null;
-            }
-            // GUI-объекты (ScreenGui/Frame/TextLabel/...) не имеют меша —
-            // их свойства читаются из guiPropsByRef (см. loadGuiOverlay).
+            // GUI-объекты — ПЕРЕД virtualInstanceProps: Instance.new("Frame")
+            // тоже заводит virtualInstanceProps (см. luaCreateVirtualInstance),
+            // но если это GUI-класс, у него ЕЩЁ и guiPropsByRef — та самая
+            // "живая" копия, которую видит DOM-рендер. Раньше проверка
+            // virtualInstanceProps шла первой и просто перехватывала любое
+            // чтение/запись раньше, чем дело доходило до GUI-ветки.
             if (guiPropsByRef[ref] && name in guiPropsByRef[ref]) {
                 const v = guiPropsByRef[ref][name];
                 // Position/Size — составные UDim2-объекты, мост может
@@ -3806,6 +4333,12 @@ game = setmetatable({}, {
                 // независимого чтения/логирования, не для арифметики над UDim2.
                 return (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
             }
+            // Instance.new() — нет меша/тела вообще, все свойства просто
+            // лежат в обычном JS-объекте, заведённом при создании.
+            if (virtualInstanceProps[ref]) {
+                const v = virtualInstanceProps[ref][name];
+                return v !== undefined ? v : null;
+            }
             const mesh = sceneObjs[ref];
             if (name === 'Transparency') {
                 return mesh && mesh.material ? 1 - (mesh.material.opacity !== undefined ? mesh.material.opacity : 1) : 0;
@@ -3814,20 +4347,22 @@ game = setmetatable({}, {
                 const body = physicsBodies[ref];
                 return body ? body.collisionFilterMask !== 0 : true;
             }
+            if (luaGenericPropsByRef[ref] && name in luaGenericPropsByRef[ref]) return luaGenericPropsByRef[ref][name];
+            if (name in GENERIC_PROP_DEFAULTS) return GENERIC_PROP_DEFAULTS[name];
             return null;
         }
         function luaSetGenericProp(ref, name, value) {
             if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
-            if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
-            // GUI: Text/Visible/BackgroundTransparency/TextTransparency и
-            // прочие простые (число/строка/булево) свойства патчатся прямо
-            // в DOM-оверлей — см. guiPatchProp/applyGuiElementStyle.
+            // GUI — ПЕРЕД virtualInstanceProps, той же причине, что и в
+            // luaGetGenericProp выше: иначе запись на свежесозданном
+            // Instance.new("Frame") молча уходила мимо DOM.
             // Color3/UDim2 через мост не проставить (мост несёт только
             // числа/строки/булевы, см. installLuaBridge), поэтому для
             // BackgroundColor3/TextColor3/Position/Size это ограничение.
             if (guiPropsByRef[ref]) {
                 if (guiPatchProp(ref, name, value)) return;
             }
+            if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
             const mesh = sceneObjs[ref];
             if (name === 'Transparency' && mesh && mesh.material) {
                 mesh.material.transparent = value > 0;
@@ -3839,7 +4374,7 @@ game = setmetatable({}, {
                 if (body) body.collisionFilterMask = value ? 1 : 0;
                 return;
             }
-            logLuaOutput('warn', 'свойство "' + name + '" пока не поддержано Lua-мостом (только Position/Transparency/CanCollide, GUI Text/Visible/... + произвольные на Instance.new())');
+            (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {})[name] = value;
         }
         // Отдельный, СЫРОЙ индекс иерархии для Lua-моста — специально НЕ
         // переиспользует treeByRef/parentByRef (те строятся из /api/tree,
@@ -3963,7 +4498,16 @@ game = setmetatable({}, {
             remoteQueue = remoteQueue.filter(x => x.dueAt > now);
             for (const item of ready) {
                 const evName = item.targetSide === 'server' ? 'OnServerEvent' : 'OnClientEvent';
-                fireLuaSignal(item.ref, evName, item.args);
+                // RemoteEvent.OnServerEvent(player, ...) — player ПЕРВЫМ
+                // аргументом это не опция, а часть самого API в настоящем
+                // Roblox; раньше тут просто не было вообще ничего —
+                // RecordsServer.lua ловил бы код промокода на месте player
+                // и падал на первом же player.Name. Движок моделирует
+                // ровно одного LocalPlayer — его и подставляем.
+                const args = evName === 'OnServerEvent'
+                    ? [{ __instanceRef: luaPlayerRef }, ...item.args]
+                    : item.args;
+                fireLuaSignal(item.ref, evName, args);
             }
         }
 
@@ -3989,11 +4533,46 @@ game = setmetatable({}, {
             }
             return -1;
         }
+        // Корневые сервисы (Workspace/Players/ReplicatedStorage/...) — их
+        // родитель -1, а luaChildrenByRef[-1] сознательно не заполняется
+        // (см. startLuaScriptsInner, "parent !== -1" при построении
+        // luaChildrenByRef). Нужно отдельно для game:GetChildren()/
+        // GetDescendants() — раньше их не было вовсе, и game:GetDescendants()
+        // уходило в getService("GetDescendants"), создавая виртуальный
+        // инстанс с таким именем ("attempt to call a table value" — сам
+        // game ловился как обычный сервис по неизвестному имени).
+        function luaRootRefs() {
+            const out = [];
+            for (const ref in luaParentByRef) {
+                if (luaParentByRef[ref] === -1) out.push(parseInt(ref));
+            }
+            return out;
+        }
+        // Классы, у которых есть визуальное GUI-представление в DOM-оверлее
+        // (см. app.py GUI_CLASSES) — используется, чтобы Instance.new(...)
+        // сразу заводил guiPropsByRef, а не только virtualInstanceProps.
+        const GUI_CLASS_NAMES = new Set([
+            'ScreenGui', 'BillboardGui', 'SurfaceGui', 'Frame', 'ScrollingFrame',
+            'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
+            'UIListLayout', 'UIGridLayout', 'UIPadding', 'UICorner', 'UIStroke',
+            'UIAspectRatioConstraint', 'UIGradient',
+        ]);
         function luaCreateVirtualInstance(className) {
             const ref = luaNextVirtualRef--;
             luaByRef[ref] = { cls: className, name: className };
             luaParentByRef[ref] = -1;
             virtualInstanceProps[ref] = {};
+            // Instance.new("TextButton") и т.п. — раньше это заводило ТОЛЬКО
+            // virtualInstanceProps, а luaSetGenericProp проверяет именно его
+            // ПЕРВЫМ и возвращается сразу же (см. её код) — до guiPropsByRef
+            // дело просто не доходило. Такая кнопка физически не могла
+            // ничего показать: .Text/.Size/.BackgroundColor3 тихо оседали в
+            // virtualInstanceProps, откуда их никто никогда не читает для
+            // отрисовки (не Clone() — у него отдельный, уже рабочий путь
+            // через cloneGuiSubtreeInto).
+            if (GUI_CLASS_NAMES.has(className)) {
+                guiPropsByRef[ref] = { ref, cls: className, Name: className, parent: -1 };
+            }
             return ref;
         }
         function luaCloneRef(ref) {
@@ -4010,7 +4589,47 @@ game = setmetatable({}, {
             }
             const p = luaPositionOfRef(ref);
             if (p) luaSetPositionOfRef(newRef, p.x, p.y, p.z);
+            // GUI (Frame/TextButton/...) раньше тут вообще не копировался —
+            // ни свойства (Position/Size/Text/BackgroundColor3/...), ни, тем
+            // более, дочерние элементы. template:Clone() в SongMenuScript
+            // возвращал класс/имя без единого визуального свойства и без
+            // вложенных TextLabel/UICorner и т.п. — карточка песни физически
+            // не могла НИЧЕГО показать, даже будучи правильно
+            // запараенчена в SongList.
+            if (guiPropsByRef[ref]) {
+                cloneGuiSubtreeInto(ref, newRef);
+            }
             return newRef;
+        }
+        // Общая рекурсивная копия GUI-поддерева — используется и Clone()
+        // (luaCloneRef), и StarterGui->PlayerGui при входе в Play
+        // (cloneStarterGuiIntoPlayerGui). Копирует guiPropsByRef и
+        // ЗАПАРЕНЧИВАЕТ детей (через luaSetParent) под уже готовый newRef —
+        // сам newRef при этом никуда не парентится этой функцией.
+        // Рекурсивно клонирует GUI-поддерево. Для корня (origRef -> newRef,
+        // вызывается из luaCloneRef) newRef ещё не запараенчен — как и в
+        // настоящем Roblox Clone(), только сам скрипт выставляет .Parent
+        // потом. Для детей — сразу же парентит их (luaSetParent) под уже
+        // готовый новый родитель, ПОСЛЕ того как guiPropsByRef[newChildRef]
+        // уже проставлен: luaSetParent проверяет "это GUI?" именно по нему,
+        // чтобы сразу обновить guiChildrenByRef и отрендерить узел, если
+        // родитель уже виден на экране.
+        function cloneGuiSubtreeInto(origRef, newRef) {
+            guiPropsByRef[newRef] = Object.assign({}, guiPropsByRef[origRef], { cls: luaByRef[newRef].cls, ref: newRef, parent: luaParentByRef[newRef] });
+            for (const childRef of (luaChildrenByRef[origRef] || [])) {
+                const childInfo = luaByRef[childRef];
+                if (!childInfo) continue;
+                const newChildRef = luaCreateVirtualInstance(childInfo.cls);
+                luaByRef[newChildRef].name = childInfo.name;
+                if (virtualInstanceProps[childRef]) {
+                    virtualInstanceProps[newChildRef] = Object.assign({}, virtualInstanceProps[childRef]);
+                }
+                if (guiPropsByRef[childRef]) {
+                    guiPropsByRef[newChildRef] = Object.assign({}, guiPropsByRef[childRef], { cls: childInfo.cls, ref: newChildRef });
+                }
+                luaSetParent(newChildRef, newRef);
+                if (guiPropsByRef[childRef]) cloneGuiSubtreeInto(childRef, newChildRef);
+            }
         }
         function luaSetParent(ref, parentRef) {
             const oldParent = luaParentByRef[ref];
@@ -4020,6 +4639,36 @@ game = setmetatable({}, {
             luaParentByRef[ref] = parentRef;
             if (parentRef !== -1) {
                 (luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef] || []).push(ref);
+            }
+            // GUI-репарентинг (например, songCard.Parent = scroll после
+            // template:Clone()) раньше НИКАК не отражался в guiChildrenByRef/
+            // DOM — эта карта строится ЦЕЛИКОМ ОДИН РАЗ в
+            // renderGuiOverlayFromClient() при старте Play и дальше никогда
+            // не обновлялась. Клонированные карточки песен получали новый
+            // Parent, но физически никогда не появлялись на экране: движок
+            // даже не подозревал об их существовании при отрисовке.
+            if (guiPropsByRef[ref]) {
+                if (oldParent !== undefined && guiChildrenByRef[oldParent]) {
+                    guiChildrenByRef[oldParent] = guiChildrenByRef[oldParent].filter(c => c !== ref);
+                }
+                if (parentRef !== -1) {
+                    (guiChildrenByRef[parentRef] = guiChildrenByRef[parentRef] || []).push(ref);
+                }
+                let el = guiDomByRef[ref];
+                const parentEl = guiDomByRef[parentRef];
+                if (el && parentEl) {
+                    parentEl.appendChild(el); // уже был в DOM (редкий, но валидный повторный репарентинг) — просто переносим узел
+                } else if (!el && parentEl) {
+                    guiRenderNode(ref, parentEl); // первое появление в DOM — вместе со всем поддеревом (рекурсивно)
+                } else if (el && !parentEl) {
+                    el.remove(); // новый родитель ещё не отрисован (или это Parent=nil) — прячем, пока не понадобится
+                    delete guiDomByRef[ref];
+                }
+                // Пере-раскладка списка (см. applyUIListLayout) — если у
+                // старого/нового родителя есть UIListLayout, состав детей
+                // только что поменялся, карточки нужно переставить.
+                if (oldParent !== undefined) applyUIListLayout(oldParent);
+                if (parentRef !== -1) applyUIListLayout(parentRef);
             }
             // Настоящее, а не заглушечное срабатывание — ChildAdded/ChildRemoved
             // реально стреляют при репарентинге (Instance.new(...).Parent = x,
@@ -4040,6 +4689,23 @@ game = setmetatable({}, {
                 const body = physicsBodies[ref];
                 if (body && physicsWorld) { physicsWorld.removeBody(body); delete physicsBodies[ref]; }
             }
+            // GUI-узлы (ScreenGui/Frame/TextLabel/...) тут вообще не
+            // учитывались — loadingGui:Destroy() чистил только 3D-мир и
+            // JS-реестр ссылок, а сам DOM-элемент (guiDomByRef[ref]) так и
+            // оставался в #gui-overlay навсегда, просто без родителя в
+            // luaParentByRef — визуально экран не исчезал.
+            const guiEl = guiDomByRef[ref];
+            if (guiEl) {
+                if (guiEl.parentNode) guiEl.parentNode.removeChild(guiEl);
+                delete guiDomByRef[ref];
+                delete guiPropsByRef[ref];
+            }
+            const guiParentRef = luaParentByRef[ref];
+            if (guiParentRef !== undefined && guiChildrenByRef[guiParentRef]) {
+                guiChildrenByRef[guiParentRef] = guiChildrenByRef[guiParentRef].filter(c => c !== ref);
+                applyUIListLayout(guiParentRef); // осиротевшие места в списке (см. applyUIListLayout)
+            }
+            delete guiChildrenByRef[ref];
             const parentRef = luaParentByRef[ref];
             if (parentRef !== undefined && luaChildrenByRef[parentRef]) {
                 luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef].filter(c => c !== ref);
@@ -4074,6 +4740,80 @@ game = setmetatable({}, {
                 luaWaits.push({ co: L2, resumeAt: performance.now() + Math.max(0, secs) * 1000 });
                 return lua.lua_yield(L2, 0);
             });
+            // JSONEncode/JSONDecode — HttpService:JSONDecode(...) раньше не
+            // существовал вообще (падал в общий __find_first_child -> nil ->
+            // "attempt to call a nil value"), и т.к. и SongMenuScript, и
+            // Main.lua зовут его строго внутри pcall(...), ошибка НЕ
+            // ронялась наружу — просто "continue" на каждой песне,
+            // тихо-пусто списком. Настоящая JSON<->Lua конвертация через
+            // JSON.parse/stringify + рекурсивный обход стека.
+            function pushJsAsLua(L2, v) {
+                if (v === null || v === undefined) { lua.lua_pushnil(L2); return; }
+                if (typeof v === 'number') { lua.lua_pushnumber(L2, v); return; }
+                if (typeof v === 'boolean') { lua.lua_pushboolean(L2, v); return; }
+                if (typeof v === 'string') { lua.lua_pushstring(L2, v); return; }
+                if (Array.isArray(v)) {
+                    lua.lua_createtable(L2, v.length, 0);
+                    for (let i = 0; i < v.length; i++) {
+                        pushJsAsLua(L2, v[i]);
+                        lua.lua_rawseti(L2, -2, i + 1);
+                    }
+                    return;
+                }
+                if (typeof v === 'object') {
+                    lua.lua_createtable(L2, 0, Object.keys(v).length);
+                    for (const k in v) {
+                        lua.lua_pushstring(L2, k);
+                        pushJsAsLua(L2, v[k]);
+                        lua.lua_rawset(L2, -3);
+                    }
+                    return;
+                }
+                lua.lua_pushnil(L2);
+            }
+            function luaToJs(L2, idx) {
+                const ty = lua.lua_type(L2, idx);
+                if (ty === lua.LUA_TNIL) return null;
+                if (ty === lua.LUA_TBOOLEAN) return !!lua.lua_toboolean(L2, idx);
+                if (ty === lua.LUA_TNUMBER) return lua.lua_tonumber(L2, idx);
+                if (ty === lua.LUA_TSTRING) return lua.lua_tojsstring(L2, idx);
+                if (ty === lua.LUA_TTABLE) {
+                    const n = lua.lua_rawlen(L2, idx);
+                    if (n > 0) {
+                        const arr = [];
+                        for (let i = 1; i <= n; i++) {
+                            lua.lua_rawgeti(L2, idx, i);
+                            arr.push(luaToJs(L2, -1));
+                            lua.lua_pop(L2, 1);
+                        }
+                        return arr;
+                    }
+                    const obj = {};
+                    lua.lua_pushnil(L2);
+                    while (lua.lua_next(L2, idx) !== 0) {
+                        const kty = lua.lua_type(L2, -2);
+                        let key = null;
+                        if (kty === lua.LUA_TSTRING) key = lua.lua_tojsstring(L2, -2);
+                        else if (kty === lua.LUA_TNUMBER) key = String(lua.lua_tonumber(L2, -2));
+                        if (key !== null) obj[key] = luaToJs(L2, -1);
+                        lua.lua_pop(L2, 1);
+                    }
+                    return obj;
+                }
+                return null;
+            }
+            def('__json_encode', function (L2) {
+                let out = '{}';
+                try { out = JSON.stringify(luaToJs(L2, 1)); } catch (e) { /* циклическая ссылка и т.п. — отдаём безопасный fallback */ }
+                lua.lua_pushstring(L2, out === undefined ? 'null' : out);
+                return 1;
+            });
+            def('__json_decode', function (L2) {
+                let val = null;
+                try { val = JSON.parse(lua.lua_tojsstring(L2, 1)); } catch (e) { /* невалидный JSON — nil, как и настоящий Roblox упал бы через error(), но тут безопаснее отдать nil */ }
+                pushJsAsLua(L2, val);
+                return 1;
+            });
             // Signal:Wait()/:wait() — используется тем же принципом, что и
             // wait(secs) выше: уступаем корутину L2 (это либо собственная
             // корутина скрипта из runLuaScript, либо — после фикса ниже —
@@ -4086,6 +4826,47 @@ game = setmetatable({}, {
                 const evName = lua.lua_tojsstring(L2, 2);
                 luaSignalWaits.push({ co: L2, ref, evName });
                 return lua.lua_yield(L2, 0);
+            });
+            // require(moduleScriptInstance) — компилирует Source конкретного
+            // ModuleScript (см. luaModuleSourceByRef, наполняется в
+            // startLuaScriptsInner из /api/scripts) в function(script)...end,
+            // как и обычные Script/LocalScript (см. runLuaScript) — у модуля
+            // тоже есть свой `script`. Сам вызов, кэш по ref и защита от
+            // циклического require() — в Lua (см. require() в LUA_PRELUDE);
+            // эта функция — только "скомпилируй мне ref N", возвращает
+            // (true, function) или (false, "текст ошибки"), НИКОГДА не
+            // бросает Lua error() сама — чтобы не зависеть от того, как
+            // именно fengari прокидывает luaL_error через JS-биндинг
+            // (см. комментарий у __conns выше про тот же принцип).
+            def('__compile_module', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const src = luaModuleSourceByRef[ref];
+                if (src === undefined) {
+                    lua.lua_pushboolean(L2, false);
+                    lua.lua_pushstring(L2, 'require(): ссылка #' + ref + ' — не ModuleScript этой карты');
+                    return 2;
+                }
+                const chunkname = luaModuleNameByRef[ref] || ('Module#' + ref);
+                const wrapped = 'return function(script)\n' + src + '\nend';
+                let status = loadLuaChunk(L2, wrapped, chunkname);
+                if (status !== lua.LUA_OK) {
+                    const msg = luaErrToString(L2);
+                    lua.lua_pop(L2, 1);
+                    lua.lua_pushboolean(L2, false);
+                    lua.lua_pushstring(L2, 'ошибка компиляции модуля ' + chunkname + ': ' + msg);
+                    return 2;
+                }
+                status = lua.lua_pcall(L2, 0, 1, 0); // достаём саму function(script)...end как значение
+                if (status !== lua.LUA_OK) {
+                    const msg = luaErrToString(L2);
+                    lua.lua_pop(L2, 1);
+                    lua.lua_pushboolean(L2, false);
+                    lua.lua_pushstring(L2, msg);
+                    return 2;
+                }
+                lua.lua_pushboolean(L2, true);
+                lua.lua_insert(L2, -2); // стек был [function, true] -> [true, function]
+                return 2;
             });
             def('__get_parent', function (L2) {
                 const ref = luaParentByRef[lua.lua_tonumber(L2, 1)];
@@ -4106,6 +4887,35 @@ game = setmetatable({}, {
                 const p = luaPositionOfRef(lua.lua_tonumber(L2, 1));
                 lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
                 return 3;
+            });
+            // GUI-объекты (ScreenGui/Frame/...) хранят Position/Size как
+            // UDim2 (в guiPropsByRef), а НЕ как 3D-координаты — но
+            // "if k == 'Position' then ... Vector3.new(...) end" в
+            // InstanceMT.__index раньше срабатывал БЕЗУСЛОВНО для любого
+            // инстанса, GUI-объект или нет: entry.frame.Position (кадр
+            // ноты в геймплее, обычный Instance.new("Frame")) отдавал
+            // Vector3(0,0,0) вместо настоящего UDim2, и
+            // "entry.frame.Position.X.Scale" падал "attempt to index a
+            // number value (field 'X')" — .X у Vector3 это уже ЧИСЛО, а
+            // скрипт ждал вложенный UDim с полем .Scale. __is_gui_ref
+            // нужен, чтобы InstanceMT знал, по какому пути идти.
+            def('__is_gui_ref', function (L2) {
+                lua.lua_pushboolean(L2, !!guiPropsByRef[lua.lua_tonumber(L2, 1)]);
+                return 1;
+            });
+            def('__get_gui_position', function (L2) {
+                const p = (guiPropsByRef[lua.lua_tonumber(L2, 1)] || {}).Position || {};
+                const x = p.x || {}, y = p.y || {};
+                lua.lua_pushnumber(L2, x.scale || 0); lua.lua_pushnumber(L2, x.offset || 0);
+                lua.lua_pushnumber(L2, y.scale || 0); lua.lua_pushnumber(L2, y.offset || 0);
+                return 4;
+            });
+            def('__get_gui_size', function (L2) {
+                const p = (guiPropsByRef[lua.lua_tonumber(L2, 1)] || {}).Size || {};
+                const x = p.x || {}, y = p.y || {};
+                lua.lua_pushnumber(L2, x.scale || 0); lua.lua_pushnumber(L2, x.offset || 0);
+                lua.lua_pushnumber(L2, y.scale || 0); lua.lua_pushnumber(L2, y.offset || 0);
+                return 4;
             });
             // CFrame раньше не читался мостом вообще — .CFrame падал в
             // __get_prop -> __find_first_child -> nil -> "attempt to index
@@ -4135,6 +4945,47 @@ game = setmetatable({}, {
             def('__set_position', function (L2) {
                 luaSetPositionOfRef(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3), lua.lua_tonumber(L2, 4));
                 return 0;
+            });
+            // AbsolutePosition/AbsoluteSize — меряем настоящий отрисованный
+            // DOM-узел (getBoundingClientRect), а не пересчитываем UDim2
+            // вручную по всей цепочке родителей — тот же результат, но
+            // без риска рассинхронизации с тем, что реально нарисовано.
+            // #gui-overlay стоит в левом верхнем углу вьюпорта, так что
+            // координаты клиента и есть координаты экрана, как в Roblox.
+            def('__get_gui_rect', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const el = guiDomByRef[ref];
+                let x = 0, y = 0, w = 0, h = 0;
+                if (el) { const r = el.getBoundingClientRect(); x = r.left; y = r.top; w = r.width; h = r.height; }
+                lua.lua_pushnumber(L2, x); lua.lua_pushnumber(L2, y);
+                lua.lua_pushnumber(L2, w); lua.lua_pushnumber(L2, h);
+                return 4;
+            });
+            // AbsoluteContentSize — свойство UIListLayout/UIGridLayout, а не
+            // самого контейнера, но измеримый DOM-узел — это его родитель
+            // (ScrollingFrame). Настоящей раскладки списка (авто-стек
+            // детей по UIListLayout) в этом движке нет — только это число,
+            // достаточное, чтобы CanvasSize можно было честно посчитать.
+            def('__get_gui_content_size', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const parentRef = luaParentByRef[ref];
+                const el = guiDomByRef[parentRef];
+                lua.lua_pushnumber(L2, el ? el.scrollWidth : 0);
+                lua.lua_pushnumber(L2, el ? el.scrollHeight : 0);
+                return 2;
+            });
+            // PlayerModule:GetControls():Disable()/:Enable() (см.
+            // PLAYER_MODULE_SOURCE/bootstrapClientPlayer) — по-настоящему
+            // останавливает WASD-ходьбу персонажа и поворот камеры мышью/
+            // тачем во время Play (applyCharacterControl/onMM/onTM), а не
+            // просто существует для галочки.
+            def('__set_controls_enabled', function (L2) {
+                luaControlsDisabled = !lua.lua_toboolean(L2, 1);
+                return 0;
+            });
+            def('__get_character_ref', function (L2) {
+                lua.lua_pushnumber(L2, luaCharacterRef);
+                return 1;
             });
             def('__find_first_child', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
@@ -4167,17 +5018,105 @@ game = setmetatable({}, {
                 else lua.lua_pushstring(L2, String(v));
                 return 1;
             });
+            // Составные Roblox-типы (UDim2 у Position/Size, Color3 у
+            // BackgroundColor3/TextColor3/...) в Lua — обычные таблицы
+            // (см. UDim2.new/Color3.new в LUA_PRELUDE), но луа-мост раньше
+            // прокидывал в JS только number/boolean/string — LUA_TTABLE
+            // молча превращался в null, поэтому "frame.Position =
+            // UDim2.new(...)" ничего не двигало (не падало, просто не
+            // применялось). Теперь для двух опознаваемых форм (по полям
+            // X.Scale/X.Offset — UDim2; по R/G/B — Color3) достаём числа
+            // через lua_getfield и собираем ровно ту JS-форму, которую ждут
+            // udim2ToCssPos/udim2ToCssSize/color3ToCss (см. ниже) —
+            // остальные табличные свойства по-прежнему не поддержаны.
+            function luaTableToJsPropValue(L2, idx) {
+                const field = (parentKey, childKey) => {
+                    lua.lua_getfield(L2, idx, parentKey);
+                    lua.lua_getfield(L2, -1, childKey);
+                    const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0;
+                    lua.lua_pop(L2, 2); // childKey-значение + parentKey-таблица
+                    return v;
+                };
+                lua.lua_getfield(L2, idx, 'X');
+                const isUDim2 = lua.lua_type(L2, -1) === lua.LUA_TTABLE;
+                lua.lua_pop(L2, 1);
+                if (isUDim2) {
+                    return {
+                        x: { scale: field('X', 'Scale'), offset: field('X', 'Offset') },
+                        y: { scale: field('Y', 'Scale'), offset: field('Y', 'Offset') },
+                    };
+                }
+                lua.lua_getfield(L2, idx, 'R');
+                const isColor3 = lua.lua_isnumber(L2, -1);
+                const r = isColor3 ? lua.lua_tonumber(L2, -1) : 0;
+                lua.lua_pop(L2, 1);
+                if (isColor3) {
+                    lua.lua_getfield(L2, idx, 'G'); const g = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
+                    lua.lua_getfield(L2, idx, 'B'); const b = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
+                    return { r, g, b };
+                }
+                return null;
+            }
             def('__set_prop', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1), name = lua.lua_tojsstring(L2, 2);
+                // part.CFrame = CFrame.new(...) — раньше вообще ничего не
+                // делал (CFrame был только для ЧТЕНИЯ). Настоящей алгебры
+                // CFrame тут по-прежнему нет (см. коммент у чтения CFrame
+                // выше) — при записи честно переносим только позицию,
+                // поворот игнорируется. Лучше переставить деталь на нужное
+                // место без поворота, чем упасть или не сдвинуть вовсе.
+                if (name === 'CFrame' && lua.lua_type(L2, 3) === lua.LUA_TTABLE) {
+                    lua.lua_getfield(L2, 3, 'Position');
+                    if (lua.lua_type(L2, -1) === lua.LUA_TTABLE) {
+                        const gx = (f) => { lua.lua_getfield(L2, -1, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
+                        const x = gx('X'), y = gx('Y'), z = gx('Z');
+                        lua.lua_pop(L2, 1);
+                        luaSetPositionOfRef(ref, x, y, z);
+                        fireLuaSignal(ref, '__prop_' + name, []);
+                        return 0;
+                    }
+                    lua.lua_pop(L2, 1);
+                }
                 const ty = lua.lua_type(L2, 3);
                 let value = null;
                 if (ty === lua.LUA_TNUMBER) value = lua.lua_tonumber(L2, 3);
                 else if (ty === lua.LUA_TBOOLEAN) value = !!lua.lua_toboolean(L2, 3);
                 else if (ty === lua.LUA_TSTRING) value = lua.lua_tojsstring(L2, 3);
+                else if (ty === lua.LUA_TTABLE) value = luaTableToJsPropValue(L2, 3);
                 luaSetGenericProp(ref, name, value);
+                // GetPropertyChangedSignal(name) — стреляем ПОСЛЕ применения
+                // (см. luaSetGenericProp/guiPatchProp выше), не раньше: иначе
+                // обработчик читал бы ещё старое значение свойства.
+                fireLuaSignal(ref, '__prop_' + name, []);
                 return 0;
             });
             def('__workspace_ref', function (L2) { lua.lua_pushnumber(L2, luaWorkspaceRef()); return 1; });
+            // __tween_register(completedKey, ref, propName, targetValue, duration)
+            // — регистрирует один свойство-переход в activeTweens (см.
+            // updateTweens). completedKey — отрицательный "псевдо-ref",
+            // уникальный на каждый Tween (см. TweenService.Create в
+            // LUA_PRELUDE), не пересекается ни с реальными ref-ами карты
+            // (положительные), ни с Instance.new()-рефами
+            // (luaNextVirtualRef, тоже отрицательные, но начинаются с -1000
+            // и УБЫВАЮТ) — используем отдельный диапазон far away.
+            def('__tween_register', function (L2) {
+                const completedKey = lua.lua_tonumber(L2, 1);
+                const ref = lua.lua_tonumber(L2, 2);
+                const propName = lua.lua_tojsstring(L2, 3);
+                const ty = lua.lua_type(L2, 4);
+                let composite = false, toVal;
+                if (ty === lua.LUA_TTABLE) { toVal = luaTableToJsPropValue(L2, 4); composite = true; }
+                else if (ty === lua.LUA_TNUMBER) { toVal = lua.lua_tonumber(L2, 4); }
+                else { toVal = lua.lua_type(L2, 4) === lua.LUA_TBOOLEAN ? !!lua.lua_toboolean(L2, 4) : lua.lua_tojsstring(L2, 4); composite = true; }
+                const duration = lua.lua_tonumber(L2, 5) || 0;
+                let fromVal = null;
+                if (!composite) {
+                    const cur = luaGetGenericProp(ref, propName);
+                    fromVal = (typeof cur === 'number') ? cur : toVal; // не смогли прочитать текущее число — сразу к цели, без анимации
+                }
+                activeTweens.push({ ref, propName, from: fromVal, to: toVal, duration, startTime: performance.now(), composite, completedRef: completedKey });
+                return 0;
+            });
             def('__set_parent', function (L2) {
                 luaSetParent(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2));
                 return 0;
@@ -4192,6 +5131,16 @@ game = setmetatable({}, {
             });
             def('__find_service', function (L2) {
                 lua.lua_pushnumber(L2, luaFindServiceRef(lua.lua_tojsstring(L2, 1)));
+                return 1;
+            });
+            def('__root_count', function (L2) {
+                lua.lua_pushnumber(L2, luaRootRefs().length);
+                return 1;
+            });
+            def('__root_at', function (L2) {
+                const roots = luaRootRefs();
+                const i = lua.lua_tonumber(L2, 1);
+                lua.lua_pushnumber(L2, roots[i] !== undefined ? roots[i] : -1);
                 return 1;
             });
             // ============ Сигналы (:Connect) и RemoteEvent ============
@@ -4272,6 +5221,175 @@ game = setmetatable({}, {
             });
         }
 
+        // ====================== Luau -> Lua препроцессор ======================
+        // fengari — обычная Lua 5.3, не Luau: она не понимает составное
+        // присваивание (+=, -=, *=, /=, %=, ^=, ..=, //=) и continue —
+        // а реальные Roblox-скрипты (в т.ч. эта карта — Plugin.lua, Main.lua,
+        // SongMenuScript.lua) написаны именно на Luau и используют оба.
+        // Раньше это падало ещё на компиляции: "syntax error near '+'"
+        // (compound-присваивание) и "syntax error near 'end'" (continue —
+        // голый идентификатор не валидный Lua-statement сам по себе).
+        // Переписываем ИСХОДНИК перед loadLuaChunk, не трогая парсер.
+
+        // [{type:'code'|'skip', text}] — 'skip' это строки ('...','"...",
+        // длинные [[...]]/[=[...]=]) и комментарии (--... и --[[...]]) —
+        // их только копируем как есть, не анализируем содержимое.
+        function splitLuaSegments(src) {
+            const segs = [];
+            let i = 0, n = src.length, start = 0;
+            const flushCode = (end) => { if (end > start) segs.push({ type: 'code', text: src.slice(start, end) }); };
+            while (i < n) {
+                const c = src[i];
+                if (c === '-' && src[i + 1] === '-') {
+                    flushCode(i);
+                    let j = i + 2;
+                    const lb = matchLuaLongBracket(src, j);
+                    if (lb) j = lb.end;
+                    else { while (j < n && src[j] !== '\n') j++; }
+                    segs.push({ type: 'skip', text: src.slice(i, j) });
+                    i = j; start = j; continue;
+                }
+                if (c === '"' || c === "'") {
+                    flushCode(i);
+                    let j = i + 1;
+                    while (j < n && src[j] !== c) { if (src[j] === '\\') j++; j++; }
+                    j = Math.min(j + 1, n);
+                    segs.push({ type: 'skip', text: src.slice(i, j) });
+                    i = j; start = j; continue;
+                }
+                if (c === '[') {
+                    const lb = matchLuaLongBracket(src, i);
+                    if (lb) {
+                        flushCode(i);
+                        segs.push({ type: 'skip', text: src.slice(i, lb.end) });
+                        i = lb.end; start = lb.end; continue;
+                    }
+                }
+                i++;
+            }
+            flushCode(n);
+            return segs;
+        }
+        // [=*[ ... ]=*] — длинная строка/комментарий Lua. null, если в
+        // позиции i такой конструкции нет (одиночная '[' — просто скобка).
+        function matchLuaLongBracket(src, i) {
+            if (src[i] !== '[') return null;
+            let j = i + 1, eq = 0;
+            while (src[j] === '=') { eq++; j++; }
+            if (src[j] !== '[') return null;
+            j++;
+            const close = ']' + '='.repeat(eq) + ']';
+            const idx = src.indexOf(close, j);
+            return { end: idx === -1 ? src.length : idx + close.length };
+        }
+
+        // "x OP= y" -> "x = x OP (y)" — только внутри code-сегментов.
+        // lvalue ищем СРАЗУ ЗА оператором (regex с $ на срезе "до оператора"
+        // — тогда lvMatch.index сразу даёт точную позицию в исходной
+        // строке, без лишнего lastIndexOf). rvalue — вперёд от оператора,
+        // с балансом скобок, до первого ';'/переноса строки на глубине 0 —
+        // покрывает подавляющее большинство реального кода (составные
+        // присваивания почти всегда — одна простая строка).
+        function expandCompoundAssign(code) {
+            const opRe = /([+\-*/%^]|\.\.|\/\/)=(?!=)/g;
+            const lvRe = /([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*|\s*\[[^\[\]]*\])*)\s*$/;
+            let out = '', last = 0, m;
+            while ((m = opRe.exec(code))) {
+                const opStart = m.index, opEnd = opStart + m[0].length, op = m[1];
+                let ls = opStart;
+                while (ls > 0 && /\s/.test(code[ls - 1])) ls--;
+                const lvMatch = lvRe.exec(code.slice(0, ls));
+                if (!lvMatch) continue; // не похоже на lvalue — не наш случай, оставляем как есть
+                const lvalue = lvMatch[1];
+                const lvStartIdx = lvMatch.index;
+                let re = opEnd, depth = 0;
+                while (re < code.length) {
+                    const ch = code[re];
+                    if (ch === '(' || ch === '[' || ch === '{') depth++;
+                    else if (ch === ')' || ch === ']' || ch === '}') { if (depth === 0) break; depth--; }
+                    else if (depth === 0 && (ch === ';' || ch === '\n')) break;
+                    re++;
+                }
+                const rhs = code.slice(opEnd, re).trim();
+                out += code.slice(last, lvStartIdx) + `${lvalue} = ${lvalue} ${op} (${rhs})`;
+                last = re;
+                opRe.lastIndex = re;
+            }
+            out += code.slice(last);
+            return out;
+        }
+
+        // continue -> goto __continue_N + метка перед закрывающим end/until
+        // ближайшего цикла (for/while/repeat), с учётом вложенности через
+        // простой стек блоков. Не пересекает границу вложенной function —
+        // как и в самой Luau, continue не может "прыгнуть" из замыкания
+        // наружу.
+        function expandContinue(src) {
+            const segs = splitLuaSegments(src);
+            let loopId = 0;
+            const stack = [];
+            let pendingLoopDo = false;
+            const wordRe = /[A-Za-z_][A-Za-z0-9_]*/g;
+            for (const seg of segs) {
+                if (seg.type !== 'code') continue;
+                let out = '', last = 0;
+                wordRe.lastIndex = 0;
+                let m;
+                while ((m = wordRe.exec(seg.text))) {
+                    const w = m[0], idx = m.index;
+                    if (w === 'for' || w === 'while') {
+                        stack.push({ kind: 'loop', id: ++loopId, continueUsed: false });
+                        pendingLoopDo = true;
+                        out += seg.text.slice(last, idx) + w; last = idx + w.length; continue;
+                    }
+                    if (w === 'repeat') {
+                        stack.push({ kind: 'repeat', id: ++loopId, continueUsed: false });
+                        out += seg.text.slice(last, idx) + w; last = idx + w.length; continue;
+                    }
+                    if (w === 'if' || w === 'function') {
+                        stack.push({ kind: w === 'if' ? 'if' : 'function' });
+                        out += seg.text.slice(last, idx) + w; last = idx + w.length; continue;
+                    }
+                    if (w === 'do') {
+                        if (pendingLoopDo) pendingLoopDo = false;
+                        else stack.push({ kind: 'do' });
+                        out += seg.text.slice(last, idx) + w; last = idx + w.length; continue;
+                    }
+                    if (w === 'until') {
+                        out += seg.text.slice(last, idx);
+                        const frame = stack.pop();
+                        if (frame && frame.continueUsed) out += `::__continue_${frame.id}:: `;
+                        out += 'until'; last = idx + w.length; continue;
+                    }
+                    if (w === 'end') {
+                        out += seg.text.slice(last, idx);
+                        const frame = stack.pop();
+                        if (frame && frame.kind === 'loop' && frame.continueUsed) out += `::__continue_${frame.id}:: `;
+                        out += 'end'; last = idx + w.length; continue;
+                    }
+                    if (w === 'continue') {
+                        out += seg.text.slice(last, idx);
+                        let target = null;
+                        for (let k = stack.length - 1; k >= 0; k--) {
+                            if (stack[k].kind === 'function') break; // continue не пересекает function
+                            if (stack[k].kind === 'loop' || stack[k].kind === 'repeat') { target = stack[k]; break; }
+                        }
+                        out += target ? (target.continueUsed = true, `goto __continue_${target.id}`) : w;
+                        last = idx + w.length; continue;
+                    }
+                }
+                out += seg.text.slice(last);
+                seg.text = out;
+            }
+            return segs.map(s => s.text).join('');
+        }
+
+        function preprocessLuau(src) {
+            const segs = splitLuaSegments(src);
+            for (const seg of segs) if (seg.type === 'code') seg.text = expandCompoundAssign(seg.text);
+            return expandContinue(segs.map(s => s.text).join(''));
+        }
+
         // luaL_loadstring/luaL_loadbuffer работают с байтовыми буферами
         // (как обычный char* в C), а не с JS-строками напрямую — при не-ASCII
         // содержимом (кириллица в исходнике скрипта — у нас это норма) байтовая
@@ -4282,7 +5400,7 @@ game = setmetatable({}, {
         // Roblox Studio.
         function loadLuaChunk(L, code, chunkname) {
             const { lauxlib, to_luastring } = window.fengari;
-            const buf = to_luastring(code);
+            const buf = to_luastring(preprocessLuau(code));
             return lauxlib.luaL_loadbuffer(L, buf, buf.length, to_luastring(chunkname));
         }
 
@@ -4419,11 +5537,33 @@ game = setmetatable({}, {
             return refMap;
         }
 
+        // Синтетический PlayerModule — в настоящем Roblox это закрытый
+        // встроенный модуль (много тысяч строк управления персонажем и
+        // камерой), сюда его не переносить; но GetControls():Disable()/
+        // :Enable() — единственное, что реально зовут игровые скрипты
+        // (см. чат) — и ЭТО у движка есть чем управлять: тот самый
+        // WASD-полёт/ходьба персонажа и поворот камеры мышью в Play (см.
+        // luaControlsDisabled в applyCharacterControl/onMM/onTM). Поэтому
+        // не пустышка "ничего не отключает", а честная связь через
+        // __set_controls_enabled.
+        const PLAYER_MODULE_SOURCE = [
+            'local PlayerModule = {}',
+            'local Controls = {}',
+            'Controls.__index = Controls',
+            'function Controls:Disable() __set_controls_enabled(false) end',
+            'function Controls:Enable() __set_controls_enabled(true) end',
+            'function PlayerModule:GetControls() return setmetatable({}, Controls) end',
+            'return PlayerModule',
+        ].join('\n');
+
         // Создаёт game.Players.LocalPlayer (виртуальный, как и всё Play-only
         // дерево — luaCreateVirtualInstance) с дочерними PlayerGui и
         // Backpack, и клонирует в PlayerGui содержимое StarterGui. Это и
         // есть "полностью локальные" объекты — они существуют ТОЛЬКО в
         // клиентской половине рантайма и пропадают по Stop.
+        let luaCharacterRef = -1; // ref виртуального "Model", изображающего player.Character (см. __get_character_ref) — тот самый ходящий куб из Play, а не настоящий Humanoid
+        let luaPlayerRef = -1;    // ref единственного LocalPlayer (см. bootstrapClientPlayer) — нужен, чтобы подставлять его первым аргументом в OnServerEvent (см. processRemoteQueue)
+
         function bootstrapClientPlayer() {
             let playersRef = luaFindServiceRef('Players');
             if (playersRef === -1) playersRef = luaCreateVirtualInstance('Players');
@@ -4431,9 +5571,22 @@ game = setmetatable({}, {
             luaByRef[playerRef].name = 'LocalPlayer';
             luaSetParent(playerRef, playersRef);
 
+            luaCharacterRef = luaCreateVirtualInstance('Model');
+            luaByRef[luaCharacterRef].name = 'LocalCharacter';
+            luaSetParent(luaCharacterRef, luaWorkspaceRef());
+
             const playerGuiRef = luaCreateVirtualInstance('PlayerGui');
             luaSetParent(playerGuiRef, playerRef);
-            luaCreateVirtualInstance('Backpack'); // существует для полноты API; не рендерится
+            const backpackRef = luaCreateVirtualInstance('Backpack'); // существует для полноты API; не рендерится
+            luaSetParent(backpackRef, playerRef);
+
+            const playerScriptsRef = luaCreateVirtualInstance('PlayerScripts');
+            luaSetParent(playerScriptsRef, playerRef);
+            const playerModuleRef = luaCreateVirtualInstance('ModuleScript');
+            luaByRef[playerModuleRef].name = 'PlayerModule';
+            luaSetParent(playerModuleRef, playerScriptsRef);
+            luaModuleSourceByRef[playerModuleRef] = PLAYER_MODULE_SOURCE;
+            luaModuleNameByRef[playerModuleRef] = 'PlayerModule';
 
             const refMap = cloneStarterGuiIntoPlayerGui(playerGuiRef);
             return { playerRef, playerGuiRef, refMap };
@@ -4450,6 +5603,7 @@ game = setmetatable({}, {
         }
 
         async function startLuaScriptsInner() {
+            luaLogSessionId = 'play_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             const r = await api('GET', '/api/scripts');
             if (!isPlaying) return;
             if (!r || !r.ok) { logLuaOutput('error', '/api/scripts не ответил'); return; }
@@ -4510,6 +5664,23 @@ game = setmetatable({}, {
                 }
             }
 
+            // ModuleScript-исходники по ref — require() ищет тут (см.
+            // __compile_module ниже), а не ходит в сеть на каждый require:
+            // /api/scripts уже принёс все исходники разом. Сам кэш
+            // выполненных модулей и защита от циклического require() —
+            // ЦЕЛИКОМ в Lua (см. LUA_PRELUDE, require()), а не здесь: у
+            // сервера и клиента и так разные lua_State с разными globals —
+            // раз LUA_PRELUDE выполняется на каждом отдельно, локальные
+            // __moduleCache там получаются автоматически изолированными,
+            // без JS-стороны, тем же принципом, что и __conns.
+            luaModuleSourceByRef = {};
+            luaModuleNameByRef = {};
+            for (const scr of r.scripts) {
+                if (scr.cls !== 'ModuleScript') continue;
+                luaModuleSourceByRef[scr.ref] = scr.source;
+                luaModuleNameByRef[scr.ref] = scr.name;
+            }
+
             luaWaits = [];
             luaSignalWaits = [];
             luaResetSignals();
@@ -4528,7 +5699,18 @@ game = setmetatable({}, {
             // ПОДМЕНЁННЫМ ref — от лица своего клона в PlayerGui, а не
             // шаблона. LocalScript'ы вне StarterGui (например, в
             // StarterPlayerScripts) запускаются как есть.
-            const { refMap } = bootstrapClientPlayer();
+            let refMap = {};
+            try {
+                const bootResult = bootstrapClientPlayer();
+                refMap = bootResult.refMap;
+                luaPlayerRef = bootResult.playerRef;
+            } catch (e) {
+                // Раньше исключение тут (не пойманное) обрывало ВСЮ функцию —
+                // ни один LocalScript не запускался, GUI не рендерился, и в
+                // Output не было ни строчки объяснения (JS-исключение вне
+                // Lua pcall сюда не попадает вообще).
+                logLuaOutput('error', 'bootstrapClientPlayer упал: ' + e.message + ' — LocalScript-и и GUI не запущены');
+            }
             for (const scr of r.scripts) {
                 if (scr.cls !== 'LocalScript') continue;
                 const clonedRef = refMap[scr.ref];
@@ -4550,6 +5732,10 @@ game = setmetatable({}, {
             luaParentByRef = {};
             luaChildrenByRef = {};
             virtualInstanceProps = {};
+            luaGenericPropsByRef = {};
+            luaCharacterRef = -1;
+            luaPlayerRef = -1;
+            luaControlsDisabled = false;
             luaNextVirtualRef = -1000;
             luaResetSignals();
             renderLuaOutput();
@@ -4607,7 +5793,17 @@ game = setmetatable({}, {
             el.style.width = size.width;
             el.style.height = size.height;
             el.style.zIndex = String(props.ZIndex || 1);
-            el.style.display = (props.Visible === false) ? 'none' : 'flex';
+            // ScreenGui/BillboardGui управляются свойством Enabled (не
+            // Visible — у ScreenGui такого свойства вообще нет в настоящем
+            // Roblox), а раньше Enabled нигде не читался при отрисовке —
+            // songMenu.Enabled = true/false из скрипта молча ничего не
+            // делало визуально (см. guiPatchProp — он просто перевызывает
+            // эту функцию после любого изменения свойства).
+            if (cls === 'ScreenGui' || cls === 'BillboardGui') {
+                el.style.display = (props.Enabled === false) ? 'none' : 'flex';
+            } else {
+                el.style.display = (props.Visible === false) ? 'none' : 'flex';
+            }
 
             if (cls === 'Frame' || cls === 'ScrollingFrame') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
@@ -4633,6 +5829,18 @@ game = setmetatable({}, {
             }
         }
 
+        function domInputTypeName(e, isMove) {
+            if (e.touches !== undefined || (e.type && e.type.indexOf('touch') === 0)) return 'Touch';
+            if (isMove) return 'MouseMovement';
+            if (e.button === 2) return 'MouseButton2';
+            if (e.button === 1) return 'MouseButton3';
+            return 'MouseButton1';
+        }
+        function domInputXY(e) {
+            const t = e.touches && e.touches[0];
+            return t ? [t.clientX, t.clientY] : [e.clientX, e.clientY];
+        }
+
         function guiCreateDomNode(ref, props) {
             const el = document.createElement(props.cls === 'TextButton' || props.cls === 'ImageButton' ? 'button' : 'div');
             el.className = 'rbx-gui-el';
@@ -4645,7 +5853,43 @@ game = setmetatable({}, {
                 // а не просто визуальная реакция: любой LocalScript,
                 // сделавший button.MouseButton1Click:Connect(fn), получит
                 // вызов на клиентской VM (см. installLuaBridge/__connect).
+                // MouseButton1Down/Up — только у GuiButton (Text/ImageButton),
+                // как и в настоящем Roblox: у обычного Frame их нет.
                 el.addEventListener('click', () => fireLuaSignal(ref, 'MouseButton1Click', []));
+                el.addEventListener('mousedown', () => fireLuaSignal(ref, 'MouseButton1Down', []));
+                el.addEventListener('mouseup', () => fireLuaSignal(ref, 'MouseButton1Up', []));
+            }
+            // MouseEnter/MouseLeave — у ЛЮБОГО GuiObject в настоящем Roblox,
+            // не только у кнопок (Frame/TextLabel тоже их поддерживают).
+            el.addEventListener('mouseenter', () => fireLuaSignal(ref, 'MouseEnter', []));
+            el.addEventListener('mouseleave', () => fireLuaSignal(ref, 'MouseLeave', []));
+            // InputBegan/InputEnded — тоже у ЛЮБОГО GuiObject (в отличие от
+            // MouseButton1Down/Up, которые только у GuiButton) — например,
+            // SliderBg в SettingsMenuScript это обычный Frame. InputObject
+            // строится в Lua (см. makeEvent/Connect в LUA_PRELUDE) из
+            // "сырых" typeName/x/y — тут только они.
+            el.addEventListener('mousedown', (e) => fireLuaSignal(ref, 'InputBegan', [domInputTypeName(e, false), ...domInputXY(e)]));
+            el.addEventListener('mouseup', (e) => fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]));
+            // FocusLost/Focused — TextBox (contentEditable div, см.
+            // applyGuiElementStyle). enterPressed — единственный аргумент
+            // FocusLost в настоящем Roblox — запоминаем нажатие Enter в
+            // keydown и читаем флаг в blur (сам Enter к этому моменту уже
+            // не всплывает как отдельное событие).
+            if (props.cls === 'TextBox') {
+                let enterPressed = false;
+                // Живая правка contentEditable не попадает в guiPropsByRef
+                // сама по себе — без этого promoInput.Text из Lua всегда
+                // читал бы исходное статическое значение, а не то, что
+                // реально ввёл игрок.
+                el.addEventListener('input', () => { if (guiPropsByRef[ref]) guiPropsByRef[ref].Text = el.textContent; });
+                el.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { enterPressed = true; el.blur(); }
+                });
+                el.addEventListener('focus', () => fireLuaSignal(ref, 'Focused', []));
+                el.addEventListener('blur', () => {
+                    fireLuaSignal(ref, 'FocusLost', [enterPressed]);
+                    enterPressed = false;
+                });
             }
             return el;
         }
@@ -4659,6 +5903,49 @@ game = setmetatable({}, {
             for (const childRef of (guiChildrenByRef[ref] || [])) {
                 guiRenderNode(childRef, el);
             }
+            applyUIListLayout(ref);
+        }
+
+        // UIListLayout — раньше был только числом-заглушкой в GUI_CLASS_NAMES
+        // (не падал), но реальной раскладки не делал вообще: карточки
+        // (например, песен в SongMenuScript, клонированные через Clone())
+        // просто оставались на позиции шаблона — все друг на друге в одной
+        // точке. Визуально это выглядит как "список из одной песни", хотя
+        // данных внутри может быть сколько угодно. Простой вертикальный
+        // стек (FillDirection всегда вертикальный, без честного учёта
+        // Scale-высоты — обычно у карточек списка задают offset-высоту,
+        // этого достаточно) — не полная реализация UIListLayout (нет
+        // HorizontalAlignment/Wraps и т.п.), но накладывания друг на друга
+        // не будет.
+        function applyUIListLayout(containerRef) {
+            const kids = (guiChildrenByRef[containerRef] || []).slice();
+            let layoutRef = null;
+            for (const k of kids) {
+                if (guiPropsByRef[k] && guiPropsByRef[k].cls === 'UIListLayout') { layoutRef = k; break; }
+            }
+            if (!layoutRef) return;
+            const layoutProps = guiPropsByRef[layoutRef] || {};
+            const paddingPx = (layoutProps.Padding && layoutProps.Padding.offset) || 0;
+            let offset = 0;
+            for (const k of kids) {
+                const p = guiPropsByRef[k];
+                if (!p || k === layoutRef) continue;
+                if (p.cls && p.cls.indexOf('UI') === 0) continue; // UIPadding/UICorner/... — не элементы списка
+                // Visible === false — это как раз наш случай "скрытый
+                // шаблон-для-клонирования, оставленный лежать среди
+                // остальных детей контейнера" (SongTemplate и т.п.).
+                // Раньше он тоже учитывался как элемент списка: занимал
+                // место (сдвигая ВСЕ реальные карточки вниз) и, что хуже,
+                // МЕНЯЛ Position самого шаблона — следующий клон копировал
+                // уже испорченную позицию, а не оригинальную дизайнерскую.
+                if (p.Visible === false) continue;
+                const oldX = (p.Position && p.Position.x) || { scale: 0, offset: 0 };
+                p.Position = { x: oldX, y: { scale: 0, offset } };
+                const el = guiDomByRef[k];
+                if (el) applyGuiElementStyle(el, p);
+                const heightPx = (p.Size && p.Size.y && p.Size.y.offset) || 0;
+                offset += heightPx + paddingPx;
+            }
         }
 
         // Рендерит DOM-оверлей из уже готового guiPropsByRef (собранного
@@ -4669,7 +5956,7 @@ game = setmetatable({}, {
         // тоже не рендерится напрямую, только его копии в PlayerGui.
         function renderGuiOverlayFromClient() {
             const overlay = document.getElementById('gui-overlay');
-            if (!overlay) return;
+            if (!overlay) { logLuaOutput('error', 'renderGuiOverlayFromClient: #gui-overlay не найден в DOM'); return; }
             overlay.innerHTML = '';
             guiDomByRef = {};
             guiChildrenByRef = {};
@@ -4680,6 +5967,7 @@ game = setmetatable({}, {
                     (guiChildrenByRef[parentRef] = guiChildrenByRef[parentRef] || []).push(ref);
                 }
             }
+            let renderedCount = 0;
             for (const [refStr, props] of Object.entries(guiPropsByRef)) {
                 const ref = Number(refStr);
                 if (props.cls !== 'ScreenGui' && props.cls !== 'BillboardGui') continue;
@@ -4687,10 +5975,19 @@ game = setmetatable({}, {
                 const parentInfo = parentRef !== undefined ? luaByRef[parentRef] : null;
                 const isTemplateUnderStarterGui = parentInfo && parentInfo.cls === 'StarterGui';
                 if (isTemplateUnderStarterGui) continue; // шаблон — не рендерим, рендерим клон в PlayerGui
-                if (props.enabled === false) continue;
+                if (props.Enabled === false) continue; // раньше было props.enabled (маленькая e) — никогда не совпадало, ScreenGui.Enabled=false из плейса игнорировался
                 guiRenderNode(ref, overlay);
+                renderedCount++;
             }
             overlay.classList.add('active');
+            // Временный диагностический лог: сколько top-level ScreenGui/
+            // BillboardGui реально ушло в DOM и сколько всего GUI-объектов
+            // вообще известно движку на этот момент — если тут 0 при
+            // ненулевом totalGuiObjects, значит все они Enabled=false (или
+            // props.Enabled не то, что ожидается), а не проблема с самим
+            // рендером/CSS.
+            logLuaOutput('info', 'GUI overlay: отрисовано верхних экранов ' + renderedCount
+                + ' из ' + Object.keys(guiPropsByRef).length + ' известных GUI-объектов');
         }
 
         function clearGuiOverlay() {
@@ -4708,9 +6005,28 @@ game = setmetatable({}, {
         // молча ни на что не влияли бы.
         function guiPatchProp(ref, name, value) {
             const props = guiPropsByRef[ref];
-            const el = guiDomByRef[ref];
-            if (!props || !el) return false;
+            if (!props) return false;
             props[name] = value;
+            let el = guiDomByRef[ref];
+            if (!el) {
+                // Узла ещё нет — это нормально для ScreenGui/BillboardGui,
+                // который стартовал с Enabled=false: renderGuiOverlayFromClient
+                // при старте Play вообще пропускает такие (см. её код), а
+                // значит ни сам он, ни его дети (весь Background/кнопки/тексты
+                // внутри) никогда не попадали в DOM. Раньше это молча ничего
+                // не делало ("if (!props || !el) return false") — Lua-скрипт
+                // ставил Enabled=true, а показывать было physически нечему.
+                // Рендерим (и всё поддерево — guiRenderNode рекурсивен) прямо
+                // сейчас, при первом реальном включении.
+                if (name === 'Enabled' && value === true && (props.cls === 'ScreenGui' || props.cls === 'BillboardGui')) {
+                    const overlay = document.getElementById('gui-overlay');
+                    if (overlay) {
+                        guiRenderNode(ref, overlay);
+                        overlay.classList.add('active');
+                    }
+                }
+                return true;
+            }
             applyGuiElementStyle(el, props);
             return true;
         }
@@ -4719,6 +6035,7 @@ game = setmetatable({}, {
             if (!luaServerL && !luaClientL) return;
             processRemoteQueue();
             updateRunServiceSignals();
+            updateTweens();
             if (!luaWaits.length) return;
             const now = performance.now();
             const ready = luaWaits.filter(w => w.resumeAt <= now);
@@ -4726,6 +6043,65 @@ game = setmetatable({}, {
             luaWaits = luaWaits.filter(w => w.resumeAt > now);
             for (const w of ready) resumeLuaCoroutine(w.co, 'script', 0);
         }
+
+        // TweenService:Create(...):Play() — раньше TweenService не
+        // существовал вообще (виртуальный пустой сервис), а используется
+        // массово: анимация очков в Main.lua, уведомления в
+        // SettingsMenuScript, блюр/фейд в AgeWarningModule. Настоящей
+        // покадровой интерполяции для ЧИСЛОВЫХ свойств (Transparency,
+        // BackgroundTransparency и т.п.) — линейной, без имитации
+        // конкретных EasingStyle (Quad/Back/...) — этого достаточно, чтобы
+        // хоть что-то плавно двигалось, вместо мгновенного "телепорта" или
+        // падения скрипта. Составные свойства (Color3/UDim2) — честно не
+        // анимируются, просто применяются в момент завершения (см.
+        // __tween_register) — то же ограничение, что и у Color3/UDim2
+        // через мост в принципе (см. коммент у __set_prop).
+        function updateTweens() {
+            if (!activeTweens.length) return;
+            const now = performance.now();
+            const stillActive = [];
+            for (const t of activeTweens) {
+                const elapsed = (now - t.startTime) / 1000;
+                const p = t.duration > 0 ? Math.min(1, elapsed / t.duration) : 1;
+                if (t.composite) {
+                    if (p >= 1) {
+                        luaSetGenericProp(t.ref, t.propName, t.to);
+                        fireLuaSignal(t.completedRef, 'Event', []);
+                    } else {
+                        stillActive.push(t);
+                    }
+                    continue;
+                }
+                const v = t.from + (t.to - t.from) * p;
+                luaSetGenericProp(t.ref, t.propName, v);
+                if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
+                else stillActive.push(t);
+            }
+            activeTweens = stillActive;
+        }
+
+        // UserInputService.InputBegan/InputChanged/InputEnded — глобальные
+        // (в отличие от per-GuiObject InputBegan/InputEnded в
+        // guiCreateDomNode): слушаем весь document, а не конкретный
+        // элемент — иначе перетаскивание слайдера (см. SettingsMenuScript)
+        // обрывалось бы, стоит увести курсор за пределы SliderBg. Сервис
+        // ленивый (как и все остальные, см. getService) — если скрипт ещё
+        // не спросил UserInputService, просто ничего не шлём.
+        document.addEventListener('mousedown', (e) => {
+            if (!luaServerL && !luaClientL) return;
+            const ref = luaFindServiceRef('UserInputService');
+            if (ref !== -1) fireLuaSignal(ref, 'InputBegan', [domInputTypeName(e, false), ...domInputXY(e)]);
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!luaServerL && !luaClientL) return;
+            const ref = luaFindServiceRef('UserInputService');
+            if (ref !== -1) fireLuaSignal(ref, 'InputChanged', [domInputTypeName(e, true), ...domInputXY(e)]);
+        });
+        document.addEventListener('mouseup', (e) => {
+            if (!luaServerL && !luaClientL) return;
+            const ref = luaFindServiceRef('UserInputService');
+            if (ref !== -1) fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]);
+        });
 
         // RunService.Stepped/Heartbeat/RenderStepped — настоящий, не
         // заглушечный тик каждый кадр, если хоть один скрипт уже успел
@@ -4774,14 +6150,22 @@ game = setmetatable({}, {
         }
 
         let charVelX = 0, charVelZ = 0; // последняя заданная игроком горизонтальная скорость
+        // Устанавливается настоящим PlayerModule:GetControls():Disable()
+        // (см. __set_controls_enabled в installLuaBridge) — например, FNF
+        // делает так на время песни, чтобы играющий не увёл персонажа
+        // WASD'ом и не сбил камеру мышью посреди ритм-игры. Раньше
+        // PlayerModule не существовал вовсе, Disable() ничего не мог
+        // отключить физически (см. пояснение в чате) — теперь честно
+        // останавливает и ходьбу, и поворот камеры мышью/тачем.
+        let luaControlsDisabled = false;
 
         function applyCharacterControl() {
             if (!charBody) return;
             charBody.wakeUp();
 
-            const forward = Math.max(-1, Math.min(1,
+            const forward = luaControlsDisabled ? 0 : Math.max(-1, Math.min(1,
                 (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
-            const strafe = Math.max(-1, Math.min(1,
+            const strafe = luaControlsDisabled ? 0 : Math.max(-1, Math.min(1,
                 (keysPressed['d'] ? 1 : 0) - (keysPressed['a'] ? 1 : 0) + joyVector.x));
 
             // Движение по горизонтали относительно направления взгляда камеры
@@ -6272,7 +7656,7 @@ game = setmetatable({}, {
 
             keysPressed[e.key.toLowerCase()] = true;
 
-            if (isPlaying && (e.key === ' ' || e.key.toLowerCase() === 'e')) {
+            if (isPlaying && !luaControlsDisabled && (e.key === ' ' || e.key.toLowerCase() === 'e')) {
                 e.preventDefault();
                 jumpQueued = true;
             }
