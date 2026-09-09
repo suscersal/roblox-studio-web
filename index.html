@@ -5055,6 +5055,22 @@ end
                     lua.lua_getfield(L2, idx, 'B'); const b = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
                     return { r, g, b };
                 }
+                // Vector2 (AnchorPoint и т.п.) — плоские числовые X/Y, без
+                // вложенных таблиц (не UDim2) и без R (не Color3). Раньше
+                // не распознавался вообще — luaTableToJsPropValue отдавал
+                // null, AnchorPoint молча превращался в null/не
+                // применялся, а Position всегда считался левым верхним
+                // углом — круги попадания и падающие ноты (AnchorPoint
+                // (0.5,0.5) и (0,0.5) соответственно) были смещены
+                // относительно задуманного места.
+                lua.lua_getfield(L2, idx, 'X');
+                const isVector2 = lua.lua_isnumber(L2, -1);
+                const vx = isVector2 ? lua.lua_tonumber(L2, -1) : 0;
+                lua.lua_pop(L2, 1);
+                if (isVector2) {
+                    lua.lua_getfield(L2, idx, 'Y'); const vy = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
+                    return { x: vx, y: vy };
+                }
                 return null;
             }
             def('__set_prop', function (L2) {
@@ -5793,6 +5809,16 @@ end
             el.style.width = size.width;
             el.style.height = size.height;
             el.style.zIndex = String(props.ZIndex || 1);
+            // AnchorPoint — раньше вообще не читался: Position всегда
+            // считался левым верхним углом элемента, как AnchorPoint(0,0)
+            // по умолчанию. Круги попадания (AnchorPoint 0.5,0.5) и
+            // падающие ноты (0,0.5) в Main.lua были смещены относительно
+            // задуманного места — процентный transform (в % от размера
+            // САМОГО элемента, не родителя) — тот же трюк, что и в
+            // настоящем CSS-центрировании, работает независимо от
+            // фактического пиксельного размера.
+            const ap = props.AnchorPoint;
+            el.style.transform = ap ? `translate(${-(ap.x || 0) * 100}%, ${-(ap.y || 0) * 100}%)` : '';
             // ScreenGui/BillboardGui управляются свойством Enabled (не
             // Visible — у ScreenGui такого свойства вообще нет в настоящем
             // Roblox), а раньше Enabled нигде не читался при отрисовке —
