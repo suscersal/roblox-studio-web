@@ -323,6 +323,24 @@
             pointer-events: auto;
         }
 
+        /* pointer-events НАСЛЕДУЕТСЯ от родителя, а не только от далёкого
+           #gui-overlay — декоративные дети (UICorner/UIStroke/UIPadding/
+           UIListLayout/...) внутри TextButton/TextBox МОЛЧА наследовали
+           auto от своего же интерактивного родителя и, будучи растянуты
+           на весь его размер (или лежащие в том же ряду/поверх), физически
+           перехватывали клик/тач раньше, чем он доходил до самой кнопки
+           или текстового поля. Та же история у TextLabel/ImageLabel —
+           чисто визуальные, не должны участвовать в hit-тестинге вовсе.
+           auto:none здесь явно "сбрасывает" унаследованное значение,
+           а не полагается на дефолт — иначе оно так и оставалось бы auto
+           от родителя.
+        */
+        .rbx-gui-el[data-cls^="UI"],
+        .rbx-gui-el[data-cls="TextLabel"],
+        .rbx-gui-el[data-cls="ImageLabel"] {
+            pointer-events: none;
+        }
+
         #vp-label {
             display: none; /* подсказка по ЛКМ/ПКМ/WASD убрана по просьбе — загораживала GUI-оверлей снизу */
         }
@@ -792,7 +810,18 @@
             display: none;
             align-items: flex-end;
             gap: 14px;
-            z-index: 10;
+            /* Было z-index:10 — ВЫШЕ #gui-overlay (z-index:5). Джойстик и
+               A/S/K/L лежат в #viewport РЯДОМ с #gui-overlay (см. разметку
+               ниже, они соседи), а не внутри него — поэтому z-index
+               сравнивался напрямую, и #joy-zone (pointer-events:all)
+               физически перехватывал клики/тач ПОД любым GUI-элементом,
+               который визуально оказывался над ним (например, поле ввода
+               промокода в SettingsMenu) — сам GUI при этом рисовался
+               поверх на экране, но событий не получал. Теперь ниже —
+               джойстик по-прежнему выше самой 3D-сцены (auto/0), но ниже
+               GUI-оверлея.
+            */
+            z-index: 4;
             pointer-events: none
         }
 
@@ -1993,8 +2022,16 @@
             animate();
             loadTree();
 
-            // Фокус viewport для WASD
-            vp.addEventListener('click', () => vp.focus());
+            // Фокус viewport для WASD — но НЕ если клик пришёлся по
+            // текстовому полю GUI-оверлея (TextBox — обычный
+            // contentEditable div): иначе он получал фокус на долю
+            // секунды и тут же терял его этому же обработчику (клик по
+            // TextBox тоже всплывает до #viewport) — печатать в поле
+            // промокода было физически невозможно.
+            vp.addEventListener('click', (e) => {
+                if (e.target.closest && e.target.closest('[data-cls="TextBox"]')) return;
+                vp.focus();
+            });
             vp.focus();
 
             // Мобильный геймпад: кнопки вверх/вниз
@@ -3848,6 +3885,7 @@ InstanceMT.__index = function(t, k)
         or k == "PlayerAdded" or k == "PlayerRemoving" or k == "Chatted" or k == "Died"
         or k == "CharacterAdded" or k == "CharacterRemoving"
         or k == "FlagCaptured"
+        or k == "Ended" or k == "Loaded" or k == "DidLoop" or k == "Paused" or k == "Resumed" or k == "Played"
         or k == "Event" or k == "Stepped" or k == "Heartbeat" or k == "RenderStepped" then
         return makeEvent(ref, k)
     end
