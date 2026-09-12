@@ -97,7 +97,7 @@ chaquopy {
             // rbxl_parser.py использует только стандартную библиотеку —
             // единственная внешняя зависимость приложения это Flask.
             install "flask"
-            install "zstandart"
+            install "zstandard"
         }
     }
 }
