@@ -355,7 +355,42 @@
             padding: 4px 8px;
             border-radius: 4px;
             z-index: 5;
-            font-family: monospace
+            font-family: monospace;
+            transition: left .15s;
+        }
+
+        /* Плавающая кнопка Stop поверх вьюпорта во время Play — просили
+           убрать верхний тулбар целиком (Explorer/Properties и так уже
+           сворачиваются, но САМ тулбар с обычными кнопками редактора всё
+           ещё съедал строку высоты, а Stop в нём — единственное, что
+           реально нужно в Play). Иконка вместо текста — компактнее, чем
+           целая кнопка "⏹ Stop" из тулбара. */
+        #play-stop-fab {
+            display: none;
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            z-index: 6;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: none;
+            background: #ef4444;
+            color: #fff;
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+        }
+
+        #play-stop-fab.visible {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #viewport.play-active #fps-counter {
+            left: 48px;
         }
 
         #speed-indicator {
@@ -957,6 +992,7 @@
         <div class="resizer" id="resizer-1"></div>
         <div id="viewport" tabindex="0">
             <div id="gui-overlay"></div>
+            <button id="play-stop-fab" onclick="togglePlay()" title="Stop">⏸</button>
             <div id="fps-counter">FPS: --</div>
             <div id="speed-indicator">🚀 x1.0</div>
             <div id="quality-selector">
@@ -3185,11 +3221,17 @@
         // запоминаем, чтобы вернуть как было по Stop.
         let _savedExplorerWidth = null;
         let _savedRightpanelWidth = null;
+        let _savedBottomPanelHeight = null;
         function setEditorPanelsCollapsedForPlay(collapsed) {
             const explorerEl = document.getElementById('explorer');
             const rightpanelEl = document.getElementById('rightpanel');
+            const bottomPanelEl = document.getElementById('bottom-panel');
+            const toolbarTopEl = document.getElementById('toolbar-top');
+            const viewportEl = document.getElementById('viewport');
+            const playStopFab = document.getElementById('play-stop-fab');
             const resizer1 = document.getElementById('resizer-1') || document.querySelector('#explorer + .resizer');
             const resizer2 = document.getElementById('resizer-2');
+            const resizerH = document.getElementById('resizer-h');
             if (!explorerEl || !rightpanelEl) return;
             // Раньше панели прятались ПОЛНОСТЬЮ (display:none) — вьюпорт
             // получал всю освободившуюся ширину разом (буфер рендера рос
@@ -3200,7 +3242,17 @@
             // скрытия просто сильно сужаем панели (а не убираем совсем,
             // как и просили), давая вьюпорту заметно больше места, но не
             // разгоняя ширину до неестественного экстремума.
+            //
+            // Output (bottom-panel, по умолчанию 180px) раньше вообще не
+            // трогался — а вьюпорт теперь зажат к 16:9 ИМЕННО ПО ВЫСОТЕ
+            // (см. resize()): чем меньше доступная высота, тем меньше и
+            // итоговая ширина коробки 16:9, даже если по горизонтали давно
+            // пусто. Результат — тот самый "маленький экран": высоту
+            // отъедал Output, а свежеосвобождённая от Explorer/Properties
+            // ширина простаивала чёрными полосами. Сворачиваем Output
+            // так же, как и боковые панели.
             const COLLAPSED_WIDTH = '42px';
+            const COLLAPSED_HEIGHT = '32px';
             if (collapsed) {
                 _savedExplorerWidth = explorerEl.style.width || getComputedStyle(explorerEl).width;
                 _savedRightpanelWidth = rightpanelEl.style.width || getComputedStyle(rightpanelEl).width;
@@ -3210,6 +3262,19 @@
                 rightpanelEl.style.minWidth = COLLAPSED_WIDTH;
                 if (resizer1) resizer1.style.display = 'none';
                 if (resizer2) resizer2.style.display = 'none';
+                if (bottomPanelEl) {
+                    _savedBottomPanelHeight = bottomPanelEl.style.height || getComputedStyle(bottomPanelEl).height;
+                    bottomPanelEl.style.height = COLLAPSED_HEIGHT;
+                    bottomPanelEl.style.minHeight = COLLAPSED_HEIGHT;
+                }
+                if (resizerH) resizerH.style.display = 'none';
+                // Верхний тулбар (New/Open/Save/Add/Delete/...) в Play не
+                // нужен вообще — единственное, что оттуда реально
+                // используется, это Stop, а он теперь плавающей кнопкой
+                // прямо на вьюпорте (см. #play-stop-fab).
+                if (toolbarTopEl) toolbarTopEl.style.display = 'none';
+                if (playStopFab) playStopFab.classList.add('visible');
+                if (viewportEl) viewportEl.classList.add('play-active');
             } else {
                 explorerEl.style.minWidth = '';
                 rightpanelEl.style.minWidth = '';
@@ -3217,6 +3282,14 @@
                 if (_savedRightpanelWidth) rightpanelEl.style.width = _savedRightpanelWidth;
                 if (resizer1) resizer1.style.display = '';
                 if (resizer2) resizer2.style.display = '';
+                if (bottomPanelEl) {
+                    bottomPanelEl.style.minHeight = '';
+                    if (_savedBottomPanelHeight) bottomPanelEl.style.height = _savedBottomPanelHeight;
+                }
+                if (resizerH) resizerH.style.display = '';
+                if (toolbarTopEl) toolbarTopEl.style.display = '';
+                if (playStopFab) playStopFab.classList.remove('visible');
+                if (viewportEl) viewportEl.classList.remove('play-active');
             }
             // renderer.setSize зависит от фактических размеров DOM
             // вьюпорта (см. resize()/renderer.setSize чуть ниже по файлу),
@@ -3959,6 +4032,7 @@ InstanceMT.__index = function(t, k)
         or k == "PlayerAdded" or k == "PlayerRemoving" or k == "Chatted" or k == "Died"
         or k == "CharacterAdded" or k == "CharacterRemoving"
         or k == "FlagCaptured"
+        or k == "Ended" or k == "DidLoop" or k == "Loaded"
         or k == "Event" or k == "Stepped" or k == "Heartbeat" or k == "RenderStepped" then
         return makeEvent(ref, k)
     end
@@ -4444,6 +4518,15 @@ end
             if (!soundElByRef[ref]) {
                 const a = new Audio();
                 a.preload = 'auto';
+                // Sound.Ended — реальный сигнал Roblox, на который
+                // SongMenuScript/Main.lua вешается через
+                // sound.Ended:Connect(...), чтобы, например, вернуться в
+                // меню, когда трек доиграл сам. Раньше "Ended" не было
+                // даже в списке распознаваемых имён событий в
+                // InstanceMT.__index (см. makeEvent) — sound.Ended сам по
+                // себе возвращал nil, и падение было ещё ДО :Connect,
+                // прямо на чтении поля.
+                a.addEventListener('ended', () => fireLuaSignal(ref, 'Ended', []));
                 soundElByRef[ref] = a;
             }
             return soundElByRef[ref];
