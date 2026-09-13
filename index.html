@@ -311,34 +311,33 @@
             overflow: hidden;
             white-space: pre-wrap;
             font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+            pointer-events: none;
+        }
+
+        /* ScreenGui/BillboardGui — организационные full-screen контейнеры,
+           не визуальные элементы (в настоящем Roblox сами по себе клики
+           никогда не блокируют, блокируют только их GuiObject-потомки).
+           Раньше pointer-events:auto по ошибке повесили на БАЗОВЫЙ класс
+           целиком, включая эти корни — из-за чего ЛЮБОЙ другой, даже
+           пустой в этом месте экрана, но Enabled=true ScreenGui, если он
+           стоял позже по DOM/z-order, перехватывал клики по ВСЕЙ площади
+           экрана, включая совершенно другое меню под ним (см. диагностику
+           Playwright: "<div ... data-cls="ScreenGui"> intercepts pointer
+           events" — Играть/Прослушать не срабатывали именно поэтому).
+           Включаем auto только настоящим GuiObject'ам. */
+        .rbx-gui-el[data-cls="Frame"],
+        .rbx-gui-el[data-cls="ScrollingFrame"],
+        .rbx-gui-el[data-cls="TextLabel"],
+        .rbx-gui-el[data-cls="TextButton"],
+        .rbx-gui-el[data-cls="TextBox"],
+        .rbx-gui-el[data-cls="ImageLabel"],
+        .rbx-gui-el[data-cls="ImageButton"] {
+            pointer-events: auto;
         }
 
         .rbx-gui-el[data-cls="TextButton"],
         .rbx-gui-el[data-cls="ImageButton"] {
-            pointer-events: auto;
             cursor: pointer;
-        }
-
-        .rbx-gui-el[data-cls="TextBox"] {
-            pointer-events: auto;
-        }
-
-        /* pointer-events НАСЛЕДУЕТСЯ от родителя, а не только от далёкого
-           #gui-overlay — декоративные дети (UICorner/UIStroke/UIPadding/
-           UIListLayout/...) внутри TextButton/TextBox МОЛЧА наследовали
-           auto от своего же интерактивного родителя и, будучи растянуты
-           на весь его размер (или лежащие в том же ряду/поверх), физически
-           перехватывали клик/тач раньше, чем он доходил до самой кнопки
-           или текстового поля. Та же история у TextLabel/ImageLabel —
-           чисто визуальные, не должны участвовать в hit-тестинге вовсе.
-           auto:none здесь явно "сбрасывает" унаследованное значение,
-           а не полагается на дефолт — иначе оно так и оставалось бы auto
-           от родителя.
-        */
-        .rbx-gui-el[data-cls^="UI"],
-        .rbx-gui-el[data-cls="TextLabel"],
-        .rbx-gui-el[data-cls="ImageLabel"] {
-            pointer-events: none;
         }
 
         #vp-label {
@@ -810,18 +809,7 @@
             display: none;
             align-items: flex-end;
             gap: 14px;
-            /* Было z-index:10 — ВЫШЕ #gui-overlay (z-index:5). Джойстик и
-               A/S/K/L лежат в #viewport РЯДОМ с #gui-overlay (см. разметку
-               ниже, они соседи), а не внутри него — поэтому z-index
-               сравнивался напрямую, и #joy-zone (pointer-events:all)
-               физически перехватывал клики/тач ПОД любым GUI-элементом,
-               который визуально оказывался над ним (например, поле ввода
-               промокода в SettingsMenu) — сам GUI при этом рисовался
-               поверх на экране, но событий не получал. Теперь ниже —
-               джойстик по-прежнему выше самой 3D-сцены (auto/0), но ниже
-               GUI-оверлея.
-            */
-            z-index: 4;
+            z-index: 10;
             pointer-events: none
         }
 
@@ -2022,16 +2010,8 @@
             animate();
             loadTree();
 
-            // Фокус viewport для WASD — но НЕ если клик пришёлся по
-            // текстовому полю GUI-оверлея (TextBox — обычный
-            // contentEditable div): иначе он получал фокус на долю
-            // секунды и тут же терял его этому же обработчику (клик по
-            // TextBox тоже всплывает до #viewport) — печатать в поле
-            // промокода было физически невозможно.
-            vp.addEventListener('click', (e) => {
-                if (e.target.closest && e.target.closest('[data-cls="TextBox"]')) return;
-                vp.focus();
-            });
+            // Фокус viewport для WASD
+            vp.addEventListener('click', () => vp.focus());
             vp.focus();
 
             // Мобильный геймпад: кнопки вверх/вниз
@@ -2187,16 +2167,56 @@
         function resize() {
             const vp = document.getElementById('viewport');
             const scale = qualitySettings.resolutionScale;
-            const w = Math.floor(vp.clientWidth * scale);
-            const h = Math.floor(vp.clientHeight * scale);
+            const guiOverlayEl = document.getElementById('gui-overlay');
+            // В Play зажимаем вьюпорт к 16:9 (letterbox чёрными полосами
+            // слева/справа или сверху/снизу — как просили), а не растягиваем
+            // на всю доступную площадь #viewport: это не только красивее,
+            // но и убирает "прыжки" пропорций GUI-оверлея (там много
+            // Position/Size в scale, т.е. в процентах от ширины/высоты)
+            // при каждом сворачивании/разворачивании Explorer/Properties
+            // или просто на нетипичном соотношении сторон экрана телефона.
+            // В режиме редактирования (не Play) поведение старое — вьюпорт
+            // занимает всю доступную область, так удобнее двигать камеру
+            // и работать с сценой.
+            let cssW = vp.clientWidth, cssH = vp.clientHeight, offX = 0, offY = 0;
+            if (typeof isPlaying !== 'undefined' && isPlaying) {
+                const targetAspect = 16 / 9;
+                const boxAspect = vp.clientWidth / Math.max(vp.clientHeight, 1);
+                if (boxAspect > targetAspect) {
+                    cssH = vp.clientHeight;
+                    cssW = Math.floor(cssH * targetAspect);
+                } else {
+                    cssW = vp.clientWidth;
+                    cssH = Math.floor(cssW / targetAspect);
+                }
+                offX = Math.floor((vp.clientWidth - cssW) / 2);
+                offY = Math.floor((vp.clientHeight - cssH) / 2);
+            }
+            const w = Math.floor(cssW * scale);
+            const h = Math.floor(cssH * scale);
             // ВАЖНО: setSize принимает CSS-размер (третий аргумент false —
             // не трогать style самим three.js, стиль задаём вручную ниже).
             // Реальный размер буфера отрисовки = w*pixelRatio x h*pixelRatio,
             // это считает сам renderer — раньше повышенная плотность
             // экрана телефона никак не учитывалась.
             renderer.setSize(w, h, false);
-            renderer.domElement.style.width = '100%';
-            renderer.domElement.style.height = '100%';
+            renderer.domElement.style.position = 'absolute';
+            renderer.domElement.style.left = offX + 'px';
+            renderer.domElement.style.top = offY + 'px';
+            renderer.domElement.style.width = cssW + 'px';
+            renderer.domElement.style.height = cssH + 'px';
+            // #gui-overlay обязан покрывать РОВНО ту же область, что и
+            // canvas, иначе Position/Size в scale у GUI (проценты) будут
+            // считаться от иной, неверной площади, чем то, что реально
+            // видно на летербоксед-канвасе.
+            if (guiOverlayEl) {
+                guiOverlayEl.style.left = offX + 'px';
+                guiOverlayEl.style.top = offY + 'px';
+                guiOverlayEl.style.width = cssW + 'px';
+                guiOverlayEl.style.height = cssH + 'px';
+                guiOverlayEl.style.right = '';
+                guiOverlayEl.style.bottom = '';
+            }
             if (camera) {
                 camera.aspect = w / Math.max(h, 1);
                 camera.updateProjectionMatrix();
@@ -3156,6 +3176,58 @@
             refreshStreamedGeometry();
         }
 
+        // Explorer/Properties занимают заметную часть ширины экрана (по
+        // умолчанию ~220px + ~260px), а на телефоне это большая доля от
+        // и без того небольшого окна — сам вьюпорт (буфер рендера)
+        // остаётся крошечным. Во время Play эти панели почти не нужны
+        // (тестируешь саму игру, а не инспектируешь объекты), поэтому
+        // прячем их и отдаём освободившееся место вьюпорту; ширины
+        // запоминаем, чтобы вернуть как было по Stop.
+        let _savedExplorerWidth = null;
+        let _savedRightpanelWidth = null;
+        function setEditorPanelsCollapsedForPlay(collapsed) {
+            const explorerEl = document.getElementById('explorer');
+            const rightpanelEl = document.getElementById('rightpanel');
+            const resizer1 = document.getElementById('resizer-1') || document.querySelector('#explorer + .resizer');
+            const resizer2 = document.getElementById('resizer-2');
+            if (!explorerEl || !rightpanelEl) return;
+            // Раньше панели прятались ПОЛНОСТЬЮ (display:none) — вьюпорт
+            // получал всю освободившуюся ширину разом (буфер рендера рос
+            // с ~1350 до ~2430px при неизменной высоте ~549px), и GUI-
+            // оверлей — у него много Position/Size в scale (в процентах
+            // от ширины) — при таком нетипичном соотношении сторон
+            // визуально "растягивался" по горизонтали. Вместо полного
+            // скрытия просто сильно сужаем панели (а не убираем совсем,
+            // как и просили), давая вьюпорту заметно больше места, но не
+            // разгоняя ширину до неестественного экстремума.
+            const COLLAPSED_WIDTH = '42px';
+            if (collapsed) {
+                _savedExplorerWidth = explorerEl.style.width || getComputedStyle(explorerEl).width;
+                _savedRightpanelWidth = rightpanelEl.style.width || getComputedStyle(rightpanelEl).width;
+                explorerEl.style.width = COLLAPSED_WIDTH;
+                explorerEl.style.minWidth = COLLAPSED_WIDTH;
+                rightpanelEl.style.width = COLLAPSED_WIDTH;
+                rightpanelEl.style.minWidth = COLLAPSED_WIDTH;
+                if (resizer1) resizer1.style.display = 'none';
+                if (resizer2) resizer2.style.display = 'none';
+            } else {
+                explorerEl.style.minWidth = '';
+                rightpanelEl.style.minWidth = '';
+                if (_savedExplorerWidth) explorerEl.style.width = _savedExplorerWidth;
+                if (_savedRightpanelWidth) rightpanelEl.style.width = _savedRightpanelWidth;
+                if (resizer1) resizer1.style.display = '';
+                if (resizer2) resizer2.style.display = '';
+            }
+            // renderer.setSize зависит от фактических размеров DOM
+            // вьюпорта (см. resize()/renderer.setSize чуть ниже по файлу),
+            // а он пересчитывается только по событию window 'resize' —
+            // простое display:none/'' у соседних панелей окно браузера не
+            // трогает, поэтому без явного вызова буфер рендера остался бы
+            // прежнего (маленького) размера, хотя место на экране уже
+            // освободилось.
+            requestAnimationFrame(() => { if (typeof resize === 'function') resize(); });
+        }
+
         async function startPlay() {
             if (typeof CANNON === 'undefined') {
                 notify(t('notify_cannon_not_ready'), 'err');
@@ -3288,6 +3360,7 @@
             updateCamera();
 
             isPlaying = true;
+            setEditorPanelsCollapsedForPlay(true);
             jumpQueued = false;
             lastStreamPos = { x: spawn.x, y: spawn.y, z: spawn.z, time: performance.now() };
             fallingSinceMs = null;
@@ -3313,6 +3386,7 @@
 
         function stopPlay() {
             isPlaying = false;
+            setEditorPanelsCollapsedForPlay(false);
             stopLuaScripts();
             physicsWorld = null;
             physicsBodies = {};
@@ -3885,20 +3959,26 @@ InstanceMT.__index = function(t, k)
         or k == "PlayerAdded" or k == "PlayerRemoving" or k == "Chatted" or k == "Died"
         or k == "CharacterAdded" or k == "CharacterRemoving"
         or k == "FlagCaptured"
-        or k == "Ended" or k == "Loaded" or k == "DidLoop" or k == "Paused" or k == "Resumed" or k == "Played"
         or k == "Event" or k == "Stepped" or k == "Heartbeat" or k == "RenderStepped" then
         return makeEvent(ref, k)
     end
     -- Sound:Play()/:play() (и Pause/Resume/Stop, все регистры — старые
-    -- скрипты 2008-2011 годов зовут их с маленькой буквы) — у движка нет
-    -- реального аудио-плеера (см. комментарий у Instance.new выше про
-    -- "классы без визуального смысла"), поэтому это no-op-заглушки, а не
-    -- имитация звука. Раньше .play/.Play не были в этом списке и падали
-    -- в __get_prop -> __find_first_child, который возвращал nil (нет
-    -- ребёнка с таким именем) -> "attempt to call a nil value (method
-    -- 'play')".
+    -- скрипты 2008-2011 годов зовут их с маленькой буквы). Раньше это
+    -- было no-op ВСЕГДА ("у движка нет реального аудио-плеера") — теперь
+    -- для настоящего Sound-инстанса реально играет через __sound_control
+    -- (JS поднимает под каждым Sound-рефом настоящий HTMLAudioElement,
+    -- см. getOrCreateSoundEl/luaSoundControl). Для прочих классов
+    -- (AnimationTrack и т.п., см. LoadAnimation чуть выше) по-прежнему
+    -- no-op — там реально нечему играть.
     if k == "Play" or k == "play" or k == "Stop" or k == "stop"
         or k == "Pause" or k == "pause" or k == "Resume" or k == "resume" then
+        if __get_class(ref) == "Sound" then
+            local action = (k == "Play" or k == "play") and "play"
+                or (k == "Stop" or k == "stop") and "stop"
+                or (k == "Pause" or k == "pause") and "pause"
+                or "resume"
+            return function(self, ...) __sound_control(ref, action) end
+        end
         return function(self, ...) end
     end
     if k == "Fire" then
@@ -4339,6 +4419,54 @@ end
                 mesh.matrix.compose(new THREE.Vector3(x, y, z), q, sc);
             }
         }
+        // rbxassetid://12345 (или голое число) -> локальный проксирующий
+        // URL, который браузер реально может открыть как <img>/<audio>
+        // src (см. /api/asset-proxy в app.py). Используется и для
+        // ImageLabel.Image, и для Sound.SoundId (см. getOrCreateSoundEl).
+        function rbxAssetIdToProxyUrl(idStr) {
+            const m = /\d+/.exec(String(idStr || ''));
+            if (!m) return null;
+            return '/api/asset-proxy?id=' + m[0];
+        }
+
+        // Настоящий звуковой движок поверх Sound-инстансов. Раньше
+        // Sound:Play()/:Stop()/:Pause() были голыми no-op-заглушками "у
+        // движка нет реального аудио-плеера" (см. комментарий в
+        // InstanceMT.__index) — для ритм-игры (FNF), где вся суть в
+        // синхронизации с музыкой, это означало полную тишину. Каждому
+        // Sound-рефу соответствует один настоящий HTMLAudioElement;
+        // SoundId/Volume/Looped/PlaybackSpeed синхронизируются в
+        // luaSetGenericProp, сама игра дёргает Play/Stop/Pause через
+        // __sound_control (см. installLuaBridge и правку в
+        // InstanceMT.__index).
+        let soundElByRef = {};
+        function getOrCreateSoundEl(ref) {
+            if (!soundElByRef[ref]) {
+                const a = new Audio();
+                a.preload = 'auto';
+                soundElByRef[ref] = a;
+            }
+            return soundElByRef[ref];
+        }
+        function luaSoundControl(ref, action) {
+            const a = soundElByRef[ref];
+            if (!a) return; // SoundId ещё не задан — играть нечего
+            if (action === 'play') {
+                // currentTime не сбрасываем — Roblox Sound:Play() на уже
+                // играющем звуке просто продолжает (а не перезапускает);
+                // TimePosition для перемотки выставляется отдельным
+                // свойством, см. luaSetGenericProp.
+                a.play().catch(() => { }); // автоплей иногда блокируется браузером до первого жеста пользователя — не считаем это ошибкой скрипта
+            } else if (action === 'stop') {
+                a.pause();
+                a.currentTime = 0;
+            } else if (action === 'pause') {
+                a.pause();
+            } else if (action === 'resume') {
+                a.play().catch(() => { });
+            }
+        }
+
         // Разумные Roblox-дефолты для свойств, которых у этого движка нет
         // ни в meshes (Position/Transparency/CanCollide), ни в GUI, ни в
         // virtualInstanceProps — Sound и подобные "не визуальные" классы
@@ -4356,6 +4484,18 @@ end
 
         function luaGetGenericProp(ref, name) {
             if (name === 'Name' && luaByRef[ref]) return luaByRef[ref].name;
+            // Sound — живое состояние реального <audio>, а не то, что
+            // Lua когда-то в него в последний раз записал: TimePosition
+            // должен ползти сам по себе во время игры (Main.lua сверяет
+            // с ним такты чарта), IsPlaying/Playing должны отражать,
+            // правда ли звук сейчас звучит (например, после того как
+            // трек доиграл до конца сам, без явного Stop()).
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Sound' && soundElByRef[ref]) {
+                const a = soundElByRef[ref];
+                if (name === 'TimePosition') return a.currentTime || 0;
+                if (name === 'IsPlaying' || name === 'Playing') return !a.paused && !a.ended;
+                if (name === 'TimeLength' || name === 'Length') return a.duration || 0;
+            }
             // GUI-объекты — ПЕРЕД virtualInstanceProps: Instance.new("Frame")
             // тоже заводит virtualInstanceProps (см. luaCreateVirtualInstance),
             // но если это GUI-класс, у него ЕЩЁ и guiPropsByRef — та самая
@@ -4391,6 +4531,28 @@ end
         }
         function luaSetGenericProp(ref, name, value) {
             if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
+            // Sound — до GUI/virtualInstanceProps веток: Sound не GUI-класс,
+            // но должен реально играть, а не просто хранить значение (см.
+            // getOrCreateSoundEl/luaSoundControl выше).
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Sound') {
+                if (name === 'SoundId') {
+                    const url = rbxAssetIdToProxyUrl(value);
+                    const a = getOrCreateSoundEl(ref);
+                    if (url) a.src = url;
+                } else if (name === 'Volume') {
+                    getOrCreateSoundEl(ref).volume = Math.max(0, Math.min(1, Number(value) || 0));
+                } else if (name === 'Looped') {
+                    getOrCreateSoundEl(ref).loop = !!value;
+                } else if (name === 'PlaybackSpeed') {
+                    getOrCreateSoundEl(ref).playbackRate = Number(value) || 1;
+                } else if (name === 'TimePosition') {
+                    getOrCreateSoundEl(ref).currentTime = Number(value) || 0;
+                }
+                // Падаем ДАЛЬШЕ (не return) — значение всё равно кладём в
+                // luaGenericPropsByRef как раньше, чтобы код, читающий их
+                // напрямую без спец-обработки (см. luaGetGenericProp),
+                // тоже видел актуальное значение.
+            }
             // GUI — ПЕРЕД virtualInstanceProps, той же причине, что и в
             // luaGetGenericProp выше: иначе запись на свежесозданном
             // Instance.new("Frame") молча уходила мимо DOM.
@@ -4692,15 +4854,30 @@ end
                 if (parentRef !== -1) {
                     (guiChildrenByRef[parentRef] = guiChildrenByRef[parentRef] || []).push(ref);
                 }
-                let el = guiDomByRef[ref];
+                const selfProps = guiPropsByRef[ref];
+                const isDecoration = selfProps.cls === 'UICorner' || selfProps.cls === 'UIStroke';
                 const parentEl = guiDomByRef[parentRef];
-                if (el && parentEl) {
-                    parentEl.appendChild(el); // уже был в DOM (редкий, но валидный повторный репарентинг) — просто переносим узел
-                } else if (!el && parentEl) {
-                    guiRenderNode(ref, parentEl); // первое появление в DOM — вместе со всем поддеревом (рекурсивно)
-                } else if (el && !parentEl) {
-                    el.remove(); // новый родитель ещё не отрисован (или это Parent=nil) — прячем, пока не понадобится
-                    delete guiDomByRef[ref];
+                if (isDecoration) {
+                    // Instance.new("UICorner"); corner.Parent = frame —
+                    // паттерн из Main.lua (spawnNote/pressLane/
+                    // createHoldEffect): раньше это создавало пустой,
+                    // ничего не делающий DOM-узел под frame (см.
+                    // guiCreateDomNode/applyGuiElementStyle — они не знают
+                    // про UICorner/UIStroke вообще), поэтому падающие ноты
+                    // и круги попадания, создаваемые прямо в рантайме,
+                    // никогда не скруглялись и не обводились, даже когда
+                    // .rbxl для статичных элементов уже пофикшен.
+                    if (parentEl) applyGuiDecoration(parentEl, selfProps);
+                } else {
+                    let el = guiDomByRef[ref];
+                    if (el && parentEl) {
+                        parentEl.appendChild(el); // уже был в DOM (редкий, но валидный повторный репарентинг) — просто переносим узел
+                    } else if (!el && parentEl) {
+                        guiRenderNode(ref, parentEl); // первое появление в DOM — вместе со всем поддеревом (рекурсивно)
+                    } else if (el && !parentEl) {
+                        el.remove(); // новый родитель ещё не отрисован (или это Parent=nil) — прячем, пока не понадобится
+                        delete guiDomByRef[ref];
+                    }
                 }
                 // Пере-раскладка списка (см. applyUIListLayout) — если у
                 // старого/нового родителя есть UIListLayout, состав детей
@@ -5048,6 +5225,10 @@ end
                 return 1;
             });
             def('__destroy', function (L2) { luaDestroyRef(lua.lua_tonumber(L2, 1)); return 0; });
+            def('__sound_control', function (L2) {
+                luaSoundControl(lua.lua_tonumber(L2, 1), lua.lua_tojsstring(L2, 2));
+                return 0;
+            });
             def('__get_prop', function (L2) {
                 const v = luaGetGenericProp(lua.lua_tonumber(L2, 1), lua.lua_tojsstring(L2, 2));
                 if (v === null || v === undefined) lua.lua_pushnil(L2);
@@ -5108,6 +5289,21 @@ end
                 if (isVector2) {
                     lua.lua_getfield(L2, idx, 'Y'); const vy = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
                     return { x: vx, y: vy };
+                }
+                // UDim (плоская {Scale, Offset}, без вложенных X/Y) —
+                // corner.CornerRadius = UDim.new(0.2, 0) в Main.lua
+                // (spawnNote/pressLane/createHoldEffect). Раньше не
+                // распознавался (не UDim2, не Color3, не Vector2) и падал
+                // в null — падающие ноты и круги попадания, создаваемые
+                // прямо в рантайме через Instance.new("UICorner"), никогда
+                // не получали реальный радиус на JS-стороне.
+                lua.lua_getfield(L2, idx, 'Scale');
+                const isUDim = lua.lua_isnumber(L2, -1);
+                const uScale = isUDim ? lua.lua_tonumber(L2, -1) : 0;
+                lua.lua_pop(L2, 1);
+                if (isUDim) {
+                    lua.lua_getfield(L2, idx, 'Offset'); const uOffset = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
+                    return { scale: uScale, offset: uOffset };
                 }
                 return null;
             }
@@ -5680,6 +5876,20 @@ end
                 for (const inst of allR.instances) {
                     luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
                     luaParentByRef[inst.ref] = inst.parent;
+                    // Sound, уже лежащий В ФАЙЛЕ (не Instance.new(...) из
+                    // Lua) — SoundId туда никогда не "присваивается" через
+                    // мост (luaSetGenericProp), он уже готов при загрузке,
+                    // поэтому инициализируем реальный <audio> здесь явно.
+                    // Без этого audio.src оставался пустым для абсолютно
+                    // всех звуков, лежащих на карте изначально (см. историю:
+                    // 5 Sound-рефов с воспроизведением, но без src).
+                    if (inst.cls === 'Sound' && inst.soundId) {
+                        const a = getOrCreateSoundEl(inst.ref);
+                        const url = rbxAssetIdToProxyUrl(inst.soundId);
+                        if (url) a.src = url;
+                        if (typeof inst.volume === 'number') a.volume = Math.max(0, Math.min(1, inst.volume));
+                        if (inst.looped) a.loop = true;
+                    }
                 }
                 for (const inst of allR.instances) {
                     if (inst.parent !== undefined && inst.parent !== -1) {
@@ -5820,6 +6030,51 @@ end
         // Родитель здесь всегда сам #gui-overlay (100% вьюпорта) — вложенные
         // Frame'ы позиционируются относительно родительского DOM-узла через
         // обычное position:absolute, так что calc(%) уже считается верно.
+        // Одиночный UDim {scale, offset} -> CSS-длина. Используется для
+        // UICorner.CornerRadius/*Radius и т.п. — та же логика, что и в
+        // udim2ToCssSize, но для одного измерения.
+        function udimToCssLength(u) {
+            if (!u || typeof u !== 'object') return '0px';
+            return 'calc(' + ((u.scale || 0) * 100) + '% + ' + (u.offset || 0) + 'px)';
+        }
+
+        // Применяет UICorner/UIStroke к DOM-элементу их РОДИТЕЛЯ. Эти два
+        // класса — не самостоятельные визуальные элементы (в настоящем
+        // Roblox тоже), а модификаторы соседнего GuiObject, поэтому они
+        // не получают собственный DOM-узел — раньше это вообще никак не
+        // обрабатывалось (см. applyGuiElementStyle), из-за чего ЛЮБОЙ
+        // UICorner/UIStroke в файле или созданный из Lua
+        // (Instance.new("UICorner")) не влиял на картинку: все Frame/
+        // TextButton в Play всегда рисовались с прямыми углами и без
+        // обводки, даже когда CornerRadius/Thickness были настроены.
+        function applyGuiDecoration(parentEl, decoProps) {
+            if (!parentEl || !decoProps) return;
+            if (decoProps.cls === 'UICorner') {
+                // Часть файлов хранит один общий CornerRadius, часть (в
+                // т.ч. этот проект) — независимый радиус на каждый угол
+                // (более новая версия UICorner в Roblox). Поддерживаем
+                // оба варианта.
+                if (decoProps.TopLeftRadius || decoProps.TopRightRadius ||
+                    decoProps.BottomLeftRadius || decoProps.BottomRightRadius) {
+                    const tl = udimToCssLength(decoProps.TopLeftRadius);
+                    const tr = udimToCssLength(decoProps.TopRightRadius);
+                    const br = udimToCssLength(decoProps.BottomRightRadius);
+                    const bl = udimToCssLength(decoProps.BottomLeftRadius);
+                    parentEl.style.borderRadius = tl + ' ' + tr + ' ' + br + ' ' + bl;
+                } else {
+                    parentEl.style.borderRadius = udimToCssLength(decoProps.CornerRadius);
+                }
+            } else if (decoProps.cls === 'UIStroke') {
+                if (decoProps.Enabled === false) return;
+                const thickness = (typeof decoProps.Thickness === 'number' ? decoProps.Thickness : 1);
+                // inset box-shadow вместо border — обводка не съедает
+                // внутреннее пространство и не сдвигает контент/бэкграунд,
+                // как настоящий UIStroke (рисуется поверх, не в layout).
+                parentEl.style.boxShadow = 'inset 0 0 0 ' + thickness + 'px ' +
+                    color3ToCss(decoProps.Color, decoProps.Transparency);
+            }
+        }
+
         function udim2ToCssPos(pos) {
             const x = pos && pos.x ? pos.x : { scale: 0, offset: 0 };
             const y = pos && pos.y ? pos.y : { scale: 0, offset: 0 };
@@ -5846,7 +6101,29 @@ end
             el.style.top = pos.top;
             el.style.width = size.width;
             el.style.height = size.height;
-            el.style.zIndex = String(props.ZIndex || 1);
+            // Файл Roblox хранит инстансы, сгруппированные ПО КЛАССАМ
+            // (все TextButton в одном чанке, все TextLabel — в другом), а
+            // не в исходном порядке потомков конкретного родителя. Порядок
+            // добавления в guiChildrenByRef идёт по порядку чтения этих
+            // чанков — то есть фактически СЛУЧАЙНЫЙ относительно того, что
+            // на самом деле старше/младше среди детей ОДНОГО родителя. При
+            // равном ZIndex (обычное дело: почти всё в файле ZIndex=1) это
+            // означает, что TextLabel вроде SongName мог оказаться "выше"
+            // TextButton вроде PlayBtn в z-порядке (или наоборот) чисто по
+            // случайности того, в каком чанке какой класс лежит в файле —
+            // и, получив pointer-events:auto, накрывал собой кнопку
+            // (реальный кейс: PlayBtn был недоступен для тапа, потому что
+            // SongName того же ряда рисовался поверх, хотя у обоих ZIndex=1
+            // — см. диагностику Playwright, "TextLabel intercepts pointer
+            // events"). "Настоящий" порядок потомков без переразбора
+            // формата не восстановить, поэтому вместо этого гарантируем
+            // явным множителем, что интерактивные классы (кнопки, поля
+            // ввода) при равном ZIndex ВСЕГДА рисуются выше декоративных
+            // (лейблы/фреймы) — это соответствует практическому смыслу
+            // разметки (кнопку не проектируют так, чтобы её специально
+            // накрывал текст) и не требует знать истинный порядок.
+            const isInteractiveCls = props.cls === 'TextButton' || props.cls === 'ImageButton' || props.cls === 'TextBox';
+            el.style.zIndex = String((props.ZIndex || 1) * 10 + (isInteractiveCls ? 5 : 0));
             // AnchorPoint — раньше вообще не читался: Position всегда
             // считался левым верхним углом элемента, как AnchorPoint(0,0)
             // по умолчанию. Круги попадания (AnchorPoint 0.5,0.5) и
@@ -5875,6 +6152,19 @@ end
                     ? (props.BorderSizePixel || 1) + 'px solid ' + color3ToCss(props.BorderColor3)
                     : 'none';
                 if (props.ClipsDescendants) el.style.overflow = 'hidden';
+                if (cls === 'ScrollingFrame') {
+                    // Раньше ScrollingFrame рендерился 1-в-1 как обычный
+                    // Frame (см. эту же ветку выше) — без overflow:auto
+                    // список песен физически не мог прокручиваться, ЧТО
+                    // БЫ ни лежало внутри (UIListLayout по-прежнему
+                    // раскладывает карточки через position:absolute —
+                    // абсолютно спозиционированные потомки корректно
+                    // формируют scrollHeight своего прокручиваемого
+                    // предка, так что отдельный CanvasSize не нужен).
+                    el.style.overflowY = 'auto';
+                    el.style.overflowX = 'hidden';
+                    el.style.webkitOverflowScrolling = 'touch';
+                }
             } else if (cls === 'TextLabel' || cls === 'TextButton' || cls === 'TextBox') {
                 el.style.background = (props.BackgroundTransparency >= 1)
                     ? 'transparent' : color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
@@ -5889,6 +6179,31 @@ end
             } else if (cls === 'ImageLabel' || cls === 'ImageButton') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
                 el.textContent = '';
+                // Раньше Image просто складывался в title (всплывающая
+                // подсказка при наведении) — картинка нигде не
+                // рисовалась, даже когда в файле честно стоял реальный
+                // rbxassetid:// (например SongIcon у карточек песен —
+                // см. историю чата: иконки альбомов не показывались
+                // именно поэтому, хотя ImageUrl был прописан). Настоящий
+                // rbxassetid:// браузер напрямую открыть не может (это не
+                // http-схема) — гоним через /api/asset-proxy на сервере
+                // (см. app.py, тот же приём, что и для скачивания
+                // аватара: сервер ходит на assetdelivery.roblox.com сам,
+                // браузер получает уже готовые байты картинки).
+                const proxyUrl = rbxAssetIdToProxyUrl(props.Image);
+                if (proxyUrl) {
+                    el.style.backgroundImage = 'url(' + proxyUrl + ')';
+                    // Fit — ближе всего к дефолтному ScaleType.Stretch
+                    // Roblox визуально не искажает картинку; Crop/Tile
+                    // отдельно не эмулируем (редкий случай для этого
+                    // движка), но Stretch/Slice трактуем как cover, а
+                    // Fit — как contain.
+                    el.style.backgroundSize = (props.ScaleType === 'Fit') ? 'contain' : 'cover';
+                    el.style.backgroundPosition = 'center';
+                    el.style.backgroundRepeat = 'no-repeat';
+                } else {
+                    el.style.backgroundImage = '';
+                }
                 el.title = props.Image || '';
             }
         }
@@ -5922,6 +6237,15 @@ end
                 el.addEventListener('click', () => fireLuaSignal(ref, 'MouseButton1Click', []));
                 el.addEventListener('mousedown', () => fireLuaSignal(ref, 'MouseButton1Down', []));
                 el.addEventListener('mouseup', () => fireLuaSignal(ref, 'MouseButton1Up', []));
+                // touchend НЕ passive и с preventDefault — иначе следом за
+                // нашим сигналом браузер сам досылает "теневые" mousedown/
+                // mouseup/click от того же тапа, и MouseButton1Down/Click
+                // прилетают в Lua ДВАЖДЫ на одно нажатие. Для тумблеров
+                // (открыть/закрыть меню, play/pause и т.п.) двойное
+                // срабатывание отменяет само себя — кнопка выглядит
+                // "сломанной", хотя оба сигнала технически дошли.
+                el.addEventListener('touchstart', () => fireLuaSignal(ref, 'MouseButton1Down', []), { passive: true });
+                el.addEventListener('touchend', (e) => { e.preventDefault(); fireLuaSignal(ref, 'MouseButton1Up', []); fireLuaSignal(ref, 'MouseButton1Click', []); }, { passive: false });
             }
             // MouseEnter/MouseLeave — у ЛЮБОГО GuiObject в настоящем Roblox,
             // не только у кнопок (Frame/TextLabel тоже их поддерживают).
@@ -5934,6 +6258,12 @@ end
             // "сырых" typeName/x/y — тут только они.
             el.addEventListener('mousedown', (e) => fireLuaSignal(ref, 'InputBegan', [domInputTypeName(e, false), ...domInputXY(e)]));
             el.addEventListener('mouseup', (e) => fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]));
+            // Тач-эквиваленты — см. коммент у document.addEventListener
+            // ('touchstart'/...) для UserInputService чуть ниже по файлу:
+            // без них sliderBg.InputBegan (обычный Frame, не кнопка) на
+            // телефоне мог вообще не сработать в начале жеста перетаскивания.
+            el.addEventListener('touchstart', (e) => fireLuaSignal(ref, 'InputBegan', [domInputTypeName(e, false), ...domInputXY(e)]), { passive: true });
+            el.addEventListener('touchend', (e) => fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]), { passive: true });
             // FocusLost/Focused — TextBox (contentEditable div, см.
             // applyGuiElementStyle). enterPressed — единственный аргумент
             // FocusLost в настоящем Roblox — запоминаем нажатие Enter в
@@ -5965,6 +6295,13 @@ end
             guiDomByRef[ref] = el;
             parentEl.appendChild(el);
             for (const childRef of (guiChildrenByRef[ref] || [])) {
+                const childProps = guiPropsByRef[childRef];
+                if (childProps && (childProps.cls === 'UICorner' || childProps.cls === 'UIStroke')) {
+                    // Модификатор, не отдельный визуальный узел — красим
+                    // el (родителя), а не создаём для него DOM-элемент.
+                    applyGuiDecoration(el, childProps);
+                    continue;
+                }
                 guiRenderNode(childRef, el);
             }
             applyUIListLayout(ref);
@@ -6166,6 +6503,31 @@ end
             const ref = luaFindServiceRef('UserInputService');
             if (ref !== -1) fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]);
         });
+        // Тач-эквиваленты — раньше их не было вовсе, только мышиные. На
+        // телефоне простой тап браузер ещё синтезирует как mousedown/
+        // mouseup/click (поэтому кнопки вроде "Играть" и так работали),
+        // но при РЕАЛЬНОМ перетаскивании (палец сдвинулся) синтетических
+        // mousemove в процессе жеста не будет вообще — только один (если
+        // вообще) в самом конце. Слайдер громкости в SettingsMenuScript
+        // (sliderBg.InputBegan + UserInputService.InputChanged, см. код
+        // самой игры) из-за этого не мог отследить движение пальца.
+        // Passive (без preventDefault) — чтобы не ломать нативный touch-
+        // scroll ScrollingFrame (список песен) тем же самым обработчиком.
+        document.addEventListener('touchstart', (e) => {
+            if (!luaServerL && !luaClientL) return;
+            const ref = luaFindServiceRef('UserInputService');
+            if (ref !== -1) fireLuaSignal(ref, 'InputBegan', [domInputTypeName(e, false), ...domInputXY(e)]);
+        }, { passive: true });
+        document.addEventListener('touchmove', (e) => {
+            if (!luaServerL && !luaClientL) return;
+            const ref = luaFindServiceRef('UserInputService');
+            if (ref !== -1) fireLuaSignal(ref, 'InputChanged', [domInputTypeName(e, true), ...domInputXY(e)]);
+        }, { passive: true });
+        document.addEventListener('touchend', (e) => {
+            if (!luaServerL && !luaClientL) return;
+            const ref = luaFindServiceRef('UserInputService');
+            if (ref !== -1) fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]);
+        }, { passive: true });
 
         // RunService.Stepped/Heartbeat/RenderStepped — настоящий, не
         // заглушечный тик каждый кадр, если хоть один скрипт уже успел
@@ -7324,6 +7686,7 @@ end
                 notify('Не удалось импортировать: ' + (e && e.message || e), 'err');
             }
         };
+
 
         async function doDownloadAvatar3d(mode) {
             const userId = (document.getElementById('av-uid').value || '').trim();

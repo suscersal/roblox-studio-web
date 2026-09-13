@@ -168,7 +168,15 @@ GUI_CONTAINER_CLASSES = {'Frame', 'ScrollingFrame'}
 GUI_LEAF_CLASSES = {
     'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
 }
-GUI_CLASSES = GUI_ROOT_CLASSES | GUI_CONTAINER_CLASSES | GUI_LEAF_CLASSES
+# UICorner/UIStroke не рисуются отдельным DOM-узлом — они модификаторы
+# соседнего GUI-объекта (border-radius / обводка), см. index.html
+# applyGuiDecorationToParent. Раньше их не было ни в одном из наборов
+# классов вообще, поэтому /api/gui_tree их молча отбрасывал — фронтенд
+# никогда не узнавал о TopLeftRadius/.../Thickness, лежащих в самом
+# .rbxl, и все GUI-плашки в Play всегда рисовались с прямыми углами и
+# без обводки, независимо от того, что реально настроено в файле.
+GUI_DECORATION_CLASSES = {'UICorner', 'UIStroke'}
+GUI_CLASSES = GUI_ROOT_CLASSES | GUI_CONTAINER_CLASSES | GUI_LEAF_CLASSES | GUI_DECORATION_CLASSES
 
 # Свойства, которые реально нужны фронтенду для рисования GUI-оверлея —
 # сознательно узкий список (как и SCRIPT_CLASSES выше по духу), чтобы не
@@ -179,6 +187,13 @@ GUI_PROPS = (
     'BorderColor3', 'Text', 'TextColor3', 'TextTransparency', 'TextSize',
     'TextScaled', 'TextWrapped', 'TextXAlignment', 'TextYAlignment', 'Font',
     'Image', 'ScaleType', 'ClipsDescendants',
+    # UICorner: некоторые файлы (в т.ч. этот) хранят независимый радиус
+    # на каждый угол (более новый вариант UICorner в Roblox) вместо
+    # одного общего CornerRadius — фронтенд понимает оба варианта.
+    'CornerRadius', 'TopLeftRadius', 'TopRightRadius',
+    'BottomLeftRadius', 'BottomRightRadius',
+    # UIStroke
+    'Color', 'Thickness', 'Transparency',
 )
 
 # Script/LocalScript исполняются в РАЗНЫХ средах в настоящем Roblox
@@ -795,7 +810,20 @@ def api_all_instances():
     out = []
     for ref, cls in r2c.items():
         name = pr.get(ref, {}).get('Name', cls)
-        out.append({'ref': ref, 'cls': cls, 'name': name, 'parent': pm.get(ref, -1)})
+        item = {'ref': ref, 'cls': cls, 'name': name, 'parent': pm.get(ref, -1)}
+        if cls == 'Sound':
+            # SoundId/Volume/Looped — заданные ПРЯМО В ФАЙЛЕ (а не через
+            # Instance.new(...).SoundId = ... из Lua) звуки. Раньше сюда
+            # не долетали: Lua-мост видел только cls/name/parent, поэтому
+            # реальный HTMLAudioElement (см. getOrCreateSoundEl в
+            # index.html) никогда не получал src для звуков, уже лежащих
+            # в карте при загрузке — audio.src оставался пустым, даже
+            # если Sound:Play() честно вызывался.
+            sp = pr.get(ref, {})
+            item['soundId'] = sp.get('SoundId', '')
+            item['volume'] = sp.get('Volume', 0.5)
+            item['looped'] = sp.get('Looped', False)
+        out.append(item)
     return jsonify({'ok': True, 'instances': out})
 
 
@@ -1516,6 +1544,71 @@ def _rbx_get_bytes(url):
         return _rbx_maybe_gunzip(resp.read())
 
 
+# Простой in-memory кэш байтов ассетов — картинки/звуки в игре
+# (SongIcon.Image, звуковые дорожки песен) грузятся с этого эндпоинта на
+# каждый Play заново; без кэша это лишний поход в сеть к Roblox при
+# каждом перезапуске Play той же сессии редактирования.
+_ASSET_PROXY_CACHE = {}
+_ASSET_PROXY_CACHE_MAX = 64
+
+
+@flask_app.route('/api/asset-proxy')
+def api_asset_proxy():
+    """Прокси-загрузка ассета Roblox по id — превращает rbxassetid://N
+    (то, что реально лежит в Image/SoundId у ImageLabel/Sound в файле) в
+    настоящий скачиваемый URL для браузера. Нужен именно прокси, а не
+    прямой fetch с клиента на assetdelivery.roblox.com, по двум причинам:
+    1) CORS — Roblox не шлёт заголовки, разрешающие браузеру читать ответ
+       с произвольного источника;
+    2) звуки/картинки, вставленные в приватную игру, иногда всё равно
+       требуют куку (см. _roblox_headers) — на клиенте её нет и быть не
+       должно.
+    В отличие от /api/roblox/asset/fetch (которого больше нет — это была
+    отдельная фича "скачать ассет по ID" с явным заходом через диалог),
+    здесь НЕ требуем логин: подавляющее большинство картинок/звуков,
+    вставленных в опубликованную игру, публичные и отдаются без куки —
+    просто пробуем куку, если она есть (через _roblox_headers), и не
+    падаем в 401, если её нет."""
+    raw_id = request.args.get('id', '').strip()
+    m = _re.search(r'\d+', raw_id)
+    if not m:
+        return Response('bad asset id', status=400)
+    asset_id = m.group()
+
+    cached = _ASSET_PROXY_CACHE.get(asset_id)
+    if cached:
+        content_type, raw_bytes = cached
+        return Response(raw_bytes, mimetype=content_type)
+
+    try:
+        raw_bytes = _rbx_get_bytes(
+            f'https://assetdelivery.roblox.com/v1/asset/?id={asset_id}')
+    except Exception as e:
+        return Response(f'asset fetch failed: {e}', status=502)
+
+    # Тип контента — по сигнатуре байтов (см. тот же приём в убранной
+    # asset/fetch-фиче): Roblox отдаёт сырые байты картинки/звука без
+    # заголовка, который тут можно было бы просто перенести как есть.
+    if raw_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+        content_type = 'image/png'
+    elif raw_bytes[:3] == b'\xff\xd8\xff':
+        content_type = 'image/jpeg'
+    elif raw_bytes[:4] == b'OggS':
+        content_type = 'audio/ogg'
+    elif raw_bytes[:3] == b'ID3' or raw_bytes[:2] == b'\xff\xfb':
+        content_type = 'audio/mpeg'
+    elif raw_bytes[:4] == b'RIFF':
+        content_type = 'audio/wav'
+    else:
+        content_type = 'application/octet-stream'
+
+    if len(_ASSET_PROXY_CACHE) >= _ASSET_PROXY_CACHE_MAX:
+        _ASSET_PROXY_CACHE.pop(next(iter(_ASSET_PROXY_CACHE)))
+    _ASSET_PROXY_CACHE[asset_id] = (content_type, raw_bytes)
+
+    return Response(raw_bytes, mimetype=content_type)
+
+
 def _rbx_download_cdn(hash_value):
     """8 CDN-узлов Roblox равнозначны — здесь короткий таймаут на узел
     (8с), чтобы один зависший узел не превращал скачивание в минуты
@@ -1530,7 +1623,6 @@ def _rbx_download_cdn(hash_value):
     raise RuntimeError(last_err or f'Не удалось скачать {hash_value}')
 
 
-@flask_app.route('/api/roblox/avatar3d/status')
 def api_roblox_avatar3d_status():
     """Один быстрый неблокирующий опрос состояния генерации у Roblox —
     вызывается клиентом периодически (см. doDownloadAvatar3d в index.html),
