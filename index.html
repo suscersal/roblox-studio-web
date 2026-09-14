@@ -778,6 +778,15 @@
             color: #9ca3af;
         }
 
+        #bottom-panel.output-floating {
+            border: 1px solid #4b5563;
+        }
+
+        #bottom-panel.output-floating #output-header {
+            cursor: move;
+            user-select: none;
+        }
+
         #output-header button {
             background: none;
             border: none;
@@ -839,7 +848,7 @@
 
         #mobile-pad {
             position: absolute;
-            bottom: 56px;
+            bottom: 10px;
             left: 16px;
             display: none;
             align-items: flex-end;
@@ -3221,7 +3230,58 @@
         // запоминаем, чтобы вернуть как было по Stop.
         let _savedExplorerWidth = null;
         let _savedRightpanelWidth = null;
-        let _savedBottomPanelHeight = null;
+        let _savedBottomPanelStyle = null;
+        let _outputDragInited = false;
+        // Таскание Output за заголовок, когда он "плавающий" (Play, см.
+        // setEditorPanelsCollapsedForPlay). Слушатели вешаем один раз —
+        // сам drag активен только пока на #bottom-panel есть класс
+        // output-floating (в обычном режиме редактирования заголовок
+        // остаётся некликабельным для перетаскивания, как и раньше).
+        function initOutputDrag() {
+            if (_outputDragInited) return;
+            _outputDragInited = true;
+            const header = document.getElementById('output-header');
+            const panel = document.getElementById('bottom-panel');
+            if (!header || !panel) return;
+            let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+            function onDown(e) {
+                if (!panel.classList.contains('output-floating')) return;
+                // Не перетаскивать, если тап пришёлся на сами кнопки
+                // заголовка (селектор "Все", корзина очистки) — иначе
+                // клик по ним всегда превращался бы в (пусть и нулевой)
+                // старт драга.
+                if (e.target.closest('button, select')) return;
+                dragging = true;
+                const p = e.touches ? e.touches[0] : e;
+                startX = p.clientX; startY = p.clientY;
+                const r = panel.getBoundingClientRect();
+                startLeft = r.left; startTop = r.top;
+                e.preventDefault();
+            }
+            function onMove(e) {
+                if (!dragging) return;
+                const p = e.touches ? e.touches[0] : e;
+                const dx = p.clientX - startX, dy = p.clientY - startY;
+                const w = panel.offsetWidth, h = panel.offsetHeight;
+                let nl = startLeft + dx, nt = startTop + dy;
+                // Не даём утащить целиком за пределы экрана — иначе
+                // маленькую плавающую панель легко потерять насовсем и
+                // придётся перезапускать Play, чтобы она появилась заново
+                // по центру.
+                nl = Math.max(-w + 40, Math.min(window.innerWidth - 40, nl));
+                nt = Math.max(0, Math.min(window.innerHeight - 40, nt));
+                panel.style.left = nl + 'px';
+                panel.style.top = nt + 'px';
+            }
+            function onUp() { dragging = false; }
+            header.addEventListener('mousedown', onDown);
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            header.addEventListener('touchstart', onDown, { passive: false });
+            document.addEventListener('touchmove', onMove, { passive: true });
+            document.addEventListener('touchend', onUp);
+        }
+
         function setEditorPanelsCollapsedForPlay(collapsed) {
             const explorerEl = document.getElementById('explorer');
             const rightpanelEl = document.getElementById('rightpanel');
@@ -3243,16 +3303,18 @@
             // как и просили), давая вьюпорту заметно больше места, но не
             // разгоняя ширину до неестественного экстремума.
             //
-            // Output (bottom-panel, по умолчанию 180px) раньше вообще не
-            // трогался — а вьюпорт теперь зажат к 16:9 ИМЕННО ПО ВЫСОТЕ
-            // (см. resize()): чем меньше доступная высота, тем меньше и
-            // итоговая ширина коробки 16:9, даже если по горизонтали давно
-            // пусто. Результат — тот самый "маленький экран": высоту
-            // отъедал Output, а свежеосвобождённая от Explorer/Properties
-            // ширина простаивала чёрными полосами. Сворачиваем Output
-            // так же, как и боковые панели.
+            // Output (bottom-panel, по умолчанию 180px) раньше просто
+            // сплющивался до 32px в общем flex-потоке — консоль
+            // становилась бесполезной (одна строка видна), хотя место
+            // под неё всё равно частично резервировалось. Вместо этого
+            // вытаскиваем панель из потока (position:fixed) и кладём
+            // ПОВЕРХ вьюпорта — вьюпорт получает вообще всю высоту
+            // #main, а Output остаётся нормального размера и просто
+            // перекрывает часть картинки; таскается за заголовок
+            // (#output-header, см. initOutputDrag).
+            const FLOAT_WIDTH = '360px';
+            const FLOAT_HEIGHT = '200px';
             const COLLAPSED_WIDTH = '42px';
-            const COLLAPSED_HEIGHT = '32px';
             if (collapsed) {
                 _savedExplorerWidth = explorerEl.style.width || getComputedStyle(explorerEl).width;
                 _savedRightpanelWidth = rightpanelEl.style.width || getComputedStyle(rightpanelEl).width;
@@ -3263,9 +3325,20 @@
                 if (resizer1) resizer1.style.display = 'none';
                 if (resizer2) resizer2.style.display = 'none';
                 if (bottomPanelEl) {
-                    _savedBottomPanelHeight = bottomPanelEl.style.height || getComputedStyle(bottomPanelEl).height;
-                    bottomPanelEl.style.height = COLLAPSED_HEIGHT;
-                    bottomPanelEl.style.minHeight = COLLAPSED_HEIGHT;
+                    _savedBottomPanelStyle = bottomPanelEl.getAttribute('style') || '';
+                    bottomPanelEl.style.position = 'fixed';
+                    bottomPanelEl.style.left = '';
+                    bottomPanelEl.style.right = '8px';
+                    bottomPanelEl.style.bottom = '8px';
+                    bottomPanelEl.style.top = '';
+                    bottomPanelEl.style.width = FLOAT_WIDTH;
+                    bottomPanelEl.style.height = FLOAT_HEIGHT;
+                    bottomPanelEl.style.maxHeight = FLOAT_HEIGHT;
+                    bottomPanelEl.style.zIndex = '50';
+                    bottomPanelEl.style.boxShadow = '0 4px 18px rgba(0,0,0,.5)';
+                    bottomPanelEl.style.borderRadius = '8px';
+                    bottomPanelEl.classList.add('output-floating');
+                    initOutputDrag();
                 }
                 if (resizerH) resizerH.style.display = 'none';
                 // Верхний тулбар (New/Open/Save/Add/Delete/...) в Play не
@@ -3283,8 +3356,8 @@
                 if (resizer1) resizer1.style.display = '';
                 if (resizer2) resizer2.style.display = '';
                 if (bottomPanelEl) {
-                    bottomPanelEl.style.minHeight = '';
-                    if (_savedBottomPanelHeight) bottomPanelEl.style.height = _savedBottomPanelHeight;
+                    bottomPanelEl.classList.remove('output-floating');
+                    bottomPanelEl.setAttribute('style', _savedBottomPanelStyle || '');
                 }
                 if (resizerH) resizerH.style.display = '';
                 if (toolbarTopEl) toolbarTopEl.style.display = '';
