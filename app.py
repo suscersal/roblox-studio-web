@@ -158,6 +158,13 @@ HIDDEN = {
 PART_CLASSES = {
     'Part', 'WedgePart', 'CornerWedgePart', 'TrussPart',
     'SpawnLocation', 'Seat', 'VehicleSeat', 'SpherePart',
+    # MeshPart раньше сюда не входил — такие объекты молча пропускались
+    # в build_all_scene_objects (см. ниже) и вообще не попадали в сцену,
+    # хотя парсер их видит и активно используется классом в
+    # Lua-песочнице/диалоге "Добавить". Рендерим как обычный box (реальная
+    # геометрия .mesh не разбирается — см. _extract_part_texture_id ниже
+    # про текстуру).
+    'MeshPart',
 }
 
 # Классы 2D-интерфейса (Roblox GUI) — рендерятся отдельным DOM-оверлеем
@@ -456,6 +463,43 @@ def gather_objects_in_radius(cx, cy, cz, radius):
 _scene_build_cache = {'parsed_id': None, 'objs': None}
 
 
+def _rbxassetid_num(value):
+    """'rbxassetid://123' -> '123'. Отсеивает rbxasset://textures/... —
+    это встроенные в студию файлы, у них нет числового id и их всё равно
+    нельзя утянуть с /api/asset-proxy (см. там же про assetdelivery)."""
+    if not value:
+        return None
+    s = str(value)
+    if 'rbxassetid://' not in s:
+        return None
+    m = _re.search(r'\d+', s)
+    return m.group() if m else None
+
+
+def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
+    """Ищем ЛЮБОЙ реальный (rbxassetid://) источник картинки для части:
+    1) TextureID/Texture прямо на MeshPart,
+    2) Texture дочернего Decal,
+    3) TextureId дочернего SpecialMesh.
+    Первое найденное побеждает — комбинировать несколько текстур на одном
+    box-приближении всё равно не получится, это не полноценный UV-меш."""
+    if cls == 'MeshPart':
+        tid = _rbxassetid_num(props.get('TextureID') or props.get('Texture'))
+        if tid:
+            return tid
+    for child in children_by_parent.get(ref, ()):
+        child_cls = referent_to_class.get(child)
+        if child_cls == 'Decal':
+            tid = _rbxassetid_num(all_props.get(child, {}).get('Texture'))
+            if tid:
+                return tid
+        elif child_cls == 'SpecialMesh':
+            tid = _rbxassetid_num(all_props.get(child, {}).get('TextureId'))
+            if tid:
+                return tid
+    return None
+
+
 def build_all_scene_objects():
     # Раньше этот разбор (CFrame/матрицы поворота, поиск SpecialMesh для
     # формы, цвет, Anchored/CanCollide) заново гонялся по ВСЕМ объектам
@@ -471,6 +515,13 @@ def build_all_scene_objects():
     pid = (id(parsed), _scene_version['v'])
     if _scene_build_cache['parsed_id'] == pid:
         return _scene_build_cache['objs']
+
+    # ref ребёнка -> ref родителя из parent_map — переворачиваем один раз
+    # на всю сборку сцены, а не ищем детей линейным проходом на каждую
+    # часть (на картах в тысячи объектов это была бы O(n^2) сборка).
+    children_by_parent = {}
+    for child_ref, parent_ref in parsed['parent_map'].items():
+        children_by_parent.setdefault(parent_ref, []).append(child_ref)
 
     objs = []
     for ref, cls in parsed['referent_to_class'].items():
@@ -538,6 +589,10 @@ def build_all_scene_objects():
             break
         name = props.get('Name', cls)
 
+        texture_id = _extract_part_texture_id(
+            ref, cls, props, children_by_parent, parsed['props'],
+            parsed['referent_to_class'])
+
         anchored = props.get('Anchored', False)
         if isinstance(anchored, str):
             anchored = anchored.lower() in ('true', '1')
@@ -550,7 +605,7 @@ def build_all_scene_objects():
             'shape': shape,
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
-            'rot': rot_matrix, 'color': color,
+            'rot': rot_matrix, 'color': color, 'texture': texture_id,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
