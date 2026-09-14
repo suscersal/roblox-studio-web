@@ -158,6 +158,13 @@ HIDDEN = {
 PART_CLASSES = {
     'Part', 'WedgePart', 'CornerWedgePart', 'TrussPart',
     'SpawnLocation', 'Seat', 'VehicleSeat', 'SpherePart',
+    # MeshPart раньше сюда не входил — такие объекты молча пропускались
+    # в build_all_scene_objects (см. ниже) и вообще не попадали в сцену,
+    # хотя парсер их видит и активно используется классом в
+    # Lua-песочнице/диалоге "Добавить". Рендерим как обычный box (реальная
+    # геометрия .mesh не разбирается — см. _extract_part_texture_id ниже
+    # про текстуру).
+    'MeshPart',
 }
 
 # Классы 2D-интерфейса (Roblox GUI) — рендерятся отдельным DOM-оверлеем
@@ -456,6 +463,43 @@ def gather_objects_in_radius(cx, cy, cz, radius):
 _scene_build_cache = {'parsed_id': None, 'objs': None}
 
 
+def _rbxassetid_num(value):
+    """'rbxassetid://123' -> '123'. Отсеивает rbxasset://textures/... —
+    это встроенные в студию файлы, у них нет числового id и их всё равно
+    нельзя утянуть с /api/asset-proxy (см. там же про assetdelivery)."""
+    if not value:
+        return None
+    s = str(value)
+    if 'rbxassetid://' not in s:
+        return None
+    m = _re.search(r'\d+', s)
+    return m.group() if m else None
+
+
+def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
+    """Ищем ЛЮБОЙ реальный (rbxassetid://) источник картинки для части:
+    1) TextureID/Texture прямо на MeshPart,
+    2) Texture дочернего Decal,
+    3) TextureId дочернего SpecialMesh.
+    Первое найденное побеждает — комбинировать несколько текстур на одном
+    box-приближении всё равно не получится, это не полноценный UV-меш."""
+    if cls == 'MeshPart':
+        tid = _rbxassetid_num(props.get('TextureID') or props.get('Texture'))
+        if tid:
+            return tid
+    for child in children_by_parent.get(ref, ()):
+        child_cls = referent_to_class.get(child)
+        if child_cls == 'Decal':
+            tid = _rbxassetid_num(all_props.get(child, {}).get('Texture'))
+            if tid:
+                return tid
+        elif child_cls == 'SpecialMesh':
+            tid = _rbxassetid_num(all_props.get(child, {}).get('TextureId'))
+            if tid:
+                return tid
+    return None
+
+
 def build_all_scene_objects():
     # Раньше этот разбор (CFrame/матрицы поворота, поиск SpecialMesh для
     # формы, цвет, Anchored/CanCollide) заново гонялся по ВСЕМ объектам
@@ -471,6 +515,13 @@ def build_all_scene_objects():
     pid = (id(parsed), _scene_version['v'])
     if _scene_build_cache['parsed_id'] == pid:
         return _scene_build_cache['objs']
+
+    # ref ребёнка -> ref родителя из parent_map — переворачиваем один раз
+    # на всю сборку сцены, а не ищем детей линейным проходом на каждую
+    # часть (на картах в тысячи объектов это была бы O(n^2) сборка).
+    children_by_parent = {}
+    for child_ref, parent_ref in parsed['parent_map'].items():
+        children_by_parent.setdefault(parent_ref, []).append(child_ref)
 
     objs = []
     for ref, cls in parsed['referent_to_class'].items():
@@ -538,6 +589,10 @@ def build_all_scene_objects():
             break
         name = props.get('Name', cls)
 
+        texture_id = _extract_part_texture_id(
+            ref, cls, props, children_by_parent, parsed['props'],
+            parsed['referent_to_class'])
+
         anchored = props.get('Anchored', False)
         if isinstance(anchored, str):
             anchored = anchored.lower() in ('true', '1')
@@ -550,7 +605,7 @@ def build_all_scene_objects():
             'shape': shape,
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
-            'rot': rot_matrix, 'color': color,
+            'rot': rot_matrix, 'color': color, 'texture': texture_id,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
@@ -1538,6 +1593,114 @@ def _rbx_get_json(url):
             f'Roblox вернул не-JSON ответ (похоже на антибот-страницу): {snippet}')
 
 
+def _roblox_apikey_file():
+    """Путь к файлу с сохранённым Open Cloud API-ключом — то же место и
+    тот же принцип, что и _roblox_auth_file() для куки (см. рядом):
+    RSW_DATA_DIR на Android, локальная папка иначе. Отдельный файл, а не
+    внутри roblox_auth.json — ключ и кука это разные учётные данные с
+    разным жизненным циклом (ключ не привязан к конкретному логину)."""
+    data_dir = os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)
+    return Path(data_dir) / 'roblox_apikey.json'
+
+
+def _roblox_api_key():
+    """Open Cloud API-ключ — официальная замена сессионной куки для
+    AssetDelivery. С 2 апреля 2025 Roblox закрыл анонимный доступ к
+    assetdelivery.roblox.com (see devforum "New Asset Delivery API
+    Endpoints for Community Tools") — без авторизации теперь 401 на
+    ЛЮБОЙ запрос, а не только на приватные ассеты. Ключ создаётся в
+    Creator Dashboard → Open Cloud → API Keys, с правом только на чтение
+    ассетов.
+
+    Порядок поиска: переменная окружения ROBLOX_API_KEY (для серверных
+    деплоев, где ключ задаётся при запуске) — если не задана, читаем
+    ключ, который пользователь ввёл сам через UI (/api/roblox/api-key,
+    см. ниже) и который лежит в _roblox_apikey_file(). Ключ НЕ хранится
+    в коде/репозитории ни в одном из вариантов."""
+    env_key = os.environ.get('ROBLOX_API_KEY', '').strip()
+    if env_key:
+        return env_key
+    p = _roblox_apikey_file()
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding='utf-8'))
+        key = (data.get('api_key') or '').strip()
+        return key or None
+    except Exception:
+        return None
+
+
+@flask_app.route('/api/roblox/api-key', methods=['GET', 'POST', 'DELETE'])
+def api_roblox_api_key():
+    """Управление Open Cloud API-ключом из UI — пользователь вводит его
+    сам (см. showRobloxApiKeyDialog в index.html), ключ сохраняется на
+    диск локально (та же папка, что и roblox_auth.json) и никогда не
+    уходит никуда, кроме прямых запросов к apis.roblox.com в
+    _rbx_get_bytes_opencloud. GET отдаёт только факт наличия ключа и его
+    последние 4 символа для опознания — сам ключ обратно не возвращаем."""
+    p = _roblox_apikey_file()
+
+    if request.method == 'GET':
+        env_key = os.environ.get('ROBLOX_API_KEY', '').strip()
+        if env_key:
+            return jsonify({'ok': True, 'hasKey': True, 'source': 'env', 'last4': env_key[-4:]})
+        key = _roblox_api_key()
+        if not key:
+            return jsonify({'ok': True, 'hasKey': False})
+        return jsonify({'ok': True, 'hasKey': True, 'source': 'ui', 'last4': key[-4:]})
+
+    if request.method == 'DELETE':
+        try:
+            if p.exists():
+                p.unlink()
+            return jsonify({'ok': True})
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 500
+
+    # POST — сохранить новый ключ
+    body = request.get_json(silent=True) or {}
+    key = (body.get('api_key') or '').strip()
+    if not key:
+        return jsonify({'ok': False, 'error': 'api_key пустой'}), 400
+    try:
+        p.write_text(json.dumps({'api_key': key}), encoding='utf-8')
+        return jsonify({'ok': True, 'last4': key[-4:]})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+def _rbx_get_bytes_opencloud(asset_id):
+    """GET /asset-delivery-api/v1/assetId/{id} с x-api-key → JSON с
+    полем location (временная подписанная CDN-ссылка, TTL несколько
+    минут) → обычный GET по этой ссылке уже без заголовков авторизации.
+    Возвращает None, если ключ не сконфигурирован (тогда вызывающий код
+    падает обратно на анонимный путь ниже), и бросает исключение при
+    реальной ошибке запроса — чтобы отличить "ключа просто нет" от
+    "ключ есть, но не работает"."""
+    api_key = _roblox_api_key()
+    if not api_key:
+        return None
+
+    meta_req = _req.Request(
+        f'https://apis.roblox.com/asset-delivery-api/v1/assetId/{asset_id}',
+        headers={'x-api-key': api_key, 'Accept': 'application/json',
+                 'Accept-Encoding': 'identity'})
+    with _req.urlopen(meta_req, timeout=20) as resp:
+        meta = json.loads(_rbx_maybe_gunzip(resp.read()).decode('utf-8', 'replace'))
+
+    location = meta.get('location')
+    if not location:
+        raise RuntimeError(f'Open Cloud ответил без location: {meta}')
+
+    # Сама CDN-ссылка уже подписана (signature+expiry в query, см.
+    # archiveteam wiki про AWS CloudFront) — второй раз x-api-key слать
+    # не нужно и не поможет, это просто обычный HTTPS GET.
+    cdn_req = _req.Request(location, headers={'Accept-Encoding': 'gzip'})
+    with _req.urlopen(cdn_req, timeout=20) as resp:
+        return _rbx_maybe_gunzip(resp.read())
+
+
 def _rbx_get_bytes(url):
     r = _req.Request(url, headers=_roblox_headers())
     with _req.urlopen(r, timeout=8) as resp:
@@ -1557,18 +1720,20 @@ def api_asset_proxy():
     """Прокси-загрузка ассета Roblox по id — превращает rbxassetid://N
     (то, что реально лежит в Image/SoundId у ImageLabel/Sound в файле) в
     настоящий скачиваемый URL для браузера. Нужен именно прокси, а не
-    прямой fetch с клиента на assetdelivery.roblox.com, по двум причинам:
-    1) CORS — Roblox не шлёт заголовки, разрешающие браузеру читать ответ
-       с произвольного источника;
-    2) звуки/картинки, вставленные в приватную игру, иногда всё равно
-       требуют куку (см. _roblox_headers) — на клиенте её нет и быть не
-       должно.
-    В отличие от /api/roblox/asset/fetch (которого больше нет — это была
-    отдельная фича "скачать ассет по ID" с явным заходом через диалог),
-    здесь НЕ требуем логин: подавляющее большинство картинок/звуков,
-    вставленных в опубликованную игру, публичные и отдаются без куки —
-    просто пробуем куку, если она есть (через _roblox_headers), и не
-    падаем в 401, если её нет."""
+    прямой fetch с клиента на assetdelivery.roblox.com/apis.roblox.com,
+    из-за CORS — эти домены не шлют заголовки, разрешающие браузеру
+    читать ответ с произвольного источника.
+
+    Порядок попыток (обе ветки реально пробуются, а не "либо/либо"):
+    1) Open Cloud (x-api-key, см. _rbx_get_bytes_opencloud) — официальный
+       путь, если сконфигурирован ROBLOX_API_KEY.
+    2) Кука/анонимный GET на /v1/asset/?id= (_roblox_headers сама решает,
+       слать куку или нет — см. _roblox_cookie) — пробуется, если шаг 1
+       не настроен ИЛИ настроен, но реально упал (сеть, невалидный ключ,
+       ассет вне прав ключа и т.п.). С 2 апреля 2025 Roblox требует
+       авторизацию на ЛЮБОЙ запрос к AssetDelivery, так что без ключа И
+       без куки этот шаг тоже обычно вернёт 401 — тогда возвращаем
+       ОБЕ ошибки, чтобы сразу было видно, что именно не сработало."""
     raw_id = request.args.get('id', '').strip()
     m = _re.search(r'\d+', raw_id)
     if not m:
@@ -1580,11 +1745,30 @@ def api_asset_proxy():
         content_type, raw_bytes = cached
         return Response(raw_bytes, mimetype=content_type)
 
+    raw_bytes = None
+    opencloud_error = None
     try:
-        raw_bytes = _rbx_get_bytes(
-            f'https://assetdelivery.roblox.com/v1/asset/?id={asset_id}')
+        raw_bytes = _rbx_get_bytes_opencloud(asset_id)
     except Exception as e:
-        return Response(f'asset fetch failed: {e}', status=502)
+        opencloud_error = str(e)
+
+    cookie_error = None
+    if raw_bytes is None:
+        try:
+            raw_bytes = _rbx_get_bytes(
+                f'https://assetdelivery.roblox.com/v1/asset/?id={asset_id}')
+        except Exception as e:
+            cookie_error = str(e)
+
+    if raw_bytes is None:
+        parts = []
+        if opencloud_error:
+            parts.append(f'Open Cloud: {opencloud_error}')
+        if cookie_error:
+            has_cookie = _roblox_cookie() is not None
+            parts.append(
+                f'{"кука" if has_cookie else "анонимно (нет куки)"}: {cookie_error}')
+        return Response('asset fetch failed — ' + '; '.join(parts), status=502)
 
     # Тип контента — по сигнатуре байтов (см. тот же приём в убранной
     # asset/fetch-фиче): Roblox отдаёт сырые байты картинки/звука без

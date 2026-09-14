@@ -963,6 +963,8 @@
                 data-i18n="tb_publish">☁ Publish</span></button>
         <button class="purple" id="avatar3d-btn" onclick="showAvatar3dDialog()"
             title="Скачать 3D-аватар по Roblox User ID">🧍 Avatar</button>
+        <button id="rbx-apikey-btn" onclick="showRobloxApiKeyDialog()"
+            title="Open Cloud API-ключ для загрузки звуков/картинок с сервера">🔑 API key</button>
         <button onclick="toggleLang()" title="Switch language / Сменить язык" id="lang-btn">🌐 EN</button>
         <div class="sep"></div>
         <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title"
@@ -2610,6 +2612,35 @@
             return geo;
         }
 
+        // ============ ТЕКСТУРЫ ОБЫЧНЫХ ЧАСТЕЙ (Decal/MeshPart/SpecialMesh) ============
+        // Глобальный (не per-rebuild, в отличие от geoCache/matCache ниже —
+        // те создаются заново на каждую пересборку сцены) кэш по asset id,
+        // чтобы одна и та же текстура не качалась с /api/asset-proxy заново
+        // при каждом Play/перезаходе в сцену.
+        const _partTexCache = {};
+        // Раньше THREE.TextureLoader создавался здесь же, на верхнем уровне
+        // скрипта — то есть СРАЗУ при разборе этого <script>, ДО того, как
+        // гарантированно успевает выполниться сам THREE.js (он подключён
+        // отдельным <script src="..."> и не обязательно к этому моменту уже
+        // отработал) — "Uncaught ReferenceError: THREE is not defined" при
+        // самой загрузке страницы, ещё до всякого Play. Инициализируем
+        // лениво, при первом реальном вызове (к этому моменту THREE точно
+        // загружен — вся остальная сцена и так на нём держится).
+        let _partTexLoader = null;
+        function getOrLoadPartTexture(assetId) {
+            if (_partTexCache[assetId]) return _partTexCache[assetId];
+            if (!_partTexLoader) _partTexLoader = new THREE.TextureLoader();
+            const tex = _partTexLoader.load('/api/asset-proxy?id=' + assetId, (loaded) => {
+                // Тот же r128-фикс насыщенности, что и у аватаров (см.
+                // importAvatarIntoScene) — иначе текстура выглядит блёкло.
+                loaded.encoding = THREE.sRGBEncoding;
+                loaded.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                loaded.needsUpdate = true;
+            });
+            _partTexCache[assetId] = tex;
+            return tex;
+        }
+
         // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
         function buildMeshFromObj(o, geoCache, matCache) {
             const geoKey = o.shape + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
@@ -2633,13 +2664,23 @@
             }
             const geo = geoCache[geoKey];
 
-            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1);
+            // Текстура — только на "high", как и остальные quality-флаги
+            // визуальной детализации (см. QUALITY_PRESETS). На low/medium
+            // грузить с сервера картинки на каждую замешенную часть карты
+            // того же класса проблем, что решает весь chunk-based стриминг.
+            const texId = qualitySettings.textures ? o.texture : null;
+            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1) + '_' + (texId || '');
             if (!matCache[matKey]) {
                 matCache[matKey] = new THREE.MeshLambertMaterial({
-                    color: o.color || '#a0a0a0',
+                    // Текстуру красим в тон o.color — она бы почти всегда
+                    // забивалась им до полной непрозрачной заливки, если
+                    // color оставить как есть (получается имитация тона
+                    // поверхности без текстуры).
+                    color: texId ? '#ffffff' : (o.color || '#a0a0a0'),
                     transparent: (o.opacity || 1) < 1.0,
                     opacity: o.opacity || 1.0,
                     flatShading: currentQuality === 'low',
+                    map: texId ? getOrLoadPartTexture(texId) : null,
                 });
             }
             const mat = matCache[matKey];
@@ -7634,6 +7675,59 @@ end
                 '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
+        }
+
+        // === Open Cloud API-ключ для /api/asset-proxy — пользователь ===
+        // сам создаёт ключ в Creator Dashboard и вводит его сюда. Ключ
+        // хранится только на локальном сервере (файл рядом с app.py, см.
+        // _roblox_apikey_file), сюда возвращаются только "есть/нет" и
+        // последние 4 символа для опознания — сам ключ с сервера не
+        // уходит второй раз в браузер.
+        async function showRobloxApiKeyDialog() {
+            const st = await api('GET', '/api/roblox/api-key');
+            const has = st.ok && st.hasKey;
+            const fromEnv = has && st.source === 'env';
+            const statusLine = has
+                ? ('✅ Ключ сохранён (…' + st.last4 + ')' + (fromEnv ? ' — задан через переменную окружения ROBLOX_API_KEY на сервере' : ''))
+                : '⚠️ Ключ не задан — звуки/картинки с сервера грузиться не будут (Roblox с апреля 2025 требует авторизацию на AssetDelivery).';
+
+            showModal(
+                '<h3>🔑 Roblox Open Cloud API key</h3>' +
+                '<p style="opacity:.8; font-size:13px;">Создайте ключ на ' +
+                '<a href="https://create.roblox.com/dashboard/credentials" target="_blank">create.roblox.com/dashboard/credentials</a> ' +
+                'с правом только на чтение ассетов (Asset Delivery) и вставьте сюда.</p>' +
+                '<p style="margin:6px 0;">' + statusLine + '</p>' +
+                (fromEnv ? '' :
+                    '<input id="rbx-apikey-input" type="password" placeholder="Вставьте API-ключ" style="width:100%; padding:6px; box-sizing:border-box;">' +
+                    '<div class="modal-row" style="margin-top:10px;">' +
+                    '<button onclick="saveRobloxApiKey()" style="background:#7c3aed">💾 Сохранить</button>' +
+                    (has ? '<button onclick="clearRobloxApiKey()" style="background:#b91c1c">🗑 Удалить</button>' : '') +
+                    '<button onclick="closeModal()">Отмена</button>' +
+                    '</div>')
+            );
+        }
+
+        async function saveRobloxApiKey() {
+            const el = document.getElementById('rbx-apikey-input');
+            const key = el ? el.value.trim() : '';
+            if (!key) { notify('Ключ пустой', 'err'); return; }
+            const r = await api('POST', '/api/roblox/api-key', { api_key: key });
+            if (r.ok) {
+                notify('✅ Ключ сохранён (…' + r.last4 + ')');
+                closeModal();
+            } else {
+                notify('Ошибка: ' + (r.error || r.text), 'err');
+            }
+        }
+
+        async function clearRobloxApiKey() {
+            const r = await api('DELETE', '/api/roblox/api-key');
+            if (r.ok) {
+                notify('Ключ удалён');
+                closeModal();
+            } else {
+                notify('Ошибка: ' + (r.error || r.text), 'err');
+            }
         }
 
         async function doPub() {
