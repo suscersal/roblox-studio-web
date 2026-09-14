@@ -2610,26 +2610,6 @@
             return geo;
         }
 
-        // ============ ТЕКСТУРЫ ОБЫЧНЫХ ЧАСТЕЙ (Decal/MeshPart/SpecialMesh) ============
-        // Глобальный (не per-rebuild, в отличие от geoCache/matCache ниже —
-        // те создаются заново на каждую пересборку сцены) кэш по asset id,
-        // чтобы одна и та же текстура не качалась с /api/asset-proxy заново
-        // при каждом Play/перезаходе в сцену.
-        const _partTexCache = {};
-        const _partTexLoader = new THREE.TextureLoader();
-        function getOrLoadPartTexture(assetId) {
-            if (_partTexCache[assetId]) return _partTexCache[assetId];
-            const tex = _partTexLoader.load('/api/asset-proxy?id=' + assetId, (loaded) => {
-                // Тот же r128-фикс насыщенности, что и у аватаров (см.
-                // importAvatarIntoScene) — иначе текстура выглядит блёкло.
-                loaded.encoding = THREE.sRGBEncoding;
-                loaded.anisotropy = renderer.capabilities.getMaxAnisotropy();
-                loaded.needsUpdate = true;
-            });
-            _partTexCache[assetId] = tex;
-            return tex;
-        }
-
         // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
         function buildMeshFromObj(o, geoCache, matCache) {
             const geoKey = o.shape + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
@@ -2653,23 +2633,13 @@
             }
             const geo = geoCache[geoKey];
 
-            // Текстура — только на "high", как и остальные quality-флаги
-            // визуальной детализации (см. QUALITY_PRESETS). На low/medium
-            // грузить с сервера картинки на каждую замешенную часть карты
-            // того же класса проблем, что решает весь chunk-based стриминг.
-            const texId = qualitySettings.textures ? o.texture : null;
-            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1) + '_' + (texId || '');
+            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1);
             if (!matCache[matKey]) {
                 matCache[matKey] = new THREE.MeshLambertMaterial({
-                    // Текстуру красим в тон o.color — она бы почти всегда
-                    // забивалась им до полной непрозрачной заливки, если
-                    // color оставить как есть (получается имитация тона
-                    // поверхности без текстуры).
-                    color: texId ? '#ffffff' : (o.color || '#a0a0a0'),
+                    color: o.color || '#a0a0a0',
                     transparent: (o.opacity || 1) < 1.0,
                     opacity: o.opacity || 1.0,
                     flatShading: currentQuality === 'low',
-                    map: texId ? getOrLoadPartTexture(texId) : null,
                 });
             }
             const mat = matCache[matKey];
