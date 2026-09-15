@@ -2751,9 +2751,31 @@
                 Right: 0, Left: 1, Top: 2, Bottom: 3, Back: 4, Front: 5,
             };
             const isBoxShape = !o.shape || o.shape === 'block' || o.shape === 'box';
+            // Decal — своя явная грань (Face), уже вычислена корректно
+            // выше. Но MeshPart.TextureID/SpecialMesh.TextureId — это
+            // текстура, честно рассчитанная на РЕАЛЬНУЮ форму меша
+            // (какая угодно, не бокс) с её собственной UV-развёрткой;
+            // мы же вместо настоящей геометрии рисуем bounding-box
+            // приближение. Раньше в этом случае текстуру всё равно
+            // клеили на ВСЕ 6 граней сразу (тем же дефолтным UV
+            // BoxGeometry 0..1 на каждую грань) — для непрямоугольного
+            // меша это гарантированно выглядит криво натянутым сразу со
+            // всех сторон, как на зажигалке (длинный тонкий бокс + один
+            // "плоский" рисунок этикетки). Раз настоящую геометрию меша
+            // не грузим, кладём такую текстуру ТОЛЬКО на одну, самую
+            // большую по площади грань (обычно она и была основной
+            // "лицевой" стороной у автора модели) — заметно ближе к
+            // правде, чем текстура на каждой стороне одновременно.
+            let implicitFaceIdx = null;
+            if (texId && !o.textureFace && isBoxShape) {
+                const sx = o.sx || 1, sy = o.sy || 1, sz = o.sz || 1;
+                const areaX = sy * sz, areaY = sx * sz, areaZ = sx * sy;
+                implicitFaceIdx = (areaX >= areaY && areaX >= areaZ) ? 0
+                    : (areaY >= areaZ) ? 2 : 4;
+            }
             const faceIdx = (texId && o.textureFace && isBoxShape)
                 ? (FACE_TO_BOX_GROUP[o.textureFace] ?? FACE_TO_BOX_GROUP.Front)
-                : null;
+                : implicitFaceIdx;
 
             const baseColor = texId && faceIdx === null ? '#ffffff' : (o.color || '#a0a0a0');
             const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1) + '_' +
