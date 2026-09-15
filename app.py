@@ -482,22 +482,34 @@ def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, ref
     2) Texture дочернего Decal,
     3) TextureId дочернего SpecialMesh.
     Первое найденное побеждает — комбинировать несколько текстур на одном
-    box-приближении всё равно не получится, это не полноценный UV-меш."""
+    box-приближении всё равно не получится, это не полноценный UV-меш.
+
+    Возвращает (texture_id, face) — face берём ТОЛЬКО у Decal (его
+    свойство Face — на какую грань накладывать, по умолчанию 'Front',
+    как в самом Roblox) и только для него: раньше текстура клалась
+    ОДНИМ материалом на всю BoxGeometry — то есть на ВСЕ 6 граней сразу
+    (дефолтный UV each-face-0..1 у Three.js), а не на одну, как в
+    реальном Roblox — отсюда и "плохо легли текстуры" (растянутая
+    копия текстуры со всех сторон сразу). Для MeshPart.TextureID/
+    SpecialMesh face не возвращаем — они на реальном меше оборачивают
+    всю поверхность, а не одну грань, так что "на все грани" тут ближе
+    к истине (это по-прежнему лишь box-приближение, не настоящий меш)."""
     if cls == 'MeshPart':
         tid = _rbxassetid_num(props.get('TextureID') or props.get('Texture'))
         if tid:
-            return tid
+            return tid, None
     for child in children_by_parent.get(ref, ()):
         child_cls = referent_to_class.get(child)
         if child_cls == 'Decal':
-            tid = _rbxassetid_num(all_props.get(child, {}).get('Texture'))
+            child_props = all_props.get(child, {})
+            tid = _rbxassetid_num(child_props.get('Texture'))
             if tid:
-                return tid
+                return tid, (child_props.get('Face') or 'Front')
         elif child_cls == 'SpecialMesh':
             tid = _rbxassetid_num(all_props.get(child, {}).get('TextureId'))
             if tid:
-                return tid
-    return None
+                return tid, None
+    return None, None
 
 
 def build_all_scene_objects():
@@ -589,7 +601,7 @@ def build_all_scene_objects():
             break
         name = props.get('Name', cls)
 
-        texture_id = _extract_part_texture_id(
+        texture_id, texture_face = _extract_part_texture_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
 
@@ -606,6 +618,7 @@ def build_all_scene_objects():
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
+            'textureFace': texture_face,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
@@ -1668,6 +1681,47 @@ def api_roblox_api_key():
         return jsonify({'ok': True, 'last4': key[-4:]})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@flask_app.route('/api/roblox/api-key/validate', methods=['POST'])
+def api_roblox_api_key_validate():
+    """Реальная проверка сохранённого ключа — раньше единственный способ
+    узнать, что ключ битый/без нужного скоупа, был подождать, пока
+    что-нибудь в игре не перестанет грузиться, и читать 502 из
+    /api/asset-proxy постфактум. Дёргаем тот же metadata-запрос Open
+    Cloud (без скачивания самого CDN-файла — незачем гонять байты ради
+    проверки), тестовым ID из тела запроса, если он есть (обычно берём
+    первый попавшийся реальный ассет прямо из сцены на фронте — так
+    проверка идёт по тому, что реально понадобится в игре), иначе просто
+    числом 1 (главное — отличить 401/403 по КЛЮЧУ от ошибки по
+    конкретному ассету)."""
+    api_key = _roblox_api_key()
+    if not api_key:
+        return jsonify({'ok': True, 'valid': False, 'reason': 'no_key'})
+
+    body = request.get_json(silent=True) or {}
+    m = _re.search(r'\d+', str(body.get('assetId', '')))
+    test_id = m.group() if m else '1'
+
+    meta_req = _req.Request(
+        f'https://apis.roblox.com/asset-delivery-api/v1/assetId/{test_id}',
+        headers={'x-api-key': api_key, 'Accept': 'application/json',
+                 'Accept-Encoding': 'identity'})
+    try:
+        with _req.urlopen(meta_req, timeout=10) as resp:
+            resp.read()
+        return jsonify({'ok': True, 'valid': True})
+    except _urlerr.HTTPError as e:
+        if e.code in (401, 403):
+            return jsonify({'ok': True, 'valid': False, 'reason': 'unauthorized',
+                            'status': e.code})
+        # Любая ДРУГАЯ ошибка (404 на конкретный тестовый ассет, 5xx у
+        # Roblox и т.п.) НЕ значит, что ключ плохой — сам факт того, что
+        # сервер ответил (а не отверг по x-api-key), уже означает, что
+        # ключ авторизовался нормально.
+        return jsonify({'ok': True, 'valid': True, 'note': f'HTTP {e.code} на тестовом ассете, но ключ авторизовался'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
 
 
 def _rbx_get_bytes_opencloud(asset_id):

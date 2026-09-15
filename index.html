@@ -961,10 +961,9 @@
                 data-i18n="tb_refresh">🔄 Refresh</span></button>
         <button class="blue" onclick="showPublishDialog()" data-i18n-title="tb_publish_title" title="Publish"><span
                 data-i18n="tb_publish">☁ Publish</span></button>
-        <button class="purple" id="avatar3d-btn" onclick="showAvatar3dDialog()"
-            title="Скачать 3D-аватар по Roblox User ID">🧍 Avatar</button>
-        <button id="rbx-apikey-btn" onclick="showRobloxApiKeyDialog()"
-            title="Open Cloud API-ключ для загрузки звуков/картинок с сервера">🔑 API key</button>
+        <button class="purple" id="account-btn" onclick="showAccountDialog()"
+            data-i18n-title="tb_account_title" title="Аккаунт Roblox и Open Cloud API-ключ">
+            <span data-i18n="tb_account">👤 Account</span></button>
         <button onclick="toggleLang()" title="Switch language / Сменить язык" id="lang-btn">🌐 EN</button>
         <div class="sep"></div>
         <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title"
@@ -1082,6 +1081,7 @@
                 tb_delete: '🗑 Delete', tb_delete_title: 'Delete (Delete)',
                 tb_refresh: '🔄 Refresh', tb_refresh_title: 'Refresh scene (F5)',
                 tb_publish: '☁ Publish', tb_publish_title: 'Publish',
+                tb_account: '👤 Account', tb_account_title: 'Roblox account and Open Cloud API key',
                 tb_play: '▶ Play', tb_play_title: 'Run physics simulation',
                 tb_resetcam: '🏠 Reset', tb_resetcam_title: 'Reset camera',
                 tb_topview: '⬆ Top', tb_topview_title: 'Top view',
@@ -1150,6 +1150,36 @@
                 avatar_added_to_scene: '✅ Avatar added to scene',
                 avatar_saved: '✅ Avatar saved',
                 avatar_save_cancelled: 'Save cancelled',
+                account_title: '👤 Roblox Account',
+                account_section_login: 'Roblox login (cookie)',
+                account_section_apikey: 'Open Cloud API key',
+                apikey_desc: 'Create a key at <a href="https://create.roblox.com/dashboard/credentials" target="_blank">create.roblox.com/dashboard/credentials</a> with read-only Asset Delivery access and paste it here — needed for sounds/images in Play (Roblox requires auth for AssetDelivery since April 2025).',
+                apikey_status_set: '✅ Key saved (…{last4})',
+                apikey_status_set_env: ' — set via ROBLOX_API_KEY environment variable on the server',
+                apikey_status_unset: '⚠️ Key not set — sounds/images from the server won\'t load.',
+                apikey_placeholder: 'Paste API key',
+                apikey_save: '💾 Save',
+                apikey_delete: '🗑 Delete',
+                apikey_validate: '🔎 Check',
+                apikey_validating: 'Checking…',
+                apikey_valid: '✅ Key works',
+                apikey_invalid: '❌ Key rejected (401/403) — check it was created with Asset Delivery read access and hasn\'t expired.',
+                apikey_empty: 'Key is empty',
+                apikey_saved_notify: '✅ Key saved (…{last4})',
+                apikey_deleted_notify: 'Key deleted',
+                apikey_error: 'Error: {msg}',
+                acc_username_ph: 'Roblox nickname',
+                acc_get_id_btn: '🔍 Get ID',
+                acc_uid_ph: 'Roblox User ID (filled in automatically)',
+                acc_enter_username: 'Enter a nickname',
+                acc_id_found: '✅ ID found: {id} ({name})',
+                acc_user_not_found: 'User not found',
+                acc_request_error: 'Request error: {msg}',
+                avatar_progress_title: '🧍 Downloading 3D avatar',
+                avatar_progress_back: 'Back',
+                avatar_progress_cancel: 'Cancel',
+                acc_login_done: '✅ Signed in',
+                acc_login_failed: 'Sign-in failed',
             },
             ru: {
                 tb_new: '🆕 Новый', tb_new_title: 'Новая пустая сцена',
@@ -1160,6 +1190,7 @@
                 tb_delete: '🗑 Удалить', tb_delete_title: 'Удалить (Delete)',
                 tb_refresh: '🔄 Обновить', tb_refresh_title: 'Обновить сцену (F5)',
                 tb_publish: '☁ Публикация', tb_publish_title: 'Опубликовать',
+                tb_account: '👤 Аккаунт', tb_account_title: 'Аккаунт Roblox и Open Cloud API-ключ',
                 tb_play: '▶ Play', tb_play_title: 'Запустить симуляцию физики',
                 tb_resetcam: '🏠 Сброс', tb_resetcam_title: 'Сбросить камеру',
                 tb_topview: '⬆ Верх', tb_topview_title: 'Вид сверху',
@@ -1228,6 +1259,36 @@
                 avatar_added_to_scene: '✅ Аватар добавлен на сцену',
                 avatar_saved: '✅ Аватар сохранён',
                 avatar_save_cancelled: 'Сохранение отменено',
+                account_title: '👤 Аккаунт Roblox',
+                account_section_login: 'Вход в Roblox (кука)',
+                account_section_apikey: 'Open Cloud API key',
+                apikey_desc: 'Создайте ключ на <a href="https://create.roblox.com/dashboard/credentials" target="_blank">create.roblox.com/dashboard/credentials</a> с правом только на чтение ассетов (Asset Delivery) и вставьте сюда — нужен для звуков/картинок в Play (Roblox требует авторизацию на AssetDelivery с апреля 2025).',
+                apikey_status_set: '✅ Ключ сохранён (…{last4})',
+                apikey_status_set_env: ' — задан через переменную окружения ROBLOX_API_KEY на сервере',
+                apikey_status_unset: '⚠️ Ключ не задан — звуки/картинки с сервера грузиться не будут.',
+                apikey_placeholder: 'Вставьте API-ключ',
+                apikey_save: '💾 Сохранить',
+                apikey_delete: '🗑 Удалить',
+                apikey_validate: '🔎 Проверить',
+                apikey_validating: 'Проверяю…',
+                apikey_valid: '✅ Ключ работает',
+                apikey_invalid: '❌ Ключ отклонён (401/403) — проверьте, что он создан с правом на чтение Asset Delivery и не истёк.',
+                apikey_empty: 'Ключ пустой',
+                apikey_saved_notify: '✅ Ключ сохранён (…{last4})',
+                apikey_deleted_notify: 'Ключ удалён',
+                apikey_error: 'Ошибка: {msg}',
+                acc_username_ph: 'Ник в Roblox',
+                acc_get_id_btn: '🔍 Получить ID',
+                acc_uid_ph: 'Roblox User ID (заполнится автоматически)',
+                acc_enter_username: 'Введите никнейм',
+                acc_id_found: '✅ ID найден: {id} ({name})',
+                acc_user_not_found: 'Пользователь не найден',
+                acc_request_error: 'Ошибка запроса: {msg}',
+                avatar_progress_title: '🧍 Скачивание 3D-аватара',
+                avatar_progress_back: 'Назад',
+                avatar_progress_cancel: 'Отменить',
+                acc_login_done: '✅ Вход выполнен',
+                acc_login_failed: 'Вход не выполнен',
             },
         };
 
@@ -2636,6 +2697,12 @@
                 loaded.encoding = THREE.sRGBEncoding;
                 loaded.anisotropy = renderer.capabilities.getMaxAnisotropy();
                 loaded.needsUpdate = true;
+            }, undefined, () => {
+                // 3-й колбэк TextureLoader.load — onError, раньше не
+                // передавался вообще: неудачная загрузка (плохой ключ/
+                // кука, сеть) молча оставляла часть без текстуры —
+                // ни строчки в Output.
+                logLuaOutput('warn', 'Не удалось загрузить текстуру part\'а (assetId=' + assetId + ') — проверьте Open Cloud API key/куку в 👤 Account.');
             });
             _partTexCache[assetId] = tex;
             return tex;
@@ -2669,19 +2736,57 @@
             // грузить с сервера картинки на каждую замешенную часть карты
             // того же класса проблем, что решает весь chunk-based стриминг.
             const texId = qualitySettings.textures ? o.texture : null;
-            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1) + '_' + (texId || '');
+
+            // Decal накладывается РОВНО на одну грань (o.textureFace —
+            // Face-свойство самого Decal в файле, см. _extract_part_texture_id
+            // в app.py), а не на все 6 сразу. Раньше один и тот же материал
+            // с текстурой ставился на ВСЮ BoxGeometry целиком — у неё
+            // дефолтный UV каждой грани 0..1 независимо, так что текстура
+            // рисовалась растянутой копией на каждой из 6 сторон сразу —
+            // "плохо легли текстуры". BoxGeometry.groups идут в порядке
+            // +X,-X,+Y,-Y,+Z,-Z; Roblox Enum.NormalId (Right=+X, Left=-X,
+            // Top=+Y, Bottom=-Y, Back=+Z, Front=-Z) — переводим строковое
+            // имя грани в тот же индекс.
+            const FACE_TO_BOX_GROUP = {
+                Right: 0, Left: 1, Top: 2, Bottom: 3, Back: 4, Front: 5,
+            };
+            const isBoxShape = !o.shape || o.shape === 'block' || o.shape === 'box';
+            const faceIdx = (texId && o.textureFace && isBoxShape)
+                ? (FACE_TO_BOX_GROUP[o.textureFace] ?? FACE_TO_BOX_GROUP.Front)
+                : null;
+
+            const baseColor = texId && faceIdx === null ? '#ffffff' : (o.color || '#a0a0a0');
+            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1) + '_' +
+                (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx));
             if (!matCache[matKey]) {
-                matCache[matKey] = new THREE.MeshLambertMaterial({
-                    // Текстуру красим в тон o.color — она бы почти всегда
-                    // забивалась им до полной непрозрачной заливки, если
-                    // color оставить как есть (получается имитация тона
-                    // поверхности без текстуры).
-                    color: texId ? '#ffffff' : (o.color || '#a0a0a0'),
+                const baseOpts = {
                     transparent: (o.opacity || 1) < 1.0,
                     opacity: o.opacity || 1.0,
                     flatShading: currentQuality === 'low',
-                    map: texId ? getOrLoadPartTexture(texId) : null,
-                });
+                };
+                if (faceIdx !== null) {
+                    // Массив материалов по группам граней BoxGeometry: 5
+                    // обычных (цвет part'а, без текстуры) + 1 с текстурой
+                    // на нужной грани — ИМЕННО то место, куда в Roblox
+                    // кладётся Decal.
+                    const plain = new THREE.MeshLambertMaterial({ ...baseOpts, color: o.color || '#a0a0a0' });
+                    const textured = new THREE.MeshLambertMaterial({
+                        ...baseOpts, color: '#ffffff', map: getOrLoadPartTexture(texId),
+                    });
+                    const arr = [plain, plain, plain, plain, plain, plain];
+                    arr[faceIdx] = textured;
+                    matCache[matKey] = arr;
+                } else {
+                    matCache[matKey] = new THREE.MeshLambertMaterial({
+                        ...baseOpts,
+                        // Текстуру красим в тон o.color — она бы почти всегда
+                        // забивалась им до полной непрозрачной заливки, если
+                        // color оставить как есть (получается имитация тона
+                        // поверхности без текстуры).
+                        color: baseColor,
+                        map: texId ? getOrLoadPartTexture(texId) : null,
+                    });
+                }
             }
             const mat = matCache[matKey];
 
@@ -4641,6 +4746,15 @@ end
                 // себе возвращал nil, и падение было ещё ДО :Connect,
                 // прямо на чтении поля.
                 a.addEventListener('ended', () => fireLuaSignal(ref, 'Ended', []));
+                // Раньше ошибка загрузки звука (плохой/просроченный
+                // ROBLOX_API_KEY, сеть, ассет недоступен) проходила
+                // молча — Sound просто никогда не начинал звучать, без
+                // единой подсказки почему. Теперь honest warn в Output
+                // (см. logLuaOutput) с именем инстанса и его SoundId.
+                a.addEventListener('error', () => {
+                    const nm = (luaByRef[ref] && luaByRef[ref].name) || ref;
+                    logLuaOutput('warn', 'Не удалось загрузить звук "' + nm + '" (' + (a.src || '?') + ') — проверьте Open Cloud API key/куку в 👤 Account.');
+                });
                 soundElByRef[ref] = a;
             }
             return soundElByRef[ref];
@@ -6398,6 +6512,16 @@ end
                     el.style.backgroundSize = (props.ScaleType === 'Fit') ? 'contain' : 'cover';
                     el.style.backgroundPosition = 'center';
                     el.style.backgroundRepeat = 'no-repeat';
+                    // background-image сам по себе не даёт события ошибки
+                    // (в отличие от <img>/<audio>) — ошибка на /api/asset-
+                    // proxy раньше проходила молча: элемент просто
+                    // оставался пустым, без единой подсказки почему.
+                    // Проверяем отдельным Image() специально ради onerror.
+                    const probe = new Image();
+                    probe.onerror = () => {
+                        logLuaOutput('warn', 'Не удалось загрузить картинку "' + (props.Name || cls) + '" (' + proxyUrl + ') — проверьте Open Cloud API key/куку в 👤 Account.');
+                    };
+                    probe.src = proxyUrl;
                 } else {
                     el.style.backgroundImage = '';
                 }
@@ -7635,31 +7759,6 @@ end
             }
         }
 
-        async function fetchUserIdByUsername() {
-            const username = document.getElementById('av-username').value.trim();
-            if (!username) {
-                notify('Введите никнейм', 'warn');
-                return;
-            }
-            try {
-                const resp = await fetch(`/api/roblox/userid?username=${encodeURIComponent(username)}`);
-                const json = await resp.json();
-                if (json.ok) {
-                    document.getElementById('av-uid').value = json.id;
-                    const preview = document.getElementById('avatar-preview');
-                    if (preview) {
-                        preview.src = `https://www.roblox.com/headshot-thumbnail/image?userId=${json.id}&width=100&height=100&format=png`;
-                        preview.style.display = 'block';
-                    }
-                    notify(`✅ ID найден: ${json.id} (${json.displayName || json.name || ''})`);
-                } else {
-                    notify(json.error || 'Пользователь не найден', 'err');
-                }
-            } catch (e) {
-                notify('Ошибка запроса: ' + e.message, 'err');
-            }
-        }
-
         function showPublishDialog() {
             showModal(
                 '<h3>☁ Open Cloud</h3>' +
@@ -7677,56 +7776,82 @@ end
             );
         }
 
-        // === Open Cloud API-ключ для /api/asset-proxy — пользователь ===
-        // сам создаёт ключ в Creator Dashboard и вводит его сюда. Ключ
-        // хранится только на локальном сервере (файл рядом с app.py, см.
+        // === Open Cloud API-ключ + вход в Roblox — теперь одно меню
+        // (showAccountDialog), а не две отдельные кнопки/диалога: оба
+        // про один и тот же Roblox-аккаунт с точки зрения пользователя,
+        // хотя технически это разные учётные данные (кука сессии vs
+        // Open Cloud ключ, см. _roblox_api_key). Ключ хранится только на
+        // локальном сервере (файл рядом с app.py, см.
         // _roblox_apikey_file), сюда возвращаются только "есть/нет" и
         // последние 4 символа для опознания — сам ключ с сервера не
         // уходит второй раз в браузер.
-        async function showRobloxApiKeyDialog() {
+        async function _apiKeySectionHtml() {
             const st = await api('GET', '/api/roblox/api-key');
             const has = st.ok && st.hasKey;
             const fromEnv = has && st.source === 'env';
             const statusLine = has
-                ? ('✅ Ключ сохранён (…' + st.last4 + ')' + (fromEnv ? ' — задан через переменную окружения ROBLOX_API_KEY на сервере' : ''))
-                : '⚠️ Ключ не задан — звуки/картинки с сервера грузиться не будут (Roblox с апреля 2025 требует авторизацию на AssetDelivery).';
-
-            showModal(
-                '<h3>🔑 Roblox Open Cloud API key</h3>' +
-                '<p style="opacity:.8; font-size:13px;">Создайте ключ на ' +
-                '<a href="https://create.roblox.com/dashboard/credentials" target="_blank">create.roblox.com/dashboard/credentials</a> ' +
-                'с правом только на чтение ассетов (Asset Delivery) и вставьте сюда.</p>' +
+                ? (t('apikey_status_set', { last4: st.last4 }) + (fromEnv ? t('apikey_status_set_env') : ''))
+                : t('apikey_status_unset');
+            return '<h4 style="margin:14px 0 4px">' + t('account_section_apikey') + '</h4>' +
+                '<p style="opacity:.8; font-size:13px;">' + t('apikey_desc') + '</p>' +
                 '<p style="margin:6px 0;">' + statusLine + '</p>' +
-                (fromEnv ? '' :
-                    '<input id="rbx-apikey-input" type="password" placeholder="Вставьте API-ключ" style="width:100%; padding:6px; box-sizing:border-box;">' +
-                    '<div class="modal-row" style="margin-top:10px;">' +
-                    '<button onclick="saveRobloxApiKey()" style="background:#7c3aed">💾 Сохранить</button>' +
-                    (has ? '<button onclick="clearRobloxApiKey()" style="background:#b91c1c">🗑 Удалить</button>' : '') +
-                    '<button onclick="closeModal()">Отмена</button>' +
-                    '</div>')
-            );
+                (fromEnv
+                    ? ('<div class="modal-row" style="margin-top:6px;"><button onclick="validateRobloxApiKey()" style="background:#3b82f6">' + t('apikey_validate') + '</button></div>' +
+                        '<p id="rbx-apikey-validate-result" style="margin:6px 0 0; font-size:13px;"></p>')
+                    :
+                    '<input id="rbx-apikey-input" type="password" placeholder="' + t('apikey_placeholder') + '" style="width:100%; padding:6px; box-sizing:border-box;">' +
+                    '<div class="modal-row" style="margin-top:6px;">' +
+                    '<button onclick="saveRobloxApiKey()" style="background:#7c3aed">' + t('apikey_save') + '</button>' +
+                    (has ? '<button onclick="clearRobloxApiKey()" style="background:#b91c1c">' + t('apikey_delete') + '</button>' : '') +
+                    (has ? '<button onclick="validateRobloxApiKey()" style="background:#3b82f6">' + t('apikey_validate') + '</button>' : '') +
+                    '</div>' +
+                    (has ? '<p id="rbx-apikey-validate-result" style="margin:6px 0 0; font-size:13px;"></p>' : ''));
         }
 
         async function saveRobloxApiKey() {
             const el = document.getElementById('rbx-apikey-input');
             const key = el ? el.value.trim() : '';
-            if (!key) { notify('Ключ пустой', 'err'); return; }
+            if (!key) { notify(t('apikey_empty'), 'err'); return; }
             const r = await api('POST', '/api/roblox/api-key', { api_key: key });
             if (r.ok) {
-                notify('✅ Ключ сохранён (…' + r.last4 + ')');
-                closeModal();
+                notify(t('apikey_saved_notify', { last4: r.last4 }));
+                showAccountDialog();
             } else {
-                notify('Ошибка: ' + (r.error || r.text), 'err');
+                notify(t('apikey_error', { msg: r.error || r.text }), 'err');
             }
         }
 
         async function clearRobloxApiKey() {
             const r = await api('DELETE', '/api/roblox/api-key');
             if (r.ok) {
-                notify('Ключ удалён');
-                closeModal();
+                notify(t('apikey_deleted_notify'));
+                showAccountDialog();
             } else {
-                notify('Ошибка: ' + (r.error || r.text), 'err');
+                notify(t('apikey_error', { msg: r.error || r.text }), 'err');
+            }
+        }
+
+        async function validateRobloxApiKey() {
+            const resEl = document.getElementById('rbx-apikey-validate-result');
+            if (resEl) resEl.textContent = t('apikey_validating');
+            // Пробуем реальным ассетом со сцены, если он уже загружен
+            // (см. luaByRef/all_instances) — так проверка честно бьёт по
+            // тому же пути, что и настоящая игра, а не по случайному ID.
+            let testAssetId = null;
+            for (const ref in (typeof soundElByRef !== 'undefined' ? soundElByRef : {})) {
+                const src = soundElByRef[ref].src || '';
+                const m = /[?&]id=(\d+)/.exec(src);
+                if (m) { testAssetId = m[1]; break; }
+            }
+            const r = await api('POST', '/api/roblox/api-key/validate', testAssetId ? { assetId: testAssetId } : {});
+            if (!r.ok) {
+                if (resEl) resEl.textContent = '❌ ' + t('apikey_error', { msg: r.error || r.text });
+                return;
+            }
+            if (r.valid) {
+                if (resEl) resEl.textContent = t('apikey_valid');
+            } else {
+                if (resEl) resEl.textContent = t('apikey_invalid');
             }
         }
 
@@ -7743,6 +7868,31 @@ end
             else notify('HTTP ' + r.status + ': ' + (r.text || r.error), 'err');
         }
 
+        async function fetchUserIdByUsername() {
+            const username = document.getElementById('av-username').value.trim();
+            if (!username) {
+                notify(t('acc_enter_username'), 'warn');
+                return;
+            }
+            try {
+                const resp = await fetch(`/api/roblox/userid?username=${encodeURIComponent(username)}`);
+                const json = await resp.json();
+                if (json.ok) {
+                    document.getElementById('av-uid').value = json.id;
+                    const preview = document.getElementById('avatar-preview');
+                    if (preview) {
+                        preview.src = `https://www.roblox.com/headshot-thumbnail/image?userId=${json.id}&width=100&height=100&format=png`;
+                        preview.style.display = 'block';
+                    }
+                    notify(t('acc_id_found', { id: json.id, name: json.displayName || json.name || '' }));
+                } else {
+                    notify(json.error || t('acc_user_not_found'), 'err');
+                }
+            } catch (e) {
+                notify(t('acc_request_error', { msg: e.message }), 'err');
+            }
+        }
+
         // === Скачивание 3D-аватара пользователя по Roblox User ID ===
         // Логин делается через RobloxLoginActivity (Kotlin, WebView) — она
         // сама ловит .ROBLOSECURITY и передаёт результат сюда через
@@ -7751,14 +7901,34 @@ end
         window.onRobloxAuthUpdated = function (loggedIn) {
             closeModal();
             if (loggedIn) {
-                notify('✅ Вход выполнен');
-                showAvatar3dDialog();
+                notify(t('acc_login_done'));
+                showAccountDialog();
             } else {
-                notify('Вход не выполнен', 'err');
+                notify(t('acc_login_failed'), 'err');
             }
         };
 
-        async function showAvatar3dDialog() {
+        // showAvatar3dDialog — старое имя, оставлено как алиас (на него
+        // ссылается кнопка "Назад" в _avatarProgressHtml и колбэк логина
+        // выше) — сам диалог теперь общий с API-ключом, см. showAccountDialog.
+        function showAvatar3dDialog() { return showAccountDialog(); }
+
+        // Раньше кнопка выхода звала ТОЛЬКО window.AndroidBridge.logoutRoblox()
+        // — во встроенном браузере (не Android-обёртка, кука хранится
+        // сервером через /api/roblox/logout, см. app.py) кнопка тихо
+        // ничего не делала: AndroidBridge просто не существует. Теперь
+        // бьёт в правильный путь в зависимости от окружения.
+        async function logoutRoblox() {
+            if (IS_ANDROID && window.AndroidBridge && window.AndroidBridge.logoutRoblox) {
+                window.AndroidBridge.logoutRoblox();
+            } else {
+                await api('POST', '/api/roblox/logout');
+            }
+            closeModal();
+            showAccountDialog();
+        }
+
+        async function showAccountDialog() {
             let loggedIn = false;
             if (IS_ANDROID) {
                 loggedIn = window.AndroidBridge.isRobloxLoggedIn();
@@ -7769,16 +7939,22 @@ end
 
             // Кнопка импорта ZIP теперь доступна всегда, без проверки IS_ANDROID
             const localImportRow = '<div class="modal-row"><button onclick="pickAvatarFileForImport()">' + t('avatar_import_file') + '</button></div>';
+            const apiKeyHtml = await _apiKeySectionHtml();
+            const hr = '<hr style="border-color:#374151;border-style:solid;margin:12px 0 4px">';
 
             if (!loggedIn) {
                 showModal(
-                    '<h3>' + t('avatar_title') + '</h3>' +
+                    '<h3>' + t('account_title') + '</h3>' +
+                    '<h4 style="margin:4px 0">' + t('account_section_login') + '</h4>' +
                     localImportRow +
                     '<p style="margin-top:10px">' + t('avatar_login_needed') + '</p>' +
                     '<div class="modal-row">' +
                     (IS_ANDROID
                         ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#7c3aed">' + t('avatar_login_btn') + '</button>'
                         : '<p style="opacity:.7">' + t('avatar_login_android_only') + '</p>') +
+                    '</div>' +
+                    hr + apiKeyHtml +
+                    '<div class="modal-row" style="margin-top:10px">' +
                     '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                     '</div>'
                 );
@@ -7786,12 +7962,13 @@ end
             }
 
             showModal(`
-        <h3>${t('avatar_title_uid')}</h3>
+        <h3>${t('account_title')}</h3>
+        <h4 style="margin:4px 0">${t('account_section_login')}</h4>
         <div style="display:flex; gap:6px; margin-bottom:8px;">
-            <input id="av-username" placeholder="Ник в Roblox" style="flex:1; padding:6px;">
-            <button onclick="fetchUserIdByUsername()" style="background:#3b82f6; padding:4px 12px;">🔍 Получить ID</button>
+            <input id="av-username" placeholder="${t('acc_username_ph')}" style="flex:1; padding:6px;">
+            <button onclick="fetchUserIdByUsername()" style="background:#3b82f6; padding:4px 12px;">${t('acc_get_id_btn')}</button>
         </div>
-        <input id="av-uid" placeholder="Roblox User ID (заполнится автоматически)">
+        <input id="av-uid" placeholder="${t('acc_uid_ph')}">
         <img id="avatar-preview" style="width:80px; height:80px; border-radius:50%; display:none; margin:6px auto; background:#1f2937;">
         <div class="modal-row">
             <button onclick="doDownloadAvatar3d('import')" style="background:#7c3aed">${t('avatar_import_scene')}</button>
@@ -7799,7 +7976,10 @@ end
         </div>
         ${localImportRow}
         <div class="modal-row">
-            <button onclick="window.AndroidBridge && window.AndroidBridge.logoutRoblox(); closeModal();">${t('avatar_logout')}</button>
+            <button onclick="logoutRoblox()">${t('avatar_logout')}</button>
+        </div>
+        ${hr}${apiKeyHtml}
+        <div class="modal-row" style="margin-top:10px">
             <button onclick="closeModal()">${t('btn_cancel')}</button>
         </div>
     `);
@@ -7836,11 +8016,11 @@ end
             const errBlock = errorText
                 ? '<div style="margin-top:10px;padding:8px;background:#3f1d1d;border-radius:6px;color:#fca5a5;font-size:13px;white-space:pre-wrap;word-break:break-word">' + errorText + '</div>'
                 : '';
-            return '<h3>🧍 Скачивание 3D-аватара</h3>' + rows + errBlock +
+            return '<h3>' + t('avatar_progress_title') + '</h3>' + rows + errBlock +
                 '<div class="modal-row" style="margin-top:12px">' +
                 (errorText
-                    ? '<button onclick="showAvatar3dDialog()">Назад</button>'
-                    : '<button onclick="cancelAvatar3dDownload()">Отменить</button>') +
+                    ? '<button onclick="showAccountDialog()">' + t('avatar_progress_back') + '</button>'
+                    : '<button onclick="cancelAvatar3dDownload()">' + t('avatar_progress_cancel') + '</button>') +
                 '</div>';
         }
 
