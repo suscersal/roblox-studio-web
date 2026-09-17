@@ -140,7 +140,14 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          # `yes | sdkmanager --licenses` — sdkmanager сам закрывает stdin,
+          # дочитав не весь бесконечный поток yes; yes получает SIGPIPE и
+          # завершается ненулевым кодом, а set -o pipefail считает это
+          # провалом всего пайплайна, хотя лицензии сдкманагер принял
+          # нормально ещё до этого. "|| true" — глушим именно это (не саму
+          # проверку лицензий: если sdkmanager реально не запустится,
+          # следующий вызов sdkmanager с пакетами упадёт сам и честно).
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
