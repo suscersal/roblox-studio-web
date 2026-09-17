@@ -914,6 +914,9 @@ def api_all_instances():
     r2c = parsed['referent_to_class']
     pm = parsed['parent_map']
     pr = parsed['props']
+    children_by_parent = {}
+    for ref, parent_ref in pm.items():
+        children_by_parent.setdefault(parent_ref, []).append(ref)
     out = []
     for ref, cls in r2c.items():
         name = pr.get(ref, {}).get('Name', cls)
@@ -930,6 +933,27 @@ def api_all_instances():
             item['soundId'] = sp.get('SoundId', '')
             item['volume'] = sp.get('Volume', 0.5)
             item['looped'] = sp.get('Looped', False)
+            # PlaybackSpeed — то же самое "задано прямо в файле, ни один
+            # скрипт этого не трогает" — что и Octave ниже: FNF-карты с
+            # готовым "sped up"-вариантом трека (PlaybackSpeed=2.0 у
+            # нескольких твоих Sound) звучали на обычной скорости, потому
+            # что раньше сюда попадали только soundId/volume/looped.
+            ps = sp.get('PlaybackSpeed', 1.0)
+            if ps != 1.0:
+                item['playbackSpeed'] = ps
+            # PitchShiftSoundEffect — НАСТОЯЩИЙ Roblox-механизм питча (не
+            # устаревшее скалярное Sound.Pitch): отдельный дочерний
+            # инстанс с Octave (множитель скорости = 2^Octave). Раньше
+            # нигде не читался вообще — FNF-карты с "sped up"/замедленными
+            # вариантами трека (Octave задан ПРЯМО в файле, без единой
+            # строчки скрипта) звучали на обычной скорости, потому что
+            # эффект просто никак не подключался к реальному <audio>.
+            for child_ref in children_by_parent.get(ref, ()):
+                if r2c.get(child_ref) == 'PitchShiftSoundEffect':
+                    cp = pr.get(child_ref, {})
+                    if cp.get('Enabled', True):
+                        item['pitchOctave'] = cp.get('Octave', 0.0)
+                    break
         out.append(item)
     return jsonify({'ok': True, 'instances': out})
 

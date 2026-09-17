@@ -1189,6 +1189,8 @@
                 avatar_progress_cancel: 'Cancel',
                 acc_login_done: '✅ Signed in',
                 acc_login_failed: 'Sign-in failed',
+                preview_listen: 'Listen',
+                preview_stop: 'Stop',
             },
             ru: {
                 tb_new: '🆕 Новый', tb_new_title: 'Новая пустая сцена',
@@ -1304,6 +1306,8 @@
                 avatar_progress_cancel: 'Отменить',
                 acc_login_done: '✅ Вход выполнен',
                 acc_login_failed: 'Вход не выполнен',
+                preview_listen: 'Прослушать',
+                preview_stop: 'Стоп',
             },
         };
 
@@ -2729,17 +2733,34 @@
         //    от версии — остальное, tangent/vertex-color, не нужно для
         //    геометрии и намеренно пропускается), затем массив граней —
         //    sizeof_MeshFace=12 (3×uint32 индекса).
-        //  - "4.00"/"5.00" (риг/LOD, другой макет заголовка с костями) —
-        //    НЕ поддержаны: это либо скиннинг-меши персонажей (уже покрыты
-        //    отдельным путём импорта аватара через OBJ), либо структура,
-        //    которую нельзя честно угадать без проверки на живом
-        //    Roblox CDN (недоступен из песочницы сборки) — явный fallback
-        //    на bounding-box с предупреждением в Output honestly лучше, чем
-        //    тихо собранная из неверных офсетов геометрия.
+        //  - "4.00"/"4.01"/"5.00"/"6.00" — новый LOD/риг-заголовок (24 байта),
+        //    см. _parseRobloxMeshV4: с ~2020-х Studio сама прикладывает
+        //    LOD-цепочку ко ВСЕМ мешам при экспорте, не только к скиннингу
+        //    персонажей, так что это теперь формат БОЛЬШИНСТВА обычных
+        //    decorative-пропсов, а не только риг-моделей. Структура заголовка
+        //    взята из стороннего реверс-инжиниринга формата — НЕ проверена
+        //    вживую против настоящего Roblox CDN (недоступен из песочницы
+        //    сборки), отсюда жёсткие sanity-проверки внутри (диапазоны
+        //    numVerts/numFaces, длина буфера, индексы граней обязаны попадать
+        //    в диапазон вершин) — при малейшем несовпадении честный fallback
+        //    на bounding-box, а не собранная из неверных офсетов геометрия.
+        //  - "7.00" (новый формат с отдельными physical/render cage-мешами
+        //    для лицевой анимации) — намеренно НЕ поддержан: это принципиально
+        //    другая структура, а не небольшое расширение старой, угадывать
+        //    байты вслепую тут больше риск, чем польза.
         const _meshGeometryCache = {}; // meshId -> Promise<{geometry, size}|null>
 
         function _parseRobloxMeshV1(text) {
-            const nums = text.match(/-?[\d.]+(?:[eE][-+]?\d+)?/g);
+            // БАГ, из-за которого валился как минимум 514528468 (старый
+            // классический меш, реально версии "1.00"): текст сюда раньше
+            // приходил ЦЕЛИКОМ, включая саму строку заголовка "version
+            // 1.00" — а "1.00" тоже подходит под regex чисел ниже и
+            // становился nums[0], то есть "числом граней", вместо
+            // настоящего numFaces из следующей строки. Всё дальнейшее
+            // потом читалось со сдвигом на одно число. Отрезаем строку
+            // заголовка ДО того, как искать числа.
+            const body = text.replace(/^\s*version[^\n]*\n?/i, '');
+            const nums = body.match(/-?[\d.]+(?:[eE][-+]?\d+)?/g);
             if (!nums || nums.length < 2) return null;
             const numFaces = parseInt(nums[0], 10);
             if (!numFaces) return null;
@@ -2800,6 +2821,75 @@
             return { positions, normals, uvs, indices };
         }
 
+        // Форматы 4.00/4.01 (и, по той же структуре, 5.00/6.00) — с этой
+        // версии Roblox Studio стала сама прикладывать LOD-цепочку и (для
+        // риг-мешей) кости КО ВСЕМ мешам при экспорте, не только к
+        // скиннингу персонажей — отсюда у большинства обычных decorative
+        // пропсов теперь именно этот формат, а не старый v2.00/v3.00.
+        // 24-байтный заголовок (по независимым реверс-инжинирингам формата,
+        // НЕ проверено вживую против настоящего Roblox CDN — сеть на
+        // roblox.com из этой песочницы недоступна):
+        //   uint16 sizeofHeader (=24)   uint16 lodType
+        //   uint32 numVerts             uint32 numFaces
+        //   uint16 numLODs              uint16 numBones
+        //   uint32 sizeofBoneNames      uint16 numSubsets
+        //   uint8  numHighQualityLODs   uint8  unused
+        // В отличие от v2/v3, здесь НЕТ явного поля sizeof_MeshVertex — размер
+        // вершины фиксирован форматом: 36 байт (pos12+norm12+uv8+tangent4)
+        // без костей, +8 байт (bone indices+weights) на вершину, если
+        // numBones>0. Нам для геометрии+UV достаточно первых 32 байт
+        // каждой записи — как и в v2/v3-парсере, кости/LOD-хвост после
+        // vertex+face массивов просто не читаем (это заготовка под base
+        // LOD0 = собственно видимая геометрия, LOD1+ идут ПОСЛЕ и нам не
+        // нужны). Если реальный byte-layout всё же чуть отличается —
+        // многочисленные sanity-проверки ниже (диапазоны numVerts/numFaces,
+        // требуемая длина буфера) должны поймать несовпадение и вернуть
+        // null, а не собрать мусорную геометрию молча.
+        function _parseRobloxMeshV4(buf) {
+            if (buf.byteLength < 24) return null;
+            const dv = new DataView(buf);
+            const sizeofHeader = dv.getUint16(0, true);
+            const numVerts = dv.getUint32(4, true);
+            const numFaces = dv.getUint32(8, true);
+            const numBones = dv.getUint16(14, true);
+            if (sizeofHeader < 24 || sizeofHeader > 64) return null;
+            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) return null;
+            const vertSize = numBones > 0 ? 44 : 36;
+            const vertOff = sizeofHeader;
+            const faceOff = vertOff + numVerts * vertSize;
+            const needBytes = faceOff + numFaces * 12;
+            if (needBytes > buf.byteLength) return null; // угадали неверно — честный fallback, не мусор
+            const positions = new Float32Array(numVerts * 3);
+            const normals = new Float32Array(numVerts * 3);
+            const uvs = new Float32Array(numVerts * 2);
+            for (let i = 0; i < numVerts; i++) {
+                const base = vertOff + i * vertSize;
+                positions[i * 3] = dv.getFloat32(base, true);
+                positions[i * 3 + 1] = dv.getFloat32(base + 4, true);
+                positions[i * 3 + 2] = dv.getFloat32(base + 8, true);
+                normals[i * 3] = dv.getFloat32(base + 12, true);
+                normals[i * 3 + 1] = dv.getFloat32(base + 16, true);
+                normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
+                uvs[i * 2] = dv.getFloat32(base + 24, true);
+                uvs[i * 2 + 1] = 1 - dv.getFloat32(base + 28, true);
+            }
+            const indices = new Uint32Array(numFaces * 3);
+            for (let i = 0; i < numFaces; i++) {
+                const base = faceOff + i * 12;
+                indices[i * 3] = dv.getUint32(base, true);
+                indices[i * 3 + 1] = dv.getUint32(base + 4, true);
+                indices[i * 3 + 2] = dv.getUint32(base + 8, true);
+            }
+            // Доп. проверка непротиворечивости: индексы граней обязаны
+            // указывать внутрь диапазона вершин — если "угадали" неверный
+            // vertSize/заголовок, они почти наверняка вылезут за границу
+            // (мусорные большие числа из неверно смещённых байт).
+            for (let i = 0; i < indices.length; i++) {
+                if (indices[i] >= numVerts) return null;
+            }
+            return { positions, normals, uvs, indices };
+        }
+
         function _buildGeometryFromParsed(parsed) {
             const geo = new THREE.BufferGeometry();
             geo.setAttribute('position', new THREE.BufferAttribute(parsed.positions, 3));
@@ -2835,13 +2925,21 @@
                     let parsed = null;
                     if (version === '1.00') {
                         parsed = _parseRobloxMeshV1(new TextDecoder('utf-8').decode(buf));
-                    } else if (version === '2.00' || version === '3.00') {
-                        // Текстовый заголовок "version X.XX\n" перед бинарной
-                        // частью — обрезаем его по первому переводу строки.
-                        const nl = new Uint8Array(buf).indexOf(10);
-                        parsed = _parseRobloxMeshBinary(buf.slice(nl + 1));
+                    } else if (version === '2.00' || version === '3.00' || version === '4.00' || version === '4.01' || version === '5.00' || version === '6.00') {
+                        // Текстовый заголовок "version X.XX\n" (или "\r\n")
+                        // перед бинарной частью — обрезаем его по первому
+                        // переводу строки, включая возможный \r перед ним:
+                        // лишний байт тут сдвинул бы ВСЮ бинарную структуру
+                        // на 1 и превратил бы валидный файл в мусор.
+                        const bytes = new Uint8Array(buf);
+                        let nl = bytes.indexOf(10);
+                        let bodyStart = nl + 1;
+                        const body = buf.slice(bodyStart);
+                        parsed = (version === '2.00' || version === '3.00')
+                            ? _parseRobloxMeshBinary(body)
+                            : _parseRobloxMeshV4(body);
                     } else {
-                        logLuaOutput('warn', 'Mesh ' + meshId + ': формат "' + (version || '?') + '" (риг/LOD) пока не поддержан, использую приближение');
+                        logLuaOutput('warn', 'Mesh ' + meshId + ': формат "' + (version || '?') + '" пока не поддержан, использую приближение');
                         return null;
                     }
                     if (!parsed) {
@@ -5031,6 +5129,22 @@ end
         // __sound_control (см. installLuaBridge и правку в
         // InstanceMT.__index).
         let soundElByRef = {};
+        // PlaybackSpeed и PitchShiftSoundEffect.Octave — два НЕЗАВИСИМЫХ
+        // источника скорости/питча одного и того же <audio>.playbackRate
+        // (см. коммент в startLuaScriptsInner). Раньше и генерик-сеттер
+        // PlaybackSpeed/Pitch, и обработчик Octave писали в playbackRate
+        // напрямую, затирая друг друга — на треках, где реально заданы
+        // ОБА (как в твоём файле), последний применённый эффект побеждал
+        // молча. Держим оба множителя отдельно и всегда пересчитываем
+        // итоговую скорость как их произведение — так же, как в
+        // настоящем Roblox это два независимых звуковых эффекта в цепочке.
+        const _soundBaseSpeed = {};   // ref -> PlaybackSpeed (Pitch — алиас того же)
+        const _soundPitchOctave = {}; // ref -> Octave активного PitchShiftSoundEffect
+        function _applySoundRate(ref) {
+            const speed = _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
+            const octave = _soundPitchOctave[ref] != null ? _soundPitchOctave[ref] : 0;
+            getOrCreateSoundEl(ref).playbackRate = speed * Math.pow(2, octave);
+        }
         function getOrCreateSoundEl(ref) {
             if (!soundElByRef[ref]) {
                 const a = new Audio();
@@ -5122,11 +5236,12 @@ end
                 // Pitch — устаревшее (в реальном Roblox давно заменено
                 // PlaybackSpeed и фактически является его алиасом, а не
                 // отдельным множителем), но старые FNF-скрипты 2018-2021
-                // годов сплошь и рядом ставят именно Sound.Pitch. Раньше
-                // просто лежало в общем "мусорном ящике" и никак не влияло
-                // на звук — читаем/пишем через тот же playbackRate, что и
-                // PlaybackSpeed (см. запись ниже).
-                if (name === 'PlaybackSpeed' || name === 'Pitch') return a.playbackRate;
+                // годов сплошь и рядом ставят именно Sound.Pitch. Читаем
+                // именно ЭТОТ множитель (_soundBaseSpeed), а не итоговый
+                // a.playbackRate — тот теперь ЕЩЁ включает независимый
+                // множитель PitchShiftSoundEffect.Octave (см. _applySoundRate),
+                // и отдавать скрипту чужой вклад в своё же свойство неверно.
+                if (name === 'PlaybackSpeed' || name === 'Pitch') return _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
             }
             // GUI-объекты — ПЕРЕД virtualInstanceProps: Instance.new("Frame")
             // тоже заводит virtualInstanceProps (см. luaCreateVirtualInstance),
@@ -5176,10 +5291,13 @@ end
                 } else if (name === 'Looped') {
                     getOrCreateSoundEl(ref).loop = !!value;
                 } else if (name === 'PlaybackSpeed' || name === 'Pitch') {
-                    // Оба свойства управляют одним и тем же <audio>.playbackRate
-                    // (см. коммент в luaGetGenericProp) — что бы скрипт ни
-                    // выставил последним, реально звучит именно оно.
-                    getOrCreateSoundEl(ref).playbackRate = Number(value) || 1;
+                    // Оба свойства — один и тот же множитель (см. коммент в
+                    // luaGetGenericProp), но это НЕ единственный источник
+                    // playbackRate: PitchShiftSoundEffect.Octave — независимый
+                    // множитель поверх него (см. _applySoundRate), поэтому
+                    // сюда пишем именно "свою" часть, а не playbackRate целиком.
+                    _soundBaseSpeed[ref] = Number(value) || 1;
+                    _applySoundRate(ref);
                 } else if (name === 'TimePosition') {
                     getOrCreateSoundEl(ref).currentTime = Number(value) || 0;
                 }
@@ -5187,6 +5305,21 @@ end
                 // luaGenericPropsByRef как раньше, чтобы код, читающий их
                 // напрямую без спец-обработки (см. luaGetGenericProp),
                 // тоже видел актуальное значение.
+            }
+            // PitchShiftSoundEffect.Octave/.Enabled — НАСТОЯЩИЙ Roblox-
+            // механизм питча (отдельный дочерний инстанс, см. api_all_instances
+            // в app.py), а не устаревшее скалярное Sound.Pitch выше. Если
+            // скрипт меняет его в рантайме — находим родительский Sound и
+            // пересчитываем ЕГО долю (множитель = 2^Octave, как в настоящем
+            // Roblox) через _applySoundRate, не трогая PlaybackSpeed-часть.
+            if (luaByRef[ref] && luaByRef[ref].cls === 'PitchShiftSoundEffect' && (name === 'Octave' || name === 'Enabled')) {
+                const soundRef = luaParentByRef[ref];
+                if (soundRef !== undefined && luaByRef[soundRef] && luaByRef[soundRef].cls === 'Sound') {
+                    const enabled = name === 'Enabled' ? !!value : (luaGenericPropsByRef[ref] ? luaGenericPropsByRef[ref].Enabled !== false : true);
+                    const octave = name === 'Octave' ? Number(value) || 0 : (luaGenericPropsByRef[ref] ? Number(luaGenericPropsByRef[ref].Octave) || 0 : 0);
+                    _soundPitchOctave[soundRef] = enabled ? octave : 0;
+                    _applySoundRate(soundRef);
+                }
             }
             // GUI — ПЕРЕД virtualInstanceProps, той же причине, что и в
             // luaGetGenericProp выше: иначе запись на свежесозданном
@@ -6603,6 +6736,19 @@ end
                         if (url) a.src = url;
                         if (typeof inst.volume === 'number') a.volume = Math.max(0, Math.min(1, inst.volume));
                         if (inst.looped) a.loop = true;
+                        // PlaybackSpeed и PitchShiftSoundEffect.Octave, заданные
+                        // ПРЯМО в файле (см. api_all_instances в app.py) — раньше
+                        // ни один из двух не применялся: FNF-карты с готовым
+                        // "sped up"-вариантом трека (выставлено дизайнером, без
+                        // единой строчки скрипта) всегда звучали на обычной
+                        // скорости. Оба реально используются на разных треках
+                        // ОДНОВРЕМЕННО (не альтернативы друг другу) — как и в
+                        // настоящем Roblox, они независимые эффекты и
+                        // перемножаются, а не затирают друг друга (см.
+                        // _setSoundRate/_soundBaseSpeed/_soundPitchOctave ниже).
+                        if (typeof inst.playbackSpeed === 'number') _soundBaseSpeed[inst.ref] = inst.playbackSpeed;
+                        if (typeof inst.pitchOctave === 'number') _soundPitchOctave[inst.ref] = inst.pitchOctave;
+                        _applySoundRate(inst.ref);
                     }
                 }
                 for (const inst of allR.instances) {
@@ -6733,6 +6879,13 @@ end
                 a.currentTime = 0;
             }
             soundElByRef = {};
+            // Иначе PlaybackSpeed/Octave, выставленные скриптом ДО Stop, тихо
+            // пережили бы рестарт и подменили собой файловое значение по
+            // умолчанию при следующем Play (особенно заметно для звуков,
+            // у которых в файле PlaybackSpeed=1.0 — для них api_all_instances
+            // вообще не шлёт это поле, полагаясь, что тут и так пусто).
+            for (const k in _soundBaseSpeed) delete _soundBaseSpeed[k];
+            for (const k in _soundPitchOctave) delete _soundPitchOctave[k];
         }
 
         // ============ GUI (ScreenGui/Frame/TextLabel/TextButton/... в Play) ============
@@ -7708,6 +7861,46 @@ end
             document.getElementById('tab-props').innerHTML = '<p style="color:#6b7280;font-size:12px;padding:8px">' + t('props_placeholder') + '</p>';
         }
 
+        // ============ ПРОСЛУШАТЬ ЗВУК ИЗ EXPLORER (вне Play) ============
+        // Один глобальный <audio> для превью — иначе выбор другого Sound,
+        // пока играет предыдущий, наложил бы треки друг на друга.
+        let _editorPreviewAudio = null;
+        let _editorPreviewBtn = null;
+        let _editorPreviewSoundId = null;
+        function _stopEditorPreview() {
+            if (_editorPreviewAudio) { _editorPreviewAudio.pause(); _editorPreviewAudio.currentTime = 0; }
+            if (_editorPreviewBtn) _editorPreviewBtn.textContent = '🔊 ' + t('preview_listen');
+            _editorPreviewBtn = null;
+            _editorPreviewSoundId = null;
+        }
+        function buildSoundPreviewRow(soundId) {
+            const row = document.createElement('div');
+            row.style.cssText = 'margin-bottom:4px;padding:4px;background:#111827;border-radius:4px';
+            const btn = document.createElement('button');
+            btn.textContent = '🔊 ' + t('preview_listen');
+            btn.style.cssText = 'width:100%;padding:6px;font-size:12px;background:#2563eb;color:#fff;border:none;border-radius:4px';
+            const url = rbxAssetIdToProxyUrl(soundId);
+            btn.onclick = () => {
+                if (!url) { notify(t('notify_error'), 'err'); return; }
+                // Повторное нажатие на ТОТ ЖЕ звук, пока он играет — это
+                // "Стоп", а не перезапуск с начала.
+                if (_editorPreviewSoundId === soundId && _editorPreviewAudio && !_editorPreviewAudio.paused) {
+                    _stopEditorPreview();
+                    return;
+                }
+                _stopEditorPreview();
+                if (!_editorPreviewAudio) _editorPreviewAudio = new Audio();
+                _editorPreviewAudio.src = url;
+                _editorPreviewAudio.onended = () => _stopEditorPreview();
+                _editorPreviewAudio.play().catch((e) => { notify(String(e.message || e), 'err'); _stopEditorPreview(); });
+                _editorPreviewBtn = btn;
+                _editorPreviewSoundId = soundId;
+                btn.textContent = '⏸ ' + t('preview_stop');
+            };
+            row.appendChild(btn);
+            return row;
+        }
+
         // ============ СВОЙСТВА ============
         function renderProps(r) {
             const SCLS = ['Script', 'LocalScript', 'ModuleScript'];
@@ -7731,6 +7924,17 @@ end
             hdr.appendChild(cls);
             hdr.appendChild(ref);
             panel.appendChild(hdr);
+
+            // Прослушать звук прямо из Explorer, вне Play — раньше это
+            // было доступно ТОЛЬКО через реальный Sound:Play() внутри
+            // запущенных Lua-скриптов в Play-режиме; выбрать Sound в
+            // дереве и просто послушать, что там лежит (как в настоящем
+            // Roblox Studio), было нечем. /api/asset-proxy работает вне
+            // зависимости от Play, так что тут достаточно голого <audio>
+            // без всякого моста к Lua.
+            if (r.cls === 'Sound' && r.props.SoundId) {
+                panel.appendChild(buildSoundPreviewRow(r.props.SoundId));
+            }
 
             // Position, Rotation, Size
             const specialProps = ['Position', 'Rotation', 'Size'];
