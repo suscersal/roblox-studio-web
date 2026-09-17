@@ -6718,6 +6718,21 @@ end
             luaResetSignals();
             renderLuaOutput();
             clearGuiOverlay();
+            // Раньше звук вообще не трогался при Stop — реальный
+            // HTMLAudioElement (см. getOrCreateSoundEl) не привязан к Lua VM
+            // никак, поэтому обнуление luaByRef/luaServerL его не касалось,
+            // и трек продолжал играть после выхода из Play, пока пользователь
+            // не перезагружал страницу. Останавливаем и обнуляем currentTime
+            // у всех живых <audio> (а не просто .pause() — иначе Sound.Play()
+            // в следующем заходе в Play продолжил бы с той же позиции, где
+            // остановились в прошлый раз, а не с начала, как в реальном
+            // Roblox при новом запуске сервера), и чистим сам реестр —
+            // следующий Play создаст свежие элементы под актуальные SoundId.
+            for (const a of Object.values(soundElByRef)) {
+                a.pause();
+                a.currentTime = 0;
+            }
+            soundElByRef = {};
         }
 
         // ============ GUI (ScreenGui/Frame/TextLabel/TextButton/... в Play) ============
