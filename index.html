@@ -2708,6 +2708,182 @@
             return geo;
         }
 
+        // ============ ЗАГРУЗКА РЕАЛЬНОЙ ГЕОМЕТРИИ MeshPart/SpecialMesh(FileMesh) ============
+        // Раньше MeshId (MeshPart.MeshId / дочерний SpecialMesh.MeshId при
+        // MeshType.FileMesh — см. _extract_real_mesh_id в app.py) вообще не
+        // подгружался как геометрия: часть ВСЕГДА рисовалась как bounding-box
+        // её Size (см. buildMeshFromObj ниже) — отсюда "меши не грузятся" и
+        // "текстура криво легла" (клеилась на box-приближение вместо
+        // настоящей формы с её настоящими UV). Парсим бинарный .mesh Roblox
+        // прямо в браузере через тот же /api/asset-proxy, что и для
+        // картинок/звука — просто как ArrayBuffer вместо Image/Audio.
+        //
+        // Поддержаны версии:
+        //  - "1.00" — древний ASCII-формат: header "version 1.00", число
+        //    граней, затем по 3 вершины на грань (без индексного буфера),
+        //    каждая вершина — [x,y,z][nx,ny,nz][u,v,0].
+        //  - "2.00"/"3.00" — бинарный формат: header из известных полей
+        //    (sizeof_MeshHeader/sizeof_MeshVertex/sizeof_MeshFace/numVerts/
+        //    numFaces), массив вершин с шагом sizeof_MeshVertex (первые 32
+        //    байта каждой всегда position(12)+normal(12)+uv(8) независимо
+        //    от версии — остальное, tangent/vertex-color, не нужно для
+        //    геометрии и намеренно пропускается), затем массив граней —
+        //    sizeof_MeshFace=12 (3×uint32 индекса).
+        //  - "4.00"/"5.00" (риг/LOD, другой макет заголовка с костями) —
+        //    НЕ поддержаны: это либо скиннинг-меши персонажей (уже покрыты
+        //    отдельным путём импорта аватара через OBJ), либо структура,
+        //    которую нельзя честно угадать без проверки на живом
+        //    Roblox CDN (недоступен из песочницы сборки) — явный fallback
+        //    на bounding-box с предупреждением в Output honestly лучше, чем
+        //    тихо собранная из неверных офсетов геометрия.
+        const _meshGeometryCache = {}; // meshId -> Promise<{geometry, size}|null>
+
+        function _parseRobloxMeshV1(text) {
+            const nums = text.match(/-?[\d.]+(?:[eE][-+]?\d+)?/g);
+            if (!nums || nums.length < 2) return null;
+            const numFaces = parseInt(nums[0], 10);
+            if (!numFaces) return null;
+            const coords = nums.slice(1).map(Number);
+            const need = numFaces * 3 * 9; // 3 вершины/грань × (pos3+norm3+uv3)
+            if (coords.length < need) return null;
+            const positions = new Float32Array(numFaces * 9);
+            const normals = new Float32Array(numFaces * 9);
+            const uvs = new Float32Array(numFaces * 6);
+            let ci = 0, pi = 0, ni = 0, ui = 0;
+            for (let f = 0; f < numFaces; f++) {
+                for (let v = 0; v < 3; v++) {
+                    positions[pi++] = coords[ci++]; positions[pi++] = coords[ci++]; positions[pi++] = coords[ci++];
+                    normals[ni++] = coords[ci++]; normals[ni++] = coords[ci++]; normals[ni++] = coords[ci++];
+                    uvs[ui++] = coords[ci++]; uvs[ui++] = 1 - coords[ci++]; ci++; // третье число UV-тройки не используется; V инвертирован — см. коммент у бинарного парсера
+                }
+            }
+            return { positions, normals, uvs, indices: null };
+        }
+
+        function _parseRobloxMeshBinary(buf) {
+            const dv = new DataView(buf);
+            let off = 0;
+            const sizeofHeader = dv.getUint16(off, true); off += 2;
+            const sizeofVertex = dv.getUint16(off, true); off += 2;
+            const sizeofFace = dv.getUint16(off, true); off += 2;
+            off += 2; // паддинг перед numVerts(uint32) до 4-байтного выравнивания
+            const numVerts = dv.getUint32(off, true); off += 4;
+            const numFaces = dv.getUint32(off, true); off += 4;
+            if (!numVerts || !numFaces || sizeofVertex < 32 || sizeofFace !== 12) return null;
+            const vertOff = sizeofHeader > 0 ? sizeofHeader : off;
+            const positions = new Float32Array(numVerts * 3);
+            const normals = new Float32Array(numVerts * 3);
+            const uvs = new Float32Array(numVerts * 2);
+            for (let i = 0; i < numVerts; i++) {
+                const base = vertOff + i * sizeofVertex;
+                if (base + 32 > buf.byteLength) return null;
+                positions[i * 3] = dv.getFloat32(base, true);
+                positions[i * 3 + 1] = dv.getFloat32(base + 4, true);
+                positions[i * 3 + 2] = dv.getFloat32(base + 8, true);
+                normals[i * 3] = dv.getFloat32(base + 12, true);
+                normals[i * 3 + 1] = dv.getFloat32(base + 16, true);
+                normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
+                uvs[i * 2] = dv.getFloat32(base + 24, true);
+                // Roblox хранит V сверху-вниз, Three.js/OpenGL — снизу-вверх;
+                // без переворота текстура на реальном меше встаёт вверх ногами.
+                uvs[i * 2 + 1] = 1 - dv.getFloat32(base + 28, true);
+            }
+            const faceOff = vertOff + numVerts * sizeofVertex;
+            const indices = new Uint32Array(numFaces * 3);
+            for (let i = 0; i < numFaces; i++) {
+                const base = faceOff + i * sizeofFace;
+                if (base + 12 > buf.byteLength) return null;
+                indices[i * 3] = dv.getUint32(base, true);
+                indices[i * 3 + 1] = dv.getUint32(base + 4, true);
+                indices[i * 3 + 2] = dv.getUint32(base + 8, true);
+            }
+            return { positions, normals, uvs, indices };
+        }
+
+        function _buildGeometryFromParsed(parsed) {
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(parsed.positions, 3));
+            geo.setAttribute('normal', new THREE.BufferAttribute(parsed.normals, 3));
+            geo.setAttribute('uv', new THREE.BufferAttribute(parsed.uvs, 2));
+            if (parsed.indices) geo.setIndex(new THREE.BufferAttribute(parsed.indices, 1));
+            if (!parsed.normals.some(n => n !== 0)) geo.computeVertexNormals();
+            geo.computeBoundingBox();
+            const bb = geo.boundingBox;
+            const size = {
+                x: Math.max(0.001, bb.max.x - bb.min.x),
+                y: Math.max(0.001, bb.max.y - bb.min.y),
+                z: Math.max(0.001, bb.max.z - bb.min.z),
+            };
+            // Помечаем как разделяемую между несколькими частями с одним
+            // MeshId — вызывающий код НЕ должен .dispose() эту геометрию
+            // при удалении/пересборке одной конкретной части (см. места,
+            // где geometry.dispose() вызывается на mesh-объектах сцены).
+            geo.userData.sharedMesh = true;
+            return { geometry: geo, size };
+        }
+
+        async function loadRealMeshGeometry(meshId) {
+            if (_meshGeometryCache[meshId]) return _meshGeometryCache[meshId];
+            const p = (async () => {
+                try {
+                    const resp = await fetch('/api/asset-proxy?id=' + meshId);
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    const buf = await resp.arrayBuffer();
+                    const head = new TextDecoder('ascii').decode(buf.slice(0, 16));
+                    const m = /version[ ]?([\d.]+)/i.exec(head);
+                    const version = m ? m[1] : null;
+                    let parsed = null;
+                    if (version === '1.00') {
+                        parsed = _parseRobloxMeshV1(new TextDecoder('utf-8').decode(buf));
+                    } else if (version === '2.00' || version === '3.00') {
+                        // Текстовый заголовок "version X.XX\n" перед бинарной
+                        // частью — обрезаем его по первому переводу строки.
+                        const nl = new Uint8Array(buf).indexOf(10);
+                        parsed = _parseRobloxMeshBinary(buf.slice(nl + 1));
+                    } else {
+                        logLuaOutput('warn', 'Mesh ' + meshId + ': формат "' + (version || '?') + '" (риг/LOD) пока не поддержан, использую приближение');
+                        return null;
+                    }
+                    if (!parsed) {
+                        logLuaOutput('warn', 'Mesh ' + meshId + ': не удалось разобрать файл, использую приближение');
+                        return null;
+                    }
+                    return _buildGeometryFromParsed(parsed);
+                } catch (e) {
+                    logLuaOutput('warn', 'Mesh ' + meshId + ': загрузка не удалась (' + e.message + '), использую приближение');
+                    return null;
+                }
+            })();
+            _meshGeometryCache[meshId] = p;
+            return p;
+        }
+
+        // Асинхронно подменяет box-приближение на реальную геометрию, когда
+        // она подгрузится — сам mesh уже добавлен в сцену со старой
+        // геометрией (не блокируем появление объекта на время сетевого
+        // запроса). sceneObjs проверяем на момент завершения: если part
+        // успели удалить/пересобрать сцену, подменять уже нечего.
+        function scheduleRealMeshSwap(o, mesh) {
+            loadRealMeshGeometry(o.meshId).then((result) => {
+                if (!result) return;
+                if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
+                mesh.geometry = result.geometry;
+                // mesh.matrixAutoUpdate=false (см. buildMeshFromObj) — матрица
+                // либо голая rotation+position (без поворота), либо честная
+                // 3x3-матрица поворота Roblox, но БЕЗ масштаба (тот раньше
+                // был запечён прямо в вершины box-геометрии). decompose/
+                // compose работает одинаково в обоих случаях и добавляет
+                // недостающий масштаб (Size части / собственный размер
+                // реального меша), не трогая позицию и поворот.
+                const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scale = new THREE.Vector3();
+                mesh.matrix.decompose(pos, quat, scale);
+                scale.x *= (o.sx || 1) / result.size.x;
+                scale.y *= (o.sy || 1) / result.size.y;
+                scale.z *= (o.sz || 1) / result.size.z;
+                mesh.matrix.compose(pos, quat, scale);
+            });
+        }
+
         // ============ ТЕКСТУРЫ ОБЫЧНЫХ ЧАСТЕЙ (Decal/MeshPart/SpecialMesh) ============
         // Глобальный (не per-rebuild, в отличие от geoCache/matCache ниже —
         // те создаются заново на каждую пересборку сцены) кэш по asset id,
@@ -2785,7 +2961,14 @@
             const FACE_TO_BOX_GROUP = {
                 Right: 0, Left: 1, Top: 2, Bottom: 3, Back: 4, Front: 5,
             };
-            const isBoxShape = !o.shape || o.shape === 'block' || o.shape === 'box';
+            // meshId (реальная кастомная геометрия, см. scheduleRealMeshSwap
+            // ниже) — НЕ box-приближение, даже пока грузится: настоящая
+            // форма почти никогда не прямоугольная, класть текстуру на одну
+            // "самую большую грань" для неё так же неверно, как на все 6
+            // сразу — до подмены геометрии часть просто без текстуры не
+            // останется (полноценный map на весь плейсхолдер), а после
+            // подмены реальные UV меша лягут как надо.
+            const isBoxShape = !o.meshId && (!o.shape || o.shape === 'block' || o.shape === 'box');
             // Decal — своя явная грань (Face), уже вычислена корректно
             // выше. Но MeshPart.TextureID/SpecialMesh.TextureId — это
             // текстура, честно рассчитанная на РЕАЛЬНУЮ форму меша
@@ -2883,6 +3066,7 @@
             if ((o.opacity || 1) < 1.0) {
                 mesh.material.depthWrite = (o.opacity || 1) > 0.7;
             }
+            if (o.meshId) scheduleRealMeshSwap(o, mesh);
             return mesh;
         }
 
@@ -2907,7 +3091,11 @@
             // Очистка старых объектов
             for (const mesh of Object.values(sceneObjs)) {
                 scene.remove(mesh);
-                if (mesh.geometry) mesh.geometry.dispose();
+                // sharedMesh (см. loadRealMeshGeometry/_buildGeometryFromParsed)
+                // — одна геометрия по MeshId переиспользуется сразу несколькими
+                // частями через _meshGeometryCache; dispose() тут убил бы её
+                // для ВСЕХ, включая части, которые продолжают жить дальше.
+                if (mesh.geometry && !mesh.geometry.userData.sharedMesh) mesh.geometry.dispose();
                 if (mesh.material) {
                     if (Array.isArray(mesh.material)) {
                         mesh.material.forEach(m => {
@@ -3763,7 +3951,7 @@
                     // задвоится с обычной подгрузкой редактора при следующем
                     // reloadScene()/смене вида.
                     scene.remove(mesh);
-                    if (mesh.geometry) mesh.geometry.dispose();
+                    if (mesh.geometry && !mesh.geometry.userData.sharedMesh) mesh.geometry.dispose();
                     delete sceneObjs[ref];
                 } else {
                     mesh.matrix.copy(playSnapshot[ref]);
@@ -3969,6 +4157,26 @@ end
 function CFrame.fromAxisAngle(axis, angle) return CFrame.new(0, 0, 0) end -- поворот игнорируется — см. коммент выше
 function CFrame.Angles(rx, ry, rz) return CFrame.new(0, 0, 0) end
 CFrame.__tostring = function(c) return c.X .. ", " .. c.Y .. ", " .. c.Z end
+-- cf:Lerp(goal, alpha) — раньше не существовало вообще, а это ИМЕННО тот
+-- метод, которым камерные скрипты (MenuCamera.lua и подобные) плавно ведут
+-- камеру каждый кадр: camera.CFrame = camera.CFrame:Lerp(target, 0.1).
+-- Без него вызов падал "attempt to call a nil value (method 'Lerp')" —
+-- RenderStepped-соединение обрывалось на первом же кадре, и следующее
+-- присвоение camera.CFrame (когда скрипт где-то ещё СРАЗУ ставит его на
+-- целевую точку, например при смене персонажа в меню) особенно на
+-- медленном первом кадре выглядело как мгновенный "телепорт" камеры
+-- вместо плавного пролёта. Линейно интерполируем позицию и lookVector
+-- (нормализуем результат — честного slerp по кватерниону тут нет, но для
+-- почти всех углов поворота камеры разница на глаз не заметна).
+function CFrame.Lerp(self, goal, alpha)
+    local x = self.X + (goal.X - self.X) * alpha
+    local y = self.Y + (goal.Y - self.Y) * alpha
+    local z = self.Z + (goal.Z - self.Z) * alpha
+    local lx = self.lookVector.X + (goal.lookVector.X - self.lookVector.X) * alpha
+    local ly = self.lookVector.Y + (goal.lookVector.Y - self.lookVector.Y) * alpha
+    local lz = self.lookVector.Z + (goal.lookVector.Z - self.lookVector.Z) * alpha
+    return CFrame.new(Vector3.new(x, y, z), Vector3.new(x + lx, y + ly, z + lz))
+end
 
 -- NumberSequence/NumberSequenceKeypoint/ColorSequence(Keypoint) — просто
 -- данные (чаще всего для UIGradient/ParticleEmitter). Визуального градиента
@@ -4786,6 +4994,22 @@ end
                 mesh.matrix.compose(new THREE.Vector3(x, y, z), q, sc);
             }
         }
+        // Camera — особый случай: реально двигаем THREE-камеру Play-режима
+        // (позиция + lookAt), у неё нет меша в sceneObjs. Вынесено в общую
+        // функцию, чтобы ОДИН и тот же код применял CFrame и при разовом
+        // присваивании (__set_prop), и покадрово при интерполяции Tween'а
+        // (см. updateTweens) — раньше второго пути не было вообще, отсюда
+        // "телепорт камеры": TweenService на составных свойствах (CFrame —
+        // таблица) не анимировал ничего покадрово, а применял итоговое
+        // значение мгновенно в момент завершения tween'а.
+        function applyCFrameValue(ref, x, y, z, lx, ly, lz) {
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined') {
+                camera.position.set(x, y, z);
+                camera.lookAt(x + lx, y + ly, z + lz);
+            } else {
+                luaSetPositionOfRef(ref, x, y, z);
+            }
+        }
         // rbxassetid://12345 (или голое число) -> локальный проксирующий
         // URL, который браузер реально может открыть как <img>/<audio>
         // src (см. /api/asset-proxy в app.py). Используется и для
@@ -4820,6 +5044,21 @@ end
                 // себе возвращал nil, и падение было ещё ДО :Connect,
                 // прямо на чтении поля.
                 a.addEventListener('ended', () => fireLuaSignal(ref, 'Ended', []));
+                // Loaded — раньше нечем было понять, что звук вообще готов
+                // играть (SongMenuScript ждёт этого перед стартом превью),
+                // sound.Loaded:Connect(...) молча никогда не срабатывал.
+                // canplaythrough — честный аналог "метаданные+буфер готовы",
+                // а не 'loadedmetadata' (тогда играть ещё рано).
+                a.addEventListener('canplaythrough', () => fireLuaSignal(ref, 'Loaded', []), { once: true });
+                // DidLoop — родное 'ended' у зацикленного <audio> (loop=true)
+                // браузером вообще не шлётся, он просто молча прыгает на
+                // начало сам. Ловим момент прыжка по времени (currentTime
+                // резко упал, хотя явного Sound:Stop()/перемотки не было).
+                let _lastT = 0;
+                a.addEventListener('timeupdate', () => {
+                    if (a.loop && a.currentTime < _lastT - 0.5) fireLuaSignal(ref, 'DidLoop', []);
+                    _lastT = a.currentTime;
+                });
                 // Раньше ошибка загрузки звука (плохой/просроченный
                 // ROBLOX_API_KEY, сеть, ассет недоступен) проходила
                 // молча — Sound просто никогда не начинал звучать, без
@@ -4862,7 +5101,7 @@ end
         // "attempt to perform arithmetic on a nil value" — с нужным полем
         // дефолт хотя бы совпадает с тем, что было бы в настоящем Roblox.
         const GENERIC_PROP_DEFAULTS = {
-            Volume: 0.5, PlaybackSpeed: 1, TimePosition: 0, SoundId: '',
+            Volume: 0.5, PlaybackSpeed: 1, Pitch: 1, TimePosition: 0, SoundId: '',
             Looped: false, Playing: false, PlayOnRemove: false,
         };
         let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
@@ -4880,6 +5119,14 @@ end
                 if (name === 'TimePosition') return a.currentTime || 0;
                 if (name === 'IsPlaying' || name === 'Playing') return !a.paused && !a.ended;
                 if (name === 'TimeLength' || name === 'Length') return a.duration || 0;
+                // Pitch — устаревшее (в реальном Roblox давно заменено
+                // PlaybackSpeed и фактически является его алиасом, а не
+                // отдельным множителем), но старые FNF-скрипты 2018-2021
+                // годов сплошь и рядом ставят именно Sound.Pitch. Раньше
+                // просто лежало в общем "мусорном ящике" и никак не влияло
+                // на звук — читаем/пишем через тот же playbackRate, что и
+                // PlaybackSpeed (см. запись ниже).
+                if (name === 'PlaybackSpeed' || name === 'Pitch') return a.playbackRate;
             }
             // GUI-объекты — ПЕРЕД virtualInstanceProps: Instance.new("Frame")
             // тоже заводит virtualInstanceProps (см. luaCreateVirtualInstance),
@@ -4928,7 +5175,10 @@ end
                     getOrCreateSoundEl(ref).volume = Math.max(0, Math.min(1, Number(value) || 0));
                 } else if (name === 'Looped') {
                     getOrCreateSoundEl(ref).loop = !!value;
-                } else if (name === 'PlaybackSpeed') {
+                } else if (name === 'PlaybackSpeed' || name === 'Pitch') {
+                    // Оба свойства управляют одним и тем же <audio>.playbackRate
+                    // (см. коммент в luaGetGenericProp) — что бы скрипт ни
+                    // выставил последним, реально звучит именно оно.
                     getOrCreateSoundEl(ref).playbackRate = Number(value) || 1;
                 } else if (name === 'TimePosition') {
                     getOrCreateSoundEl(ref).currentTime = Number(value) || 0;
@@ -5738,19 +5988,14 @@ end
                         // видимую камеру в Play. lookVector теперь настоящий
                         // (см. фикс CFrame.new(pos, lookAt) в прелюдии) —
                         // используем его для camera.lookAt.
-                        if (luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined') {
-                            lua.lua_getfield(L2, 3, 'lookVector');
-                            let lx = 0, ly = 0, lz = -1;
-                            if (lua.lua_type(L2, -1) === lua.LUA_TTABLE) {
-                                const gl = (f) => { lua.lua_getfield(L2, -1, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
-                                lx = gl('X'); ly = gl('Y'); lz = gl('Z');
-                            }
-                            lua.lua_pop(L2, 1);
-                            camera.position.set(x, y, z);
-                            camera.lookAt(x + lx, y + ly, z + lz);
-                        } else {
-                            luaSetPositionOfRef(ref, x, y, z);
+                        lua.lua_getfield(L2, 3, 'lookVector');
+                        let lx = 0, ly = 0, lz = -1;
+                        if (lua.lua_type(L2, -1) === lua.LUA_TTABLE) {
+                            const gl = (f) => { lua.lua_getfield(L2, -1, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
+                            lx = gl('X'); ly = gl('Y'); lz = gl('Z');
                         }
+                        lua.lua_pop(L2, 1);
+                        applyCFrameValue(ref, x, y, z, lx, ly, lz);
                         fireLuaSignal(ref, '__prop_' + name, []);
                         return 0;
                     }
@@ -5782,12 +6027,52 @@ end
                 const completedKey = lua.lua_tonumber(L2, 1);
                 const ref = lua.lua_tonumber(L2, 2);
                 const propName = lua.lua_tojsstring(L2, 3);
+                const duration = lua.lua_tonumber(L2, 5) || 0;
+                // CFrame — отдельный случай ДО общей ветки composite ниже:
+                // раньше составные свойства (таблицы — Color3/UDim2/CFrame)
+                // вообще не интерполировались покадрово, значение просто
+                // применялось целиком в момент завершения tween'а — для
+                // камеры (MenuCamera.lua и подобные, TweenService на
+                // camera.CFrame) это выглядело как мгновенный "телепорт"
+                // вместо плавного пролёта. Здесь честно лерпим позицию и
+                // lookVector каждый кадр (см. updateTweens) — то же самое,
+                // что уже делает CFrame:Lerp, просто растянутое по времени
+                // самим Tween'ом, а не вручную скриптом.
+                if (propName === 'CFrame' && lua.lua_type(L2, 4) === lua.LUA_TTABLE) {
+                    const gx = (f) => { lua.lua_getfield(L2, 4, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
+                    const tx = gx('X'), ty = gx('Y'), tz = gx('Z');
+                    lua.lua_getfield(L2, 4, 'lookVector');
+                    let tlx = 0, tly = 0, tlz = -1;
+                    if (lua.lua_type(L2, -1) === lua.LUA_TTABLE) {
+                        const gl = (f) => { lua.lua_getfield(L2, -1, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
+                        tlx = gl('X'); tly = gl('Y'); tlz = gl('Z');
+                    }
+                    lua.lua_pop(L2, 1);
+                    let fx = tx, fy = ty, fz = tz, flx = tlx, fly = tly, flz = tlz;
+                    if (luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined') {
+                        fx = camera.position.x; fy = camera.position.y; fz = camera.position.z;
+                        const dir = camera.getWorldDirection(new THREE.Vector3());
+                        flx = dir.x; fly = dir.y; flz = dir.z;
+                    } else if (sceneObjs[ref]) {
+                        const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+                        sceneObjs[ref].matrix.decompose(p, q, sc);
+                        fx = p.x; fy = p.y; fz = p.z;
+                        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+                        flx = dir.x; fly = dir.y; flz = dir.z;
+                    }
+                    activeTweens.push({
+                        ref, propName, cframe: true,
+                        fromPos: { x: fx, y: fy, z: fz }, toPos: { x: tx, y: ty, z: tz },
+                        fromLook: { x: flx, y: fly, z: flz }, toLook: { x: tlx, y: tly, z: tlz },
+                        duration, startTime: performance.now(), completedRef: completedKey,
+                    });
+                    return 0;
+                }
                 const ty = lua.lua_type(L2, 4);
                 let composite = false, toVal;
                 if (ty === lua.LUA_TTABLE) { toVal = luaTableToJsPropValue(L2, 4); composite = true; }
                 else if (ty === lua.LUA_TNUMBER) { toVal = lua.lua_tonumber(L2, 4); }
                 else { toVal = lua.lua_type(L2, 4) === lua.LUA_TBOOLEAN ? !!lua.lua_toboolean(L2, 4) : lua.lua_tojsstring(L2, 4); composite = true; }
-                const duration = lua.lua_tonumber(L2, 5) || 0;
                 let fromVal = null;
                 if (!composite) {
                     const cur = luaGetGenericProp(ref, propName);
@@ -6903,6 +7188,19 @@ end
             for (const t of activeTweens) {
                 const elapsed = (now - t.startTime) / 1000;
                 const p = t.duration > 0 ? Math.min(1, elapsed / t.duration) : 1;
+                if (t.cframe) {
+                    const x = t.fromPos.x + (t.toPos.x - t.fromPos.x) * p;
+                    const y = t.fromPos.y + (t.toPos.y - t.fromPos.y) * p;
+                    const z = t.fromPos.z + (t.toPos.z - t.fromPos.z) * p;
+                    let lx = t.fromLook.x + (t.toLook.x - t.fromLook.x) * p;
+                    let ly = t.fromLook.y + (t.toLook.y - t.fromLook.y) * p;
+                    let lz = t.fromLook.z + (t.toLook.z - t.fromLook.z) * p;
+                    const llen = Math.hypot(lx, ly, lz) || 1;
+                    applyCFrameValue(t.ref, x, y, z, lx / llen, ly / llen, lz / llen);
+                    if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
+                    else stillActive.push(t);
+                    continue;
+                }
                 if (t.composite) {
                     if (p >= 1) {
                         luaSetGenericProp(t.ref, t.propName, t.to);

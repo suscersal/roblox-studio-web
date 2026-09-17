@@ -348,7 +348,12 @@ def chunk_box_object(o):
 def chunk_large_objects(objs):
     out = []
     for o in objs:
-        if o.get('shape') == 'box':
+        # meshId — реальная кастомная геометрия (см. _extract_real_mesh_id),
+        # а не настоящий bounding-box: chunk_box_object режет объект на
+        # суб-боксы буквально по его Size, что для реального меша (форма
+        # почти никогда не совпадает с прямоугольником) раздробило бы
+        # видимую модель на набор неверных кубов вместо неё самой.
+        if o.get('shape') == 'box' and not o.get('meshId'):
             out.extend(chunk_box_object(o))
         else:
             out.append(o)
@@ -512,6 +517,37 @@ def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, ref
     return None, None
 
 
+def _extract_real_mesh_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
+    """MeshId для РЕАЛЬНОЙ геометрии — в отличие от shape-эвристики в
+    build_all_scene_objects (которая лишь подбирает ближайший ИЗ ФИКСИРОВАННОГО
+    НАБОРА примитивов: box/sphere/cylinder/cone/wedge), это отдельный
+    кастомный меш, который раньше вообще не подгружался: MeshPart.MeshId
+    и SpecialMesh.MeshId (при MeshType.FileMesh, число 5 — единственный
+    тип, где MeshId указывает на реальную кастомную геометрию с сервера;
+    Cylinder/Sphere/Wedge/Head и т.п. — это встроенные примитивы, у них
+    MeshId либо пуст, либо игнорируется настоящим Roblox тоже, никакой
+    реальной геометрии подгружать не нужно). Раньше эти MeshId нигде не
+    читались для геометрии вообще — FileMesh-меши (BasePart с дочерним
+    SpecialMesh, MeshType=5) и любые MeshPart рендерились ТОЛЬКО как
+    bounding-box, отсюда и "меши не грузятся"/"кривая развёртка" — текстура
+    клеилась на приближение вместо настоящей формы и её настоящих UV."""
+    if cls == 'MeshPart':
+        mid = _rbxassetid_num(props.get('MeshId') or props.get('MeshID'))
+        if mid:
+            return mid
+    for child in children_by_parent.get(ref, ()):
+        if referent_to_class.get(child) == 'SpecialMesh':
+            cp = all_props.get(child, {})
+            mt = cp.get('MeshType', 0)
+            if isinstance(mt, str):
+                mt = int(mt) if mt.isdigit() else 0
+            if mt == 5:
+                mid = _rbxassetid_num(cp.get('MeshId'))
+                if mid:
+                    return mid
+    return None
+
+
 def build_all_scene_objects():
     # Раньше этот разбор (CFrame/матрицы поворота, поиск SpecialMesh для
     # формы, цвет, Anchored/CanCollide) заново гонялся по ВСЕМ объектам
@@ -604,6 +640,9 @@ def build_all_scene_objects():
         texture_id, texture_face = _extract_part_texture_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
+        real_mesh_id = _extract_real_mesh_id(
+            ref, cls, props, children_by_parent, parsed['props'],
+            parsed['referent_to_class'])
 
         anchored = props.get('Anchored', False)
         if isinstance(anchored, str):
@@ -618,7 +657,7 @@ def build_all_scene_objects():
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
-            'textureFace': texture_face,
+            'textureFace': texture_face, 'meshId': real_mesh_id,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
