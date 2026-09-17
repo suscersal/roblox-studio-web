@@ -1896,7 +1896,15 @@ def api_asset_proxy():
         content_type = 'image/jpeg'
     elif raw_bytes[:4] == b'OggS':
         content_type = 'audio/ogg'
-    elif raw_bytes[:3] == b'ID3' or raw_bytes[:2] == b'\xff\xfb':
+    elif raw_bytes[:3] == b'ID3' or (raw_bytes[:1] == b'\xff' and len(raw_bytes) > 1 and (raw_bytes[1] & 0xe0) == 0xe0):
+        # MP3 без ID3-тега начинается сразу с фрейма: 11-битное синхрослово
+        # 0xFFE (первый байт FF, у второго байта старшие 3 бита тоже
+        # единицы) — младшие биты второго байта кодируют версию MPEG/layer
+        # и МЕНЯЮТСЯ от файла к файлу (0xFB — это только ОДИН конкретный
+        # вариант). Раньше проверялся именно этот один вариант байт-в-байт,
+        # так что любой трек с другой версией/битрейтом тихо улетал как
+        # application/octet-stream — браузер такое играть отказывается
+        # ("Failed to load because no supported source was found").
         content_type = 'audio/mpeg'
     elif raw_bytes[:4] == b'RIFF':
         content_type = 'audio/wav'

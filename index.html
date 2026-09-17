@@ -5129,26 +5129,48 @@ end
         // __sound_control (см. installLuaBridge и правку в
         // InstanceMT.__index).
         let soundElByRef = {};
-        // PlaybackSpeed и PitchShiftSoundEffect.Octave — два НЕЗАВИСИМЫХ
-        // источника скорости/питча одного и того же <audio>.playbackRate
-        // (см. коммент в startLuaScriptsInner). Раньше и генерик-сеттер
-        // PlaybackSpeed/Pitch, и обработчик Octave писали в playbackRate
-        // напрямую, затирая друг друга — на треках, где реально заданы
-        // ОБА (как в твоём файле), последний применённый эффект побеждал
-        // молча. Держим оба множителя отдельно и всегда пересчитываем
-        // итоговую скорость как их произведение — так же, как в
-        // настоящем Roblox это два независимых звуковых эффекта в цепочке.
+        // PlaybackSpeed vs PitchShiftSoundEffect.Octave — это НЕ два
+        // взаимозаменяемых способа задать один и тот же множитель
+        // playbackRate, как я раньше по ошибке решил. В настоящем Roblox
+        // это физически разные эффекты:
+        //   - PlaybackSpeed — обычный ресемплинг: меняет И скорость, И тон
+        //     вместе (это и есть playbackRate — корректно).
+        //   - PitchShiftSoundEffect.Octave — НАСТОЯЩИЙ питч-шифтер: меняет
+        //     ТОЛЬКО тон, темп остаётся тем же самым.
+        // Раньше Octave тоже домножался в playbackRate — то есть тайком
+        // ускорял/замедлял трек, хотя не должен был трогать скорость
+        // вообще. Именно это и звучало "то быстрее то медленнее
+        // неправильно": на треках с обоими эффектами сразу playbackRate
+        // получал лишний, ложный множитель 2^Octave поверх осмысленного
+        // PlaybackSpeed. Честный pitch-only shift (без изменения темпа)
+        // на голом <audio> без Web Audio API + фазовый вокодер сделать
+        // нельзя — поэтому Octave больше НЕ участвует в playbackRate:
+        // скорость теперь = ровно PlaybackSpeed, тон Octave визуально
+        // отслеживается (_soundPitchOctave), но реально не проигрывается.
         const _soundBaseSpeed = {};   // ref -> PlaybackSpeed (Pitch — алиас того же)
-        const _soundPitchOctave = {}; // ref -> Octave активного PitchShiftSoundEffect
+        const _soundPitchOctave = {}; // ref -> Octave активного PitchShiftSoundEffect (см. коммент выше — НЕ входит в playbackRate)
         function _applySoundRate(ref) {
             const speed = _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
-            const octave = _soundPitchOctave[ref] != null ? _soundPitchOctave[ref] : 0;
-            getOrCreateSoundEl(ref).playbackRate = speed * Math.pow(2, octave);
+            getOrCreateSoundEl(ref).playbackRate = speed;
+            if (_soundPitchOctave[ref]) {
+                logLuaOutput('warn', 'Sound ' + ref + ': PitchShiftSoundEffect (Octave=' + _soundPitchOctave[ref] + ') не меняет темп — только тон, а честный pitch-only эффект пока не реализован, звучит без него');
+            }
         }
         function getOrCreateSoundEl(ref) {
             if (!soundElByRef[ref]) {
                 const a = new Audio();
                 a.preload = 'auto';
+                // Настоящий Roblox.PlaybackSpeed меняет СКОРОСТЬ И ВЫСОТУ
+                // ТОНА одновременно (обычный ресемплинг) — а современные
+                // браузеры по умолчанию делают ОБРАТНОЕ: сохраняют высоту
+                // тона при смене playbackRate (preservesPitch=true из
+                // коробки), то есть без этой строчки даже честный
+                // PlaybackSpeed звучал бы неправильно — темп меняется, тон
+                // держится. Отключаем это поведение, чтобы playbackRate
+                // реально давал classic-resample эффект, как в Roblox.
+                a.preservesPitch = false;
+                a.mozPreservesPitch = false;
+                a.webkitPreservesPitch = false;
                 // Sound.Ended — реальный сигнал Roblox, на который
                 // SongMenuScript/Main.lua вешается через
                 // sound.Ended:Connect(...), чтобы, например, вернуться в
@@ -5237,10 +5259,10 @@ end
                 // PlaybackSpeed и фактически является его алиасом, а не
                 // отдельным множителем), но старые FNF-скрипты 2018-2021
                 // годов сплошь и рядом ставят именно Sound.Pitch. Читаем
-                // именно ЭТОТ множитель (_soundBaseSpeed), а не итоговый
-                // a.playbackRate — тот теперь ЕЩЁ включает независимый
-                // множитель PitchShiftSoundEffect.Octave (см. _applySoundRate),
-                // и отдавать скрипту чужой вклад в своё же свойство неверно.
+                // из _soundBaseSpeed, а не a.playbackRate напрямую — так
+                // симметрично с записью (см. luaSetGenericProp) и не
+                // зависит от того, реализуем ли когда-нибудь честный
+                // pitch-only эффект для Octave отдельным путём.
                 if (name === 'PlaybackSpeed' || name === 'Pitch') return _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
             }
             // GUI-объекты — ПЕРЕД virtualInstanceProps: Instance.new("Frame")
@@ -5292,10 +5314,9 @@ end
                     getOrCreateSoundEl(ref).loop = !!value;
                 } else if (name === 'PlaybackSpeed' || name === 'Pitch') {
                     // Оба свойства — один и тот же множитель (см. коммент в
-                    // luaGetGenericProp), но это НЕ единственный источник
-                    // playbackRate: PitchShiftSoundEffect.Octave — независимый
-                    // множитель поверх него (см. _applySoundRate), поэтому
-                    // сюда пишем именно "свою" часть, а не playbackRate целиком.
+                    // luaGetGenericProp): реальный ресемплинг, меняет
+                    // playbackRate целиком (в отличие от Octave ниже — тот
+                    // на playbackRate не влияет вообще, см. _applySoundRate).
                     _soundBaseSpeed[ref] = Number(value) || 1;
                     _applySoundRate(ref);
                 } else if (name === 'TimePosition') {
@@ -5308,10 +5329,12 @@ end
             }
             // PitchShiftSoundEffect.Octave/.Enabled — НАСТОЯЩИЙ Roblox-
             // механизм питча (отдельный дочерний инстанс, см. api_all_instances
-            // в app.py), а не устаревшее скалярное Sound.Pitch выше. Если
-            // скрипт меняет его в рантайме — находим родительский Sound и
-            // пересчитываем ЕГО долю (множитель = 2^Octave, как в настоящем
-            // Roblox) через _applySoundRate, не трогая PlaybackSpeed-часть.
+            // в app.py), а не устаревшее скалярное Sound.Pitch выше. В
+            // отличие от PlaybackSpeed это pitch-only эффект — темп не
+            // меняет, поэтому и на playbackRate не влияет (см. подробный
+            // коммент у _applySoundRate); тут просто держим значение в
+            // _soundPitchOctave актуальным на случай, если честный
+            // pitch-only эффект появится позже.
             if (luaByRef[ref] && luaByRef[ref].cls === 'PitchShiftSoundEffect' && (name === 'Octave' || name === 'Enabled')) {
                 const soundRef = luaParentByRef[ref];
                 if (soundRef !== undefined && luaByRef[soundRef] && luaByRef[soundRef].cls === 'Sound') {
@@ -6736,16 +6759,17 @@ end
                         if (url) a.src = url;
                         if (typeof inst.volume === 'number') a.volume = Math.max(0, Math.min(1, inst.volume));
                         if (inst.looped) a.loop = true;
-                        // PlaybackSpeed и PitchShiftSoundEffect.Octave, заданные
-                        // ПРЯМО в файле (см. api_all_instances в app.py) — раньше
-                        // ни один из двух не применялся: FNF-карты с готовым
-                        // "sped up"-вариантом трека (выставлено дизайнером, без
-                        // единой строчки скрипта) всегда звучали на обычной
-                        // скорости. Оба реально используются на разных треках
-                        // ОДНОВРЕМЕННО (не альтернативы друг другу) — как и в
-                        // настоящем Roblox, они независимые эффекты и
-                        // перемножаются, а не затирают друг друга (см.
-                        // _setSoundRate/_soundBaseSpeed/_soundPitchOctave ниже).
+                        // PlaybackSpeed, заданный ПРЯМО в файле (см.
+                        // api_all_instances в app.py) — раньше не применялся:
+                        // FNF-карты с готовым "sped up"-вариантом трека
+                        // (выставлено дизайнером для обхода детекта авторских
+                        // прав, без единой строчки скрипта) всегда звучали на
+                        // обычной скорости. PitchShiftSoundEffect.Octave тоже
+                        // считываем и храним (_soundPitchOctave) — но, в
+                        // отличие от PlaybackSpeed, он НЕ входит в playbackRate
+                        // (см. подробный коммент у _applySoundRate: Octave —
+                        // это честный pitch-only эффект в настоящем Roblox, не
+                        // должен трогать скорость воспроизведения).
                         if (typeof inst.playbackSpeed === 'number') _soundBaseSpeed[inst.ref] = inst.playbackSpeed;
                         if (typeof inst.pitchOctave === 'number') _soundPitchOctave[inst.ref] = inst.pitchOctave;
                         _applySoundRate(inst.ref);
@@ -7918,6 +7942,18 @@ end
             const cls = document.createElement('div');
             cls.className = 'prop-cls';
             cls.textContent = r.cls;
+            // Имя инстанса — раньше шапка Properties показывала ТОЛЬКО класс
+            // ("Sound"), а не то, что реально выбрано ("pluffaduff_-_...").
+            // В самом Explorer имя видно, а тут — нет, хотя это ровно то, по
+            // чему обычно ориентируются при выборе объекта.
+            if (r.props && r.props.Name && r.props.Name !== r.cls) {
+                const nameEl = document.createElement('div');
+                nameEl.className = 'prop-name-title';
+                nameEl.style.cssText = 'font-weight:bold;font-size:13px;color:#e5e7eb;word-break:break-word';
+                nameEl.textContent = r.props.Name;
+                hdr.appendChild(nameEl);
+                cls.style.cssText = 'font-size:11px;color:#9ca3af';
+            }
             const ref = document.createElement('div');
             ref.className = 'prop-ref';
             ref.textContent = 'ref ' + r.ref;
