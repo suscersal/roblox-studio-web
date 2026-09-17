@@ -8075,7 +8075,15 @@ end
         // Вызывается из Kotlin (MainActivity.AndroidBridge) после того как
         // пользователь выбрал .rbxl через системный пикер, а Kotlin скопировал
         // его в приватное хранилище приложения и передал сюда локальный путь.
-        window.onAndroidFileImported = async function (path) {
+        // errMsg — раньше при сбое копирования (см. filePickerLauncher в
+        // MainActivity.kt) колбэк либо не вызывался вовсе, либо ушёл бы с
+        // path=null прямо на /api/open, что дало бы невнятную ошибку парсера
+        // вместо честной причины сбоя копирования.
+        window.onAndroidFileImported = async function (path, errMsg) {
+            if (!path) {
+                notify(errMsg || t('notify_error'), 'err');
+                return;
+            }
             const r = await api('POST', '/api/open', { path: path });
             if (r.ok) {
                 notify(t('notify_loaded_count', { n: r.count }));

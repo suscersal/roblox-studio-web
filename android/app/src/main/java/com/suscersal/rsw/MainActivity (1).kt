@@ -35,21 +35,47 @@ class MainActivity : AppCompatActivity() {
     // надёжный способ достать файл, выбранный пользователем, при scoped
     // storage на Android 10+. Копируем в приватную папку приложения и
     // сообщаем странице через JS-колбэк.
+    //
+    // Раньше использовалось ФИКСИРОВАННОЕ имя "imported.rbxl" — если
+    // предыдущая копия этого файла по какой-то причине осталась с
+    // испорченными правами (например, MIUI/HyperOS "Очистка памяти"/
+    // "Диспетчер безопасности" иногда трогает файлы приложений в рамках
+    // своей оптимизации хранилища, либо файл достался от восстановления
+    // данных при переустановке — и то, и другое вживую воспроизвести из
+    // песочницы нельзя, но оба честно объясняют Permission denied НА
+    // ЧТЕНИИ файла, который сам же процесс перед этим спокойно
+    // перезаписал), КАЖДЫЙ следующий импорт утыкался в тот же самый
+    // испорченный файл. Теперь — новое имя на каждый импорт (метка
+    // времени), а если старый файл с фиксированным именем ещё валяется
+    // от прошлых версий приложения — пробуем стереть его тоже (не
+    // критично, если не получится). Плюс: ошибка копирования больше не
+    // падает необработанным исключением молча — сообщаем странице явно.
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val uri: Uri? = if (result.resultCode == RESULT_OK) result.data?.data else null
         if (uri == null) return@registerForActivityResult
-        val dest = File(filesDir, "imported.rbxl")
-        contentResolver.openInputStream(uri)?.use { input ->
-            dest.outputStream().use { output -> input.copyTo(output) }
+        File(filesDir, "imported.rbxl").delete() // старое фиксированное имя — best-effort уборка
+        val dest = File(filesDir, "imported_${System.currentTimeMillis()}.rbxl")
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            } ?: throw java.io.IOException("contentResolver вернул пустой поток для $uri")
+            webView.evaluateJavascript(
+                "window.onAndroidFileImported && window.onAndroidFileImported(${
+                    org.json.JSONObject.quote(dest.absolutePath)
+                });",
+                null
+            )
+        } catch (e: Exception) {
+            dest.delete()
+            webView.evaluateJavascript(
+                "window.onAndroidFileImported && window.onAndroidFileImported(null, ${
+                    org.json.JSONObject.quote(e.message ?: e.toString())
+                });",
+                null
+            )
         }
-        webView.evaluateJavascript(
-            "window.onAndroidFileImported && window.onAndroidFileImported(${
-                org.json.JSONObject.quote(dest.absolutePath)
-            });",
-            null
-        )
     }
 
     // Импорт произвольного локального файла (zip с моделью аватара,
