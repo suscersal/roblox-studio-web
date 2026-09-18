@@ -5199,19 +5199,33 @@ end
             }
             return _sharedAudioCtx;
         }
-        const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, чтобы не пересчитывать OLA заново при повторном Play/пересборке сцены
-        // Overlap-Add без поиска лучшего сдвига (не полноценный WSOLA с
-        // кросс-корреляцией) — сознательный компромисс: честный WSOLA-поиск
-        // на 3-4-минутном треке на телефоне давал бы миллиарды операций
-        // (секунды-десятки секунд подвисания при входе в Play), а простой
-        // OLA укладывается в считанные десятки миллисекунд даже на слабом
-        // устройстве. Ценой чуть большей "фазовости" на некоторых
-        // созвучиях — приемлемо для музыки на 1.4-2x, что тут и требуется.
-        function _olaTimeStretch(buffer, speed, audioCtx) {
+        const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, чтобы не пересчитывать WSOLA заново при повторном Play/пересборке сцены
+        // WSOLA (Waveform Similarity Overlap-Add) — раньше здесь был
+        // простой OLA БЕЗ поиска совмещения фаз, чтобы уложиться в разумное
+        // время на телефоне. Оказалось, это давало ощутимо "плывущий"/
+        // неестественный голос — и по делу: при 50%-перекрытии на выходе и
+        // скорости 1.4-2x входные кадры почти (а на 2x — ровно) НЕ
+        // перекрывались вообще, так что склеиваемые куски физически не
+        // стыковались по фазе. Два исправления одновременно:
+        //  1) Перекрытие на выходе увеличено до 75% (hop = frameSize/4)
+        //     вместо 50% — при той же скорости 1.4-2x это оставляет
+        //     реальное перекрытие и на входе тоже, а не нулевое.
+        //  2) Добавлен собственно WSOLA-поиск: вместо кадра строго по
+        //     номинальной позиции берём тот из окрестности (±searchRadius),
+        //     что лучше всего по кросс-корреляции продолжает хвост уже
+        //     склеенного результата — это и убирает "плывущесть"/щелчки на
+        //     стыках.
+        // Радиус и шаг поиска подобраны так, чтобы не положить телефон:
+        // полный расчёт на 3-4-минутный трек — сотни миллионов операций,
+        // не миллиарды (см. таймер в консоли при первом Play, если нужно
+        // перепроверить на слабом устройстве).
+        function _wsolaTimeStretch(buffer, speed, audioCtx) {
             if (Math.abs(speed - 1) < 0.001) return buffer;
             const frameSize = 4096;
-            const hop = Math.floor(frameSize / 2); // шаг на ВЫХОДЕ, фиксированный (50% overlap)
-            const inHop = hop * speed;              // шаг на ВХОДЕ — отсюда и берётся смена темпа
+            const hop = Math.floor(frameSize / 4);   // шаг на ВЫХОДЕ, фиксированный (75% overlap)
+            const inHopNominal = hop * speed;         // номинальный шаг на ВХОДЕ — отсюда и берётся смена темпа
+            const searchRadius = 256;
+            const searchStep = 4;
             const numChannels = buffer.numberOfChannels;
             const inLen = buffer.length;
             const outLen = Math.max(1, Math.floor(inLen / speed));
@@ -5220,13 +5234,34 @@ end
             for (let i = 0; i < frameSize; i++) {
                 win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (frameSize - 1)); // окно Ханна — без него слышны щелчки на стыках кадров
             }
+            const overlapLen = frameSize - hop; // сколько сэмплов текущего кадра ляжет ПОВЕРХ хвоста предыдущего
             for (let ch = 0; ch < numChannels; ch++) {
                 const input = buffer.getChannelData(ch);
                 const output = outBuffer.getChannelData(ch);
                 const norm = new Float32Array(outLen); // сумма весов окна — без нормализации перекрытия дают неровную громкость
                 let inPos = 0, outPos = 0;
+                let lastFrameStart = -1;
                 while (outPos < outLen) {
-                    const readStart = Math.round(inPos);
+                    let readStart = Math.round(inPos);
+                    if (lastFrameStart >= 0) {
+                        // Хвост предыдущего кадра, с которым новый должен
+                        // состыковаться по фазе — ищем в окрестности
+                        // номинальной позиции ту, что коррелирует лучше всего.
+                        const prevTail = lastFrameStart + (frameSize - overlapLen);
+                        const lo = Math.max(0, readStart - searchRadius);
+                        const hi = Math.min(inLen - frameSize, readStart + searchRadius);
+                        let bestOffset = readStart, bestScore = -Infinity;
+                        for (let cand = lo; cand <= hi; cand += searchStep) {
+                            let score = 0;
+                            for (let k = 0; k < overlapLen; k += 2) {
+                                score += (input[prevTail + k] || 0) * (input[cand + k] || 0);
+                            }
+                            if (score > bestScore) { bestScore = score; bestOffset = cand; }
+                        }
+                        readStart = bestOffset;
+                    }
+                    readStart = Math.max(0, Math.min(inLen - frameSize, readStart));
+                    lastFrameStart = readStart;
                     for (let k = 0; k < frameSize; k++) {
                         const si = readStart + k, di = outPos + k;
                         if (si >= inLen || di >= outLen) continue;
@@ -5234,7 +5269,7 @@ end
                         output[di] += input[si] * w;
                         norm[di] += w;
                     }
-                    inPos += inHop;
+                    inPos += inHopNominal;
                     outPos += hop;
                 }
                 for (let i = 0; i < outLen; i++) {
@@ -5360,16 +5395,29 @@ end
                 }).then((buf) => this._ctx.decodeAudioData(buf)).then((decoded) => {
                     if (token !== this._loadToken) return; // src/режим сменили, пока грузили — этот результат уже неактуален
                     this._rawBuffer = decoded;
-                    this._rebuildProcessedBuffer();
+                    // Сам WSOLA-расчёт (сотни мс — единицы секунд на трек,
+                    // см. коммент у _wsolaTimeStretch) сюда НЕ вызываем —
+                    // он ленивый, см. play(). Раньше он запускался сразу
+                    // здесь, в момент декодирования — а декодирование всех
+                    // звуков со сменённой скоростью запускается СРАЗУ при
+                    // входе в Play (см. startLuaScriptsInner), то есть все
+                    // 4 трека считали WSOLA параллельно ещё ДО того, как
+                    // игрок вообще выбрал песню — это ощутимая пауза на
+                    // входе в Play (секунды на трек, 4 трека — уже заметно).
+                    // Честнее посчитать ОДИН раз, но именно тогда, когда
+                    // конкретный трек реально нажали "Играть".
                     if (!this._loadedFired) { this._loadedFired = true; this._fire('canplaythrough'); }
-                    if (resumePlaying) this._startPlayback(Math.min(resumeAt, this._processedBuffer.duration));
+                    if (resumePlaying) {
+                        this._rebuildProcessedBuffer();
+                        this._startPlayback(Math.min(resumeAt, this._processedBuffer.duration));
+                    }
                 }).catch(() => { if (token === this._loadToken) this._fire('error'); });
             }
             _rebuildProcessedBuffer() {
                 if (!this._rawBuffer) return;
                 const key = this._src + '|' + this._rate.toFixed(3);
                 if (_stretchedBufferCache[key]) { this._processedBuffer = _stretchedBufferCache[key]; return; }
-                this._processedBuffer = _olaTimeStretch(this._rawBuffer, this._rate, this._ctx);
+                this._processedBuffer = _wsolaTimeStretch(this._rawBuffer, this._rate, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
             }
             _stopSourceNode() {
@@ -5409,6 +5457,12 @@ end
                 if (this._mode === 'native') return this._native.play();
                 return new Promise((resolve, reject) => {
                     const tryStart = () => {
+                        if (this._rawBuffer && !this._processedBuffer) {
+                            // Первый реальный Play для этого трека — именно
+                            // тут, а не раньше, платим за WSOLA (см. коммент
+                            // в _loadFromSrcForStretch).
+                            this._rebuildProcessedBuffer();
+                        }
                         if (this._processedBuffer) {
                             if (!this._playing) {
                                 const restart = this._startOffset >= this._processedBuffer.duration - 0.01;
