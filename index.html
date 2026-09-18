@@ -5157,35 +5157,29 @@ end
             return '/api/asset-proxy?id=' + m[0];
         }
 
-        // Настоящий звуковой движок поверх Sound-инстансов. Раньше
-        // Sound:Play()/:Stop()/:Pause() были голыми no-op-заглушками "у
-        // движка нет реального аудио-плеера" (см. комментарий в
-        // InstanceMT.__index) — для ритм-игры (FNF), где вся суть в
-        // синхронизации с музыкой, это означало полную тишину. Каждому
-        // Sound-рефу соответствует один настоящий HTMLAudioElement;
-        // SoundId/Volume/Looped/PlaybackSpeed синхронизируются в
-        // luaSetGenericProp, сама игра дёргает Play/Stop/Pause через
-        // __sound_control (см. installLuaBridge и правку в
-        // InstanceMT.__index).
         let soundElByRef = {};
         // PlaybackSpeed vs PitchShiftSoundEffect.Octave — это НЕ два
         // взаимозаменяемых способа задать один и тот же множитель
-        // playbackRate, как я раньше по ошибке решил. В настоящем Roblox
-        // это физически разные эффекты:
-        //   - PlaybackSpeed — обычный ресемплинг: меняет И скорость, И тон
-        //     вместе (это и есть playbackRate — корректно).
+        // playbackRate. В настоящем Roblox это физически разные эффекты:
+        //   - PlaybackSpeed — меняет ТЕМП, тон остаётся нормальным
+        //     (подтверждено вживую пользователем на реальном Roblox-
+        //     клиенте: 2x там звучит нормальным тоном, не писклявым и не
+        //     басом — то есть настоящий Roblox делает pitch-preserving
+        //     time-stretch, а не наивный ресемплинг).
         //   - PitchShiftSoundEffect.Octave — НАСТОЯЩИЙ питч-шифтер: меняет
         //     ТОЛЬКО тон, темп остаётся тем же самым.
-        // Раньше Octave тоже домножался в playbackRate — то есть тайком
-        // ускорял/замедлял трек, хотя не должен был трогать скорость
-        // вообще. Именно это и звучало "то быстрее то медленнее
-        // неправильно": на треках с обоими эффектами сразу playbackRate
-        // получал лишний, ложный множитель 2^Octave поверх осмысленного
-        // PlaybackSpeed. Честный pitch-only shift (без изменения темпа)
-        // на голом <audio> без Web Audio API + фазовый вокодер сделать
-        // нельзя — поэтому Octave больше НЕ участвует в playbackRate:
-        // скорость теперь = ровно PlaybackSpeed, тон Octave визуально
-        // отслеживается (_soundPitchOctave), но реально не проигрывается.
+        // Браузерный <audio>.playbackRate тут не подходит ни с
+        // preservesPitch=false (честный "chipmunk", тон плывёт вместе с
+        // темпом), ни с =true (встроенный в браузер алгоритм сохранения
+        // тона звучит заметно грубее настоящего Roblox — проверено вживую,
+        // не только по документации). Раз нужен реально рабочий результат —
+        // ниже свой OLA (Overlap-Add) time-stretch поверх Web Audio API:
+        // меняет длительность буфera, сохраняя высоту тона, без оглядки на
+        // качество браузерного алгоритма. Работает ТОЛЬКО для звуков, у
+        // которых реально запрошен playbackRate!=1 — обычные SFX (что
+        // отсутствует PlaybackSpeed в файле совсем) как играли через
+        // дешёвый нативный <audio>, так и продолжают, без единого лишнего
+        // fetch/decode.
         const _soundBaseSpeed = {};   // ref -> PlaybackSpeed (Pitch — алиас того же)
         const _soundPitchOctave = {}; // ref -> Octave активного PitchShiftSoundEffect (см. коммент выше — НЕ входит в playbackRate)
         function _applySoundRate(ref) {
@@ -5195,20 +5189,252 @@ end
                 logLuaOutput('warn', 'Sound ' + ref + ': PitchShiftSoundEffect (Octave=' + _soundPitchOctave[ref] + ') не меняет темп — только тон, а честный pitch-only эффект пока не реализован, звучит без него');
             }
         }
+
+        // ============ WEB AUDIO OLA TIME-STRETCH (сохранение тона) ============
+        let _sharedAudioCtx = null;
+        function _getAudioCtx() {
+            if (!_sharedAudioCtx) {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                _sharedAudioCtx = new Ctx();
+            }
+            return _sharedAudioCtx;
+        }
+        const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, чтобы не пересчитывать OLA заново при повторном Play/пересборке сцены
+        // Overlap-Add без поиска лучшего сдвига (не полноценный WSOLA с
+        // кросс-корреляцией) — сознательный компромисс: честный WSOLA-поиск
+        // на 3-4-минутном треке на телефоне давал бы миллиарды операций
+        // (секунды-десятки секунд подвисания при входе в Play), а простой
+        // OLA укладывается в считанные десятки миллисекунд даже на слабом
+        // устройстве. Ценой чуть большей "фазовости" на некоторых
+        // созвучиях — приемлемо для музыки на 1.4-2x, что тут и требуется.
+        function _olaTimeStretch(buffer, speed, audioCtx) {
+            if (Math.abs(speed - 1) < 0.001) return buffer;
+            const frameSize = 4096;
+            const hop = Math.floor(frameSize / 2); // шаг на ВЫХОДЕ, фиксированный (50% overlap)
+            const inHop = hop * speed;              // шаг на ВХОДЕ — отсюда и берётся смена темпа
+            const numChannels = buffer.numberOfChannels;
+            const inLen = buffer.length;
+            const outLen = Math.max(1, Math.floor(inLen / speed));
+            const outBuffer = audioCtx.createBuffer(numChannels, outLen, buffer.sampleRate);
+            const win = new Float32Array(frameSize);
+            for (let i = 0; i < frameSize; i++) {
+                win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (frameSize - 1)); // окно Ханна — без него слышны щелчки на стыках кадров
+            }
+            for (let ch = 0; ch < numChannels; ch++) {
+                const input = buffer.getChannelData(ch);
+                const output = outBuffer.getChannelData(ch);
+                const norm = new Float32Array(outLen); // сумма весов окна — без нормализации перекрытия дают неровную громкость
+                let inPos = 0, outPos = 0;
+                while (outPos < outLen) {
+                    const readStart = Math.round(inPos);
+                    for (let k = 0; k < frameSize; k++) {
+                        const si = readStart + k, di = outPos + k;
+                        if (si >= inLen || di >= outLen) continue;
+                        const w = win[k];
+                        output[di] += input[si] * w;
+                        norm[di] += w;
+                    }
+                    inPos += inHop;
+                    outPos += hop;
+                }
+                for (let i = 0; i < outLen; i++) {
+                    if (norm[i] > 1e-6) output[i] /= norm[i];
+                }
+            }
+            return outBuffer;
+        }
+
+        // Настоящий звуковой движок поверх Sound-инстансов. Раньше
+        // Sound:Play()/:Stop()/:Pause() были голыми no-op-заглушками "у
+        // движка нет реального аудио-плеера" — для ритм-игры (FNF), где
+        // вся суть в синхронизации с музыкой, это означало полную тишину.
+        // Каждому Sound-рефу соответствует один RobloxSoundElement —
+        // фасад, который СНАЧАЛА (и почти всегда, для обычных SFX без
+        // PlaybackSpeed) — это дешёвый нативный <audio>, и только когда
+        // playbackRate реально становится != 1 — "апгрейдится" до полной
+        // Web Audio + OLA обработки (см. _upgrade ниже). Наружу отдаёт тот
+        // же интерфейс, что и HTMLAudioElement (play/pause/currentTime/
+        // volume/loop/playbackRate/src/addEventListener), так что весь
+        // остальной код (luaSetGenericProp/luaSoundControl/предпросмотр в
+        // Explorer) работает без изменений, не зная о переключении режима.
+        class RobloxSoundElement {
+            constructor() {
+                this._native = new Audio();
+                this._native.preload = 'auto';
+                this._mode = 'native';
+                this._rate = 1;
+                this._src = '';
+                this._listeners = {};
+                this._volume = 0.5;
+                this._loop = false;
+                // Web Audio часть — создаётся лениво в _upgrade(), чтобы
+                // обычные SFX (подавляющее большинство звуков в игре) не
+                // платили за AudioContext/decode вообще ничего.
+                this._ctx = null;
+                this._gain = null;
+                this._rawBuffer = null;
+                this._processedBuffer = null;
+                this._sourceNode = null;
+                this._playing = false;
+                this._startCtxTime = 0;
+                this._startOffset = 0;
+                this._ended = false;
+                this._loadToken = 0;
+                this._loadedFired = false;
+
+                this._native.addEventListener('ended', () => { if (this._mode === 'native') this._fire('ended'); });
+                this._native.addEventListener('canplaythrough', () => { if (this._mode === 'native' && !this._loadedFired) { this._loadedFired = true; this._fire('canplaythrough'); } });
+                this._native.addEventListener('error', () => { if (this._mode === 'native') this._fire('error'); });
+                let _lastNativeT = 0;
+                this._native.addEventListener('timeupdate', () => {
+                    if (this._mode !== 'native') return;
+                    if (this._native.loop && this._native.currentTime < _lastNativeT - 0.5) this._fire('timeupdate');
+                    _lastNativeT = this._native.currentTime;
+                });
+            }
+            addEventListener(type, cb) { (this._listeners[type] = this._listeners[type] || []).push(cb); }
+            _fire(type) { (this._listeners[type] || []).forEach((cb) => { try { cb(); } catch (e) { } }); }
+
+            get src() { return this._src; }
+            set src(url) {
+                this._src = url;
+                this._loadedFired = false;
+                if (this._mode === 'native') { this._native.src = url; return; }
+                this._loadFromSrcForStretch();
+            }
+            get volume() { return this._mode === 'native' ? this._native.volume : (this._gain ? this._gain.gain.value : this._volume); }
+            set volume(v) {
+                this._volume = v;
+                this._native.volume = v;
+                if (this._gain) this._gain.gain.value = v;
+            }
+            get loop() { return this._loop; }
+            set loop(v) { this._loop = v; this._native.loop = v; }
+            get paused() { return this._mode === 'native' ? this._native.paused : !this._playing; }
+            get ended() { return this._mode === 'native' ? this._native.ended : this._ended; }
+            get duration() {
+                if (this._mode === 'native') return this._native.duration;
+                return this._processedBuffer ? this._processedBuffer.duration : NaN;
+            }
+            get currentTime() {
+                if (this._mode === 'native') return this._native.currentTime;
+                if (!this._playing || !this._processedBuffer) return this._startOffset;
+                return Math.min(this._startOffset + (this._ctx.currentTime - this._startCtxTime), this._processedBuffer.duration);
+            }
+            set currentTime(t) {
+                if (this._mode === 'native') { this._native.currentTime = t; return; }
+                const wasPlaying = this._playing;
+                this._stopSourceNode();
+                this._startOffset = Math.max(0, t);
+                if (wasPlaying) this._startPlayback(this._startOffset);
+            }
+            get playbackRate() { return this._rate; }
+            set playbackRate(v) {
+                v = Number(v) || 1;
+                if (Math.abs(v - this._rate) < 0.001) return;
+                this._rate = v;
+                if (Math.abs(v - 1) < 0.001) {
+                    // Возврат к 1x — нативного <audio> достаточно, апгрейд не нужен.
+                    return;
+                }
+                this._upgrade();
+            }
+            _upgrade() {
+                if (this._mode === 'stretched') { this._rebuildProcessedBuffer(); return; }
+                this._mode = 'stretched';
+                this._ctx = _getAudioCtx();
+                this._gain = this._ctx.createGain();
+                this._gain.gain.value = this._volume;
+                this._gain.connect(this._ctx.destination);
+                const wasPlayingNative = !this._native.paused;
+                const nativeTime = this._native.currentTime || 0;
+                this._native.pause();
+                this._loadFromSrcForStretch(wasPlayingNative, nativeTime);
+            }
+            _loadFromSrcForStretch(resumePlaying, resumeAt) {
+                if (!this._src) return;
+                const token = ++this._loadToken;
+                fetch(this._src).then((r) => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.arrayBuffer();
+                }).then((buf) => this._ctx.decodeAudioData(buf)).then((decoded) => {
+                    if (token !== this._loadToken) return; // src/режим сменили, пока грузили — этот результат уже неактуален
+                    this._rawBuffer = decoded;
+                    this._rebuildProcessedBuffer();
+                    if (!this._loadedFired) { this._loadedFired = true; this._fire('canplaythrough'); }
+                    if (resumePlaying) this._startPlayback(Math.min(resumeAt, this._processedBuffer.duration));
+                }).catch(() => { if (token === this._loadToken) this._fire('error'); });
+            }
+            _rebuildProcessedBuffer() {
+                if (!this._rawBuffer) return;
+                const key = this._src + '|' + this._rate.toFixed(3);
+                if (_stretchedBufferCache[key]) { this._processedBuffer = _stretchedBufferCache[key]; return; }
+                this._processedBuffer = _olaTimeStretch(this._rawBuffer, this._rate, this._ctx);
+                _stretchedBufferCache[key] = this._processedBuffer;
+            }
+            _stopSourceNode() {
+                if (this._sourceNode) {
+                    try { this._sourceNode.onended = null; this._sourceNode.stop(); } catch (e) { }
+                    this._sourceNode = null;
+                }
+                this._playing = false;
+            }
+            _startPlayback(offset) {
+                if (!this._processedBuffer) return;
+                if (this._ctx.state === 'suspended') this._ctx.resume().catch(() => { });
+                const node = this._ctx.createBufferSource();
+                node.buffer = this._processedBuffer;
+                node.connect(this._gain);
+                node.onended = () => {
+                    if (this._sourceNode !== node) return; // это был предыдущий source (заменили офсетом/темпом раньше) — игнор
+                    this._sourceNode = null;
+                    this._playing = false;
+                    if (this._loop) {
+                        this._startOffset = 0;
+                        this._startPlayback(0);
+                        this._fire('timeupdate'); // сигнал для DidLoop-детектора (см. регистрацию в getOrCreateSoundEl)
+                    } else {
+                        this._ended = true;
+                        this._fire('ended');
+                    }
+                };
+                node.start(0, offset);
+                this._sourceNode = node;
+                this._startCtxTime = this._ctx.currentTime;
+                this._startOffset = offset;
+                this._playing = true;
+                this._ended = false;
+            }
+            play() {
+                if (this._mode === 'native') return this._native.play();
+                return new Promise((resolve, reject) => {
+                    const tryStart = () => {
+                        if (this._processedBuffer) {
+                            if (!this._playing) {
+                                const restart = this._startOffset >= this._processedBuffer.duration - 0.01;
+                                this._startPlayback(restart ? 0 : this._startOffset);
+                            }
+                            resolve();
+                        } else if (this._loadToken > 0) {
+                            setTimeout(tryStart, 50); // ещё грузится/декодируется — подождём
+                        } else {
+                            reject(new Error('no source'));
+                        }
+                    };
+                    tryStart();
+                });
+            }
+            pause() {
+                if (this._mode === 'native') { this._native.pause(); return; }
+                if (!this._playing) return;
+                this._startOffset = this.currentTime;
+                this._stopSourceNode();
+            }
+        }
+
         function getOrCreateSoundEl(ref) {
             if (!soundElByRef[ref]) {
-                const a = new Audio();
-                a.preload = 'auto';
-                // preservesPitch НЕ трогаем — оставляем браузерный дефолт
-                // (true, сохранять тон при смене playbackRate). Ранее была
-                // попытка выставить false, опираясь на документацию Roblox
-                // ("PlaybackSpeed меняет и тон тоже") — но по факту, когда
-                // проверили вживую, с false все ускоренные треки звучали
-                // одинаково писклявым "chipmunk"-эффектом, а в реальном
-                // Roblox разные PlaybackSpeed дают куда более сдержанную,
-                // разную на слух разницу в тоне. Раз проверка на реальном
-                // устройстве важнее документации и моей догадки — оставляем
-                // тон как есть, меняется только темп.
+                const a = new RobloxSoundElement();
                 // Sound.Ended — реальный сигнал Roblox, на который
                 // SongMenuScript/Main.lua вешается через
                 // sound.Ended:Connect(...), чтобы, например, вернуться в
@@ -5223,7 +5449,7 @@ end
                 // sound.Loaded:Connect(...) молча никогда не срабатывал.
                 // canplaythrough — честный аналог "метаданные+буфер готовы",
                 // а не 'loadedmetadata' (тогда играть ещё рано).
-                a.addEventListener('canplaythrough', () => fireLuaSignal(ref, 'Loaded', []), { once: true });
+                a.addEventListener('canplaythrough', () => fireLuaSignal(ref, 'Loaded', []));
                 // DidLoop — родное 'ended' у зацикленного <audio> (loop=true)
                 // браузером вообще не шлётся, он просто молча прыгает на
                 // начало сам. Ловим момент прыжка по времени (currentTime
