@@ -5221,11 +5221,20 @@ end
         // перепроверить на слабом устройстве).
         function _wsolaTimeStretch(buffer, speed, audioCtx) {
             if (Math.abs(speed - 1) < 0.001) return buffer;
-            const frameSize = 4096;
-            const hop = Math.floor(frameSize / 4);   // шаг на ВЫХОДЕ, фиксированный (75% overlap)
+            // Раньше frameSize=4096 (≈93мс при 44.1кГц) — для вокала это
+            // многовато: формантные особенности голоса смазываются внутри
+            // такого окна, и на стыках кадров гасят друг друга в первую
+            // очередь именно высокие частоты (они чувствительнее к
+            // мелким фазовым нестыковкам) — результат воспринимается как
+            // приглушённый/басистый голос, даже когда сам темп и грубый
+            // тон посчитаны верно. 1024 (≈23мс) — типичный размер окна
+            // именно для речи/вокала в WSOLA-реализациях.
+            const frameSize = 1024;
+            const hop = Math.floor(frameSize / 2);   // шаг на ВЫХОДЕ (классические 50% overlap для WSOLA)
             const inHopNominal = hop * speed;         // номинальный шаг на ВХОДЕ — отсюда и берётся смена темпа
-            const searchRadius = 256;
-            const searchStep = 4;
+            const searchRadius = 150;
+            const searchStep = 3;
+            const corrStep = 2; // прореживание сэмплов ВНУТРИ самой корреляции — экономия CPU, на слух не заметно
             const numChannels = buffer.numberOfChannels;
             const inLen = buffer.length;
             const outLen = Math.max(1, Math.floor(inLen / speed));
@@ -5235,6 +5244,9 @@ end
                 win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (frameSize - 1)); // окно Ханна — без него слышны щелчки на стыках кадров
             }
             const overlapLen = frameSize - hop; // сколько сэмплов текущего кадра ляжет ПОВЕРХ хвоста предыдущего
+            // Заранее считаем норму (энергию) хвоста предыдущего кадра —
+            // она одна и та же для всех кандидатов на этом шаге, доставать
+            // из цикла по kандидатам незачем.
             for (let ch = 0; ch < numChannels; ch++) {
                 const input = buffer.getChannelData(ch);
                 const output = outBuffer.getChannelData(ch);
@@ -5246,16 +5258,39 @@ end
                     if (lastFrameStart >= 0) {
                         // Хвост предыдущего кадра, с которым новый должен
                         // состыковаться по фазе — ищем в окрестности
-                        // номинальной позиции ту, что коррелирует лучше всего.
+                        // номинальной позиции ту, что коррелирует лучше
+                        // всего. РАНЬШЕ здесь было сырое произведение
+                        // (dot product) без нормализации — оно тянется к
+                        // самым ГРОМКИМ участкам входа, а не к реально
+                        // похожей по форме волне; из-за этого совмещение
+                        // регулярно промахивалось мимо настоящего периода
+                        // сигнала, и в первую очередь страдали высокие
+                        // частоты (их период короче — фазовая ошибка на
+                        // те же несколько сэмплов для них куда болезненнее,
+                        // чем для низких) — именно это и звучало как
+                        // "бас": высокие частоты гасились рассинхроном,
+                        // низкие оставались. Нормализованная кросс-
+                        // корреляция (cosine similarity) ищет похожесть
+                        // ПО ФОРМЕ волны, а не по громкости.
                         const prevTail = lastFrameStart + (frameSize - overlapLen);
+                        let prevEnergy = 0;
+                        for (let k = 0; k < overlapLen; k += corrStep) {
+                            const v = input[prevTail + k] || 0;
+                            prevEnergy += v * v;
+                        }
+                        const prevNorm = Math.sqrt(prevEnergy) || 1;
                         const lo = Math.max(0, readStart - searchRadius);
                         const hi = Math.min(inLen - frameSize, readStart + searchRadius);
                         let bestOffset = readStart, bestScore = -Infinity;
                         for (let cand = lo; cand <= hi; cand += searchStep) {
-                            let score = 0;
-                            for (let k = 0; k < overlapLen; k += 2) {
-                                score += (input[prevTail + k] || 0) * (input[cand + k] || 0);
+                            let dot = 0, candEnergy = 0;
+                            for (let k = 0; k < overlapLen; k += corrStep) {
+                                const a = input[prevTail + k] || 0;
+                                const b = input[cand + k] || 0;
+                                dot += a * b;
+                                candEnergy += b * b;
                             }
+                            const score = dot / (prevNorm * (Math.sqrt(candEnergy) || 1));
                             if (score > bestScore) { bestScore = score; bestOffset = cand; }
                         }
                         readStart = bestOffset;
