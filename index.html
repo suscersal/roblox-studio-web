@@ -2855,24 +2855,10 @@
         // получить точные значения полей заголовка ИЗ РЕАЛЬНОГО файла
         // через Output пользователя.
         let _lastMeshParseFailReason = '';
-        function _parseRobloxMeshV4(buf) {
-            if (buf.byteLength < 24) { _lastMeshParseFailReason = 'буфер короче 24 байт (' + buf.byteLength + ')'; return null; }
-            const dv = new DataView(buf);
-            const sizeofHeader = dv.getUint16(0, true);
-            const lodType = dv.getUint16(2, true);
-            const numVerts = dv.getUint32(4, true);
-            const numFaces = dv.getUint32(8, true);
-            const numLODs = dv.getUint16(12, true);
-            const numBones = dv.getUint16(14, true);
-            const dbg = 'sizeofHeader=' + sizeofHeader + ' lodType=' + lodType + ' numVerts=' + numVerts +
-                ' numFaces=' + numFaces + ' numLODs=' + numLODs + ' numBones=' + numBones + ' bufLen=' + buf.byteLength;
-            if (sizeofHeader < 24 || sizeofHeader > 64) { _lastMeshParseFailReason = 'sizeofHeader вне диапазона 24-64 (' + dbg + ')'; return null; }
-            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces нулевые или огромные (' + dbg + ')'; return null; }
-            const vertSize = numBones > 0 ? 44 : 36;
-            const vertOff = sizeofHeader;
+        function _tryParseV4Layout(dv, buf, vertOff, vertSize, numVerts, numFaces, dbg) {
             const faceOff = vertOff + numVerts * vertSize;
             const needBytes = faceOff + numFaces * 12;
-            if (needBytes > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт: нужно ' + needBytes + ', есть ' + buf.byteLength + ' (' + dbg + ')'; return null; } // угадали неверно — честный fallback, не мусор
+            if (needBytes > buf.byteLength) return null; // не влезает — точно не тот вариант
             const positions = new Float32Array(numVerts * 3);
             const normals = new Float32Array(numVerts * 3);
             const uvs = new Float32Array(numVerts * 2);
@@ -2894,14 +2880,53 @@
                 indices[i * 3 + 1] = dv.getUint32(base + 4, true);
                 indices[i * 3 + 2] = dv.getUint32(base + 8, true);
             }
-            // Доп. проверка непротиворечивости: индексы граней обязаны
-            // указывать внутрь диапазона вершин — если "угадали" неверный
-            // vertSize/заголовок, они почти наверняка вылезут за границу
-            // (мусорные большие числа из неверно смещённых байт).
+            // Проверка непротиворечивости: индексы граней обязаны указывать
+            // внутрь диапазона вершин — если офсет/шаг угаданы неверно, они
+            // почти наверняка вылезут за границу (мусорные большие числа из
+            // неверно смещённых байт). Это и есть критерий "этот вариант
+            // раскладки реально подошёл", а не просто "не упал по длине".
             for (let i = 0; i < indices.length; i++) {
-                if (indices[i] >= numVerts) { _lastMeshParseFailReason = 'индекс грани ' + indices[i] + ' >= numVerts ' + numVerts + ' (' + dbg + ')'; return null; }
+                if (indices[i] >= numVerts) return null;
             }
             return { positions, normals, uvs, indices };
+        }
+        function _parseRobloxMeshV4(buf) {
+            if (buf.byteLength < 24) { _lastMeshParseFailReason = 'буфер короче 24 байт (' + buf.byteLength + ')'; return null; }
+            const dv = new DataView(buf);
+            const sizeofHeader = dv.getUint16(0, true);
+            const lodType = dv.getUint16(2, true);
+            const numVerts = dv.getUint32(4, true);
+            const numFaces = dv.getUint32(8, true);
+            const numLODs = dv.getUint16(12, true);
+            const numBones = dv.getUint16(14, true);
+            const dbg = 'sizeofHeader=' + sizeofHeader + ' lodType=' + lodType + ' numVerts=' + numVerts +
+                ' numFaces=' + numFaces + ' numLODs=' + numLODs + ' numBones=' + numBones + ' bufLen=' + buf.byteLength;
+            if (sizeofHeader < 24 || sizeofHeader > 64) { _lastMeshParseFailReason = 'sizeofHeader вне диапазона 24-64 (' + dbg + ')'; return null; }
+            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces нулевые или огромные (' + dbg + ')'; return null; }
+            // Реальные диагностические данные с телефона (см. Output) показали
+            // numLODs=6 (НЕ ноль) при индексах граней, улетающих в мусор при
+            // vertOff=sizeofHeader — значит между заголовком и массивом вершин
+            // сидит ещё LOD-массив (список офсетов по уровням LOD), которого
+            // моя первая версия не учитывала вообще. Точный размер записи
+            // LOD-массива (4 или 8 байт на элемент) и точный размер вершины
+            // (с учётом возможного vertex color, не только tangent) не
+            // задокументированы нигде, куда есть доступ без реального Roblox
+            // CDN — поэтому перебираем правдоподобные варианты и берём
+            // ПЕРВЫЙ, который проходит honest-проверку (индексы граней внутри
+            // диапазона вершин), вместо того чтобы гадать один раз вслепую.
+            const vertOffCandidates = numLODs > 0
+                ? [sizeofHeader + numLODs * 4, sizeofHeader + numLODs * 8, sizeofHeader]
+                : [sizeofHeader];
+            const vertSizeCandidates = numBones > 0 ? [44, 48] : [36, 40];
+            for (const vertOff of vertOffCandidates) {
+                for (const vertSize of vertSizeCandidates) {
+                    const result = _tryParseV4Layout(dv, buf, vertOff, vertSize, numVerts, numFaces, dbg);
+                    if (result) return result;
+                }
+            }
+            _lastMeshParseFailReason = 'ни один из вариантов офсета/размера вершины не сошёлся (' + dbg +
+                ' испробованы vertOff=[' + vertOffCandidates.join(',') + '] vertSize=[' + vertSizeCandidates.join(',') + '])';
+            return null;
         }
 
         function _buildGeometryFromParsed(parsed) {

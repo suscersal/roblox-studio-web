@@ -1197,7 +1197,17 @@ def save_rbxl(parsed: dict, path: str):
                     elif 'x' in sample_value and 'y' in sample_value and 'z' in sample_value:
                         type_id = 0x0e
                     elif 'x' in sample_value and 'y' in sample_value:
-                        if 'scale' in sample_value.get('x', {}):
+                        # UDim2 (x/y — вложенные {scale, offset}) отличаем от
+                        # Vector2 (x/y — голые числа, например GuiObject.
+                        # AnchorPoint — то, что реально есть почти в любом
+                        # UI-меню). Раньше здесь безусловно делали
+                        # sample_value.get('x', {}) и тут же проверяли
+                        # 'scale' in <результат> — для Vector2 результат был
+                        # float, а не dict, и "in" на float падал с
+                        # TypeError, спуская ЛЮБОЕ сохранение файла с хотя бы
+                        # одним Vector2-свойством где-то в дереве.
+                        xval = sample_value.get('x')
+                        if isinstance(xval, dict) and 'scale' in xval:
                             type_id = 0x07
                         else:
                             type_id = 0x0d
