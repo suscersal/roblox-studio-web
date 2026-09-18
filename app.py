@@ -1824,12 +1824,63 @@ def _rbx_get_bytes(url):
         return _rbx_maybe_gunzip(resp.read())
 
 
-# Простой in-memory кэш байтов ассетов — картинки/звуки в игре
-# (SongIcon.Image, звуковые дорожки песен) грузятся с этого эндпоинта на
-# каждый Play заново; без кэша это лишний поход в сеть к Roblox при
-# каждом перезапуске Play той же сессии редактирования.
+# Кэш байтов ассетов — картинки/звуки в игре (SongIcon.Image, звуковые
+# дорожки песен) грузились с этого эндпоинта заново КАЖДЫЙ раз, включая
+# после перезапуска самого приложения: _ASSET_PROXY_CACHE был только
+# in-memory и обнулялся при каждом старте процесса — то есть каждый
+# новый запуск приложения снова честно ходил в сеть к Roblox за теми же
+# самыми картинками/треками, которые уже качал минуту назад в прошлом
+# запуске. Теперь под ним ещё и постоянный дисковый кэш (RSW_DATA_DIR/
+# asset_cache — то же место, где уже лежит roblox_auth.json), переживающий
+# перезапуск: in-memory кэш — для повторов В ПРЕДЕЛАХ одного запуска
+# (без похода даже на диск), дисковый — для повторов МЕЖДУ запусками
+# (без похода в сеть). Размер диска не ограничиваем намеренно — это же
+# по сути локальная копия того, что и так уже сохранено в самом .rbxl
+# как id ассетов, а не что-то растущее бесконтрольно с каждым новым
+# файлом; при необходимости почистить — это просто папка, которую можно
+# удалить руками.
 _ASSET_PROXY_CACHE = {}
 _ASSET_PROXY_CACHE_MAX = 64
+
+
+def _asset_cache_dir():
+    data_dir = os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)
+    d = Path(data_dir) / 'asset_cache'
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _asset_cache_disk_get(asset_id):
+    """Ищет ассет на диске — имя файла кодирует content-type, чтобы не
+    городить отдельный файл-метаданные на каждый ассет."""
+    try:
+        for f in _asset_cache_dir().glob(f'{asset_id}__*.bin'):
+            ct = f.stem.split('__', 1)[1].replace('_', '/')
+            return ct, f.read_bytes()
+    except Exception:
+        pass
+    return None
+
+
+def _asset_cache_disk_put(asset_id, content_type, raw_bytes):
+    try:
+        safe_ct = content_type.replace('/', '_')
+        f = _asset_cache_dir() / f'{asset_id}__{safe_ct}.bin'
+        if not f.exists():
+            f.write_bytes(raw_bytes)
+    except Exception:
+        pass  # дисковый кэш — best-effort, не должен ронять сам запрос
+
+
+def _asset_response(raw_bytes, content_type):
+    """Ассеты по id иммутабельны (rbxassetid:// не меняет содержимое под
+    тем же id) — раньше ответ уходил вообще без Cache-Control, и браузер
+    честно перезапрашивал одну и ту же картинку/звук при каждой
+    перерисовке GUI (например карточек песен в меню) заново через тот же
+    локальный сервер, хотя байты гарантированно те же самые."""
+    resp = Response(raw_bytes, mimetype=content_type)
+    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return resp
 
 
 @flask_app.route('/api/asset-proxy')
@@ -1860,7 +1911,17 @@ def api_asset_proxy():
     cached = _ASSET_PROXY_CACHE.get(asset_id)
     if cached:
         content_type, raw_bytes = cached
-        return Response(raw_bytes, mimetype=content_type)
+        return _asset_response(raw_bytes, content_type)
+
+    disk_cached = _asset_cache_disk_get(asset_id)
+    if disk_cached:
+        content_type, raw_bytes = disk_cached
+        # Подтягиваем и в in-memory тоже — следующие запросы в ЭТОЙ сессии
+        # не будут даже читать файл с диска.
+        if len(_ASSET_PROXY_CACHE) >= _ASSET_PROXY_CACHE_MAX:
+            _ASSET_PROXY_CACHE.pop(next(iter(_ASSET_PROXY_CACHE)))
+        _ASSET_PROXY_CACHE[asset_id] = (content_type, raw_bytes)
+        return _asset_response(raw_bytes, content_type)
 
     raw_bytes = None
     opencloud_error = None
@@ -1922,8 +1983,9 @@ def api_asset_proxy():
     if len(_ASSET_PROXY_CACHE) >= _ASSET_PROXY_CACHE_MAX:
         _ASSET_PROXY_CACHE.pop(next(iter(_ASSET_PROXY_CACHE)))
     _ASSET_PROXY_CACHE[asset_id] = (content_type, raw_bytes)
+    _asset_cache_disk_put(asset_id, content_type, raw_bytes)
 
-    return Response(raw_bytes, mimetype=content_type)
+    return _asset_response(raw_bytes, content_type)
 
 
 def _rbx_download_cdn(hash_value):
