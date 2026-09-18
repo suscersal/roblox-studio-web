@@ -1906,6 +1906,14 @@ def api_asset_proxy():
         # application/octet-stream — браузер такое играть отказывается
         # ("Failed to load because no supported source was found").
         content_type = 'audio/mpeg'
+    elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
+        # RIFF — общий контейнерный формат: WAV и WEBP ОБА начинаются с
+        # "RIFF", различаются только по 4-байтовой метке форматa на
+        # смещении 8 ("WAVE" против "WEBP"). Раньше сюда попадал только
+        # WAV-случай, а Roblox реально отдаёт часть текстур именно в WEBP —
+        # такая картинка уходила с типом audio/wav, и TextureLoader/<img>
+        # закономерно не мог её декодировать ("Failed to load part texture").
+        content_type = 'image/webp'
     elif raw_bytes[:4] == b'RIFF':
         content_type = 'audio/wav'
     else:

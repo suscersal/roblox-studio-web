@@ -2790,14 +2790,16 @@
             off += 2; // паддинг перед numVerts(uint32) до 4-байтного выравнивания
             const numVerts = dv.getUint32(off, true); off += 4;
             const numFaces = dv.getUint32(off, true); off += 4;
-            if (!numVerts || !numFaces || sizeofVertex < 32 || sizeofFace !== 12) return null;
+            const dbg = 'sizeofHeader=' + sizeofHeader + ' sizeofVertex=' + sizeofVertex + ' sizeofFace=' + sizeofFace +
+                ' numVerts=' + numVerts + ' numFaces=' + numFaces + ' bufLen=' + buf.byteLength;
+            if (!numVerts || !numFaces || sizeofVertex < 32 || sizeofFace !== 12) { _lastMeshParseFailReason = 'заголовок не проходит проверку (' + dbg + ')'; return null; }
             const vertOff = sizeofHeader > 0 ? sizeofHeader : off;
             const positions = new Float32Array(numVerts * 3);
             const normals = new Float32Array(numVerts * 3);
             const uvs = new Float32Array(numVerts * 2);
             for (let i = 0; i < numVerts; i++) {
                 const base = vertOff + i * sizeofVertex;
-                if (base + 32 > buf.byteLength) return null;
+                if (base + 32 > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт на вершину ' + i + ' (' + dbg + ')'; return null; }
                 positions[i * 3] = dv.getFloat32(base, true);
                 positions[i * 3 + 1] = dv.getFloat32(base + 4, true);
                 positions[i * 3 + 2] = dv.getFloat32(base + 8, true);
@@ -2813,7 +2815,7 @@
             const indices = new Uint32Array(numFaces * 3);
             for (let i = 0; i < numFaces; i++) {
                 const base = faceOff + i * sizeofFace;
-                if (base + 12 > buf.byteLength) return null;
+                if (base + 12 > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт на грань ' + i + ' (' + dbg + ')'; return null; }
                 indices[i * 3] = dv.getUint32(base, true);
                 indices[i * 3 + 1] = dv.getUint32(base + 4, true);
                 indices[i * 3 + 2] = dv.getUint32(base + 8, true);
@@ -2845,20 +2847,32 @@
         // многочисленные sanity-проверки ниже (диапазоны numVerts/numFaces,
         // требуемая длина буфера) должны поймать несовпадение и вернуть
         // null, а не собрать мусорную геометрию молча.
+        // Диагностика неудачного разбора — раньше падало молча ("не
+        // удалось разобрать файл") без единой зацепки, ПОЧЕМУ именно. Раз
+        // проверить структуру формата напрямую (нет доступа к настоящему
+        // Roblox CDN из песочницы сборки) нельзя, единственный способ
+        // когда-либо понять реальный byte-layout v4/v4.01/v7.00 — это
+        // получить точные значения полей заголовка ИЗ РЕАЛЬНОГО файла
+        // через Output пользователя.
+        let _lastMeshParseFailReason = '';
         function _parseRobloxMeshV4(buf) {
-            if (buf.byteLength < 24) return null;
+            if (buf.byteLength < 24) { _lastMeshParseFailReason = 'буфер короче 24 байт (' + buf.byteLength + ')'; return null; }
             const dv = new DataView(buf);
             const sizeofHeader = dv.getUint16(0, true);
+            const lodType = dv.getUint16(2, true);
             const numVerts = dv.getUint32(4, true);
             const numFaces = dv.getUint32(8, true);
+            const numLODs = dv.getUint16(12, true);
             const numBones = dv.getUint16(14, true);
-            if (sizeofHeader < 24 || sizeofHeader > 64) return null;
-            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) return null;
+            const dbg = 'sizeofHeader=' + sizeofHeader + ' lodType=' + lodType + ' numVerts=' + numVerts +
+                ' numFaces=' + numFaces + ' numLODs=' + numLODs + ' numBones=' + numBones + ' bufLen=' + buf.byteLength;
+            if (sizeofHeader < 24 || sizeofHeader > 64) { _lastMeshParseFailReason = 'sizeofHeader вне диапазона 24-64 (' + dbg + ')'; return null; }
+            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces нулевые или огромные (' + dbg + ')'; return null; }
             const vertSize = numBones > 0 ? 44 : 36;
             const vertOff = sizeofHeader;
             const faceOff = vertOff + numVerts * vertSize;
             const needBytes = faceOff + numFaces * 12;
-            if (needBytes > buf.byteLength) return null; // угадали неверно — честный fallback, не мусор
+            if (needBytes > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт: нужно ' + needBytes + ', есть ' + buf.byteLength + ' (' + dbg + ')'; return null; } // угадали неверно — честный fallback, не мусор
             const positions = new Float32Array(numVerts * 3);
             const normals = new Float32Array(numVerts * 3);
             const uvs = new Float32Array(numVerts * 2);
@@ -2885,7 +2899,7 @@
             // vertSize/заголовок, они почти наверняка вылезут за границу
             // (мусорные большие числа из неверно смещённых байт).
             for (let i = 0; i < indices.length; i++) {
-                if (indices[i] >= numVerts) return null;
+                if (indices[i] >= numVerts) { _lastMeshParseFailReason = 'индекс грани ' + indices[i] + ' >= numVerts ' + numVerts + ' (' + dbg + ')'; return null; }
             }
             return { positions, normals, uvs, indices };
         }
@@ -2943,7 +2957,7 @@
                         return null;
                     }
                     if (!parsed) {
-                        logLuaOutput('warn', 'Mesh ' + meshId + ': не удалось разобрать файл, использую приближение');
+                        logLuaOutput('warn', 'Mesh ' + meshId + ' (версия "' + version + '"): не удалось разобрать — ' + (_lastMeshParseFailReason || 'причина неизвестна') + ', использую приближение');
                         return null;
                     }
                     return _buildGeometryFromParsed(parsed);
