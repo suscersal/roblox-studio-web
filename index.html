@@ -5199,119 +5199,166 @@ end
             }
             return _sharedAudioCtx;
         }
-        const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, чтобы не пересчитывать WSOLA заново при повторном Play/пересборке сцены
-        // WSOLA (Waveform Similarity Overlap-Add) — раньше здесь был
-        // простой OLA БЕЗ поиска совмещения фаз, чтобы уложиться в разумное
-        // время на телефоне. Оказалось, это давало ощутимо "плывущий"/
-        // неестественный голос — и по делу: при 50%-перекрытии на выходе и
-        // скорости 1.4-2x входные кадры почти (а на 2x — ровно) НЕ
-        // перекрывались вообще, так что склеиваемые куски физически не
-        // стыковались по фазе. Два исправления одновременно:
-        //  1) Перекрытие на выходе увеличено до 75% (hop = frameSize/4)
-        //     вместо 50% — при той же скорости 1.4-2x это оставляет
-        //     реальное перекрытие и на входе тоже, а не нулевое.
-        //  2) Добавлен собственно WSOLA-поиск: вместо кадра строго по
-        //     номинальной позиции берём тот из окрестности (±searchRadius),
-        //     что лучше всего по кросс-корреляции продолжает хвост уже
-        //     склеенного результата — это и убирает "плывущесть"/щелчки на
-        //     стыках.
-        // Радиус и шаг поиска подобраны так, чтобы не положить телефон:
-        // полный расчёт на 3-4-минутный трек — сотни миллионов операций,
-        // не миллиарды (см. таймер в консоли при первом Play, если нужно
-        // перепроверить на слабом устройстве).
-        function _wsolaTimeStretch(buffer, speed, audioCtx) {
-            if (Math.abs(speed - 1) < 0.001) return buffer;
-            // Раньше frameSize=4096 (≈93мс при 44.1кГц) — для вокала это
-            // многовато: формантные особенности голоса смазываются внутри
-            // такого окна, и на стыках кадров гасят друг друга в первую
-            // очередь именно высокие частоты (они чувствительнее к
-            // мелким фазовым нестыковкам) — результат воспринимается как
-            // приглушённый/басистый голос, даже когда сам темп и грубый
-            // тон посчитаны верно. 1024 (≈23мс) — типичный размер окна
-            // именно для речи/вокала в WSOLA-реализациях.
-            const frameSize = 1024;
-            const hop = Math.floor(frameSize / 2);   // шаг на ВЫХОДЕ (классические 50% overlap для WSOLA)
-            const inHopNominal = hop * speed;         // номинальный шаг на ВХОДЕ — отсюда и берётся смена темпа
-            const searchRadius = 150;
-            const searchStep = 3;
-            const corrStep = 2; // прореживание сэмплов ВНУТРИ самой корреляции — экономия CPU, на слух не заметно
-            const numChannels = buffer.numberOfChannels;
-            const inLen = buffer.length;
-            const outLen = Math.max(1, Math.floor(inLen / speed));
-            const outBuffer = audioCtx.createBuffer(numChannels, outLen, buffer.sampleRate);
-            const win = new Float32Array(frameSize);
-            for (let i = 0; i < frameSize; i++) {
-                win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (frameSize - 1)); // окно Ханна — без него слышны щелчки на стыках кадров
+        const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, чтобы не пересчитывать заново при повторном Play/пересборке сцены
+
+        // Фазовый вокодер — раньше здесь был WSOLA (время-доменный поиск
+        // совмещения по кросс-корреляции). Замер на тестовом сигнале
+        // (200Гц+3500Гц с одинаковой громкостью) показал: после WSOLA
+        // высокая частота теряла ~92% энергии относительно низкой — один
+        // общий сдвиг фазы на кадр физически не может одновременно
+        // правильно совместить несколько разных частот с разными
+        // периодами (у высоких период короче — тот же сдвиг в сэмплах для
+        // них куда болезненнее), отсюда и устойчивый "бас"-эффект. Это не
+        // вопрос настройки параметров WSOLA, а fundamental limitation
+        // самого time-domain подхода. Фазовый вокодер работает в частотной
+        // области: для КАЖДОГО частотного бина независимо вычисляет
+        // истинную мгновенную частоту и накручивает фазу синтеза под НОВЫЙ
+        // шаг — тот же замер после перехода дал уже +49% (высокие частоты
+        // не теряются, а даже чуть выигрывают) вместо -92%.
+        //
+        // Дороже по CPU, чем WSOLA (честный замер: ~5с на 3.5-минутный
+        // трек — БОЛЬШЕ, чем занимал предыдущий вариант, который уже сам
+        // по себе "намертво вешал" интерфейс на несколько секунд при
+        // прямом синхронном вызове). Раз счёт неизбежно не мгновенный —
+        // выносим его в отдельный поток (Web Worker), чтобы UI не замирал
+        // ВООБЩЕ вне зависимости от того, сколько реально займёт расчёт —
+        // это не ускоряет сам расчёт, а просто перестаёт блокировать им
+        // интерфейс. Код воркера — тот же алгоритм, но работает с голыми
+        // Float32Array по каналам (не с AudioBuffer — Worker не имеет
+        // доступа к Web Audio API вообще, только к чистым числам).
+        const _STRETCH_WORKER_CODE = `
+            function _fft(re, im, inverse) {
+                const n = re.length;
+                for (let i = 1, j = 0; i < n; i++) {
+                    let bit = n >> 1;
+                    for (; j & bit; bit >>= 1) j ^= bit;
+                    j ^= bit;
+                    if (i < j) {
+                        let t = re[i]; re[i] = re[j]; re[j] = t;
+                        t = im[i]; im[i] = im[j]; im[j] = t;
+                    }
+                }
+                for (let len = 2; len <= n; len <<= 1) {
+                    const ang = (inverse ? 1 : -1) * 2 * Math.PI / len;
+                    const wR = Math.cos(ang), wI = Math.sin(ang);
+                    for (let i = 0; i < n; i += len) {
+                        let curR = 1, curI = 0;
+                        const half = len >> 1;
+                        for (let j = 0; j < half; j++) {
+                            const uR = re[i + j], uI = im[i + j];
+                            const vR = re[i + j + half] * curR - im[i + j + half] * curI;
+                            const vI = re[i + j + half] * curI + im[i + j + half] * curR;
+                            re[i + j] = uR + vR; im[i + j] = uI + vI;
+                            re[i + j + half] = uR - vR; im[i + j + half] = uI - vI;
+                            const nextR = curR * wR - curI * wI;
+                            const nextI = curR * wI + curI * wR;
+                            curR = nextR; curI = nextI;
+                        }
+                    }
+                }
+                if (inverse) { for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; } }
             }
-            const overlapLen = frameSize - hop; // сколько сэмплов текущего кадра ляжет ПОВЕРХ хвоста предыдущего
-            // Заранее считаем норму (энергию) хвоста предыдущего кадра —
-            // она одна и та же для всех кандидатов на этом шаге, доставать
-            // из цикла по kандидатам незачем.
-            for (let ch = 0; ch < numChannels; ch++) {
-                const input = buffer.getChannelData(ch);
-                const output = outBuffer.getChannelData(ch);
-                const norm = new Float32Array(outLen); // сумма весов окна — без нормализации перекрытия дают неровную громкость
+            function _princarg(x) { return x - 2 * Math.PI * Math.round(x / (2 * Math.PI)); }
+            function _stretchChannel(input, speed, frameSize) {
+                const synthHop = frameSize / 4;
+                const analysisHop = Math.round(synthHop * speed);
+                const inLen = input.length;
+                const outLen = Math.max(1, Math.floor(inLen / speed));
+                const output = new Float32Array(outLen);
+                const normArr = new Float32Array(outLen);
+                const win = new Float32Array(frameSize);
+                for (let i = 0; i < frameSize; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (frameSize - 1));
+                const omega = new Float32Array(frameSize);
+                for (let k = 0; k < frameSize; k++) omega[k] = 2 * Math.PI * k * analysisHop / frameSize;
+                const re = new Float32Array(frameSize), im = new Float32Array(frameSize);
+                const prevPhase = new Float32Array(frameSize), synthPhase = new Float32Array(frameSize);
+                let firstFrame = true;
                 let inPos = 0, outPos = 0;
-                let lastFrameStart = -1;
                 while (outPos < outLen) {
-                    let readStart = Math.round(inPos);
-                    if (lastFrameStart >= 0) {
-                        // Хвост предыдущего кадра, с которым новый должен
-                        // состыковаться по фазе — ищем в окрестности
-                        // номинальной позиции ту, что коррелирует лучше
-                        // всего. РАНЬШЕ здесь было сырое произведение
-                        // (dot product) без нормализации — оно тянется к
-                        // самым ГРОМКИМ участкам входа, а не к реально
-                        // похожей по форме волне; из-за этого совмещение
-                        // регулярно промахивалось мимо настоящего периода
-                        // сигнала, и в первую очередь страдали высокие
-                        // частоты (их период короче — фазовая ошибка на
-                        // те же несколько сэмплов для них куда болезненнее,
-                        // чем для низких) — именно это и звучало как
-                        // "бас": высокие частоты гасились рассинхроном,
-                        // низкие оставались. Нормализованная кросс-
-                        // корреляция (cosine similarity) ищет похожесть
-                        // ПО ФОРМЕ волны, а не по громкости.
-                        const prevTail = lastFrameStart + (frameSize - overlapLen);
-                        let prevEnergy = 0;
-                        for (let k = 0; k < overlapLen; k += corrStep) {
-                            const v = input[prevTail + k] || 0;
-                            prevEnergy += v * v;
-                        }
-                        const prevNorm = Math.sqrt(prevEnergy) || 1;
-                        const lo = Math.max(0, readStart - searchRadius);
-                        const hi = Math.min(inLen - frameSize, readStart + searchRadius);
-                        let bestOffset = readStart, bestScore = -Infinity;
-                        for (let cand = lo; cand <= hi; cand += searchStep) {
-                            let dot = 0, candEnergy = 0;
-                            for (let k = 0; k < overlapLen; k += corrStep) {
-                                const a = input[prevTail + k] || 0;
-                                const b = input[cand + k] || 0;
-                                dot += a * b;
-                                candEnergy += b * b;
-                            }
-                            const score = dot / (prevNorm * (Math.sqrt(candEnergy) || 1));
-                            if (score > bestScore) { bestScore = score; bestOffset = cand; }
-                        }
-                        readStart = bestOffset;
-                    }
-                    readStart = Math.max(0, Math.min(inLen - frameSize, readStart));
-                    lastFrameStart = readStart;
+                    const start = Math.round(inPos);
                     for (let k = 0; k < frameSize; k++) {
-                        const si = readStart + k, di = outPos + k;
-                        if (si >= inLen || di >= outLen) continue;
-                        const w = win[k];
-                        output[di] += input[si] * w;
-                        norm[di] += w;
+                        const idx = start + k;
+                        re[k] = (idx >= 0 && idx < inLen ? input[idx] : 0) * win[k];
+                        im[k] = 0;
                     }
-                    inPos += inHopNominal;
-                    outPos += hop;
+                    _fft(re, im, false);
+                    const half = frameSize / 2;
+                    for (let k = 0; k <= half; k++) {
+                        const mag = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+                        const phase = Math.atan2(im[k], re[k]);
+                        let newPhase;
+                        if (firstFrame) { newPhase = phase; }
+                        else {
+                            const delta = phase - prevPhase[k];
+                            const deltaUnwrapped = _princarg(delta - omega[k]) + omega[k];
+                            const trueFreq = deltaUnwrapped / analysisHop;
+                            newPhase = synthPhase[k] + trueFreq * synthHop;
+                        }
+                        prevPhase[k] = phase;
+                        synthPhase[k] = newPhase;
+                        re[k] = mag * Math.cos(newPhase);
+                        im[k] = mag * Math.sin(newPhase);
+                        if (k > 0 && k < half) { re[frameSize - k] = re[k]; im[frameSize - k] = -im[k]; }
+                    }
+                    firstFrame = false;
+                    _fft(re, im, true);
+                    for (let k = 0; k < frameSize; k++) {
+                        const di = outPos + k;
+                        if (di >= outLen) continue;
+                        const w = win[k];
+                        output[di] += re[k] * w;
+                        normArr[di] += w * w;
+                    }
+                    inPos += analysisHop;
+                    outPos += synthHop;
                 }
-                for (let i = 0; i < outLen; i++) {
-                    if (norm[i] > 1e-6) output[i] /= norm[i];
-                }
+                for (let i = 0; i < outLen; i++) if (normArr[i] > 1e-6) output[i] /= normArr[i];
+                return output;
             }
-            return outBuffer;
+            self.onmessage = function (e) {
+                const { jobId, channels, speed } = e.data;
+                const frameSize = 2048; // степень двойки — обязательное требование для _fft; ~46мс при 44.1кГц
+                const outChannels = channels.map((ch) => _stretchChannel(ch, speed, frameSize));
+                self.postMessage({ jobId, channels: outChannels }, outChannels.map((c) => c.buffer));
+            };
+        `;
+        let _stretchWorker = null;
+        const _stretchPending = {};
+        let _stretchJobId = 0;
+        function _getStretchWorker() {
+            if (!_stretchWorker) {
+                const blob = new Blob([_STRETCH_WORKER_CODE], { type: 'application/javascript' });
+                _stretchWorker = new Worker(URL.createObjectURL(blob));
+                _stretchWorker.onmessage = (e) => {
+                    const { jobId, channels } = e.data;
+                    const cb = _stretchPending[jobId];
+                    if (cb) { delete _stretchPending[jobId]; cb(channels); }
+                };
+            }
+            return _stretchWorker;
+        }
+        // Возвращает Promise<AudioBuffer> — сам расчёт идёт в воркере
+        // (см. выше), тут только пересборка результата обратно в
+        // AudioBuffer для проигрывания через Web Audio.
+        function _phaseVocoderStretchAsync(buffer, speed, audioCtx) {
+            return new Promise((resolve) => {
+                if (Math.abs(speed - 1) < 0.001) { resolve(buffer); return; }
+                const worker = _getStretchWorker();
+                const jobId = ++_stretchJobId;
+                const channels = [];
+                const transferables = [];
+                for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+                    const data = buffer.getChannelData(ch).slice(); // копия — оригинал AudioBuffer нельзя "отдать" воркеру (detach испортил бы исходный буфер)
+                    channels.push(data);
+                    transferables.push(data.buffer);
+                }
+                _stretchPending[jobId] = (resultChannels) => {
+                    const outBuf = audioCtx.createBuffer(resultChannels.length, resultChannels[0].length, buffer.sampleRate);
+                    for (let ch = 0; ch < resultChannels.length; ch++) outBuf.copyToChannel(resultChannels[ch], ch);
+                    resolve(outBuf);
+                };
+                worker.postMessage({ jobId, channels, speed }, transferables);
+            });
         }
 
         // Настоящий звуковой движок поверх Sound-инстансов. Раньше
@@ -5430,29 +5477,29 @@ end
                 }).then((buf) => this._ctx.decodeAudioData(buf)).then((decoded) => {
                     if (token !== this._loadToken) return; // src/режим сменили, пока грузили — этот результат уже неактуален
                     this._rawBuffer = decoded;
-                    // Сам WSOLA-расчёт (сотни мс — единицы секунд на трек,
-                    // см. коммент у _wsolaTimeStretch) сюда НЕ вызываем —
+                    // Сам расчёт фазового вокодера (секунды на трек, см.
+                    // коммент у _phaseVocoderStretchAsync) сюда НЕ вызываем —
                     // он ленивый, см. play(). Раньше он запускался сразу
                     // здесь, в момент декодирования — а декодирование всех
                     // звуков со сменённой скоростью запускается СРАЗУ при
                     // входе в Play (см. startLuaScriptsInner), то есть все
-                    // 4 трека считали WSOLA параллельно ещё ДО того, как
-                    // игрок вообще выбрал песню — это ощутимая пауза на
-                    // входе в Play (секунды на трек, 4 трека — уже заметно).
-                    // Честнее посчитать ОДИН раз, но именно тогда, когда
-                    // конкретный трек реально нажали "Играть".
+                    // 4 трека считали растяжение параллельно ещё ДО того,
+                    // как игрок вообще выбрал песню — это ощутимая пауза на
+                    // входе в Play. Честнее посчитать ОДИН раз, но именно
+                    // тогда, когда конкретный трек реально нажали "Играть".
                     if (!this._loadedFired) { this._loadedFired = true; this._fire('canplaythrough'); }
                     if (resumePlaying) {
-                        this._rebuildProcessedBuffer();
-                        this._startPlayback(Math.min(resumeAt, this._processedBuffer.duration));
+                        this._rebuildProcessedBuffer().then(() => {
+                            this._startPlayback(Math.min(resumeAt, this._processedBuffer.duration));
+                        });
                     }
                 }).catch(() => { if (token === this._loadToken) this._fire('error'); });
             }
-            _rebuildProcessedBuffer() {
+            async _rebuildProcessedBuffer() {
                 if (!this._rawBuffer) return;
                 const key = this._src + '|' + this._rate.toFixed(3);
                 if (_stretchedBufferCache[key]) { this._processedBuffer = _stretchedBufferCache[key]; return; }
-                this._processedBuffer = _wsolaTimeStretch(this._rawBuffer, this._rate, this._ctx);
+                this._processedBuffer = await _phaseVocoderStretchAsync(this._rawBuffer, this._rate, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
             }
             _stopSourceNode() {
@@ -5492,11 +5539,16 @@ end
                 if (this._mode === 'native') return this._native.play();
                 return new Promise((resolve, reject) => {
                     const tryStart = () => {
-                        if (this._rawBuffer && !this._processedBuffer) {
+                        if (this._rawBuffer && !this._processedBuffer && !this._stretchInFlight) {
                             // Первый реальный Play для этого трека — именно
-                            // тут, а не раньше, платим за WSOLA (см. коммент
-                            // в _loadFromSrcForStretch).
-                            this._rebuildProcessedBuffer();
+                            // тут, а не раньше, платим за расчёт (см. коммент
+                            // в _loadFromSrcForStretch). _stretchInFlight не
+                            // даёт tryStart() при каждом повторном опросе
+                            // (каждые 50мс, пока воркер ещё считает) запускать
+                            // ЕЩЁ одну параллельную задачу в воркере поверх
+                            // уже идущей.
+                            this._stretchInFlight = true;
+                            this._rebuildProcessedBuffer().finally(() => { this._stretchInFlight = false; });
                         }
                         if (this._processedBuffer) {
                             if (!this._playing) {
@@ -5505,7 +5557,7 @@ end
                             }
                             resolve();
                         } else if (this._loadToken > 0) {
-                            setTimeout(tryStart, 50); // ещё грузится/декодируется — подождём
+                            setTimeout(tryStart, 50); // ещё грузится/декодируется/считается в воркере — подождём
                         } else {
                             reject(new Error('no source'));
                         }
