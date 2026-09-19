@@ -2775,7 +2775,7 @@
                 for (let v = 0; v < 3; v++) {
                     positions[pi++] = coords[ci++]; positions[pi++] = coords[ci++]; positions[pi++] = coords[ci++];
                     normals[ni++] = coords[ci++]; normals[ni++] = coords[ci++]; normals[ni++] = coords[ci++];
-                    uvs[ui++] = coords[ci++]; uvs[ui++] = 1 - coords[ci++]; ci++; // третье число UV-тройки не используется; V инвертирован — см. коммент у бинарного парсера
+                    uvs[ui++] = coords[ci++]; uvs[ui++] = coords[ci++]; ci++; // третье число UV-тройки не используется. V больше НЕ переворачиваем — переворот никогда не был подтверждён на реальном Roblox-файле (проверялся только на моих же синтетических данных), а на реальном меше развёртка легла неверно именно с ним
                 }
             }
             return { positions, normals, uvs, indices: null };
@@ -2809,7 +2809,7 @@
                 uvs[i * 2] = dv.getFloat32(base + 24, true);
                 // Roblox хранит V сверху-вниз, Three.js/OpenGL — снизу-вверх;
                 // без переворота текстура на реальном меше встаёт вверх ногами.
-                uvs[i * 2 + 1] = 1 - dv.getFloat32(base + 28, true);
+                uvs[i * 2 + 1] = dv.getFloat32(base + 28, true); // V больше НЕ переворачиваем — см. коммент у v1.00-парсера выше
             }
             const faceOff = vertOff + numVerts * sizeofVertex;
             const indices = new Uint32Array(numFaces * 3);
@@ -2871,7 +2871,7 @@
                 normals[i * 3 + 1] = dv.getFloat32(base + 16, true);
                 normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
                 uvs[i * 2] = dv.getFloat32(base + 24, true);
-                uvs[i * 2 + 1] = 1 - dv.getFloat32(base + 28, true);
+                uvs[i * 2 + 1] = dv.getFloat32(base + 28, true); // V больше НЕ переворачиваем — см. коммент у v1.00-парсера выше
             }
             const indices = new Uint32Array(numFaces * 3);
             for (let i = 0; i < numFaces; i++) {
