@@ -2888,6 +2888,28 @@
             for (let i = 0; i < indices.length; i++) {
                 if (indices[i] >= numVerts) return null;
             }
+            // Этой проверки одной оказалось МАЛО: индексы граней могут
+            // случайно попасть в допустимый диапазон, даже когда офсет
+            // вершин выбран неверно — геометрия при этом получается
+            // "похожей на правду" (не разваливается), а вот UV съезжают на
+            // случайные (но правдоподобно выглядящие как числа, не мусор)
+            // значения — именно так текстура на реальном меше в игре легла
+            // полосами. Добавляем два независимых сигнала неверного офсета:
+            //  - нормали у настоящего меша почти всегда единичной длины
+            //    (±10% на погрешность экспорта) — если большинство сильно
+            //    не единичные, читаем не то;
+            //  - UV почти всегда лежат в [0,1] (немного за краем — обычная
+            //    практика для швов) — если большинство сильно за пределами
+            //    разумного диапазона, тоже читаем не то.
+            let normalOk = 0, uvOk = 0;
+            for (let i = 0; i < numVerts; i++) {
+                const nx = normals[i * 3], ny = normals[i * 3 + 1], nz = normals[i * 3 + 2];
+                const nlen = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                if (nlen > 0.5 && nlen < 1.5) normalOk++;
+                const u = uvs[i * 2], v = uvs[i * 2 + 1];
+                if (u > -0.5 && u < 1.5 && v > -0.5 && v < 1.5) uvOk++;
+            }
+            if (normalOk / numVerts < 0.7 || uvOk / numVerts < 0.7) return null;
             return { positions, normals, uvs, indices };
         }
         function _parseRobloxMeshV4(buf) {
@@ -5374,6 +5396,47 @@ end
             });
         }
 
+        // ============ ПОСТОЯННЫЙ КЭШ РЕЗУЛЬТАТА (IndexedDB) ============
+        // _stretchedBufferCache выше — только in-memory, живёт, пока жива
+        // страница. Сам расчёт (фазовый вокодер) — секунды на трек даже в
+        // отдельном потоке — раньше приходилось честно ждать заново при
+        // каждом перезапуске приложения, хотя результат для того же трека
+        // на той же скорости всегда один и тот же. IndexedDB хранит
+        // Float32Array по каналам напрямую (structured clone поддерживает
+        // типизированные массивы без ручной сериализации) и переживает
+        // перезапуск — так же, как теперь и дисковый кэш байтов ассетов на
+        // сервере (см. _asset_cache_disk_* в app.py).
+        let _stretchDbPromise = null;
+        function _openStretchDb() {
+            if (!_stretchDbPromise) {
+                _stretchDbPromise = new Promise((resolve, reject) => {
+                    const req = indexedDB.open('rsw-sound-cache', 1);
+                    req.onupgradeneeded = () => req.result.createObjectStore('stretched');
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => reject(req.error);
+                });
+            }
+            return _stretchDbPromise;
+        }
+        async function _stretchDbGet(key) {
+            try {
+                const db = await _openStretchDb();
+                return await new Promise((resolve) => {
+                    const tx = db.transaction('stretched', 'readonly');
+                    const req = tx.objectStore('stretched').get(key);
+                    req.onsuccess = () => resolve(req.result || null);
+                    req.onerror = () => resolve(null);
+                });
+            } catch (e) { return null; } // кэш — best-effort, не должен ронять воспроизведение
+        }
+        async function _stretchDbPut(key, value) {
+            try {
+                const db = await _openStretchDb();
+                const tx = db.transaction('stretched', 'readwrite');
+                tx.objectStore('stretched').put(value, key);
+            } catch (e) { /* best-effort */ }
+        }
+
         // Настоящий звуковой движок поверх Sound-инстансов. Раньше
         // Sound:Play()/:Stop()/:Pause() были голыми no-op-заглушками "у
         // движка нет реального аудио-плеера" — для ритм-игры (FNF), где
@@ -5512,8 +5575,25 @@ end
                 if (!this._rawBuffer) return;
                 const key = this._src + '|' + this._rate.toFixed(3);
                 if (_stretchedBufferCache[key]) { this._processedBuffer = _stretchedBufferCache[key]; return; }
+                // Дисковый (IndexedDB) кэш — проверяем ДО похода в воркер:
+                // если трек уже считали в прошлом запуске приложения,
+                // секунды ожидания не нужны вообще, просто пересобираем
+                // AudioBuffer из сохранённых каналов.
+                const cached = await _stretchDbGet(key);
+                if (cached) {
+                    const outBuf = this._ctx.createBuffer(cached.channels.length, cached.channels[0].length, cached.sampleRate);
+                    for (let ch = 0; ch < cached.channels.length; ch++) outBuf.copyToChannel(cached.channels[ch], ch);
+                    this._processedBuffer = outBuf;
+                    _stretchedBufferCache[key] = outBuf;
+                    return;
+                }
                 this._processedBuffer = await _phaseVocoderStretchAsync(this._rawBuffer, this._rate, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
+                const channels = [];
+                for (let ch = 0; ch < this._processedBuffer.numberOfChannels; ch++) {
+                    channels.push(this._processedBuffer.getChannelData(ch));
+                }
+                _stretchDbPut(key, { channels, sampleRate: this._processedBuffer.sampleRate });
             }
             _stopSourceNode() {
                 if (this._sourceNode) {
