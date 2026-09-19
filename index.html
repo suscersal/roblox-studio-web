@@ -4054,12 +4054,25 @@
             const padE = document.getElementById('pad-e'), padQ = document.getElementById('pad-q');
             if (padE) { padE.textContent = '⤴'; padE.title = t('pad_jump_title'); }
             if (padQ) { padQ.style.visibility = 'hidden'; }
+            _updateTouchControlsVisibility(); // luaControlsDisabled сбрасывается в stopLuaScripts/startLuaScriptsInner — на старте контролы должны быть видны, если скрипт не решит иначе
             notify(t('notify_play_started', { n: Object.keys(physicsBodies).length }));
             startLuaScripts(); // асинхронно — не блокирует появление игрока на спавне
         }
 
+        // Реальный Roblox прячет тач-контролы (джойстик, кнопку прыжка)
+        // целиком, когда PlayerModule:GetControls():Disable() выключает
+        // управление персонажем — не просто игнорирует нажатия молча,
+        // самих кнопок на экране в этот момент попросту нет. См. вызов в
+        // __set_controls_enabled и на входе/выходе из Play ниже.
+        function _updateTouchControlsVisibility() {
+            const pad = document.getElementById('mobile-pad');
+            if (!pad) return;
+            pad.style.display = (isPlaying && luaControlsDisabled) ? 'none' : '';
+        }
+
         function stopPlay() {
             isPlaying = false;
+            _updateTouchControlsVisibility(); // возвращаем джойстик/кнопку — она могла остаться скрытой, если скрипт вызвал Disable() и не успел/не стал явно включать обратно
             cameraIsScriptable = false;
             setEditorPanelsCollapsedForPlay(false);
             stopLuaScripts();
@@ -6392,6 +6405,14 @@ end
             // просто существует для галочки.
             def('__set_controls_enabled', function (L2) {
                 luaControlsDisabled = !lua.lua_toboolean(L2, 1);
+                // Раньше эта блокировка реально отключала ходьбу/поворот
+                // камеры (см. applyCharacterControl/onMM/onTM), но джойстик
+                // и кнопка прыжка на экране оставались как ни в чём не
+                // бывало — нажимай не нажимай, просто ничего не происходит.
+                // В настоящем Roblox Disable() у PlayerModule:GetControls()
+                // убирает тач-контролы с экрана целиком, а не просто глушит
+                // ввод молча.
+                _updateTouchControlsVisibility();
                 return 0;
             });
             def('__get_character_ref', function (L2) {
