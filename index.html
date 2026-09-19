@@ -5207,22 +5207,24 @@ end
         // preservesPitch=false (честный "chipmunk", тон плывёт вместе с
         // темпом), ни с =true (встроенный в браузер алгоритм сохранения
         // тона звучит заметно грубее настоящего Roblox — проверено вживую,
-        // не только по документации). Раз нужен реально рабочий результат —
-        // ниже свой OLA (Overlap-Add) time-stretch поверх Web Audio API:
-        // меняет длительность буфera, сохраняя высоту тона, без оглядки на
-        // качество браузерного алгоритма. Работает ТОЛЬКО для звуков, у
-        // которых реально запрошен playbackRate!=1 — обычные SFX (что
-        // отсутствует PlaybackSpeed в файле совсем) как играли через
+        // не только по документации). Ниже — фазовый вокодер поверх Web
+        // Audio API (см. _phaseVocoderStretchAsync) для PlaybackSpeed
+        // (сохраняет тон, меняет темп) и отдельная pitch-only цепочка
+        // (см. _pitchShiftAsync) для PitchShiftSoundEffect.Octave (меняет
+        // тон, сохраняет темп) — это два НЕЗАВИСИМЫХ эффекта, применяются
+        // оба сразу, если заданы оба. Работает ТОЛЬКО для звуков, у
+        // которых реально запрошен playbackRate!=1 или pitchOctave!=0 —
+        // обычные SFX (без PlaybackSpeed/Octave в файле) как играли через
         // дешёвый нативный <audio>, так и продолжают, без единого лишнего
         // fetch/decode.
         const _soundBaseSpeed = {};   // ref -> PlaybackSpeed (Pitch — алиас того же)
-        const _soundPitchOctave = {}; // ref -> Octave активного PitchShiftSoundEffect (см. коммент выше — НЕ входит в playbackRate)
+        const _soundPitchOctave = {}; // ref -> Octave активного PitchShiftSoundEffect (реально применяется, см. RobloxSoundElement.pitchOctave/_pitchShiftAsync)
         function _applySoundRate(ref) {
             const speed = _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
-            getOrCreateSoundEl(ref).playbackRate = speed;
-            if (_soundPitchOctave[ref]) {
-                logLuaOutput('warn', 'Sound ' + ref + ': PitchShiftSoundEffect (Octave=' + _soundPitchOctave[ref] + ') не меняет темп — только тон, а честный pitch-only эффект пока не реализован, звучит без него');
-            }
+            const octave = _soundPitchOctave[ref] != null ? _soundPitchOctave[ref] : 0;
+            const el = getOrCreateSoundEl(ref);
+            el.playbackRate = speed;
+            el.pitchOctave = octave;
         }
 
         // ============ WEB AUDIO OLA TIME-STRETCH (сохранение тона) ============
@@ -5350,10 +5352,34 @@ end
                 for (let i = 0; i < outLen; i++) if (normArr[i] > 1e-6) output[i] /= normArr[i];
                 return output;
             }
+            // Простой линейный ресемплинг — НЕ фазовый вокодер, наоборот:
+            // честный "наивный" ресемпл, который меняет темп И тон вместе
+            // (тот самый chipmunk-эффект). Нужен как второй шаг для
+            // чистого pitch-only сдвига (см. _pitchShiftAsync на главном
+            // потоке): сначала фазовым вокодером делаем сигнал в P раз
+            // ДЛИННЕЕ с сохранением тона, затем этим ресемплом сжимаем его
+            // обратно в P раз — длительность возвращается к исходной, а
+            // тон при этом честно сдвигается на P (классическая техника
+            // "time-stretch + resample" для pitch shifting).
+            function _resampleChannel(input, factor) {
+                const outLen = Math.max(1, Math.floor(input.length / factor));
+                const output = new Float32Array(outLen);
+                for (let i = 0; i < outLen; i++) {
+                    const srcPos = i * factor;
+                    const i0 = Math.floor(srcPos);
+                    const frac = srcPos - i0;
+                    const a = input[i0] || 0;
+                    const b = input[i0 + 1] !== undefined ? input[i0 + 1] : a;
+                    output[i] = a + (b - a) * frac;
+                }
+                return output;
+            }
             self.onmessage = function (e) {
-                const { jobId, channels, speed } = e.data;
+                const { jobId, channels, speed, mode } = e.data;
                 const frameSize = 2048; // степень двойки — обязательное требование для _fft; ~46мс при 44.1кГц
-                const outChannels = channels.map((ch) => _stretchChannel(ch, speed, frameSize));
+                const outChannels = mode === 'resample'
+                    ? channels.map((ch) => _resampleChannel(ch, speed))
+                    : channels.map((ch) => _stretchChannel(ch, speed, frameSize));
                 self.postMessage({ jobId, channels: outChannels }, outChannels.map((c) => c.buffer));
             };
         `;
@@ -5374,8 +5400,10 @@ end
         }
         // Возвращает Promise<AudioBuffer> — сам расчёт идёт в воркере
         // (см. выше), тут только пересборка результата обратно в
-        // AudioBuffer для проигрывания через Web Audio.
-        function _phaseVocoderStretchAsync(buffer, speed, audioCtx) {
+        // AudioBuffer для проигрывания через Web Audio. mode='stretch'
+        // (фазовый вокодер, сохраняет тон) или 'resample' (наивный
+        // ресемпл, меняет тон вместе с темпом — см. _pitchShiftAsync).
+        function _postStretchJob(buffer, speed, mode, audioCtx) {
             return new Promise((resolve) => {
                 if (Math.abs(speed - 1) < 0.001) { resolve(buffer); return; }
                 const worker = _getStretchWorker();
@@ -5392,8 +5420,29 @@ end
                     for (let ch = 0; ch < resultChannels.length; ch++) outBuf.copyToChannel(resultChannels[ch], ch);
                     resolve(outBuf);
                 };
-                worker.postMessage({ jobId, channels, speed }, transferables);
+                worker.postMessage({ jobId, channels, speed, mode }, transferables);
             });
+        }
+        function _phaseVocoderStretchAsync(buffer, speed, audioCtx) {
+            return _postStretchJob(buffer, speed, 'stretch', audioCtx);
+        }
+        function _resampleAsync(buffer, factor, audioCtx) {
+            return _postStretchJob(buffer, factor, 'resample', audioCtx);
+        }
+        // PitchShiftSoundEffect.Octave — НАСТОЯЩИЙ pitch-only эффект
+        // (темп не меняется, только тон). Раньше вообще не применялся —
+        // только логировалось предупреждение "звучит без него". Классическая
+        // техника поверх фазового вокодера: сначала растягиваем сигнал в
+        // P=2^octave раз ДЛИННЕЕ фазовым вокодером (тон сохраняется,
+        // длительность меняется), затем сжимаем результат обратно наивным
+        // ресемплом в P раз — длительность возвращается к исходной, а тон
+        // честно сдвигается на P (тот самый chipmunk-эффект, но теперь уже
+        // ЦЕЛЕНАПРАВЛЕННО, а не побочный артефакт смены темпа).
+        async function _pitchShiftAsync(buffer, octave, audioCtx) {
+            if (Math.abs(octave) < 0.001) return buffer;
+            const p = Math.pow(2, octave);
+            const lengthened = await _phaseVocoderStretchAsync(buffer, 1 / p, audioCtx);
+            return _resampleAsync(lengthened, p, audioCtx);
         }
 
         // ============ ПОСТОЯННЫЙ КЭШ РЕЗУЛЬТАТА (IndexedDB) ============
@@ -5456,6 +5505,7 @@ end
                 this._native.preload = 'auto';
                 this._mode = 'native';
                 this._rate = 1;
+                this._pitchOctave = 0; // PitchShiftSoundEffect.Octave — независимый от _rate pitch-only сдвиг, см. _rebuildProcessedBuffer
                 this._src = '';
                 this._listeners = {};
                 this._volume = 0.5;
@@ -5526,10 +5576,21 @@ end
                 v = Number(v) || 1;
                 if (Math.abs(v - this._rate) < 0.001) return;
                 this._rate = v;
-                if (Math.abs(v - 1) < 0.001) {
-                    // Возврат к 1x — нативного <audio> достаточно, апгрейд не нужен.
+                if (Math.abs(v - 1) < 0.001 && Math.abs(this._pitchOctave) < 0.001) {
+                    // Возврат к 1x БЕЗ активного pitch-эффекта — нативного
+                    // <audio> достаточно, апгрейд не нужен.
                     return;
                 }
+                this._upgrade();
+            }
+            // PitchShiftSoundEffect.Octave — независимый от playbackRate
+            // pitch-only эффект (см. _rebuildProcessedBuffer/_pitchShiftAsync).
+            get pitchOctave() { return this._pitchOctave; }
+            set pitchOctave(v) {
+                v = Number(v) || 0;
+                if (Math.abs(v - this._pitchOctave) < 0.001) return;
+                this._pitchOctave = v;
+                if (Math.abs(this._rate - 1) < 0.001 && Math.abs(v) < 0.001) return;
                 this._upgrade();
             }
             _upgrade() {
@@ -5573,7 +5634,7 @@ end
             }
             async _rebuildProcessedBuffer() {
                 if (!this._rawBuffer) return;
-                const key = this._src + '|' + this._rate.toFixed(3);
+                const key = this._src + '|' + this._rate.toFixed(3) + '|' + this._pitchOctave.toFixed(3);
                 if (_stretchedBufferCache[key]) { this._processedBuffer = _stretchedBufferCache[key]; return; }
                 // Дисковый (IndexedDB) кэш — проверяем ДО похода в воркер:
                 // если трек уже считали в прошлом запуске приложения,
@@ -5587,7 +5648,13 @@ end
                     _stretchedBufferCache[key] = outBuf;
                     return;
                 }
-                this._processedBuffer = await _phaseVocoderStretchAsync(this._rawBuffer, this._rate, this._ctx);
+                // Сначала темп (PlaybackSpeed, фазовый вокодер — сохраняет
+                // тон), потом НЕЗАВИСИМЫЙ чистый сдвиг тона (Octave) поверх
+                // уже тёмпо-корректного результата — оба эффекта реальны
+                // и в настоящем Roblox это именно два раздельных шага в
+                // цепочке, а не альтернативы друг другу.
+                const tempoCorrected = await _phaseVocoderStretchAsync(this._rawBuffer, this._rate, this._ctx);
+                this._processedBuffer = await _pitchShiftAsync(tempoCorrected, this._pitchOctave, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
                 const channels = [];
                 for (let ch = 0; ch < this._processedBuffer.numberOfChannels; ch++) {
@@ -7271,11 +7338,10 @@ end
                         // (выставлено дизайнером для обхода детекта авторских
                         // прав, без единой строчки скрипта) всегда звучали на
                         // обычной скорости. PitchShiftSoundEffect.Octave тоже
-                        // считываем и храним (_soundPitchOctave) — но, в
-                        // отличие от PlaybackSpeed, он НЕ входит в playbackRate
-                        // (см. подробный коммент у _applySoundRate: Octave —
-                        // это честный pitch-only эффект в настоящем Roblox, не
-                        // должен трогать скорость воспроизведения).
+                        // считываем и реально применяем (см. _applySoundRate/
+                        // RobloxSoundElement.pitchOctave/_pitchShiftAsync) —
+                        // это честный, независимый от PlaybackSpeed pitch-only
+                        // эффект, оба применяются одновременно, если заданы.
                         if (typeof inst.playbackSpeed === 'number') _soundBaseSpeed[inst.ref] = inst.playbackSpeed;
                         if (typeof inst.pitchOctave === 'number') _soundPitchOctave[inst.ref] = inst.pitchOctave;
                         _applySoundRate(inst.ref);
