@@ -2781,25 +2781,33 @@
             return { positions, normals, uvs, indices: null };
         }
 
+        // Точная структура v2.00 (получена из реверс-инжиниринга
+        // сообщества, не угадана): после строки-заголовка "version
+        // 2.00\n" (которую вызывающий код уже отрезал) идёт 5 байт
+        // служебной заглушки (обычно 0A 0C 00 24 0C, но не несёт нужных
+        // нам полей), затем СРАЗУ numVerts(uint32) и numFaces(uint32) —
+        // БЕЗ отдельных sizeof_MeshVertex/sizeof_MeshFace полей, которые
+        // я раньше предполагал (оттуда и вся путаница со смещениями).
+        // Размер вершины/грани для v2.00 ФИКСИРОВАН: 36 байт на вершину
+        // (pos float[3] + normal float[3] + uv float[3], третье число UV
+        // — W, не используется), 12 байт на грань (3×uint32 индекса).
         function _parseRobloxMeshBinary(buf) {
             const dv = new DataView(buf);
-            let off = 0;
-            const sizeofHeader = dv.getUint16(off, true); off += 2;
-            const sizeofVertex = dv.getUint16(off, true); off += 2;
-            const sizeofFace = dv.getUint16(off, true); off += 2;
-            off += 2; // паддинг перед numVerts(uint32) до 4-байтного выравнивания
-            const numVerts = dv.getUint32(off, true); off += 4;
-            const numFaces = dv.getUint32(off, true); off += 4;
-            const dbg = 'sizeofHeader=' + sizeofHeader + ' sizeofVertex=' + sizeofVertex + ' sizeofFace=' + sizeofFace +
-                ' numVerts=' + numVerts + ' numFaces=' + numFaces + ' bufLen=' + buf.byteLength;
-            if (!numVerts || !numFaces || sizeofVertex < 32 || sizeofFace !== 12) { _lastMeshParseFailReason = 'заголовок не проходит проверку (' + dbg + ')'; return null; }
-            const vertOff = sizeofHeader > 0 ? sizeofHeader : off;
+            const STUB = 5;
+            if (buf.byteLength < STUB + 8) { _lastMeshParseFailReason = 'буфер короче минимального заголовка v2.00 (' + buf.byteLength + ')'; return null; }
+            const numVerts = dv.getUint32(STUB, true);
+            const numFaces = dv.getUint32(STUB + 4, true);
+            const vertSize = 36, faceSize = 12;
+            const vertOff = STUB + 8;
+            const dbg = 'numVerts=' + numVerts + ' numFaces=' + numFaces + ' bufLen=' + buf.byteLength;
+            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces нулевые или огромные (' + dbg + ')'; return null; }
+            const needBytes = vertOff + numVerts * vertSize + numFaces * faceSize;
+            if (needBytes > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт: нужно ' + needBytes + ', есть ' + buf.byteLength + ' (' + dbg + ')'; return null; }
             const positions = new Float32Array(numVerts * 3);
             const normals = new Float32Array(numVerts * 3);
             const uvs = new Float32Array(numVerts * 2);
             for (let i = 0; i < numVerts; i++) {
-                const base = vertOff + i * sizeofVertex;
-                if (base + 32 > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт на вершину ' + i + ' (' + dbg + ')'; return null; }
+                const base = vertOff + i * vertSize;
                 positions[i * 3] = dv.getFloat32(base, true);
                 positions[i * 3 + 1] = dv.getFloat32(base + 4, true);
                 positions[i * 3 + 2] = dv.getFloat32(base + 8, true);
@@ -2807,18 +2815,19 @@
                 normals[i * 3 + 1] = dv.getFloat32(base + 16, true);
                 normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
                 uvs[i * 2] = dv.getFloat32(base + 24, true);
-                // Roblox хранит V сверху-вниз, Three.js/OpenGL — снизу-вверх;
-                // без переворота текстура на реальном меше встаёт вверх ногами.
-                uvs[i * 2 + 1] = dv.getFloat32(base + 28, true); // V больше НЕ переворачиваем — см. коммент у v1.00-парсера выше
+                uvs[i * 2 + 1] = dv.getFloat32(base + 28, true);
+                // base+32..35 — третье число UV-тройки (W), не используется.
             }
-            const faceOff = vertOff + numVerts * sizeofVertex;
+            const faceOff = vertOff + numVerts * vertSize;
             const indices = new Uint32Array(numFaces * 3);
             for (let i = 0; i < numFaces; i++) {
-                const base = faceOff + i * sizeofFace;
-                if (base + 12 > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт на грань ' + i + ' (' + dbg + ')'; return null; }
+                const base = faceOff + i * faceSize;
                 indices[i * 3] = dv.getUint32(base, true);
                 indices[i * 3 + 1] = dv.getUint32(base + 4, true);
                 indices[i * 3 + 2] = dv.getUint32(base + 8, true);
+            }
+            for (let i = 0; i < indices.length; i++) {
+                if (indices[i] >= numVerts) { _lastMeshParseFailReason = 'индекс грани ' + indices[i] + ' >= numVerts ' + numVerts + ' (' + dbg + ')'; return null; }
             }
             return { positions, normals, uvs, indices };
         }
@@ -2973,6 +2982,109 @@
             return { geometry: geo, size };
         }
 
+        // ============ v7.00 — Draco-компрессия ============
+        // По информации от пользователя (реверс-инжиниринг сообщества):
+        // начиная с v7.00 Roblox упаковывает геометрию через Google Draco
+        // — данные вершин/UV/нормалей больше не лежат "голыми" байтами,
+        // это энтропийное кодирование + квантование координат. Разобрать
+        // такое вручную (как v1/v2/v4 выше) невозможно — нужен настоящий
+        // Draco-декодер. Загружаем официальный WASM-декодер Google с их
+        // CDN (тот же самый, которым пользуется штатный THREE.DRACOLoader).
+        // ВАЖНО: сама эта интеграция НЕ проверена вживую вообще — сеть до
+        // gstatic.com/CDN недоступна из песочницы сборки (host_not_allowed),
+        // так что здесь непроверен даже сам факт загрузки библиотеки, не
+        // говоря уже про угадывание обёртки вокруг Draco-потока (Roblox
+        // мог добавить свой мини-заголовок перед чистыми Draco-байтами —
+        // пробуем несколько вероятных отступов, конкретных чисел байт для
+        // Roblox v7.00 нигде не нашёл). Каждый шаг обёрнут в try/catch —
+        // при любой неудаче честный откат на box, как и раньше.
+        let _dracoModulePromise = null;
+        function _loadDracoModule() {
+            if (!_dracoModulePromise) {
+                _dracoModulePromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.js';
+                    script.onload = () => {
+                        if (typeof DracoDecoderModule !== 'function') { reject(new Error('DracoDecoderModule не появился после загрузки скрипта')); return; }
+                        DracoDecoderModule().then(resolve).catch(reject);
+                    };
+                    script.onerror = () => reject(new Error('не удалось загрузить draco_decoder.js с CDN'));
+                    document.head.appendChild(script);
+                });
+            }
+            return _dracoModulePromise;
+        }
+        function _tryDecodeDracoAt(decoderModule, bytes, offset) {
+            const decoder = new decoderModule.Decoder();
+            const dracoBuffer = new decoderModule.DecoderBuffer();
+            try {
+                dracoBuffer.Init(bytes.subarray(offset), bytes.length - offset);
+                const geomType = decoder.GetEncodedGeometryType(dracoBuffer);
+                if (geomType !== decoderModule.TRIANGULAR_MESH) return null;
+                const mesh = new decoderModule.Mesh();
+                const status = decoder.DecodeBufferToMesh(dracoBuffer, mesh);
+                if (!status.ok() || mesh.num_faces() <= 0 || mesh.num_points() <= 0) {
+                    decoderModule.destroy(mesh);
+                    return null;
+                }
+                const numPoints = mesh.num_points();
+                const numFaces = mesh.num_faces();
+                function readAttr(attrType, numComponents) {
+                    const attrId = decoder.GetAttributeId(mesh, attrType);
+                    if (attrId < 0) return null;
+                    const attr = decoder.GetAttribute(mesh, attrId);
+                    const out = new decoderModule.DracoFloat32Array();
+                    decoder.GetAttributeFloatForAllPoints(mesh, attr, out);
+                    const arr = new Float32Array(numPoints * numComponents);
+                    for (let i = 0; i < arr.length; i++) arr[i] = out.GetValue(i);
+                    decoderModule.destroy(out);
+                    return arr;
+                }
+                const positions = readAttr(decoderModule.POSITION, 3);
+                const normalsRaw = readAttr(decoderModule.NORMAL, 3);
+                const uvsRaw = readAttr(decoderModule.TEX_COORD, 2);
+                if (!positions) { decoderModule.destroy(mesh); return null; }
+                const normals = normalsRaw || new Float32Array(numPoints * 3);
+                const uvs = uvsRaw || new Float32Array(numPoints * 2);
+                const faceBuf = new decoderModule.DracoInt32Array();
+                const indices = new Uint32Array(numFaces * 3);
+                for (let i = 0; i < numFaces; i++) {
+                    decoder.GetFaceFromMesh(mesh, i, faceBuf);
+                    indices[i * 3] = faceBuf.GetValue(0);
+                    indices[i * 3 + 1] = faceBuf.GetValue(1);
+                    indices[i * 3 + 2] = faceBuf.GetValue(2);
+                }
+                decoderModule.destroy(faceBuf);
+                decoderModule.destroy(mesh);
+                return { positions, normals, uvs, indices };
+            } finally {
+                decoderModule.destroy(decoder);
+                decoderModule.destroy(dracoBuffer);
+            }
+        }
+        async function _parseRobloxMeshDraco(bodyBytes) {
+            let decoderModule;
+            try {
+                decoderModule = await _loadDracoModule();
+            } catch (e) {
+                _lastMeshParseFailReason = 'не удалось загрузить Draco-декодер (' + e.message + ')';
+                return null;
+            }
+            // Пробуем несколько вероятных отступов перед чистым Draco-потоком —
+            // 0 (сразу после "version 7.00\n"), и несколько типичных
+            // размеров мини-заголовка на случай, если Roblox всё же
+            // добавляет свои numVerts/numFaces перед Draco-блоком.
+            for (const offset of [0, 4, 8, 12, 16, 20]) {
+                if (offset >= bodyBytes.length) break;
+                try {
+                    const result = _tryDecodeDracoAt(decoderModule, bodyBytes, offset);
+                    if (result) return result;
+                } catch (e) { /* пробуем следующий отступ */ }
+            }
+            _lastMeshParseFailReason = 'Draco-декодер не смог разобрать ни один из опробованных отступов';
+            return null;
+        }
+
         async function loadRealMeshGeometry(meshId) {
             if (_meshGeometryCache[meshId]) return _meshGeometryCache[meshId];
             const p = (async () => {
@@ -2999,6 +3111,10 @@
                         parsed = (version === '2.00' || version === '3.00')
                             ? _parseRobloxMeshBinary(body)
                             : _parseRobloxMeshV4(body);
+                    } else if (version === '7.00') {
+                        const bytes = new Uint8Array(buf);
+                        const nl = bytes.indexOf(10);
+                        parsed = await _parseRobloxMeshDraco(bytes.subarray(nl + 1));
                     } else {
                         logLuaOutput('warn', 'Mesh ' + meshId + ': формат "' + (version || '?') + '" пока не поддержан, использую приближение');
                         return null;
