@@ -10,8 +10,11 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * Обновление "горячих" файлов (app.py, rbxl_parser.py, index.html) без
- * пересборки и переустановки APK. Иконки (icons.txt, icons/) сюда
+ * Обновление "горячих" файлов (app.py, rbxl_parser.py, index.html,
+ * style.css, script.js — конкретный список задаётся в
+ * scripts/generate-ota-manifest.sh, эта Kotlin-сторона его не хардкодит,
+ * а честно берёт из version.json) без пересборки и переустановки APK.
+ * Иконки (icons.txt, icons/) сюда
  * намеренно не входят — любое их изменение теперь всегда идёт через
  * полную сборку APK (см. build-and-release.yml), поэтому OtaUpdater про
  * них ничего не знает.

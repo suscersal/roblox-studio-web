@@ -17,6 +17,7 @@ import os
 import io
 
 
+
 # Кэш .whl рядом со скриптом — после первой (единственной) установки с
 # сетью pip кладёт сюда скачанные колёса, и все последующие запуски на
 # Termux (в т.ч. без интернета — самолёт, метро, нет сим-карты) ставят
@@ -53,11 +54,9 @@ def _ensure(pkg, imp=None):
             ])
             return
         except subprocess.CalledProcessError:
-            print(
-                f'[RbxStudio] Офлайн-кэш для {pkg} не подошёл, пробую сеть...')
+            print(f'[RbxStudio] Офлайн-кэш для {pkg} не подошёл, пробую сеть...')
 
-    print(
-        f'[RbxStudio] Устанавливаю {pkg} (и сохраняю .whl в кэш для офлайн-запусков)...')
+    print(f'[RbxStudio] Устанавливаю {pkg} (и сохраняю .whl в кэш для офлайн-запусков)...')
     # Сначала скачиваем колесо в кэш, потом ставим из него — так кэш
     # пополняется независимо от того, есть у pip install свой кэш или нет.
     try:
@@ -209,8 +208,7 @@ GUI_PROPS = (
 # (index.html, /api/scripts) только для того, чтобы пометить бейджем и в
 # Output, откуда пришёл вывод; сам движок остаётся с одной общей Lua VM
 # (нет настоящей сети клиент↔сервер), см. комментарий у api_scripts ниже.
-SCRIPT_SIDE = {'Script': 'server',
-               'LocalScript': 'client', 'ModuleScript': 'shared'}
+SCRIPT_SIDE = {'Script': 'server', 'LocalScript': 'client', 'ModuleScript': 'shared'}
 
 
 def safe_float(v, default=0.0):
@@ -362,6 +360,7 @@ def chunk_large_objects(objs):
     return out
 
 
+
 # Счётчик версий сцены: правки в редакторе (добавление/удаление/смена
 # свойств объекта) мутируют state['parsed'] НА МЕСТЕ, не пересоздавая сам
 # словарь — значит id(parsed) не меняется, и кэши ниже (build_all_scene_
@@ -444,8 +443,7 @@ def gather_objects_in_radius(cx, cy, cz, radius):
                 if o['ref'] in seen_refs:
                     continue  # объект мог попасть в несколько соседних ячеек
                 seen_refs.add(o['ref'])
-                d = math.sqrt((o['px'] - cx) ** 2 +
-                              (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
+                d = math.sqrt((o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
                 if d <= radius:
                     result.append((d, o))
 
@@ -460,8 +458,7 @@ def gather_objects_in_radius(cx, cy, cz, radius):
     # у россыпи мелочи на той же дистанции).
     def sort_key(pair):
         d, o = pair
-        bounding_radius = math.sqrt(
-            o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
+        bounding_radius = math.sqrt(o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
         return max(0.0, d - bounding_radius) / (1.0 + math.log1p(bounding_radius))
 
     result.sort(key=sort_key)
@@ -745,7 +742,7 @@ VENDOR_SOURCES = {
     # (например, репозиторий переименован/перенесён), поправьте URL.
     'cm6-bundle.min.js': 'https://raw.githubusercontent.com/suscersal/roblox-studio-web/main/vendor/cm6-bundle.min.js',
 }
-
+    
 
 def _download_vendor_file(fn):
     """Качает fn с CDN прямо в VENDOR_DIR. True — успех (файл на диске)."""
@@ -923,8 +920,7 @@ def api_all_instances():
     out = []
     for ref, cls in r2c.items():
         name = pr.get(ref, {}).get('Name', cls)
-        item = {'ref': ref, 'cls': cls,
-                'name': name, 'parent': pm.get(ref, -1)}
+        item = {'ref': ref, 'cls': cls, 'name': name, 'parent': pm.get(ref, -1)}
         if cls == 'Sound':
             # SoundId/Volume/Looped — заданные ПРЯМО В ФАЙЛЕ (а не через
             # Instance.new(...).SoundId = ... из Lua) звуки. Раньше сюда
@@ -1171,13 +1167,11 @@ def api_scene():
             parts = group.split(',') if isinstance(group, str) else group
             if len(parts) == 3:
                 try:
-                    points.append(
-                        (float(parts[0]), float(parts[1]), float(parts[2])))
+                    points.append((float(parts[0]), float(parts[1]), float(parts[2])))
                 except (ValueError, TypeError):
                     pass
 
-    objs, total = make_scene_objects(
-        cx, cy, cz, r, limit, chunk=chunk, points=points or None)
+    objs, total = make_scene_objects(cx, cy, cz, r, limit, chunk=chunk, points=points or None)
     return jsonify({'ok': True, 'objects': objs, 'total': total})
 
 
@@ -1194,6 +1188,7 @@ def api_spawn_point():
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False, 'error': 'nothing open'}), 400
+
     candidates = []
     for ref, cls in parsed['referent_to_class'].items():
         if cls != 'SpawnLocation':
@@ -1479,8 +1474,7 @@ def api_save_download():
     if not parsed:
         return jsonify({'ok': False, 'error': 'Нет данных'}), 400
 
-    name = os.path.basename(request.args.get(
-        'name') or 'place.rbxl') or 'place.rbxl'
+    name = os.path.basename(request.args.get('name') or 'place.rbxl') or 'place.rbxl'
     ext = Path(name).suffix.lower()
     if ext not in ('.rbxl', '.rbxlx'):
         name += '.rbxl'
@@ -1810,8 +1804,7 @@ def _rbx_get_bytes_opencloud(asset_id):
         headers={'x-api-key': api_key, 'Accept': 'application/json',
                  'Accept-Encoding': 'identity'})
     with _req.urlopen(meta_req, timeout=20) as resp:
-        meta = json.loads(_rbx_maybe_gunzip(
-            resp.read()).decode('utf-8', 'replace'))
+        meta = json.loads(_rbx_maybe_gunzip(resp.read()).decode('utf-8', 'replace'))
 
     location = meta.get('location')
     if not location:
@@ -2196,8 +2189,7 @@ def api_log():
         data = request.get_json(force=True, silent=True) or {}
         session = data.get('session') or 'unknown'
         if _log_state['session'] != session:
-            ts = __import__('datetime').datetime.now().strftime(
-                '%Y%m%d_%H%M%S')
+            ts = __import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')
             _log_state['session'] = session
             _log_state['file'] = LOG_DIR / f'play_{ts}.log'
         line = {
@@ -2219,8 +2211,7 @@ def api_log():
 def api_log_list():
     try:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        files = sorted(LOG_DIR.glob('play_*.log'),
-                       key=lambda p: p.stat().st_mtime, reverse=True)
+        files = sorted(LOG_DIR.glob('play_*.log'), key=lambda p: p.stat().st_mtime, reverse=True)
         return jsonify({'ok': True, 'files': [f.name for f in files]})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -2239,14 +2230,31 @@ def api_log_get(name):
         return jsonify({'ok': False, 'error': str(e)}), 404
 
 
-# Чтение HTML шаблона
+# Чтение HTML/CSS/JS — раньше все три были одним файлом (index.html),
+# из-за чего он разросся почти до 10000 строк в одном месте; теперь
+# разложены на отдельные файлы рядом с app.py (index.html/style.css/
+# script.js), index.html подключает их через <link>/<script src>.
 with open("index.html", "r", encoding="utf-8") as file:
     HTML_TEMPLATE = file.read()
+with open("style.css", "r", encoding="utf-8") as file:
+    CSS_TEMPLATE = file.read()
+with open("script.js", "r", encoding="utf-8") as file:
+    JS_TEMPLATE = file.read()
 
 
 @flask_app.route('/')
 def index():
     return Response(HTML_TEMPLATE, mimetype='text/html')
+
+
+@flask_app.route('/style.css')
+def style_css():
+    return Response(CSS_TEMPLATE, mimetype='text/css')
+
+
+@flask_app.route('/script.js')
+def script_js():
+    return Response(JS_TEMPLATE, mimetype='application/javascript')
 
 
 if __name__ == '__main__':

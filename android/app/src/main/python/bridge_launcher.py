@@ -13,8 +13,8 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     os.environ.setdefault("FLASK_DEBUG", "False")
 
     # ВАЖНО: этот модуль (bridge_launcher.py) сам НИКОГДА не проходит через
-    # OTA-хотфикс — Kotlin-сторона качает только app.py/rbxl_parser.py/
-    # index.html (см. OtaUpdater.kt), а bridge_launcher.py грузится
+    # OTA-хотфикс — Kotlin-сторона качает только
+    # app.py/rbxl_parser.py/index.html/style.css/script.js (см. OtaUpdater.kt), а bridge_launcher.py грузится
     # исключительно из того, что зашито в APK при сборке. Поэтому его
     # собственный __file__ в момент вызова этой функции — это всегда
     # ПОСТОЯННЫЙ (baked-in) путь внутри APK, и именно рядом с ним лежат
@@ -23,7 +23,7 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     baked_dir = os.path.dirname(os.path.abspath(__file__))
     os.environ["RSW_ICONS_DIR"] = baked_dir
 
-    # Если Kotlin-сторона скачала обновлённые app.py/index.html (см.
+    # Если Kotlin-сторона скачала обновлённые app.py/index.html/style.css/script.js (см.
     # MainActivity.checkForOtaUpdate -> OtaUpdater), они лежат в
     # hotpatch_dir. Подсовываем эту папку В НАЧАЛО sys.path, чтобы
     # `import app` нашёл именно скачанную версию, а не ту, что зашита в APK
@@ -43,7 +43,7 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     # (open("index.html", ...)) — это работало локально только потому,
     # что вы запускали `python app.py` из той же папки. Chaquopy стартует
     # процесс с другим текущим каталогом, поэтому переключаемся в папку,
-    # где реально лежат app.py/index.html/icons.txt (обычная сборка) или в
+    # где реально лежат app.py/index.html/style.css/script.js/icons.txt (обычная сборка) или в
     # hotpatch_dir (после OTA-обновления) — иначе open("index.html", ...)
     # найдёт старую версию файла из первой попавшейся папки на sys.path.
     os.chdir(here)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Синхронизирует единственный "источник правды" (корневой app.py,
-# rbxl_parser.py, index.html, icons.txt, icons/) в папку Chaquopy для
-# Android-сборки.
+# rbxl_parser.py, index.html, style.css, script.js, icons.txt, icons/)
+# в папку Chaquopy для Android-сборки.
 #
 # Запускать из корня репозитория:
 #   bash scripts/sync-android-python.sh
@@ -17,9 +17,9 @@ cd "$ROOT_DIR"
 
 DEST="android/app/src/main/python"
 
-echo "[sync] Копирую app.py, rbxl_parser.py, index.html, icons.txt -> $DEST/"
+echo "[sync] Копирую app.py, rbxl_parser.py, index.html, style.css, script.js, icons.txt -> $DEST/"
 mkdir -p "$DEST"
-cp app.py rbxl_parser.py index.html icons.txt "$DEST/"
+cp app.py rbxl_parser.py index.html style.css script.js icons.txt "$DEST/"
 
 echo "[sync] Копирую icons/ -> $DEST/icons/"
 mkdir -p "$DEST/icons"

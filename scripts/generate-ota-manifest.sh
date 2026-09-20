@@ -31,7 +31,10 @@ mkdir -p "$OUT_DIR"
 # отдельной иконки того не стоит.
 # Если добавляешь новый файл в корень репозитория, который должен
 # обновляться без пересборки APK, — впиши его сюда тоже.
-HOT_FILES=(app.py rbxl_parser.py index.html)
+# style.css/script.js — раньше были частью index.html (единый файл),
+# после разделения на отдельные файлы забыть их тут означало бы, что
+# OTA-обновление доедет только до разметки, а CSS/JS останутся старыми.
+HOT_FILES=(app.py rbxl_parser.py index.html style.css script.js)
 
 python3 - "$VERSION" "$SRC" "$OUT_DIR" "${HOT_FILES[@]}" <<'PYEOF'
 import sys, os, json, hashlib, shutil

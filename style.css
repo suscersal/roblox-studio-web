@@ -1,0 +1,904 @@
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        body {
+            background: #111827;
+            color: #fff;
+            font-family: system-ui, sans-serif;
+            height: 100vh;
+            /* фолбэк для браузеров без поддержки dvh */
+            height: 100dvh;
+            /* 100vh на мобильных — это ВСЯ layout-высота,
+            включая область под виртуальной клавиатурой; когда клавиатура
+            открывается, эта высота не уменьшается сама, и вместе с
+            overflow:hidden ниже получается "экран уплывает" — браузер
+            пытается докрутить фокус в контейнер, который по факту больше
+            видимой области. 100dvh — современная единица, которая САМА
+            учитывает открытую клавиатуру (уменьшается вместе с видимой
+            областью), без единой строчки JS. */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column
+        }
+
+        #toolbar-top {
+            background: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            height: 40px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #374151;
+            overflow-x: auto
+        }
+
+        #toolbar-top button {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap
+        }
+
+        #toolbar-top button:hover {
+            background: #4b5563
+        }
+
+        #toolbar-top button.green {
+            background: #065f46
+        }
+
+        #toolbar-top button.red {
+            background: #7f1d1d
+        }
+
+        #toolbar-top button.blue {
+            background: #1e3a8a
+        }
+
+        #toolbar-top button.purple {
+            background: #7c3aed
+        }
+
+        #toolbar-top .sep {
+            width: 1px;
+            height: 24px;
+            background: #374151;
+            margin: 0 4px
+        }
+
+        #toolbar-top .title {
+            font-weight: bold;
+            margin-right: 8px;
+            font-size: 14px;
+            white-space: nowrap
+        }
+
+        @media (max-width: 700px) {
+            #toolbar-top {
+                flex-wrap: wrap;
+                height: auto;
+                overflow-x: visible;
+                padding: 4px 6px
+            }
+
+            #toolbar-top .title {
+                width: 100%;
+                margin-bottom: 2px
+            }
+
+            #toolbar-top button {
+                padding: 5px 7px;
+                font-size: 12px
+            }
+        }
+
+        #main {
+            display: flex;
+            flex: 1;
+            overflow: hidden
+        }
+
+        #explorer {
+            width: 220px;
+            min-width: 150px;
+            max-width: 400px;
+            flex-shrink: 0;
+            background: #1f2937;
+            display: flex;
+            flex-direction: column;
+            position: relative
+        }
+
+        .resizer {
+            width: 5px;
+            background: #374151;
+            cursor: col-resize;
+            flex-shrink: 0;
+            transition: background 0.2s;
+            position: relative;
+            z-index: 10
+        }
+
+        .resizer:hover,
+        .resizer.active {
+            background: #3b82f6
+        }
+
+        .resizer::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 3px;
+            height: 30px;
+            background: #6b7280;
+            border-radius: 2px
+        }
+
+        .resizer:hover::after,
+        .resizer.active::after {
+            background: #fff
+        }
+
+        #explorer-header {
+            background: #111827;
+            padding: 4px 8px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #9ca3af;
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center
+        }
+
+        #explorer-header button {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px
+        }
+
+        #search-box {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 4px 8px;
+            width: 100%;
+            font-size: 12px;
+            outline: none;
+            flex-shrink: 0
+        }
+
+        #tree-scroll {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden
+        }
+
+        #tree {
+            padding: 2px 0
+        }
+
+        .tree-node {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 1px 0;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+            overflow: hidden;
+            font-size: 12px
+        }
+
+        .tree-node:hover {
+            background: #374151
+        }
+
+        .tree-node.selected {
+            background: #1e3a5f
+        }
+
+        .tree-arrow {
+            width: 14px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 10px;
+            flex-shrink: 0
+        }
+
+        .tree-icon {
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+            flex-shrink: 0;
+            background: white;
+            border-radius: 2px
+        }
+
+        .tree-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0 2px
+        }
+
+        .tree-label mark {
+            background: #854d0e;
+            color: #fef08a;
+            border-radius: 2px
+        }
+
+        #viewport {
+            flex: 1;
+            position: relative;
+            background: #0f172a;
+            overflow: hidden;
+            min-width: 200px
+        }
+
+        #viewport canvas {
+            display: block
+        }
+
+        /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
+        #gui-overlay {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+        }
+
+        #gui-overlay.active {
+            display: block;
+        }
+
+        .rbx-gui-el {
+            position: absolute;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            white-space: pre-wrap;
+            font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+            pointer-events: none;
+        }
+
+        /* ScreenGui/BillboardGui — организационные full-screen контейнеры,
+           не визуальные элементы (в настоящем Roblox сами по себе клики
+           никогда не блокируют, блокируют только их GuiObject-потомки).
+           Раньше pointer-events:auto по ошибке повесили на БАЗОВЫЙ класс
+           целиком, включая эти корни — из-за чего ЛЮБОЙ другой, даже
+           пустой в этом месте экрана, но Enabled=true ScreenGui, если он
+           стоял позже по DOM/z-order, перехватывал клики по ВСЕЙ площади
+           экрана, включая совершенно другое меню под ним (см. диагностику
+           Playwright: "<div ... data-cls="ScreenGui"> intercepts pointer
+           events" — Играть/Прослушать не срабатывали именно поэтому).
+           Включаем auto только настоящим GuiObject'ам. */
+        .rbx-gui-el[data-cls="Frame"],
+        .rbx-gui-el[data-cls="ScrollingFrame"],
+        .rbx-gui-el[data-cls="TextLabel"],
+        .rbx-gui-el[data-cls="TextButton"],
+        .rbx-gui-el[data-cls="TextBox"],
+        .rbx-gui-el[data-cls="ImageLabel"],
+        .rbx-gui-el[data-cls="ImageButton"] {
+            pointer-events: auto;
+        }
+
+        .rbx-gui-el[data-cls="TextButton"],
+        .rbx-gui-el[data-cls="ImageButton"] {
+            cursor: pointer;
+        }
+
+        #vp-label {
+            display: none; /* подсказка по ЛКМ/ПКМ/WASD убрана по просьбе — загораживала GUI-оверлей снизу */
+        }
+
+        #fps-counter {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            font-size: 11px;
+            color: #22c55e;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            z-index: 5;
+            font-family: monospace;
+            transition: left .15s;
+        }
+
+        /* Плавающая кнопка Stop поверх вьюпорта во время Play — просили
+           убрать верхний тулбар целиком (Explorer/Properties и так уже
+           сворачиваются, но САМ тулбар с обычными кнопками редактора всё
+           ещё съедал строку высоты, а Stop в нём — единственное, что
+           реально нужно в Play). Иконка вместо текста — компактнее, чем
+           целая кнопка "⏹ Stop" из тулбара. */
+        #play-stop-fab {
+            display: none;
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            z-index: 6;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: none;
+            background: #ef4444;
+            color: #fff;
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+        }
+
+        #play-stop-fab.visible {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #viewport.play-active #fps-counter {
+            left: 48px;
+        }
+
+        #speed-indicator {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            font-size: 11px;
+            color: #fbbf24;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            z-index: 5;
+            display: none
+        }
+
+        #quality-selector {
+            position: absolute;
+            top: 36px;
+            right: 8px;
+            z-index: 5;
+            display: flex;
+            gap: 2px
+        }
+
+        #quality-selector button {
+            background: rgba(31, 41, 55, 0.9);
+            border: 1px solid #4b5563;
+            color: #fff;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 10px;
+            backdrop-filter: blur(4px)
+        }
+
+        #quality-selector button.active {
+            background: #3b82f6;
+            border-color: #60a5fa
+        }
+
+        #rightpanel {
+            width: 260px;
+            min-width: 200px;
+            max-width: 500px;
+            flex-shrink: 0;
+            min-height: 0;
+            background: #1f2937;
+            display: flex;
+            flex-direction: column
+        }
+
+        #tabs {
+            display: flex;
+            background: #111827;
+            flex-shrink: 0
+        }
+
+        .tab {
+            flex: 1;
+            padding: 6px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 12px;
+            color: #6b7280;
+            border-bottom: 2px solid transparent
+        }
+
+        .tab.active {
+            color: #fff;
+            border-bottom: 2px solid #3b82f6
+        }
+
+        #tab-props {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px
+        }
+
+        #tab-script {
+            flex: 1;
+            min-height: 0;
+            display: none;
+            flex-direction: column
+        }
+
+        #script-name {
+            padding: 4px 6px;
+            font-size: 11px;
+            color: #6b7280;
+            flex-shrink: 0;
+            background: #111827
+        }
+
+        #script-editor-container {
+            flex: 1;
+            min-height: 0;
+            position: relative
+        }
+
+        .CodeMirror {
+            height: 100% !important;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px
+        }
+
+        .CodeMirror-scroll {
+            overflow: auto !important;
+            touch-action: pan-x pan-y !important;
+        }
+
+        .CodeMirror-vscrollbar,
+        .CodeMirror-hscrollbar {
+            display: block !important;
+        }
+
+        /* Автодополнение (show-hint) в тон monokai-темы редактора */
+        .CodeMirror-hints {
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            background: #272822;
+            border: 1px solid #49483e;
+            color: #f8f8f2;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, .5);
+            z-index: 10000 !important;
+            position: absolute;
+        }
+
+        .CodeMirror-hint {
+            color: #f8f8f2;
+        }
+
+        li.CodeMirror-hint-active {
+            background: #3e5a1c;
+            color: #fff;
+        }
+
+        #script-save-btn {
+            background: #065f46;
+            border: none;
+            color: #fff;
+            padding: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            flex-shrink: 0
+        }
+
+        .prop-header {
+            padding: 4px 6px;
+            background: #111827;
+            border-radius: 4px;
+            margin-bottom: 4px
+        }
+
+        .prop-cls {
+            font-weight: bold;
+            font-size: 13px
+        }
+
+        .prop-ref {
+            font-size: 10px;
+            color: #6b7280
+        }
+
+        .prop-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 1px 2px;
+            min-height: 24px
+        }
+
+        .prop-name {
+            width: 110px;
+            flex-shrink: 0;
+            font-size: 11px;
+            color: #9ca3af;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap
+        }
+
+        .prop-val {
+            flex: 1;
+            background: #374151;
+            border: none;
+            color: #fff;
+            font-size: 11px;
+            padding: 2px 4px;
+            border-radius: 3px;
+            width: 100%;
+            outline: none
+        }
+
+        .prop-val:focus {
+            background: #4b5563
+        }
+
+        .prop-bool {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #3b82f6
+        }
+
+        .prop-color-preview {
+            width: 18px;
+            height: 18px;
+            border-radius: 3px;
+            border: 1px solid #4b5563;
+            flex-shrink: 0;
+            cursor: pointer
+        }
+
+        #modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100
+        }
+
+        #modal-overlay.show {
+            display: flex
+        }
+
+        .modal {
+            background: #1f2937;
+            border-radius: 8px;
+            padding: 16px;
+            min-width: 320px;
+            max-width: 90vw;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+        }
+
+        .modal h3 {
+            font-size: 15px;
+            font-weight: bold
+        }
+
+        .modal input,
+        .modal select {
+            background: #374151;
+            border: 1px solid #4b5563;
+            color: #fff;
+            padding: 6px 8px;
+            border-radius: 4px;
+            width: 100%;
+            font-size: 13px;
+            outline: none
+        }
+
+        .modal button {
+            background: #374151;
+            border: none;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px
+        }
+
+        .modal button:hover {
+            background: #4b5563
+        }
+
+        .modal-row {
+            display: flex;
+            gap: 6px
+        }
+
+        .modal-row button {
+            flex: 1
+        }
+
+        #fb-path {
+            font-size: 11px;
+            color: #9ca3af;
+            padding: 4px 0;
+            word-break: break-all
+        }
+
+        #fb-list {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #374151;
+            border-radius: 4px;
+            min-height: 200px;
+            max-height: 40vh
+        }
+
+        .fb-entry {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            cursor: pointer;
+            font-size: 12px
+        }
+
+        .fb-entry:hover {
+            background: #374151
+        }
+
+        .fb-entry.file-rbxl {
+            color: #86efac
+        }
+
+        .fb-entry.file-json {
+            color: #fcd34d
+        }
+
+        .fb-entry.dir {
+            color: #fde68a
+        }
+
+        .fb-size {
+            margin-left: auto;
+            color: #6b7280;
+            font-size: 10px
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1f2937
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #374151
+        }
+
+        #notify {
+            position: fixed;
+            bottom: 50px;
+            right: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 200
+        }
+
+        /* Горизонтальный ресайзер между main и bottom-panel */
+        .resizer-h {
+            height: 5px;
+            background: #374151;
+            cursor: row-resize;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+
+        .resizer-h:hover,
+        .resizer-h.active {
+            background: #3b82f6;
+        }
+
+        #bottom-panel {
+            height: 180px;
+            /* начальная высота, меняется ресайзером */
+            min-height: 80px;
+            max-height: 60vh;
+            background: #1f2937;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            border-top: 1px solid #374151;
+        }
+
+        #output-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 8px;
+            background: #111827;
+            flex-shrink: 0;
+            font-size: 12px;
+            font-weight: bold;
+            color: #9ca3af;
+        }
+
+        #bottom-panel.output-floating {
+            border: 1px solid #4b5563;
+        }
+
+        #bottom-panel.output-floating #output-header {
+            cursor: move;
+            user-select: none;
+        }
+
+        #output-header button {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            font-size: 13px;
+            padding: 2px 6px;
+        }
+
+        #output-header select {
+            background: #1f2937;
+            border: 1px solid #374151;
+            color: #d1d5db;
+            font-size: 11px;
+            border-radius: 4px;
+            padding: 2px 4px;
+            margin-left: auto;
+            margin-right: 6px;
+        }
+
+        #output-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 6px 8px;
+            font: 12px/1.5 monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #0f172a;
+        }
+
+        .notif {
+            background: #065f46;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            animation: fadein .2s ease
+        }
+
+        .notif.err {
+            background: #7f1d1d
+        }
+
+        .notif.warn {
+            background: #78350f
+        }
+
+        @keyframes fadein {
+            from {
+                opacity: 0;
+                transform: translateY(8px)
+            }
+
+            to {
+                opacity: 1;
+                transform: none
+            }
+        }
+
+        #mobile-pad {
+            position: absolute;
+            bottom: 10px;
+            left: 16px;
+            display: none;
+            align-items: flex-end;
+            gap: 14px;
+            z-index: 10;
+            pointer-events: none
+        }
+
+        @media(pointer:coarse) {
+            #mobile-pad {
+                display: flex
+            }
+        }
+
+        /* Раньше стик нужно было ловить пальцем ровно в границах круга
+           112px — на телефоне, когда не смотришь на большой палец, это
+           стабильно промахивается. Теперь есть широкая невидимая зона
+           #joy-zone (выше и вокруг круга), и стик "всплывает" туда, куда
+           реально попал палец, а не наоборот. */
+        #joy-zone {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 112px;
+            height: 240px;
+            pointer-events: all;
+            touch-action: none;
+        }
+
+        #joy-base {
+            width: 112px;
+            height: 112px;
+            border-radius: 50%;
+            background: rgba(31, 41, 55, 0.55);
+            border: 1px solid #4b5563;
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            pointer-events: none;
+            touch-action: none;
+        }
+
+        #joy-thumb {
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            background: rgba(59, 130, 246, 0.85);
+            border: 1px solid #93c5fd;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .pad-col {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+            pointer-events: all;
+            /* joy-base/joy-zone больше не в потоке flex (position:absolute),
+               поэтому место под них резервируем отступом вручную: 112px
+               (диаметр) + 14px (тот же gap, что был у #mobile-pad раньше) */
+            margin-left: 126px;
+        }
+
+        .pad-btn {
+            width: 52px;
+            height: 52px;
+            background: rgba(31, 41, 55, 0.85);
+            border: 1px solid #4b5563;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .pad-btn.active {
+            background: rgba(59, 130, 246, 0.7)
+        }
