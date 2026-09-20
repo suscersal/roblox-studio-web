@@ -2791,18 +2791,14 @@
         // Размер вершины/грани для v2.00 ФИКСИРОВАН: 36 байт на вершину
         // (pos float[3] + normal float[3] + uv float[3], третье число UV
         // — W, не используется), 12 байт на грань (3×uint32 индекса).
-        function _parseRobloxMeshBinary(buf) {
-            const dv = new DataView(buf);
-            const STUB = 5;
-            if (buf.byteLength < STUB + 8) { _lastMeshParseFailReason = 'буфер короче минимального заголовка v2.00 (' + buf.byteLength + ')'; return null; }
-            const numVerts = dv.getUint32(STUB, true);
-            const numFaces = dv.getUint32(STUB + 4, true);
+        function _tryParseV2At(dv, buf, stub) {
+            const numVerts = dv.getUint32(stub, true);
+            const numFaces = dv.getUint32(stub + 4, true);
             const vertSize = 36, faceSize = 12;
-            const vertOff = STUB + 8;
-            const dbg = 'numVerts=' + numVerts + ' numFaces=' + numFaces + ' bufLen=' + buf.byteLength;
-            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces нулевые или огромные (' + dbg + ')'; return null; }
+            const vertOff = stub + 8;
+            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) return null;
             const needBytes = vertOff + numVerts * vertSize + numFaces * faceSize;
-            if (needBytes > buf.byteLength) { _lastMeshParseFailReason = 'не хватает байт: нужно ' + needBytes + ', есть ' + buf.byteLength + ' (' + dbg + ')'; return null; }
+            if (needBytes > buf.byteLength) return null;
             const positions = new Float32Array(numVerts * 3);
             const normals = new Float32Array(numVerts * 3);
             const uvs = new Float32Array(numVerts * 2);
@@ -2827,9 +2823,29 @@
                 indices[i * 3 + 2] = dv.getUint32(base + 8, true);
             }
             for (let i = 0; i < indices.length; i++) {
-                if (indices[i] >= numVerts) { _lastMeshParseFailReason = 'индекс грани ' + indices[i] + ' >= numVerts ' + numVerts + ' (' + dbg + ')'; return null; }
+                if (indices[i] >= numVerts) return null;
             }
             return { positions, normals, uvs, indices };
+        }
+        function _parseRobloxMeshBinary(buf) {
+            const dv = new DataView(buf);
+            // 5 байт — подтверждённый реальной документацией размер
+            // заглушки для основной массы v2.00-файлов (см. коммент выше
+            // класса). Но самые старые классические меши (asset id из
+            // ~2013 года) на практике всё равно не проходят проверку с
+            // этим значением — вероятно, у них чуть другой под-вариант
+            // без заглушки вовсе или с иным её размером. Пробуем 5 как
+            // основной вариант и 0/4/6 как запасные, вместо того чтобы
+            // сразу сдаваться на самых старых файлах.
+            const dbg = 'bufLen=' + buf.byteLength;
+            if (buf.byteLength < 13) { _lastMeshParseFailReason = 'буфер короче минимального заголовка v2.00 (' + dbg + ')'; return null; }
+            for (const stub of [5, 0, 4, 6]) {
+                if (stub + 8 > buf.byteLength) continue;
+                const result = _tryParseV2At(dv, buf, stub);
+                if (result) return result;
+            }
+            _lastMeshParseFailReason = 'ни один вариант заглушки (5/0/4/6 байт) не подошёл (' + dbg + ')';
+            return null;
         }
 
         // Форматы 4.00/4.01 (и, по той же структуре, 5.00/6.00) — с этой
@@ -2880,7 +2896,14 @@
                 normals[i * 3 + 1] = dv.getFloat32(base + 16, true);
                 normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
                 uvs[i * 2] = dv.getFloat32(base + 24, true);
-                uvs[i * 2 + 1] = dv.getFloat32(base + 28, true); // V больше НЕ переворачиваем — см. коммент у v1.00-парсера выше
+                // ТОЛЬКО для v4.00+ переворот V возвращён обратно: для
+                // v2.00 структура теперь ТОЧНО известна из реальной
+                // документации (см. _parseRobloxMeshBinary выше) и она
+                // однозначно без переворота — а вот v4-семейство остаётся
+                // моей собственной догадкой про офсеты, и по факту
+                // (реальные скриншоты после отключения переворота везде)
+                // именно часть мешей этого формата легла зеркально по V.
+                uvs[i * 2 + 1] = 1 - dv.getFloat32(base + 28, true);
             }
             const indices = new Uint32Array(numFaces * 3);
             for (let i = 0; i < numFaces; i++) {
