@@ -1748,7 +1748,15 @@
                 if (!result) return;
                 if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
                 mesh.geometry = result.geometry;
-                // mesh.matrixAutoUpdate=false (см.
+                // DoubleSide — реальная геометрия (особенно из Draco, v7.00)
+                // могла прийти с порядком обхода вершин граней (winding),
+                // обратным тому, что ожидает three.js по умолчанию;
+                // FrontSide-материал в этом случае отбрасывает примерно
+                // половину треугольников (backface culling) — именно так
+                // выглядел рваный/дырявый силуэт на скриншотах. DoubleSide
+                // рисует обе стороны независимо от направления обхода —
+                // чуть дороже по рендеру, но гарантированно не "дырявое".
+                if (mesh.material) mesh.material.side = THREE.DoubleSide;
                 const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scale = new THREE.Vector3();
                 mesh.matrix.decompose(pos, quat, scale);
                 scale.x *= (o.sx || 1) / result.size.x;
