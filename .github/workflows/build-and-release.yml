@@ -8,6 +8,8 @@ on:
       - 'app.py'
       - 'rbxl_parser.py'
       - 'index.html'
+      - 'script.js'
+      - 'style.css'
       - 'icons.txt'
       - 'icons/**'
       - 'scripts/**'
