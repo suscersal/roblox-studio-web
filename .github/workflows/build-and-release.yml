@@ -63,7 +63,7 @@ jobs:
           # "Горячие" пути — то, что попадает в scripts/sync-android-python.sh
           # и не требует пересборки нативного кода. icons.txt/icons/ сюда
           # не входят — см. пояснение над job'ом.
-          HOT_REGEX='^(app\.py|rbxl_parser\.py|index\.html)$'
+          HOT_REGEX='^(app\.py|rbxl_parser\.py|index\.html|style\.css|script\.js)$'
 
           # Убираем из списка изменений файлы, которые вообще не влияют на сборку
           NON_IGNORED=$(echo "$CHANGED" | grep -Ev "$IGNORE_REGEX" || true)
