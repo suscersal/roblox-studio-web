@@ -1678,6 +1678,37 @@
                 decoderModule.destroy(dracoBuffer);
             }
         }
+        // v7.00 — НЕ просто "заголовок + чистый Draco-поток", как я раньше
+        // угадывал: это чанковый формат (как и другие бинарные форматы
+        // Roblox), Draco-данные лежат внутри чанка COREMESH, а отдельный
+        // чанк LODS задаёт диапазон граней конкретного уровня детализации.
+        // Рёбра "рваной" геометрии на скриншотах скорее всего от того, что
+        // без учёта LODS декодируются и рисуются ВСЕ уровни детализации
+        // сразу, наложенные друг на друга — а не от порядка обхода вершин
+        // (DoubleSide в предыдущей правке маскировал часть симптома, не
+        // причину). Точная структура чанков не подтверждена — ищем
+        // настоящую сигнатуру "DRACO" и имена чанков по байтам вместо
+        // слепого перебора отступов, и логируем найденное в Output: этого
+        // достаточно, чтобы через одно сообщение получить точные цифры для
+        // следующего шага (разбор LODS), вместо гадания вслепую.
+        function _findBytes(haystack, needle, from) {
+            outer: for (let i = from || 0; i <= haystack.length - needle.length; i++) {
+                for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer;
+                return i;
+            }
+            return -1;
+        }
+        function _findAllBytes(haystack, needle) {
+            const out = [];
+            let from = 0;
+            while (true) {
+                const i = _findBytes(haystack, needle, from);
+                if (i < 0) break;
+                out.push(i);
+                from = i + 1;
+            }
+            return out;
+        }
         async function _parseRobloxMeshDraco(bodyBytes) {
             let decoderModule;
             try {
@@ -1686,15 +1717,26 @@
                 _lastMeshParseFailReason = 'не удалось загрузить Draco-декодер (' + e.message + ')';
                 return null;
             }
-            // Пробуем несколько вероятных отступов перед чистым Draco-потоком —
-            for (const offset of [0, 4, 8, 12, 16, 20]) {
-                if (offset >= bodyBytes.length) break;
+            const DRACO_MAGIC = [0x44, 0x52, 0x41, 0x43, 0x4F]; // "DRACO"
+            const dracoOffsets = _findAllBytes(bodyBytes, DRACO_MAGIC);
+            const ascii = new TextDecoder('latin1').decode(bodyBytes);
+            const coremeshAt = ascii.indexOf('COREMESH');
+            const lodsAt = ascii.indexOf('LODS');
+            const beforeDraco = dracoOffsets.length
+                ? Array.from(bodyBytes.subarray(Math.max(0, dracoOffsets[0] - 32), dracoOffsets[0]))
+                    .map((b) => b.toString(16).padStart(2, '0')).join(' ')
+                : '(сигнатура DRACO не найдена)';
+            logLuaOutput('info', 'Draco-диагностика: DRACO@[' + dracoOffsets.join(',') + '] COREMESH@' + coremeshAt +
+                ' LODS@' + lodsAt + ' bufLen=' + bodyBytes.length + ' | 32 байта перед первым DRACO: ' + beforeDraco);
+            const offsetsToTry = dracoOffsets.length ? dracoOffsets : [0, 4, 8, 12, 16, 20]; // сигнатура не нашлась — старый слепой перебор как запасной вариант
+            for (const offset of offsetsToTry) {
+                if (offset >= bodyBytes.length) continue;
                 try {
                     const result = _tryDecodeDracoAt(decoderModule, bodyBytes, offset);
                     if (result) return result;
                 } catch (e) { /* пробуем следующий отступ */ }
             }
-            _lastMeshParseFailReason = 'Draco-декодер не смог разобрать ни один из опробованных отступов';
+            _lastMeshParseFailReason = 'Draco-декодер не смог разобрать ни один из опробованных отступов (см. диагностику выше)';
             return null;
         }
 
