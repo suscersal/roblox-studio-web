@@ -1630,11 +1630,17 @@
             }
             return _dracoModulePromise;
         }
-        function _tryDecodeDracoAt(decoderModule, bytes, offset) {
+        function _tryDecodeDracoAt(decoderModule, bytes, offset, length) {
             const decoder = new decoderModule.Decoder();
             const dracoBuffer = new decoderModule.DecoderBuffer();
             try {
-                dracoBuffer.Init(bytes.subarray(offset), bytes.length - offset);
+                // length — точная длина Draco-потока из заголовка COREMESH
+                // (см. _parseRobloxMeshDraco), если известна: раньше сюда
+                // всегда уходил "остаток буфера", то есть Draco читал и
+                // байты следующего чанка (LODS) как будто они ещё часть
+                // потока — теперь передаём ровно столько, сколько указано.
+                const end = length != null ? offset + length : bytes.length;
+                dracoBuffer.Init(bytes.subarray(offset, end), end - offset);
                 const geomType = decoder.GetEncodedGeometryType(dracoBuffer);
                 if (geomType !== decoderModule.TRIANGULAR_MESH) return null;
                 const mesh = new decoderModule.Mesh();
@@ -1717,26 +1723,38 @@
                 _lastMeshParseFailReason = 'не удалось загрузить Draco-декодер (' + e.message + ')';
                 return null;
             }
-            const DRACO_MAGIC = [0x44, 0x52, 0x41, 0x43, 0x4F]; // "DRACO"
-            const dracoOffsets = _findAllBytes(bodyBytes, DRACO_MAGIC);
-            const ascii = new TextDecoder('latin1').decode(bodyBytes);
-            const coremeshAt = ascii.indexOf('COREMESH');
-            const lodsAt = ascii.indexOf('LODS');
-            const beforeDraco = dracoOffsets.length
-                ? Array.from(bodyBytes.subarray(Math.max(0, dracoOffsets[0] - 32), dracoOffsets[0]))
-                    .map((b) => b.toString(16).padStart(2, '0')).join(' ')
-                : '(сигнатура DRACO не найдена)';
-            logLuaOutput('info', 'Draco-диагностика: DRACO@[' + dracoOffsets.join(',') + '] COREMESH@' + coremeshAt +
-                ' LODS@' + lodsAt + ' bufLen=' + bodyBytes.length + ' | 32 байта перед первым DRACO: ' + beforeDraco);
-            const offsetsToTry = dracoOffsets.length ? dracoOffsets : [0, 4, 8, 12, 16, 20]; // сигнатура не нашлась — старый слепой перебор как запасной вариант
-            for (const offset of offsetsToTry) {
-                if (offset >= bodyBytes.length) continue;
-                try {
-                    const result = _tryDecodeDracoAt(decoderModule, bodyBytes, offset);
-                    if (result) return result;
-                } catch (e) { /* пробуем следующий отступ */ }
+            const dv = new DataView(bodyBytes.buffer, bodyBytes.byteOffset, bodyBytes.byteLength);
+            // Заголовок чанка COREMESH — подтверждено вживую на двух
+            // реальных файлах (см. диагностику): 8 байт имя "COREMESH",
+            // затем 3×uint32 — [флаг/версия=2, длина_Draco+4, длина_Draco].
+            // Сам Draco-поток начинается СРАЗУ после этого 20-байтного
+            // заголовка и длится ровно третье поле байт — раньше этой
+            // точной длины не было, декодер получал "остаток буфера" и мог
+            // читать байты уже следующего чанка (LODS) как часть потока.
+            const ascii = new TextDecoder('latin1').decode(bodyBytes.subarray(0, Math.min(64, bodyBytes.length)));
+            let dracoOffset = 20, dracoLength = null;
+            if (ascii.startsWith('COREMESH') && bodyBytes.length >= 20) {
+                dracoLength = dv.getUint32(16, true);
+            } else {
+                // Структура не подтвердилась для этого конкретного файла —
+                // ищем сигнатуру "DRACO" по байтам как запасной вариант,
+                // без точной длины (декодер получит "остаток буфера").
+                const found = _findBytes(bodyBytes, [0x44, 0x52, 0x41, 0x43, 0x4F], 0);
+                if (found < 0) {
+                    _lastMeshParseFailReason = 'не нашёл ни заголовок COREMESH, ни сигнатуру DRACO';
+                    return null;
+                }
+                dracoOffset = found;
             }
-            _lastMeshParseFailReason = 'Draco-декодер не смог разобрать ни один из опробованных отступов (см. диагностику выше)';
+            try {
+                const result = _tryDecodeDracoAt(decoderModule, bodyBytes, dracoOffset, dracoLength);
+                if (result) return result;
+            } catch (e) {
+                _lastMeshParseFailReason = 'Draco-декодер бросил исключение: ' + e.message;
+                return null;
+            }
+            _lastMeshParseFailReason = 'Draco-декодер не смог разобрать поток по офсету ' + dracoOffset +
+                (dracoLength != null ? (', длина ' + dracoLength) : '');
             return null;
         }
 
