@@ -246,3 +246,5 @@ jobs:
             ota/*.py
             ota/*.html
             ota/*.json
+            ota/*.css
+            ota/*.js
