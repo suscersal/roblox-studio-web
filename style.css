@@ -902,3 +902,301 @@
         .pad-btn.active {
             background: rgba(59, 130, 246, 0.7)
         }
+
+/* ============ GUI: масштаб текста/кнопок, разделители, ползунки, поля ввода ============
+   Управляется переменными --fs (текст), --bs (кнопки/поля), --rz (толщина
+   разделителей панелей), --sb (полосы прокрутки); меняются кнопкой «🎚 UI». */
+:root {
+    --fs: 1;
+    --bs: 1;
+    --rz: 5px;
+    --sb: 4px;
+}
+
+@media (pointer: coarse) {
+    :root {
+        --rz: 16px;
+        --sb: 10px;
+    }
+}
+
+/* Верхняя панель */
+#toolbar-top {
+    height: calc(40px * var(--bs));
+}
+
+#toolbar-top button {
+    font-size: calc(13px * var(--fs));
+    padding: calc(4px * var(--bs)) calc(10px * var(--bs));
+    min-height: calc(30px * var(--bs));
+}
+
+#toolbar-top .title {
+    font-size: calc(14px * var(--fs));
+}
+
+@media (max-width: 700px) {
+    #toolbar-top {
+        height: auto;
+    }
+
+    #toolbar-top button {
+        font-size: calc(12px * var(--fs));
+        padding: calc(5px * var(--bs)) calc(7px * var(--bs));
+    }
+}
+
+/* Explorer */
+#explorer {
+    max-width: none;
+}
+
+#explorer-header {
+    font-size: calc(12px * var(--fs));
+}
+
+#explorer-header button {
+    font-size: calc(11px * var(--fs));
+    padding: calc(2px * var(--bs)) calc(8px * var(--bs));
+    min-height: calc(26px * var(--bs));
+}
+
+.tree-node {
+    font-size: calc(12px * var(--fs));
+    min-height: calc(26px * var(--bs));
+}
+
+.tree-arrow {
+    font-size: calc(10px * var(--fs));
+    min-width: calc(18px * var(--bs));
+}
+
+/* Properties */
+#rightpanel {
+    max-width: none;
+}
+
+.tab {
+    font-size: calc(12px * var(--fs));
+    padding: calc(6px * var(--bs));
+}
+
+.prop-cls {
+    font-size: calc(13px * var(--fs));
+}
+
+.prop-ref {
+    font-size: calc(10px * var(--fs));
+}
+
+.prop-row {
+    min-height: calc(28px * var(--bs));
+    gap: 6px;
+}
+
+.prop-name {
+    width: calc(100px * var(--fs));
+    font-size: calc(11px * var(--fs));
+}
+
+.prop-val {
+    font-size: calc(12px * var(--fs));
+    padding: calc(4px * var(--bs)) calc(6px * var(--bs));
+    min-height: calc(28px * var(--bs));
+    min-width: 0;
+    border: 1px solid transparent;
+}
+
+.prop-val:focus {
+    border-color: #3b82f6;
+    background: #1f2937;
+}
+
+.prop-num {
+    flex: 0 0 calc(64px * var(--fs));
+    width: calc(64px * var(--fs));
+}
+
+.prop-range {
+    flex: 1;
+    min-width: 0;
+    height: calc(28px * var(--bs));
+    accent-color: #3b82f6;
+    touch-action: pan-y;
+}
+
+.prop-bool {
+    width: calc(18px * var(--bs));
+    height: calc(18px * var(--bs));
+}
+
+.prop-color-preview {
+    width: calc(24px * var(--bs));
+    height: calc(24px * var(--bs));
+}
+
+#script-save-btn {
+    font-size: calc(13px * var(--fs));
+    padding: calc(8px * var(--bs));
+}
+
+/* Разделители панелей («ползунки»): толще, с хорошо видимой ручкой */
+.resizer {
+    width: var(--rz);
+    touch-action: none;
+}
+
+.resizer::after {
+    width: max(3px, calc(var(--rz) * 0.3));
+    height: 44px;
+}
+
+.resizer-h {
+    height: var(--rz);
+    touch-action: none;
+    position: relative;
+}
+
+.resizer-h::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: max(3px, calc(var(--rz) * 0.3));
+    background: #6b7280;
+    border-radius: 2px;
+}
+
+.resizer-h:hover::after,
+.resizer-h.active::after {
+    background: #fff;
+}
+
+/* Полосы прокрутки */
+::-webkit-scrollbar {
+    width: var(--sb);
+    height: var(--sb);
+}
+
+::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: calc(var(--sb) / 2);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* Output */
+#output-header {
+    font-size: calc(12px * var(--fs));
+}
+
+#output-header button {
+    font-size: calc(14px * var(--fs));
+    padding: calc(3px * var(--bs)) calc(8px * var(--bs));
+    min-height: calc(26px * var(--bs));
+}
+
+#output-header select {
+    font-size: calc(12px * var(--fs));
+    padding: calc(3px * var(--bs)) calc(6px * var(--bs));
+    min-height: calc(26px * var(--bs));
+}
+
+#output-content {
+    font-size: calc(12px * var(--fs));
+}
+
+/* Вьюпорт: качество, кнопки движения */
+#quality-selector button {
+    font-size: calc(10px * var(--fs));
+    padding: calc(3px * var(--bs)) calc(8px * var(--bs));
+    min-height: calc(24px * var(--bs));
+}
+
+#fps-counter {
+    font-size: calc(11px * var(--fs));
+}
+
+.pad-btn {
+    width: calc(52px * var(--bs));
+    height: calc(52px * var(--bs));
+    font-size: calc(20px * var(--fs));
+}
+
+/* Диалоги */
+.modal h3 {
+    font-size: calc(15px * var(--fs));
+}
+
+.modal input,
+.modal select {
+    font-size: calc(13px * var(--fs));
+    padding: calc(6px * var(--bs)) 8px;
+    min-height: calc(32px * var(--bs));
+}
+
+.modal button {
+    font-size: calc(13px * var(--fs));
+    padding: calc(6px * var(--bs)) calc(12px * var(--bs));
+    min-height: calc(32px * var(--bs));
+}
+
+.fb-entry {
+    font-size: calc(12px * var(--fs));
+    padding: calc(6px * var(--bs)) 8px;
+}
+
+.notif {
+    font-size: calc(13px * var(--fs));
+}
+
+/* Панель настроек интерфейса */
+#ui-settings {
+    position: fixed;
+    top: 48px;
+    right: 8px;
+    z-index: 300;
+    width: min(340px, 92vw);
+    background: #1f2937;
+    border: 1px solid #4b5563;
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+
+#ui-settings .ui-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    color: #d1d5db;
+}
+
+#ui-settings input[type=range] {
+    width: 100%;
+    height: 32px;
+    accent-color: #3b82f6;
+    touch-action: pan-y;
+}
+
+#ui-settings .ui-btns {
+    display: flex;
+    gap: 8px;
+}
+
+#ui-settings .ui-btns button {
+    flex: 1;
+    background: #374151;
+    border: none;
+    color: #fff;
+    padding: 10px;
+    border-radius: 6px;
+    font-size: 14px;
+}
