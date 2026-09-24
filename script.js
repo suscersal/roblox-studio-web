@@ -1443,6 +1443,32 @@
             return geo;
         }
 
+        // SpecialMesh MeshType.Head — скруглённый цилиндр (голова R6), ось Y.
+        function makeHeadGeometry(sx, sy, sz, seg) {
+            const R = 0.5, rc = 0.22; // радиус скругления кромок (в долях размера)
+            const pts = [new THREE.Vector2(0, -0.5), new THREE.Vector2(R - rc, -0.5)];
+            const arcN = 5;
+            for (let i = 1; i <= arcN; i++) { // нижнее скругление
+                const a = -Math.PI / 2 + (i / arcN) * (Math.PI / 2);
+                pts.push(new THREE.Vector2(R - rc + Math.cos(a) * rc, -0.5 + rc + Math.sin(a) * rc));
+            }
+            for (let i = 0; i <= arcN; i++) { // верхнее скругление
+                const a = (i / arcN) * (Math.PI / 2);
+                pts.push(new THREE.Vector2(R - rc + Math.cos(a) * rc, 0.5 - rc + Math.sin(a) * rc));
+            }
+            pts.push(new THREE.Vector2(0, 0.5));
+            const geo = new THREE.LatheGeometry(pts, Math.max(8, seg));
+            geo.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz)); // applyMatrix4 сам поправит нормали
+            return geo;
+        }
+        // Part.Shape = Cylinder: ось цилиндра вдоль X (а не Y, как у MeshType.Cylinder).
+        function makeCylinderXGeometry(sx, sy, sz, seg) {
+            const geo = new THREE.CylinderGeometry(0.5, 0.5, 1, Math.max(8, seg));
+            geo.rotateZ(Math.PI / 2);
+            geo.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz));
+            return geo;
+        }
+
         // ============ ЗАГРУЗКА РЕАЛЬНОЙ ГЕОМЕТРИИ MeshPart/SpecialMesh(FileMesh) ============
         const _meshGeometryCache = {}; // meshId -> Promise<{geometry, size}|null>
 
@@ -1565,6 +1591,50 @@
             if (normalOk / numVerts < 0.7 || uvOk / numVerts < 0.7) return null;
             return { positions, normals, uvs, indices };
         }
+        // Точная раскладка v4.00/v4.01 (проверена на реальных файлах):
+        //   header(24) | vertices numVerts*40 | [envelope numVerts*8, если есть кости] |
+        //   faces numFaces*12 | LOD-офсеты numLODs*u32 | ...
+        // Вершина = 40 байт: pos(12) norm(12) uv(8) tangent(4) color(4).
+        // ВАЖНО: numFaces — это грани ВСЕХ уровней детализации подряд, а
+        // lods[i]..lods[i+1] — диапазон граней i-го LOD. Раньше рисовались
+        // все LOD сразу (грубые копии поверх LOD0) — отсюда «рваные»
+        // головы/шапки с полосами и наслоением текстуры.
+        function _tryParseV4Exact(dv, buf, sizeofHeader, numVerts, numFaces, numLODs, numBones) {
+            const vertSize = 40;
+            const vertOff = sizeofHeader;
+            const faceOff = vertOff + numVerts * vertSize + (numBones > 0 ? numVerts * 8 : 0);
+            const lodOff = faceOff + numFaces * 12;
+            if (lodOff > buf.byteLength) return null;
+            let faceStart = 0, faceEnd = numFaces;
+            if (numLODs >= 2 && lodOff + numLODs * 4 <= buf.byteLength) {
+                const l0 = dv.getUint32(lodOff, true), l1 = dv.getUint32(lodOff + 4, true);
+                if (l0 === 0 && l1 > 0 && l1 <= numFaces) { faceStart = l0; faceEnd = l1; }
+            }
+            const positions = new Float32Array(numVerts * 3);
+            const normals = new Float32Array(numVerts * 3);
+            const uvs = new Float32Array(numVerts * 2);
+            for (let i = 0; i < numVerts; i++) {
+                const base = vertOff + i * vertSize;
+                positions[i * 3] = dv.getFloat32(base, true);
+                positions[i * 3 + 1] = dv.getFloat32(base + 4, true);
+                positions[i * 3 + 2] = dv.getFloat32(base + 8, true);
+                normals[i * 3] = dv.getFloat32(base + 12, true);
+                normals[i * 3 + 1] = dv.getFloat32(base + 16, true);
+                normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
+                uvs[i * 2] = dv.getFloat32(base + 24, true);
+                uvs[i * 2 + 1] = 1 - dv.getFloat32(base + 28, true);
+            }
+            const n = faceEnd - faceStart;
+            const indices = new Uint32Array(n * 3);
+            for (let i = 0; i < n; i++) {
+                const base = faceOff + (faceStart + i) * 12;
+                indices[i * 3] = dv.getUint32(base, true);
+                indices[i * 3 + 1] = dv.getUint32(base + 4, true);
+                indices[i * 3 + 2] = dv.getUint32(base + 8, true);
+            }
+            for (let i = 0; i < indices.length; i++) if (indices[i] >= numVerts) return null;
+            return { positions, normals, uvs, indices };
+        }
         function _parseRobloxMeshV4(buf) {
             if (buf.byteLength < 24) { _lastMeshParseFailReason = 'буфер короче 24 байт (' + buf.byteLength + ')'; return null; }
             const dv = new DataView(buf);
@@ -1578,6 +1648,9 @@
                 ' numFaces=' + numFaces + ' numLODs=' + numLODs + ' numBones=' + numBones + ' bufLen=' + buf.byteLength;
             if (sizeofHeader < 24 || sizeofHeader > 64) { _lastMeshParseFailReason = 'sizeofHeader вне диапазона 24-64 (' + dbg + ')'; return null; }
             if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces нулевые или огромные (' + dbg + ')'; return null; }
+            const exact = _tryParseV4Exact(dv, buf, sizeofHeader, numVerts, numFaces, numLODs, numBones);
+            if (exact) return exact;
+            // Точная раскладка не подошла — старый перебор вариантов как запасной путь.
             // Реальные диагностические данные с телефона (см.
             const vertOffCandidates = numLODs > 0
                 ? [sizeofHeader + numLODs * 4, sizeofHeader + numLODs * 8, sizeofHeader]
@@ -1715,6 +1788,33 @@
             }
             return out;
         }
+        // Чанк LODS идёт сразу за COREMESH: 8 байт имя, u32 версия, u32 размер,
+        // дальше данные. Точный формат не подтверждён, поэтому ищем в данных
+        // возрастающую последовательность u32, начинающуюся с 0 и
+        // заканчивающуюся числом граней меша — это офсеты LOD. Возвращает
+        // число граней LOD0 или null (тогда рисуются все грани, как раньше).
+        function _findLod0FaceCount(bytes, chunkStart, numFaces) {
+            if (chunkStart < 0 || chunkStart + 16 > bytes.length) return null;
+            const name = new TextDecoder('latin1').decode(bytes.subarray(chunkStart, chunkStart + 4));
+            if (name !== 'LODS') return null;
+            const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+            const size = dv.getUint32(chunkStart + 12, true);
+            const dataStart = chunkStart + 16;
+            const dataEnd = Math.min(bytes.length, dataStart + size);
+            for (let p = dataStart; p + 8 <= dataEnd; p++) {
+                if (dv.getUint32(p, true) !== 0) continue;
+                const seq = [0];
+                let q = p + 4, prev = 0;
+                while (q + 4 <= dataEnd && seq.length < 16) {
+                    const v = dv.getUint32(q, true);
+                    if (v < prev || v > numFaces) break;
+                    seq.push(v); prev = v; q += 4;
+                    if (v === numFaces) break;
+                }
+                if (seq.length >= 2 && seq[seq.length - 1] === numFaces && seq[1] > 0) return seq[1];
+            }
+            return null;
+        }
         async function _parseRobloxMeshDraco(bodyBytes) {
             let decoderModule;
             try {
@@ -1748,7 +1848,18 @@
             }
             try {
                 const result = _tryDecodeDracoAt(decoderModule, bodyBytes, dracoOffset, dracoLength);
-                if (result) return result;
+                if (result) {
+                    // Оставляем только грани LOD0 — иначе грубые LOD рисуются поверх.
+                    if (dracoLength != null) {
+                        const totalFaces = result.indices.length / 3;
+                        const lod0 = _findLod0FaceCount(bodyBytes, dracoOffset + dracoLength, totalFaces);
+                        if (lod0 && lod0 < totalFaces) {
+                            result.indices = result.indices.subarray(0, lod0 * 3);
+                            logLuaOutput('info', 'Draco: использую LOD0 (' + lod0 + ' из ' + totalFaces + ' граней)');
+                        }
+                    }
+                    return result;
+                }
             } catch (e) {
                 _lastMeshParseFailReason = 'Draco-декодер бросил исключение: ' + e.message;
                 return null;
@@ -1819,10 +1930,21 @@
                 if (mesh.material) mesh.material.side = THREE.DoubleSide;
                 const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scale = new THREE.Vector3();
                 mesh.matrix.decompose(pos, quat, scale);
-                scale.x *= (o.sx || 1) / result.size.x;
-                scale.y *= (o.sy || 1) / result.size.y;
-                scale.z *= (o.sz || 1) / result.size.z;
+                if (o.meshScale) {
+                    // SpecialMesh(FileMesh): размер = родной размер меша * Scale,
+                    // Size самой детали не участвует (как в Roblox).
+                    scale.set(o.meshScale[0], o.meshScale[1], o.meshScale[2]);
+                } else {
+                    // MeshPart: меш вписывается в Size детали.
+                    scale.x *= (o.sx || 1) / result.size.x;
+                    scale.y *= (o.sy || 1) / result.size.y;
+                    scale.z *= (o.sz || 1) / result.size.z;
+                }
                 mesh.matrix.compose(pos, quat, scale);
+                // matrixAutoUpdate=false → three.js сам НЕ пересчитает
+                // matrixWorld после первого кадра; без этого флага новый
+                // масштаб (и вообще любая правка mesh.matrix) не применялась.
+                mesh.matrixWorldNeedsUpdate = true;
             });
         }
 
@@ -1864,11 +1986,18 @@
                     geoCache[geoKey] = new THREE.ConeGeometry(radius, o.sy || 1, seg);
                 } else if (o.shape === 'wedge') {
                     geoCache[geoKey] = makeWedgeGeometry(o.sx || 1, o.sy || 1, o.sz || 1);
+                } else if (o.shape === 'head') {
+                    geoCache[geoKey] = makeHeadGeometry(o.sx || 1, o.sy || 1, o.sz || 1, Math.max(8, qualitySettings.sphereSegments));
+                } else if (o.shape === 'cylinderx') {
+                    geoCache[geoKey] = makeCylinderXGeometry(o.sx || 1, o.sy || 1, o.sz || 1, Math.max(8, qualitySettings.sphereSegments));
                 } else {
                     geoCache[geoKey] = new THREE.BoxGeometry(o.sx || 1, o.sy || 1, o.sz || 1, 1, 1, 1);
                 }
             }
             const geo = geoCache[geoKey];
+            // opacity=0 (Transparency=1) — валидное значение; раньше `o.opacity || 1`
+            // превращал его в 1, и невидимые детали рисовались непрозрачными.
+            const op = (o.opacity === undefined || o.opacity === null) ? 1 : o.opacity;
 
             // Текстура — только на "high", как и остальные quality-флаги
             const texId = qualitySettings.textures ? o.texture : null;
@@ -1892,12 +2021,12 @@
                 : implicitFaceIdx;
 
             const baseColor = texId && faceIdx === null ? '#ffffff' : (o.color || '#a0a0a0');
-            const matKey = (o.color || '#a0a0a0') + '_' + (o.opacity || 1).toFixed(1) + '_' +
+            const matKey = (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' +
                 (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx));
             if (!matCache[matKey]) {
                 const baseOpts = {
-                    transparent: (o.opacity || 1) < 1.0,
-                    opacity: o.opacity || 1.0,
+                    transparent: op < 1.0,
+                    opacity: op,
                     flatShading: currentQuality === 'low',
                 };
                 if (faceIdx !== null) {
@@ -1931,15 +2060,25 @@
             const mat = matCache[matKey];
 
             const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(o.px || 0, o.py || 0, o.pz || 0);
+            // SpecialMesh.Offset — сдвиг меша в ЛОКАЛЬНЫХ осях детали
+            let bpx = o.px || 0, bpy = o.py || 0, bpz = o.pz || 0;
+            if (o.meshOffset) {
+                const [ox, oy, oz] = o.meshOffset;
+                if (o.rot && o.rot.length >= 9) {
+                    bpx += o.rot[0] * ox + o.rot[1] * oy + o.rot[2] * oz;
+                    bpy += o.rot[3] * ox + o.rot[4] * oy + o.rot[5] * oz;
+                    bpz += o.rot[6] * ox + o.rot[7] * oy + o.rot[8] * oz;
+                } else { bpx += ox; bpy += oy; bpz += oz; }
+            }
+            mesh.position.set(bpx, bpy, bpz);
 
             if (o.rot && o.rot.length >= 9) {
                 const rm = new THREE.Matrix4();
                 // o.rot — row-major [R00,R01,R02, R10,R11,R12, R20,R21,R22],
                 rm.set(
-                    o.rot[0], o.rot[1], o.rot[2], o.px || 0,
-                    o.rot[3], o.rot[4], o.rot[5], o.py || 0,
-                    o.rot[6], o.rot[7], o.rot[8], o.pz || 0,
+                    o.rot[0], o.rot[1], o.rot[2], bpx,
+                    o.rot[3], o.rot[4], o.rot[5], bpy,
+                    o.rot[6], o.rot[7], o.rot[8], bpz,
                     0, 0, 0, 1
                 );
                 mesh.matrix.copy(rm);
@@ -1961,8 +2100,10 @@
             mesh.userData.cancollideFlag = o.cancollide !== false;
             mesh.frustumCulled = true;
 
-            if ((o.opacity || 1) < 1.0) {
-                mesh.material.depthWrite = (o.opacity || 1) > 0.7;
+            if (op < 1.0) {
+                const dw = op > 0.7;
+                if (Array.isArray(mesh.material)) mesh.material.forEach(m => { m.depthWrite = dw; });
+                else mesh.material.depthWrite = dw;
             }
             if (o.meshId) scheduleRealMeshSwap(o, mesh);
             return mesh;

@@ -236,6 +236,41 @@ def get_color(c):
     return f'#{r:02x}{g:02x}{b:02x}'
 
 
+def get_part_color(props):
+    """Цвет BasePart. В новых .rbxl (zstd, 2024+) цвет лежит в свойстве
+    Color3uint8 (целые 0..255), а НЕ в Color3/Color (float 0..1) — раньше
+    читались только последние, поэтому все Part из новых файлов были
+    серыми (#a0a0a0): Head/Torso/руки/ноги R6 без цвета кожи и т.д."""
+    c8 = props.get('Color3uint8')
+    if isinstance(c8, dict) and 'r' in c8:
+        r = max(0, min(255, int(safe_float(c8.get('r', 160), 160))))
+        g = max(0, min(255, int(safe_float(c8.get('g', 160), 160))))
+        b = max(0, min(255, int(safe_float(c8.get('b', 160), 160))))
+        return f'#{r:02x}{g:02x}{b:02x}'
+    col = props.get('Color') or props.get('Color3') or props.get('BrickColor')
+    return get_color(col) if isinstance(col, dict) else '#a0a0a0'
+
+
+# Enum.MeshType (SpecialMesh.MeshType): Head=0, Torso=1, Wedge=2, Sphere=3,
+# Cylinder=4, FileMesh=5, Brick=6, Prism=7, Pyramid=8, ParallelRamp=9,
+# RightAngleRamp=10, CornerWedge=11. Раньше 1 читался как цилиндр, а 6
+# (Brick) как клин — числа были перепутаны.
+MESHTYPE_TO_SHAPE = {
+    0: 'head', 1: 'box', 2: 'wedge', 3: 'sphere', 4: 'cylinder',
+    6: 'box', 7: 'wedge', 8: 'cone', 9: 'wedge', 10: 'wedge', 11: 'wedge',
+}
+
+
+def find_special_mesh(ref, children_by_parent, all_props, referent_to_class):
+    """Свойства первого SpecialMesh-ребёнка части (или None). Раньше
+    искали по номеру referent (ref+1 / ref+2) — это работало только пока
+    меш лежал в файле сразу после детали."""
+    for child in children_by_parent.get(ref, ()):
+        if referent_to_class.get(child) == 'SpecialMesh':
+            return all_props.get(child, {})
+    return None
+
+
 def get_pos(cf):
     if not isinstance(cf, dict):
         return 0.0, 0.0, 0.0
@@ -611,30 +646,57 @@ def build_all_scene_objects():
         else:
             sx = sy = sz_ = 1.0
 
-        # Получаем цвет
-        col = props.get('Color') or props.get(
-            'Color3') or props.get('BrickColor')
-        color = get_color(col) if isinstance(col, dict) else '#a0a0a0'
+        # Цвет (Color3uint8 из новых файлов, иначе Color3/Color/BrickColor)
+        color = get_part_color(props)
 
+        # Прозрачность: раньше не передавалась вообще, и невидимый
+        # HumanoidRootPart (Transparency=1, размером с Torso) рисовался
+        # сплошным серым блоком поверх персонажа.
+        transp = safe_float(props.get('Transparency', 0.0), 0.0)
+        opacity = max(0.0, min(1.0, 1.0 - transp))
+
+        # Форма: Part.Shape (0=Ball, 1=Block, 2=Cylinder — ось вдоль X),
+        # класс SpherePart, либо дочерний SpecialMesh (Enum.MeshType).
         shape = 'sphere' if cls == 'SpherePart' else 'box'
+        part_shape = props.get('shape', props.get('Shape'))
+        if part_shape == 0:
+            shape = 'sphere'
+        elif part_shape == 2:
+            shape = 'cylinderx'
         CONE_IDS = ['9756362', '1033714', '9887819', 'cone.mesh']
-        for sm_ref in [ref + 1, ref + 2]:
-            if parsed['referent_to_class'].get(sm_ref) != 'SpecialMesh':
-                continue
-            cp = parsed['props'].get(sm_ref, {})
-            mt = cp.get('MeshType', 0)
+        mesh_scale = None
+        mesh_offset = None
+        sm = find_special_mesh(ref, children_by_parent, parsed['props'],
+                               parsed['referent_to_class'])
+        if sm is not None:
+            mt = sm.get('MeshType', 0)
             if isinstance(mt, str):
                 mt = int(mt) if mt.isdigit() else 0
-            mid = str(cp.get('MeshId', ''))
-            if mt == 4 or mt == 3:
-                shape = 'sphere'
-            elif mt == 1:
-                shape = 'cylinder'
-            elif mt == 6:
-                shape = 'wedge'
-            elif any(cid in mid for cid in CONE_IDS):
+            mid = str(sm.get('MeshId', ''))
+            sc = sm.get('Scale') or {}
+            msx = safe_float(sc.get('x', 1), 1) if isinstance(sc, dict) else 1.0
+            msy = safe_float(sc.get('y', 1), 1) if isinstance(sc, dict) else 1.0
+            msz = safe_float(sc.get('z', 1), 1) if isinstance(sc, dict) else 1.0
+            of = sm.get('Offset') or {}
+            mox = safe_float(of.get('x', 0), 0) if isinstance(of, dict) else 0.0
+            moy = safe_float(of.get('y', 0), 0) if isinstance(of, dict) else 0.0
+            moz = safe_float(of.get('z', 0), 0) if isinstance(of, dict) else 0.0
+            if any(cid in mid for cid in CONE_IDS):
                 shape = 'cone'
-            break
+            elif mt == 5:
+                # FileMesh: реальный размер = родной размер меша * Scale,
+                # Size детали НЕ участвует — передаём Scale клиенту.
+                mesh_scale = [msx, msy, msz]
+            elif mt in MESHTYPE_TO_SHAPE:
+                shape = MESHTYPE_TO_SHAPE[mt]
+                if shape == 'head':
+                    # Head-меш — скруглённый цилиндр; ширина = глубине
+                    # (иначе у R6 Head 2x1x1 получилась бы 2.5 в ширину).
+                    sx, sy, sz_ = sz_ * msx, sy * msy, sz_ * msz
+                else:
+                    sx, sy, sz_ = sx * msx, sy * msy, sz_ * msz
+            if mox or moy or moz:
+                mesh_offset = [mox, moy, moz]
         name = props.get('Name', cls)
 
         texture_id, texture_face = _extract_part_texture_id(
@@ -658,6 +720,8 @@ def build_all_scene_objects():
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
             'textureFace': texture_face, 'meshId': real_mesh_id,
+            'opacity': opacity,
+            'meshScale': mesh_scale, 'meshOffset': mesh_offset,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
