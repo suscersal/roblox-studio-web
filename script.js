@@ -1470,6 +1470,49 @@
         }
 
         // ============ ЗАГРУЗКА РЕАЛЬНОЙ ГЕОМЕТРИИ MeshPart/SpecialMesh(FileMesh) ============
+        // Диагностика UV/LOD: две кнопки рядом с Low/Med/High. UV: 0=как есть,
+        // 1=V перевёрнут, 2=U перевёрнут, 3=оба. LOD: on=только LOD0, off=все грани.
+        let _uvMode = 0, _lodEnabled = true;
+        try {
+            _uvMode = parseInt(localStorage.getItem('rbx_uvmode') || '0', 10) || 0;
+            _lodEnabled = localStorage.getItem('rbx_lod') !== '0';
+        } catch (e) { /* localStorage недоступен */ }
+        function _applyUvMode(p) {
+            if (!p || !p.uvs || !_uvMode) return p;
+            const u = p.uvs;
+            for (let i = 0; i + 1 < u.length; i += 2) {
+                if (_uvMode & 2) u[i] = 1 - u[i];
+                if (_uvMode & 1) u[i + 1] = 1 - u[i + 1];
+            }
+            return p;
+        }
+        function _refreshMeshesAfterDebugToggle() {
+            for (const k of Object.keys(_meshGeometryCache)) delete _meshGeometryCache[k];
+            reloadScene();
+        }
+        window.addEventListener('load', () => {
+            const q = document.getElementById('q-low');
+            if (!q || !q.parentNode) return;
+            const uvBtn = document.createElement('button');
+            const lodBtn = document.createElement('button');
+            const label = () => {
+                uvBtn.textContent = 'UV:' + _uvMode;
+                lodBtn.textContent = 'LOD:' + (_lodEnabled ? 'on' : 'off');
+            };
+            uvBtn.onclick = () => {
+                _uvMode = (_uvMode + 1) % 4;
+                try { localStorage.setItem('rbx_uvmode', String(_uvMode)); } catch (e) {}
+                label(); _refreshMeshesAfterDebugToggle();
+            };
+            lodBtn.onclick = () => {
+                _lodEnabled = !_lodEnabled;
+                try { localStorage.setItem('rbx_lod', _lodEnabled ? '1' : '0'); } catch (e) {}
+                label(); _refreshMeshesAfterDebugToggle();
+            };
+            label();
+            q.parentNode.appendChild(uvBtn);
+            q.parentNode.appendChild(lodBtn);
+        });
         const _meshGeometryCache = {}; // meshId -> Promise<{geometry, size}|null>
 
         function _parseRobloxMeshV1(text) {
@@ -1606,7 +1649,7 @@
             const lodOff = faceOff + numFaces * 12;
             if (lodOff > buf.byteLength) return null;
             let faceStart = 0, faceEnd = numFaces;
-            if (numLODs >= 2 && lodOff + numLODs * 4 <= buf.byteLength) {
+            if (_lodEnabled && numLODs >= 2 && lodOff + numLODs * 4 <= buf.byteLength) {
                 const l0 = dv.getUint32(lodOff, true), l1 = dv.getUint32(lodOff + 4, true);
                 if (l0 === 0 && l1 > 0 && l1 <= numFaces) { faceStart = l0; faceEnd = l1; }
             }
@@ -1741,6 +1784,10 @@
                 if (!positions) { decoderModule.destroy(mesh); return null; }
                 const normals = normalsRaw || new Float32Array(numPoints * 3);
                 const uvs = uvsRaw || new Float32Array(numPoints * 2);
+                // Как и в v4.x: у Roblox начало V сверху, а у three.js (flipY=true
+                // у TextureLoader) — снизу. В v4 переворот был, в Draco (v7)
+                // его не было — отсюда неправильная развёртка на v7-мешах.
+                if (uvsRaw) for (let i = 1; i < uvs.length; i += 2) uvs[i] = 1 - uvs[i];
                 const faceBuf = new decoderModule.DracoInt32Array();
                 const indices = new Uint32Array(numFaces * 3);
                 for (let i = 0; i < numFaces; i++) {
@@ -1850,7 +1897,7 @@
                 const result = _tryDecodeDracoAt(decoderModule, bodyBytes, dracoOffset, dracoLength);
                 if (result) {
                     // Оставляем только грани LOD0 — иначе грубые LOD рисуются поверх.
-                    if (dracoLength != null) {
+                    if (dracoLength != null && _lodEnabled) {
                         const totalFaces = result.indices.length / 3;
                         const lod0 = _findLod0FaceCount(bodyBytes, dracoOffset + dracoLength, totalFaces);
                         if (lod0 && lod0 < totalFaces) {
@@ -1903,7 +1950,7 @@
                         logLuaOutput('warn', 'Mesh ' + meshId + ' (версия "' + version + '"): не удалось разобрать — ' + (_lastMeshParseFailReason || 'причина неизвестна') + ', использую приближение');
                         return null;
                     }
-                    return _buildGeometryFromParsed(parsed);
+                    return _buildGeometryFromParsed(_applyUvMode(parsed));
                 } catch (e) {
                     logLuaOutput('warn', 'Mesh ' + meshId + ': загрузка не удалась (' + e.message + '), использую приближение');
                     return null;
