@@ -171,6 +171,10 @@
             font-size: 11px
         }
 
+        #explorer-header button.active {
+            background: #ff6600;
+        }
+
         #search-box {
             background: #374151;
             border: none;

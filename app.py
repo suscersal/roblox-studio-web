@@ -8,7 +8,8 @@ import struct
 import math
 import traceback
 import json
-from rbxl_parser import parse_rbxl, save_rbxl, publish_place
+from urllib.parse import quote
+from rbxl_parser import parse_rbxl, save_rbxl, publish_place, export_rbxm, import_rbxm
 from flask import Flask, request, jsonify, Response, send_from_directory
 from pathlib import Path
 import sys
@@ -516,6 +517,29 @@ def _rbxassetid_num(value):
     return m.group() if m else None
 
 
+def _asset_url_num(value):
+    """Числовой id из 'http://www.roblox.com/asset/?id=123' или 'rbxassetid://123'
+    (ShirtTemplate/PantsTemplate хранятся в первом виде)."""
+    if not value:
+        return None
+    s = str(value)
+    if 'rbxasset://' in s and 'rbxassetid://' not in s:
+        return None
+    m = _re.search(r'\d+', s)
+    return m.group() if m else None
+
+
+# Части R6-персонажа, на которые ложится одежда (Shirt/Pants из соседних
+# детей той же Model): shirt — торс и руки, pants — торс и ноги
+# (в шаблоне 585x559 руки/ноги лежат в одних и тех же прямоугольниках,
+# поэтому рубашку на ноги и штаны на руки класть нельзя).
+R6_CLOTH_LIMBS = {
+    'Torso': ('shirt', 'pants'),
+    'Left Arm': ('shirt',), 'Right Arm': ('shirt',),
+    'Left Leg': ('pants',), 'Right Leg': ('pants',),
+}
+
+
 def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
     """Ищем ЛЮБОЙ реальный (rbxassetid://) источник картинки для части:
     1) TextureID/Texture прямо на MeshPart,
@@ -606,6 +630,23 @@ def build_all_scene_objects():
     for child_ref, parent_ref in parsed['parent_map'].items():
         children_by_parent.setdefault(parent_ref, []).append(child_ref)
 
+    # MaterialService/MaterialVariant: (имя, BaseMaterial) -> карты. Деталь
+    # ссылается на вариант по имени в MaterialVariantSerialized (так
+    # перчатки gloveR/gloveL получают свой материал 'main').
+    material_variants = {}
+    for vref, vcls in parsed['referent_to_class'].items():
+        if vcls != 'MaterialVariant':
+            continue
+        vp = parsed['props'].get(vref, {})
+        material_variants[(vp.get('Name'), vp.get('BaseMaterial'))] = {
+            'name': vp.get('Name'),
+            'colorMap': _asset_url_num(vp.get('ColorMap')),
+            'normalMap': _asset_url_num(vp.get('NormalMap')),
+            'roughnessMap': _asset_url_num(vp.get('RoughnessMap')),
+            'metalnessMap': _asset_url_num(vp.get('MetalnessMap')),
+            'studsPerTile': safe_float(vp.get('StudsPerTile', 10.0), 10.0) or 10.0,
+        }
+
     objs = []
     for ref, cls in parsed['referent_to_class'].items():
         if cls not in PART_CLASSES:
@@ -654,6 +695,20 @@ def build_all_scene_objects():
         # сплошным серым блоком поверх персонажа.
         transp = safe_float(props.get('Transparency', 0.0), 0.0)
         opacity = max(0.0, min(1.0, 1.0 - transp))
+        # Head, который заменяет аксессуар-голова (у Handle есть свой
+        # FaceCenterAttachment, как у Baki_head): в Roblox Head скрывают, иначе
+        # он закрывает меш аксессуара (так и было: «Head перекрывает текстуру»).
+        if cls == 'Part' and props.get('Name') == 'Head':
+            for sib in children_by_parent.get(parsed['parent_map'].get(ref), ()):
+                if parsed['referent_to_class'].get(sib) != 'Accessory':
+                    continue
+                for handle in children_by_parent.get(sib, ()):
+                    if parsed['referent_to_class'].get(handle) not in PART_CLASSES:
+                        continue
+                    if any(parsed['referent_to_class'].get(a) == 'Attachment'
+                           and parsed['props'].get(a, {}).get('Name') == 'FaceCenterAttachment'
+                           for a in children_by_parent.get(handle, ())):
+                        opacity = 0.0
 
         # Форма: Part.Shape (0=Ball, 1=Block, 2=Cylinder — ось вдоль X),
         # класс SpherePart, либо дочерний SpecialMesh (Enum.MeshType).
@@ -699,6 +754,29 @@ def build_all_scene_objects():
                 mesh_offset = [mox, moy, moz]
         name = props.get('Name', cls)
 
+        # Enum.Material и MaterialVariant детали
+        material = props.get('Material')
+        if not isinstance(material, int):
+            material = 256
+        mvar = None
+        mv_name = props.get('MaterialVariantSerialized')
+        if mv_name:
+            mvar = material_variants.get((mv_name, material))
+
+        # Одежда R6 (Shirt/Pants рядом с частью в той же Model)
+        cloth = None
+        kinds = R6_CLOTH_LIMBS.get(name) if cls == 'Part' else None
+        if kinds:
+            shirt_id = pants_id = None
+            for sib in children_by_parent.get(parsed['parent_map'].get(ref), ()):
+                sc_cls = parsed['referent_to_class'].get(sib)
+                if sc_cls == 'Shirt' and 'shirt' in kinds:
+                    shirt_id = _asset_url_num(parsed['props'].get(sib, {}).get('ShirtTemplate'))
+                elif sc_cls == 'Pants' and 'pants' in kinds:
+                    pants_id = _asset_url_num(parsed['props'].get(sib, {}).get('PantsTemplate'))
+            if shirt_id or pants_id:
+                cloth = {'limb': name, 'shirt': shirt_id, 'pants': pants_id}
+
         texture_id, texture_face = _extract_part_texture_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
@@ -721,7 +799,8 @@ def build_all_scene_objects():
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
             'textureFace': texture_face, 'meshId': real_mesh_id,
             'opacity': opacity,
-            'meshScale': mesh_scale, 'meshOffset': mesh_offset,
+            'meshScale': mesh_scale, 'meshOffset': mesh_offset, 'cloth': cloth,
+            'material': material, 'mvar': mvar,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
@@ -949,6 +1028,7 @@ def api_new():
         'class_id_to_name': {},
         'class_id_to_referents': {},
         'skipped_prop_chunks': 0,
+        'service_refs': set(referent_to_class),  # все верхнеуровневые — сервисы
         '_modified': True,
         # Намеренно НЕ добавляем '_raw_chunks'/'_raw_data' — их отсутствие
         # заставляет save_rbxl собирать бинарник с нуля из
@@ -1567,6 +1647,116 @@ def api_save_download():
     )
 
 
+def _rbxm_name(raw):
+    name = os.path.basename(raw or '') or 'model.rbxm'
+    if Path(name).suffix.lower() != '.rbxm':
+        name += '.rbxm'
+    return name
+
+
+@flask_app.route('/api/export/rbxm', methods=['GET', 'POST'])
+def api_export_rbxm():
+    """Экспорт выбранных объектов (со всеми потомками) в бинарный .rbxm.
+
+    GET  ?refs=1,2,3&name=model.rbxm — обычная браузерная загрузка (как
+         /api/save/download: blob-URL в Android WebView не работают).
+    POST {refs: [...], path: "..."} — запись файла на диск сервера; так
+         Android кладёт файл в приватную папку перед экспортом через SAF."""
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'Нет данных'}), 400
+    if request.method == 'POST':
+        body = request.json or {}
+        raw_refs = body.get('refs') or []
+    else:
+        raw_refs = [x for x in (request.args.get('refs') or '').split(',') if x.strip()]
+    try:
+        refs = [int(x) for x in raw_refs][:20000]
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Некорректный список объектов'}), 400
+    try:
+        data, count, warnings = export_rbxm(parsed, refs)
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+    if request.method == 'POST':
+        path = (request.json or {}).get('path')
+        if not path:
+            return jsonify({'ok': False, 'error': 'Нет пути'}), 400
+        try:
+            with open(path, 'wb') as f:
+                f.write(data)
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 500
+        return jsonify({'ok': True, 'path': path, 'count': count, 'warnings': warnings})
+
+    name = _rbxm_name(request.args.get('name'))
+    return Response(
+        data,
+        mimetype='application/octet-stream',
+        headers={
+            'Content-Disposition': f'attachment; filename="{name}"',
+            'X-Rbxm-Count': str(count),
+            'X-Rbxm-Warnings': quote(json.dumps(warnings, ensure_ascii=False)),
+        },
+    )
+
+
+def _finish_rbxm_import(path, parent):
+    if not state['parsed']:
+        api_new()   # нечего открывать — импортируем в новую пустую сцену
+    try:
+        roots, count, warnings = import_rbxm(state['parsed'], path, parent)
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    bump_scene_version()
+    return jsonify({'ok': True, 'count': count, 'roots': roots, 'warnings': warnings})
+
+
+@flask_app.route('/api/import/rbxm', methods=['POST'])
+def api_import_rbxm():
+    """Импорт .rbxm по пути на диске сервера (Android: Kotlin уже скопировал
+    выбранный через SAF файл в приватную папку приложения)."""
+    data = request.json or {}
+    path = data.get('path')
+    if not path or not os.path.isfile(path):
+        return jsonify({'ok': False, 'error': 'Файл не найден'}), 400
+    parent = data.get('parent')
+    return _finish_rbxm_import(path, int(parent) if parent is not None else None)
+
+
+@flask_app.route('/api/import/rbxm/upload', methods=['POST'])
+def api_import_rbxm_upload():
+    """Импорт .rbxm, выбранного обычным <input type=file> (см. /api/open/upload)."""
+    import tempfile
+    if 'file' not in request.files or not request.files['file'].filename:
+        return jsonify({'ok': False, 'error': 'Файл не передан'}), 400
+    parent = request.form.get('parent')
+    try:
+        parent = int(parent) if parent not in (None, '', 'null') else None
+    except ValueError:
+        return jsonify({'ok': False, 'error': 'Некорректный родитель'}), 400
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.rbxm', delete=False) as tmp:
+            request.files['file'].save(tmp.name)
+            tmp_path = tmp.name
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Не удалось сохранить файл: {e}'}), 500
+    try:
+        return _finish_rbxm_import(tmp_path, parent)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
 @flask_app.route('/api/browse')
 def api_browse():
     path = request.args.get('path', str(Path.home()))
@@ -2011,6 +2201,33 @@ def api_asset_proxy():
             parts.append(
                 f'{"кука" if has_cookie else "анонимно (нет куки)"}: {cookie_error}')
         return Response('asset fetch failed — ' + '; '.join(parts), status=502)
+
+    # Ассет может оказаться не картинкой, а XML-обёрткой (Decal, Shirt, Pants,
+    # Texture): внутри лежит id настоящего изображения. Идём по ссылке
+    # (не глубже двух уровней) — иначе <img>/TextureLoader получал XML и не
+    # мог его показать (текстуры одежды на теле не появлялись).
+    for _ in range(2):
+        head = raw_bytes[:400].lstrip()
+        if not (head.startswith(b'<roblox') and not head.startswith(b'<roblox!')) and not head.startswith(b'<?xml'):
+            break
+        m_in = _re.search(
+            rb'<Content name="(?:ShirtTemplate|PantsTemplate|Texture|Graphic|Image|ColorMap)">\s*<url>[^<]*?(\d+)</url>',
+            raw_bytes)
+        if not m_in or m_in.group(1).decode() == asset_id:
+            break
+        inner_id = m_in.group(1).decode()
+        inner_bytes = None
+        try:
+            inner_bytes = _rbx_get_bytes_opencloud(inner_id)
+        except Exception:
+            try:
+                inner_bytes = _rbx_get_bytes(
+                    f'https://assetdelivery.roblox.com/v1/asset/?id={inner_id}')
+            except Exception:
+                inner_bytes = None
+        if not inner_bytes:
+            break
+        raw_bytes = inner_bytes
 
     # Тип контента — по сигнатуре байтов (см. тот же приём в убранной
     # asset/fetch-фиче): Roblox отдаёт сырые байты картинки/звука без

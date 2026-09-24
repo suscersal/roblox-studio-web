@@ -5,6 +5,13 @@
                 tb_open: '📂 Open', tb_open_title: 'Open file (Ctrl+O)',
                 tb_save: '💾 Save', tb_save_title: 'Save (Ctrl+S)',
                 tb_saveas: '💾 As...', tb_saveas_title: 'Save as',
+                tb_import: '📥 Import', tb_import_title: 'Import a model (.rbxm) into the scene',
+                tb_export: '📤 Export', tb_export_title: 'Export the selected objects to a model (.rbxm)',
+                exp_multisel_title: 'Multi-select mode: tap adds/removes objects (Ctrl+click and Shift+click also work)',
+                rbxm_export_title: 'Export {n} object(s) to .rbxm',
+                notify_rbxm_exported: '📤 Exported: {n} object(s)',
+                notify_rbxm_imported: '📥 Imported: {n} object(s)',
+                notify_rbxm_warn: '⚠ {msg}',
                 tb_add: '➕ Add', tb_addobj_title: 'Add object',
                 tb_delete: '🗑 Delete', tb_delete_title: 'Delete (Delete)',
                 tb_refresh: '🔄 Refresh', tb_refresh_title: 'Refresh scene (F5)',
@@ -122,6 +129,13 @@
                 tb_open: '📂 Открыть', tb_open_title: 'Открыть файл (Ctrl+O)',
                 tb_save: '💾 Сохранить', tb_save_title: 'Сохранить (Ctrl+S)',
                 tb_saveas: '💾 Как...', tb_saveas_title: 'Сохранить как',
+                tb_import: '📥 Импорт', tb_import_title: 'Импортировать модель (.rbxm) в сцену',
+                tb_export: '📤 Экспорт', tb_export_title: 'Экспортировать выбранные объекты в модель (.rbxm)',
+                exp_multisel_title: 'Режим мультивыбора: тап добавляет/убирает объекты (Ctrl+клик и Shift+клик тоже работают)',
+                rbxm_export_title: 'Экспорт объектов: {n} → .rbxm',
+                notify_rbxm_exported: '📤 Экспортировано объектов: {n}',
+                notify_rbxm_imported: '📥 Импортировано объектов: {n}',
+                notify_rbxm_warn: '⚠ {msg}',
                 tb_add: '➕ Добавить', tb_addobj_title: 'Добавить объект',
                 tb_delete: '🗑 Удалить', tb_delete_title: 'Удалить (Delete)',
                 tb_refresh: '🔄 Обновить', tb_refresh_title: 'Обновить сцену (F5)',
@@ -680,10 +694,10 @@
             document.addEventListener('mousemove', (e) => {
                 if (!currentResizer) return;
                 if (currentResizer.id === 'resizer-1') {
-                    let w = Math.max(150, Math.min(400, startWidth + e.clientX - startX));
+                    let w = Math.max(150, Math.min(window.innerWidth * 0.6, startWidth + e.clientX - startX));
                     document.getElementById('explorer').style.width = w + 'px';
                 } else if (currentResizer.id === 'resizer-2') {
-                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.clientX));
+                    let w = Math.max(200, Math.min(window.innerWidth * 0.7, startRightWidth + startX - e.clientX));
                     document.getElementById('rightpanel').style.width = w + 'px';
                 }
                 refreshCM();
@@ -719,10 +733,10 @@
             document.addEventListener('touchmove', (e) => {
                 if (!currentResizer) return;
                 if (currentResizer.id === 'resizer-1') {
-                    let w = Math.max(150, Math.min(400, startWidth + e.touches[0].clientX - startX));
+                    let w = Math.max(150, Math.min(window.innerWidth * 0.6, startWidth + e.touches[0].clientX - startX));
                     document.getElementById('explorer').style.width = w + 'px';
                 } else if (currentResizer.id === 'resizer-2') {
-                    let w = Math.max(200, Math.min(500, startRightWidth + startX - e.touches[0].clientX));
+                    let w = Math.max(200, Math.min(window.innerWidth * 0.7, startRightWidth + startX - e.touches[0].clientX));
                     document.getElementById('rightpanel').style.width = w + 'px';
                 }
                 refreshCM();
@@ -738,6 +752,68 @@
                 }
             });
         }
+
+        // ============ НАСТРОЙКИ ИНТЕРФЕЙСА (размер текста/кнопок, ползунки-разделители) ============
+        const UI_DEFAULTS = { fs: 1, bs: 1, rz: 0, sb: 0 }; // rz/sb = 0 → значение по умолчанию из CSS
+        let uiCfg = { ...UI_DEFAULTS };
+        function applyUiSettings() {
+            const st = document.documentElement.style;
+            st.setProperty('--fs', uiCfg.fs);
+            st.setProperty('--bs', uiCfg.bs);
+            if (uiCfg.rz) st.setProperty('--rz', uiCfg.rz + 'px'); else st.removeProperty('--rz');
+            if (uiCfg.sb) st.setProperty('--sb', uiCfg.sb + 'px'); else st.removeProperty('--sb');
+            try { localStorage.setItem('rbxstudio-ui', JSON.stringify(uiCfg)); } catch (e) { }
+            try { refreshCM(); resize(); } catch (e) { }
+        }
+        function initUiSettings() {
+            try { uiCfg = { ...UI_DEFAULTS, ...JSON.parse(localStorage.getItem('rbxstudio-ui') || '{}') }; } catch (e) { }
+            applyUiSettings();
+            const lang = document.getElementById('lang-btn');
+            if (!lang || !lang.parentNode) return;
+            const btn = document.createElement('button');
+            btn.id = 'ui-btn';
+            btn.textContent = '🎚 UI';
+            btn.title = 'Размер текста, кнопок и разделителей';
+            lang.parentNode.insertBefore(btn, lang);
+            const panel = document.createElement('div');
+            panel.id = 'ui-settings';
+            panel.style.display = 'none';
+            const rows = [
+                ['fs', 'Текст', 0.7, 2.2, 0.05, '', 1],
+                ['bs', 'Кнопки и поля', 0.7, 2.2, 0.05, '', 1],
+                ['rz', 'Разделители панелей', 4, 40, 1, 'px', 16],
+                ['sb', 'Полосы прокрутки', 4, 30, 1, 'px', 10],
+            ];
+            const syncers = [];
+            for (const [key, label, min, max, step, unit, dflt] of rows) {
+                const row = document.createElement('label');
+                row.className = 'ui-row';
+                const cap = document.createElement('span');
+                const rng = document.createElement('input');
+                rng.type = 'range'; rng.min = min; rng.max = max; rng.step = step;
+                const sync = () => {
+                    rng.value = uiCfg[key] || dflt;
+                    cap.textContent = label + ': ' + (uiCfg[key] ? uiCfg[key] + unit : 'авто');
+                };
+                rng.oninput = () => { uiCfg[key] = parseFloat(rng.value); sync(); applyUiSettings(); };
+                sync(); syncers.push(sync);
+                row.appendChild(cap); row.appendChild(rng);
+                panel.appendChild(row);
+            }
+            const reset = document.createElement('button');
+            reset.textContent = 'Сбросить';
+            reset.onclick = () => { uiCfg = { ...UI_DEFAULTS }; applyUiSettings(); syncers.forEach(f => f()); };
+            const close = document.createElement('button');
+            close.textContent = 'Закрыть';
+            close.onclick = () => { panel.style.display = 'none'; };
+            const btns = document.createElement('div');
+            btns.className = 'ui-btns';
+            btns.appendChild(reset); btns.appendChild(close);
+            panel.appendChild(btns);
+            document.body.appendChild(panel);
+            btn.onclick = () => { panel.style.display = panel.style.display === 'none' ? 'flex' : 'none'; };
+        }
+        window.addEventListener('load', initUiSettings);
 
         function saveLayout() {
             const layout = {
@@ -776,7 +852,10 @@
         }
 
         // ============ THREE.JS ПЕРЕМЕННЫЕ ============
-        let selectedRef = null;
+        let selectedRef = null;          // «главный» выбранный объект: его свойства в панели Properties
+        let selectedRefs = new Set();     // все выбранные (мультивыделение); selectedRef всегда входит сюда
+        let selAnchorRef = null;          // от чего считается диапазон по Shift+клик
+        let multiSelectMode = false;      // тап добавляет/убирает из выделения (для экранов без Ctrl/Shift)
         // Ref открытого сейчас в CodeMirror скрипта и его последний
         let currentScriptRef = null;
         let currentScriptOrigSource = null;
@@ -1289,7 +1368,7 @@
 
         function onMU(e) {
             if (!isDragging && e.button === 0) {
-                pick(e.clientX, e.clientY);
+                pick(e.clientX, e.clientY, { additive: e.ctrlKey || e.metaKey || multiSelectMode });
             }
         }
 
@@ -1357,13 +1436,13 @@
             if (e.changedTouches.length === 1 && _ts) {
                 const t = e.changedTouches[0];
                 if (Math.abs(t.clientX - _ts.x) < 8 && Math.abs(t.clientY - _ts.y) < 8) {
-                    pick(t.clientX, t.clientY);
+                    pick(t.clientX, t.clientY, { additive: multiSelectMode });
                 }
             }
         }
 
         // ============ ИСПРАВЛЕННЫЙ PICK ============
-        function pick(cx, cy) {
+        function pick(cx, cy, opts) {
             const vp = document.getElementById('viewport');
             const rect = vp.getBoundingClientRect();
             mouse.x = ((cx - rect.left) / rect.width) * 2 - 1;
@@ -1410,12 +1489,13 @@
                     obj = obj.parent;
                 }
                 if (obj && obj.userData && obj.userData.ref) {
-                    selectRef(parseInt(obj.userData.ref));
+                    selectRef(parseInt(obj.userData.ref), opts);
                     return;
                 }
             }
 
-            deselect();
+            // Мимо объекта с зажатым Ctrl / в режиме мультивыбора выделение не сбрасываем.
+            if (!(opts && opts.additive)) deselect();
         }
 
         // Геометрия WedgePart (клин/скат). Конвенция Roblox: BackSurface — это +Z
@@ -1973,6 +2053,113 @@
             return tex;
         }
 
+        // ============ МАТЕРИАЛЫ (Enum.Material + MaterialVariant) ============
+        // Phong вместо Lambert даёт блик без карты окружения (для three r128
+        // без RoomEnvironment metalness выглядел бы чёрным).
+        const MATERIAL_STYLE = {
+            272: { shininess: 40, specular: 0x444444 },   // SmoothPlastic
+            288: { neon: true },                          // Neon
+            1040: { shininess: 30, specular: 0x666666 },  // CorrodedMetal
+            1056: { shininess: 90, specular: 0xaaaaaa },  // DiamondPlate
+            1072: { shininess: 120, specular: 0xffffff }, // Foil
+            1088: { shininess: 80, specular: 0xbbbbbb },  // Metal
+        };
+        const _tiledTexCache = {};
+        function getTiledTexture(id, rx, ry, srgb) {
+            const key = id + '_' + rx.toFixed(2) + '_' + ry.toFixed(2) + (srgb ? 's' : 'l');
+            if (_tiledTexCache[key]) return _tiledTexCache[key];
+            const tex = new THREE.TextureLoader().load('/api/asset-proxy?id=' + id, (l) => {
+                l.wrapS = l.wrapT = THREE.RepeatWrapping;
+                l.repeat.set(rx, ry);
+                if (srgb) l.encoding = THREE.sRGBEncoding;
+                l.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                l.needsUpdate = true;
+            }, undefined, () => logLuaOutput('warn', t('warn_texture_failed', { id })));
+            _tiledTexCache[key] = tex;
+            return tex;
+        }
+        function makeStyledMaterial(o, op) {
+            const st = MATERIAL_STYLE[o.material] || {};
+            const mv = o.mvar;
+            const base = {
+                transparent: op < 1.0, opacity: op,
+                color: (mv && mv.colorMap) ? '#ffffff' : (o.color || '#a0a0a0'),
+                shininess: st.shininess || 20,
+                specular: st.specular !== undefined ? st.specular : 0x222222,
+            };
+            if (st.neon) { base.emissive = new THREE.Color(o.color || '#ffffff'); }
+            if (mv && qualitySettings.textures) {
+                // Плитка MaterialVariant задаётся в студах (StudsPerTile), а у меша
+                // UV на всю деталь — берём приближённо по среднему размеру.
+                const tiles = Math.max(1, ((o.sx || 1) + (o.sz || 1)) / 2 / (mv.studsPerTile || 10));
+                if (mv.colorMap) base.map = getTiledTexture(mv.colorMap, tiles, tiles, true);
+                if (mv.normalMap) base.normalMap = getTiledTexture(mv.normalMap, tiles, tiles, false);
+                if (mv.metalnessMap) base.specularMap = getTiledTexture(mv.metalnessMap, tiles, tiles, false);
+            }
+            return new THREE.MeshPhongMaterial(base);
+        }
+
+        // ============ ОДЕЖДА R6 (Shirt/Pants) ============
+        // Классический шаблон 585x559: прямоугольники [x, y, w, h] граней.
+        // Порядок граней BoxGeometry: +x, -x, +y, -y, +z, -z
+        // (Roblox: Right, Left, Top, Bottom, Back, Front). Координаты
+        // торса известны точно; для рук/ног боковые грани — по симметричной
+        // раскладке шаблона (лицевая грань и верх/низ — точные).
+        const CLOTH_W = 585, CLOTH_H = 559;
+        const CLOTH_FACES = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
+        const CLOTH_REGIONS = {
+            'Torso': { px: [165, 74, 64, 128], nx: [361, 74, 64, 128], py: [231, 8, 128, 64], ny: [231, 204, 128, 64], pz: [427, 74, 128, 128], nz: [231, 74, 128, 128] },
+            'Right Arm': { px: [151, 355, 64, 128], nx: [19, 355, 64, 128], py: [217, 289, 64, 64], ny: [217, 483, 64, 64], pz: [85, 355, 64, 128], nz: [217, 355, 64, 128] },
+            'Left Arm': { px: [506, 355, 64, 128], nx: [374, 355, 64, 128], py: [308, 289, 64, 64], ny: [308, 483, 64, 64], pz: [440, 355, 64, 128], nz: [308, 355, 64, 128] },
+        };
+        CLOTH_REGIONS['Right Leg'] = CLOTH_REGIONS['Right Arm'];
+        CLOTH_REGIONS['Left Leg'] = CLOTH_REGIONS['Left Arm'];
+
+        function makeClothGeometry(o, baseGeo) {
+            const reg = CLOTH_REGIONS[o.cloth.limb];
+            if (!reg) return baseGeo;
+            const g = baseGeo.clone(); // UV свои у каждой части, общий кэш геометрий трогать нельзя
+            const uv = g.attributes.uv;
+            CLOTH_FACES.forEach((f, gi) => {
+                const [x, y, w, h] = reg[f];
+                const u0 = x / CLOTH_W, u1 = (x + w) / CLOTH_W;
+                const vt = 1 - y / CLOTH_H, vb = 1 - (y + h) / CLOTH_H;
+                const b = gi * 4;
+                uv.setXY(b, u0, vt); uv.setXY(b + 1, u1, vt);
+                uv.setXY(b + 2, u0, vb); uv.setXY(b + 3, u1, vb);
+            });
+            uv.needsUpdate = true;
+            return g;
+        }
+
+        const _clothTexCache = {};
+        function getClothTexture(color, shirtId, pantsId) {
+            const key = (color || '') + '_' + (shirtId || '') + '_' + (pantsId || '');
+            if (_clothTexCache[key]) return _clothTexCache[key];
+            const c = document.createElement('canvas');
+            c.width = CLOTH_W; c.height = CLOTH_H;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = color || '#ffcc99';
+            ctx.fillRect(0, 0, CLOTH_W, CLOTH_H);
+            const tex = new THREE.CanvasTexture(c);
+            tex.encoding = THREE.sRGBEncoding;
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            // штаны под рубашкой; порядок отрисовки не зависит от порядка загрузки
+            const layers = [pantsId, shirtId].filter(Boolean);
+            Promise.all(layers.map(id => new Promise(res => {
+                const im = new Image();
+                im.onload = () => res(im);
+                im.onerror = () => { logLuaOutput('warn', t('warn_texture_failed', { id })); res(null); };
+                im.src = '/api/asset-proxy?id=' + id;
+            }))).then(imgs => {
+                imgs.forEach(im => { if (im) ctx.drawImage(im, 0, 0, CLOTH_W, CLOTH_H); });
+                tex.needsUpdate = true;
+                logLuaOutput('info', 'Одежда: загружено слоёв ' + imgs.filter(Boolean).length + ' из ' + layers.length);
+            });
+            _clothTexCache[key] = tex;
+            return tex;
+        }
+
         // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
         function buildMeshFromObj(o, geoCache, matCache) {
             const geoKey = o.shape + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
@@ -2061,9 +2248,28 @@
                     });
                 }
             }
-            const mat = matCache[matKey];
+            let mat = matCache[matKey];
+            // Особые материалы (металлы, Neon) и MaterialVariant — только для сплошных мешей
+            if (!Array.isArray(mat) && !texId && (o.mvar || MATERIAL_STYLE[o.material])) {
+                const mk = 'mat_' + o.material + '_' + (o.mvar ? o.mvar.name : '') + '_' + (o.color || '') + '_' + op.toFixed(1)
+                    + '_' + Math.round(((o.sx || 1) + (o.sz || 1)) * 4);
+                if (!matCache[mk]) matCache[mk] = makeStyledMaterial(o, op);
+                mat = matCache[mk];
+            }
 
-            const mesh = new THREE.Mesh(geo, mat);
+            let meshGeo = geo, meshMat = mat;
+            if (o.cloth && qualitySettings.textures && isBoxShape && CLOTH_REGIONS[o.cloth.limb]) {
+                meshGeo = makeClothGeometry(o, geo);
+                const ck = 'cloth_' + (o.color || '') + '_' + (o.cloth.shirt || '') + '_' + (o.cloth.pants || '') + '_' + op.toFixed(1);
+                if (!matCache[ck]) {
+                    matCache[ck] = new THREE.MeshLambertMaterial({
+                        color: '#ffffff', transparent: op < 1.0, opacity: op,
+                        map: getClothTexture(o.color, o.cloth.shirt, o.cloth.pants),
+                    });
+                }
+                meshMat = matCache[ck];
+            }
+            const mesh = new THREE.Mesh(meshGeo, meshMat);
             // SpecialMesh.Offset — сдвиг меша в ЛОКАЛЬНЫХ осях детали
             let bpx = o.px || 0, bpy = o.py || 0, bpz = o.pz || 0;
             if (o.meshOffset) {
@@ -2223,15 +2429,17 @@
             updateInventoryCount();
 
             // Обновляем выделение если было
-            if (selectedRef && sceneObjs[selectedRef]) {
+            if (selectedRefs.size || (selectedRef && sceneObjs[selectedRef])) {
                 highlightSelected(selectedRef);
             }
         }
 
         function highlightSelected(ref) {
+            const selSet = new Set(selectedRefs);
+            if (ref) selSet.add(ref);
             for (const [r, mesh] of Object.entries(sceneObjs)) {
                 // ФИКС: импортированные 3D-аватары (importAvatarIntoScene)
-                const isSelected = parseInt(r) === ref;
+                const isSelected = selSet.has(parseInt(r));
                 const applyEmissive = (m) => {
                     if (!m || !m.material) return;
                     const mats = Array.isArray(m.material) ? m.material : [m.material];
@@ -2251,10 +2459,13 @@
                 scene.remove(window._selBox);
                 window._selBox = null;
             }
-            if (ref && sceneObjs[ref]) {
-                const box = new THREE.BoxHelper(sceneObjs[ref], 0xff6600);
-                scene.add(box);
-                window._selBox = box;
+            // Рамки — только у первых 100 выбранных, иначе выделение целой карты тормозит.
+            const boxRefs = [...selSet].filter(r => sceneObjs[r]).slice(0, 100);
+            if (boxRefs.length) {
+                const group = new THREE.Group();
+                boxRefs.forEach(r => group.add(new THREE.BoxHelper(sceneObjs[r], 0xff6600)));
+                scene.add(group);
+                window._selBox = group;
             }
         }
 
@@ -5534,6 +5745,32 @@ end
             return 'calc(' + ((u.scale || 0) * 100) + '% + ' + (u.offset || 0) + 'px)';
         }
 
+        // UICorner: Scale считается от МЕНЬШЕЙ стороны элемента, а радиус не
+        // больше половины меньшей стороны (Roblox). CSS-проценты считаются
+        // отдельно по ширине и высоте — получался эллипс: ползунок-«линза»,
+        // овальные поля и кнопки. Пересчитываем в пиксели по реальному размеру.
+        function applyCornerRadius(el, udims) {
+            const conv = (u, m) => {
+                u = u || {};
+                return Math.max(0, Math.min((u.scale || 0) * m + (u.offset || 0), m / 2)) + 'px';
+            };
+            if (udims.every(u => !u || !u.scale)) {
+                el.style.borderRadius = udims.map(u => ((u && u.offset) || 0) + 'px').join(' ');
+                return;
+            }
+            const upd = () => {
+                const m = Math.min(el.clientWidth || el.offsetWidth, el.clientHeight || el.offsetHeight);
+                if (!m) return;
+                el.style.borderRadius = udims.map(u => conv(u, m)).join(' ');
+            };
+            upd();
+            if (typeof ResizeObserver !== 'undefined') {
+                if (el._cornerRO) el._cornerRO.disconnect();
+                el._cornerRO = new ResizeObserver(upd);
+                el._cornerRO.observe(el);
+            }
+        }
+
         // Применяет UICorner/UIStroke к DOM-элементу их РОДИТЕЛЯ.
         function applyGuiDecoration(parentEl, decoProps) {
             if (!parentEl || !decoProps) return;
@@ -5541,13 +5778,11 @@ end
                 // Часть файлов хранит один общий CornerRadius, часть (в
                 if (decoProps.TopLeftRadius || decoProps.TopRightRadius ||
                     decoProps.BottomLeftRadius || decoProps.BottomRightRadius) {
-                    const tl = udimToCssLength(decoProps.TopLeftRadius);
-                    const tr = udimToCssLength(decoProps.TopRightRadius);
-                    const br = udimToCssLength(decoProps.BottomRightRadius);
-                    const bl = udimToCssLength(decoProps.BottomLeftRadius);
-                    parentEl.style.borderRadius = tl + ' ' + tr + ' ' + br + ' ' + bl;
+                    applyCornerRadius(parentEl, [decoProps.TopLeftRadius, decoProps.TopRightRadius,
+                        decoProps.BottomRightRadius, decoProps.BottomLeftRadius]);
                 } else {
-                    parentEl.style.borderRadius = udimToCssLength(decoProps.CornerRadius);
+                    const cr = decoProps.CornerRadius;
+                    applyCornerRadius(parentEl, [cr, cr, cr, cr]);
                 }
             } else if (decoProps.cls === 'UIStroke') {
                 if (decoProps.Enabled === false) return;
@@ -6146,6 +6381,8 @@ end
         }
 
         function renderTree() {
+            const et = document.getElementById('explorer-title');
+            if (et) et.textContent = 'Explorer' + (selectedRefs.size > 1 ? ' (' + selectedRefs.size + ')' : '');
             const c = document.getElementById('tree');
             c.innerHTML = '';
             for (const n of treeData) {
@@ -6163,7 +6400,7 @@ end
             if (!isVisible) return;
 
             const row = document.createElement('div');
-            row.className = 'tree-node' + (node.ref === selectedRef ? ' selected' : '');
+            row.className = 'tree-node' + (selectedRefs.has(node.ref) ? ' selected' : '');
             row.style.paddingLeft = (depth * 14 + 2) + 'px';
 
             const arrow = document.createElement('span');
@@ -6197,7 +6434,10 @@ end
             }
             label.title = node.cls;
 
-            row.onclick = () => selectRef(node.ref);
+            row.onclick = (e) => selectRef(node.ref, {
+                additive: e.ctrlKey || e.metaKey || multiSelectMode,
+                range: e.shiftKey
+            });
             row.appendChild(label);
 
             parentEl.appendChild(row);
@@ -6231,13 +6471,53 @@ end
         }
 
         // ============ ВЫБОР ОБЪЕКТА ============
-        async function selectRef(ref) {
+        // Строки Explorer в порядке отображения (для диапазона по Shift+клик).
+        function visibleRefs() {
+            const out = [];
+            const walk = (n) => {
+                const matches = !searchText || n.name.toLowerCase().includes(searchText) ||
+                    n.cls.toLowerCase().includes(searchText);
+                if (!(matches || (searchText && n.children.some(anyMatch)))) return;
+                out.push(n.ref);
+                if (expanded.has(n.ref)) n.children.forEach(walk);
+            };
+            treeData.forEach(walk);
+            return out;
+        }
+
+        // opts.additive (Ctrl/⌘/режим мультивыбора) — добавить или убрать объект из выделения,
+        // opts.range (Shift) — выделить всё от якоря до объекта в порядке Explorer.
+        async function selectRef(ref, opts) {
+            opts = opts || {};
             await saveCurrentScriptIfDirty(); // иначе несохранённые правки терялись при переключении объекта
-            selectedRef = ref;
-            highlightSelected(ref);
+            if (opts.range && selAnchorRef !== null && selAnchorRef !== ref) {
+                const order = visibleRefs();
+                const a = order.indexOf(selAnchorRef), b = order.indexOf(ref);
+                if (a >= 0 && b >= 0) {
+                    selectedRefs = new Set(order.slice(Math.min(a, b), Math.max(a, b) + 1));
+                    selectedRef = ref;
+                } else {
+                    selectedRefs = new Set([ref]); selectedRef = ref; selAnchorRef = ref;
+                }
+            } else if (opts.additive) {
+                if (selectedRefs.has(ref)) {
+                    selectedRefs.delete(ref);
+                    if (selectedRef === ref) selectedRef = selectedRefs.size ? [...selectedRefs].pop() : null;
+                } else {
+                    selectedRefs.add(ref);
+                    selectedRef = ref;
+                }
+                selAnchorRef = ref;
+                if (selectedRef === null) { deselect(); return; }
+            } else {
+                selectedRefs = new Set([ref]);
+                selectedRef = ref;
+                selAnchorRef = ref;
+            }
+            highlightSelected(selectedRef);
             renderTree();
             updateInventoryCount();
-            const r = await api('GET', '/api/instance/' + ref);
+            const r = await api('GET', '/api/instance/' + selectedRef);
             if (!r.ok) return;
             renderProps(r);
         }
@@ -6245,12 +6525,20 @@ end
         function deselect() {
             saveCurrentScriptIfDirty(); // fire-and-forget — иначе клик мимо объекта тоже терял правки
             selectedRef = null;
+            selectedRefs = new Set();
+            selAnchorRef = null;
             currentScriptRef = null;
             currentScriptOrigSource = null;
             highlightSelected(null);
             renderTree();
             updateInventoryCount();
             document.getElementById('tab-props').innerHTML = '<p style="color:#6b7280;font-size:12px;padding:8px">' + t('props_placeholder') + '</p>';
+        }
+
+        function toggleMultiSelect() {
+            multiSelectMode = !multiSelectMode;
+            const b = document.getElementById('multisel-btn');
+            if (b) b.classList.toggle('active', multiSelectMode);
         }
 
         // ============ ПРОСЛУШАТЬ ЗВУК ИЗ EXPLORER (вне Play) ============
@@ -6368,7 +6656,7 @@ end
             container.style.cssText = 'margin-bottom:4px;padding:4px;background:#111827;border-radius:4px';
 
             const label = document.createElement('div');
-            label.style.cssText = 'font-size:11px;color:#9ca3af;margin-bottom:4px;font-weight:bold';
+            label.style.cssText = 'font-size:calc(11px*var(--fs));color:#9ca3af;margin-bottom:4px;font-weight:bold';
             label.textContent = propName;
             container.appendChild(label);
 
@@ -6376,22 +6664,23 @@ end
             const colors = ['#ef4444', '#22c55e', '#3b82f6'];
 
             const row = document.createElement('div');
-            row.style.cssText = 'display:flex;gap:4px';
+            row.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(calc(96px*var(--fs)),1fr));gap:4px';
 
             coords.forEach((coord, i) => {
                 const inputGroup = document.createElement('div');
                 inputGroup.style.cssText = 'flex:1;display:flex;align-items:center;gap:2px';
 
                 const coordLabel = document.createElement('span');
-                coordLabel.style.cssText = 'font-size:10px;color:' + colors[i] + ';font-weight:bold;min-width:12px';
+                coordLabel.style.cssText = 'font-size:calc(11px*var(--fs));color:' + colors[i] + ';font-weight:bold;min-width:12px';
                 coordLabel.textContent = coord.toUpperCase();
 
                 const input = document.createElement('input');
                 input.className = 'prop-val';
                 input.type = 'number';
                 input.step = propName === 'Rotation' ? '1' : '0.1';
-                input.value = typeof value === 'object' ? (value[coord] || 0) : 0;
-                input.style.cssText = 'font-size:11px;padding:2px 4px';
+                input.value = typeof value === 'object' ? (Math.round((value[coord] || 0) * 10000) / 10000) : 0; // без хвоста float — влезает в поле
+                input.inputMode = 'decimal';
+                input.style.cssText = 'min-width:0';
 
                 input.onchange = async () => {
                     const newValue = { ...value };
@@ -6455,6 +6744,27 @@ end
                     inp.click();
                 };
                 row.appendChild(pr);
+            } else if (typeof v === 'number' && ['Transparency', 'Reflectance', 'BackgroundTransparency', 'TextTransparency', 'ImageTransparency'].includes(k)) {
+                // Ползунок 0..1 + числовое поле
+                const rng = document.createElement('input');
+                rng.type = 'range'; rng.min = 0; rng.max = 1; rng.step = 0.01;
+                rng.value = v; rng.className = 'prop-range';
+                const num = document.createElement('input');
+                num.className = 'prop-val prop-num';
+                num.type = 'number'; num.step = '0.01'; num.inputMode = 'decimal';
+                num.value = Math.round(v * 1000) / 1000;
+                const commit = () => {
+                    let x = parseFloat(num.value);
+                    if (isNaN(x)) return;
+                    x = Math.max(0, Math.min(1, x));
+                    rng.value = x; num.value = x;
+                    setProp(ref, k, x).then(() => { if (k === 'Transparency' || k === 'Reflectance') reloadScene(); });
+                };
+                rng.oninput = () => { num.value = rng.value; };
+                rng.onchange = () => { num.value = rng.value; commit(); };
+                num.onchange = commit;
+                row.appendChild(rng);
+                row.appendChild(num);
             } else {
                 const inp = document.createElement('input');
                 inp.className = 'prop-val';
@@ -6593,6 +6903,132 @@ end
             notify(ok ? t('notify_saved_simple') : t('notify_save_cancelled'), ok ? undefined : 'err');
         };
 
+        // ============ RBXM: ЭКСПОРТ ВЫБРАННЫХ ОБЪЕКТОВ / ИМПОРТ МОДЕЛИ ============
+        // Выбранные объекты в порядке Explorer (сервер сам отбрасывает вложенные дубли).
+        function selectedRefsInTreeOrder() {
+            const order = new Map();
+            (function walk(nodes) { nodes.forEach(n => { order.set(n.ref, order.size); walk(n.children || []); }); })(treeData);
+            return [...selectedRefs].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+        }
+
+        function exportSelectedRbxm() {
+            if (!selectedRefs.size) { notify(t('notify_not_selected'), 'warn'); return; }
+            let base = 'model';
+            if (selectedRefs.size === 1 && treeByRef[selectedRef]) base = treeByRef[selectedRef].name || base;
+            base = base.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'model';
+            showModal('<h3>' + t('rbxm_export_title', { n: selectedRefs.size }) + '</h3>' +
+                '<input id="rbxm-name" placeholder="' + t('fb_name_ph') + '" value="' + esc(base) + '.rbxm">' +
+                '<div class="modal-row">' +
+                '<button onclick="confirmExportRbxm()" style="background:#065f46">' + t('btn_save') + '</button>' +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
+                '</div>');
+        }
+
+        async function confirmExportRbxm() {
+            const nm = document.getElementById('rbxm-name');
+            let name = (nm && nm.value.trim()) || 'model.rbxm';
+            if (!/\.rbxm$/i.test(name)) name += '.rbxm';
+            closeModal();
+            const refs = selectedRefsInTreeOrder();
+
+            if (window.AndroidBridge && typeof window.AndroidBridge.getDataDir === 'function' &&
+                typeof window.AndroidBridge.exportRbxlFile === 'function') {
+                // Android: как в confirmSaveAs — файл во временную папку приложения, дальше SAF.
+                const tempPath = window.AndroidBridge.getDataDir() + '/export_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
+                const r = await api('POST', '/api/export/rbxm', { refs: refs, path: tempPath });
+                if (!r.ok) { notify(r.error || t('notify_error'), 'err'); return; }
+                if (r.warnings && r.warnings.length) notify(t('notify_rbxm_warn', { msg: r.warnings[0] }), 'warn');
+                window.AndroidBridge.exportRbxlFile(tempPath, name);
+                return;
+            }
+
+            // Браузер: сначала fetch (чтобы показать ошибку, а не скачать JSON под видом .rbxm), затем загрузка.
+            try {
+                const resp = await fetch('/api/export/rbxm?refs=' + refs.join(',') + '&name=' + encodeURIComponent(name));
+                if (!resp.ok) {
+                    let msg = t('notify_error');
+                    try { msg = (await resp.json()).error || msg; } catch (e) { }
+                    notify(msg, 'err');
+                    return;
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+                notify(t('notify_rbxm_exported', { n: resp.headers.get('X-Rbxm-Count') || refs.length }));
+                let warns = [];
+                try { warns = JSON.parse(decodeURIComponent(resp.headers.get('X-Rbxm-Warnings') || '[]')); } catch (e) { }
+                if (warns.length) notify(t('notify_rbxm_warn', { msg: warns[0] }), 'warn');
+            } catch (err) {
+                console.error('Экспорт rbxm:', err);
+                notify(t('notify_error'), 'err');
+            }
+        }
+
+        // Куда вставлять: в выбранный контейнер (Model/Folder/объект с детьми), иначе сервер берёт Workspace.
+        function rbxmImportParent() {
+            const n = selectedRef !== null ? treeByRef[selectedRef] : null;
+            if (n && ((n.children && n.children.length) || ['Model', 'Folder', 'Workspace'].includes(n.cls))) return n.ref;
+            return null;
+        }
+
+        async function afterRbxmImport(r) {
+            if (!r.ok) { notify(r.error || t('notify_error'), 'err'); return; }
+            await loadTree();
+            const roots = r.roots || [];
+            if (roots.length) {
+                // раскрыть путь до новых объектов и выделить их все
+                let par = parentByRef[roots[0]];
+                while (par !== undefined && par !== null && par !== -1) { expanded.add(par); par = parentByRef[par]; }
+                selectedRefs = new Set(roots);
+                selectedRef = roots[roots.length - 1];
+                selAnchorRef = selectedRef;
+                highlightSelected(selectedRef);
+                renderTree();
+                updateInventoryCount();
+                const pr = await api('GET', '/api/instance/' + selectedRef);
+                if (pr.ok) renderProps(pr);
+            }
+            notify(t('notify_rbxm_imported', { n: r.count }));
+            if (r.warnings && r.warnings.length) notify(t('notify_rbxm_warn', { msg: r.warnings[0] }), 'warn');
+        }
+
+        function importRbxm() {
+            if (window.AndroidBridge && typeof window.AndroidBridge.pickRbxlFile === 'function') {
+                // Тот же SAF-пикер (type */*), но результат уходит в /api/import/rbxm — см. onAndroidFileImported.
+                window._rbxmImportPending = true;
+                window.AndroidBridge.pickRbxlFile();
+                return;
+            }
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.rbxm';
+            fileInput.style.display = 'none';
+            document.body.appendChild(fileInput);
+            fileInput.addEventListener('change', async function (event) {
+                const file = event.target.files[0];
+                document.body.removeChild(fileInput);
+                if (!file) return;
+                const formData = new FormData();
+                formData.append('file', file);
+                const parent = rbxmImportParent();
+                if (parent !== null) formData.append('parent', String(parent));
+                try {
+                    const resp = await fetch('/api/import/rbxm/upload', { method: 'POST', body: formData });
+                    await afterRbxmImport(await resp.json());
+                } catch (err) {
+                    console.error('Импорт rbxm:', err);
+                    notify(t('notify_error'), 'err');
+                }
+            });
+            fileInput.click();   // синхронно, в рамках клика — иначе браузер откажет
+        }
+
         // Открытие .rbxl/.rbxlx нативным способом ОС вместо /api/browse.
         function pickRbxlFileForOpen() {
             // ВАЖНО: здесь раньше стояли блокирующие alert() между кликом
@@ -6649,8 +7085,15 @@ end
 
         // Вызывается из Kotlin (MainActivity.AndroidBridge) после того как
         window.onAndroidFileImported = async function (path, errMsg) {
+            const wasRbxmImport = !!window._rbxmImportPending;
+            window._rbxmImportPending = false;
             if (!path) {
                 notify(errMsg || t('notify_error'), 'err');
+                return;
+            }
+            if (wasRbxmImport) {
+                const parent = rbxmImportParent();
+                await afterRbxmImport(await api('POST', '/api/import/rbxm', { path: path, parent: parent }));
                 return;
             }
             const r = await api('POST', '/api/open', { path: path });
@@ -6677,6 +7120,7 @@ end
                 return;
             }
             selectedRef = null;
+            selectedRefs = new Set();
             expanded.clear();
             window._avatarMeshCache = {};
             await loadTree();
@@ -6754,6 +7198,7 @@ end
             if (r.ok) {
                 notify(t('notify_deleted'));
                 selectedRef = null;
+                selectedRefs = new Set();
                 loadTree();
             }
         }

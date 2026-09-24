@@ -47,6 +47,10 @@
                 data-i18n="tb_save">💾 Save</span></button>
         <button onclick="openFileBrowser('save')" data-i18n-title="tb_saveas_title" title="Save as"><span
                 data-i18n="tb_saveas">💾 As...</span></button>
+        <button onclick="importRbxm()" data-i18n-title="tb_import_title" title="Import a model (.rbxm) into the scene"><span
+                data-i18n="tb_import">📥 Import</span></button>
+        <button onclick="exportSelectedRbxm()" data-i18n-title="tb_export_title" title="Export the selected objects to a model (.rbxm)"><span
+                data-i18n="tb_export">📤 Export</span></button>
         <div class="sep"></div>
         <button onclick="showAddDialog()" data-i18n-title="tb_addobj_title" title="Add object"><span
                 data-i18n="tb_add">➕ Add</span></button>
@@ -84,8 +88,10 @@
     <div id="main">
         <div id="explorer">
             <div id="explorer-header">
-                <span>Explorer</span>
+                <span id="explorer-title">Explorer</span>
                 <div>
+                    <button id="multisel-btn" onclick="toggleMultiSelect()" data-i18n-title="exp_multisel_title"
+                        title="Multi-select mode">☑</button>
                     <button onclick="collapseAll()" data-i18n-title="exp_collapse_title" title="Collapse all">◢</button>
                     <button onclick="expandAllVisible()" data-i18n-title="exp_expand_title"
                         title="Expand all">◣</button>

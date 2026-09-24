@@ -48,16 +48,19 @@ A global `state` dict in `app.py`: `parsed` (the `parse_rbxl` result), `file_pat
 
 ### `parsed` format
 Keys the code relies on (do not break them): `referent_to_class`, `parent_map`, `props`, plus internal `_raw_chunks`, `_raw_data`, `_modified`.
-`save_rbxl` makes a **byte-for-byte copy** of the original when `_modified` is not set, and a **full rebuild** of the chunks (INST / PRNT / PROP) when it is. Any endpoint that changes `props`, `parent_map` or `referent_to_class` must set `parsed['_modified'] = True`, otherwise the changes will not be saved.
+`save_rbxl` makes a **byte-for-byte copy** of the original when `_modified` is not set, and a **full rebuild** (`build_rbx_binary`, the same writer that `export_rbxm` uses) when it is. Any endpoint that changes `props`, `parent_map` or `referent_to_class` must set `parsed['_modified'] = True`, otherwise the changes will not be saved.
 
 ### Parser (`rbxl_parser.py`)
+- `parse_rbxl` also records `prop_types` (`(class, prop) → type_id` as found in the file), `shared_strings` (SSTR), `service_refs` and `skipped_props`. The writer uses the recorded type instead of guessing from the Python value (an enum or referent looks like a plain int). Parser-added helper keys (`Position`/`Rotation` of parts, `Color3`, `Transparency`, `_assets`, derived `Size`) are not real properties and must not be written; see `_writable_props`.
+- A property array covers **all instances of a class**, and Studio omits properties whose value is the default, so instances that lack a property get its default from the embedded `_DEFAULTS_B64` table (from `rbx_reflection_database`, MIT; a property absent from the table defaults to 0/false/empty). Binary names differ from reflection names for a few properties (`_BINARY_TO_REFLECTION_NAME`).
+- rbxm: `export_rbxm` (selected objects + descendants, no services, referents renumbered, references to objects outside the selection become nil) and `import_rbxm` (merges into `parsed` under a parent, remaps referent and SharedString properties). Binary only; XML (`.rbxmx`) is rejected.
 - `TYPE_DECODERS` / `TYPE_SERIALIZERS` map `type_id → function`. Decoders are named `t_*`, serializers `s_*`. When adding a property type, add **both** functions and register them in **both** tables, otherwise saving will drop or corrupt the property.
 - Low-level primitives: LZ4 decompression, interleaved arrays (u32/u64/float), the Roblox float format, delta-encoded referents, zigzag transforms (`transform_i32` / `untransform_i32`, etc.). Every read/write pair must be an exact inverse of each other.
-- To verify any parser change: open → save → open again, and compare the results on `Castle Warfare.rbxl`.
+- To verify any parser change: open → save → open again, and compare the results on `Castle Warfare.rbxl`. A self-roundtrip cannot catch a wrong header or wrong type ids (the parser and the writer would agree with each other), so also load the saved file with an independent reader such as `rbx_binary` from rbx-dom.
 
 ### API (`app.py`, `@flask_app.route` decorators)
 Endpoint groups:
-- Files: `/api/open`, `/api/open/upload`, `/api/new`, `/api/save`, `/api/save/download`, `/api/browse`, `/api/publish`
+- Files: `/api/open`, `/api/open/upload`, `/api/new`, `/api/save`, `/api/save/download`, `/api/browse`, `/api/publish`, `/api/export/rbxm` (GET download / POST to path), `/api/import/rbxm` (by path), `/api/import/rbxm/upload`
 - Tree and instances: `/api/tree`, `/api/all_instances`, `/api/scripts`, `/api/gui_tree`, `/api/scene`, `/api/spawn`, `/api/instance` (GET/POST/PUT/DELETE)
 - Roblox: `/api/roblox/*` (userid, auth-status, logout, api-key, avatar3d/*), `/api/asset-proxy`
 - Utility: `/api/status`, `/api/log`, `/api/log/list`, `/api/log/<name>`, `/vendor/<path>`, `/icons/<path>`, `/`

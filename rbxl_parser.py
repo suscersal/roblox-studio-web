@@ -55,7 +55,11 @@ def read_chunks(path):
         name = data[pos:pos+4]
         compsize = int.from_bytes(data[pos+4:pos+8], 'little')
         uncompsize = int.from_bytes(data[pos+8:pos+12], 'little')
-        raw = data[pos+16:pos+16+compsize]
+        # compsize == 0 по спецификации значит «чанк не сжат»: сами данные
+        # лежат сразу за заголовком и занимают uncompsize байт (так хранится
+        # END-чанк, и так же пишут файлы, например, Rojo без сжатия).
+        stored_len = compsize if compsize else uncompsize
+        raw = data[pos+16:pos+16+stored_len]
         payload = None
         if compsize == 0:
             payload = raw[:uncompsize]
@@ -95,14 +99,18 @@ def read_chunks(path):
         })
         if name == b'END\x00':
             break
-        pos += 16 + compsize
+        pos += 16 + stored_len
     return chunks
 
 
 def write_chunk(name: bytes, payload: bytes) -> bytes:
+    # Несжатый чанк: compressed length = 0, uncompressed length = len(payload)
+    # (см. комментарий в read_chunks). Раньше сюда писали len(payload) в оба
+    # поля — формально это «сжатый» чанк, который настоящие читатели пытаются
+    # распаковать как LZ4.
     header = struct.pack('<4sIII',
         name,
-        len(payload),
+        0,
         len(payload),
         0
     )
@@ -290,15 +298,49 @@ def parse_inst(payload):
     referents = read_referents(ref_buf, instance_count)
     return class_id, class_name, object_format, referents
 
-def write_inst(class_id: int, class_name: str, referents: list) -> bytes:
+def write_inst(class_id: int, class_name: str, referents: list, service_flags=None) -> bytes:
     buf = bytearray()
     buf.extend(struct.pack('<I', class_id))
     name_bytes = class_name.encode('utf-8')
     buf.extend(struct.pack('<I', len(name_bytes)))
     buf.extend(name_bytes)
-    buf.append(0)
+    # object_format 1 = у класса есть сервисы: после referent'ов идёт по
+    # байту-флагу на каждый инстанс (1 — это сервис, например Workspace).
+    has_services = bool(service_flags) and any(service_flags)
+    buf.append(1 if has_services else 0)
     buf.extend(struct.pack('<I', len(referents)))
     buf.extend(write_referents(referents))
+    if has_services:
+        buf.extend(bytes(1 if f else 0 for f in service_flags))
+    return bytes(buf)
+
+
+def parse_inst_service_flags(payload, count):
+    """Флаги «этот инстанс — сервис» из INST-чанка с object_format == 1."""
+    name_len = int.from_bytes(payload[4:8], 'little')
+    pos = 8 + name_len + 1 + 4 + 4 * count
+    return list(payload[pos:pos + count])
+
+
+def parse_sstr(payload):
+    """SSTR-чанк -> список (md5-хеш 16 байт, данные). Индекс в списке — это
+    значение свойств типа SharedString (0x1c)."""
+    count = int.from_bytes(payload[4:8], 'little')
+    pos = 8
+    out = []
+    for _ in range(count):
+        h = payload[pos:pos + 16]; pos += 16
+        ln = int.from_bytes(payload[pos:pos + 4], 'little'); pos += 4
+        out.append((h, payload[pos:pos + ln])); pos += ln
+    return out
+
+
+def write_sstr(strings):
+    buf = bytearray(struct.pack('<II', 0, len(strings)))
+    for h, data in strings:
+        buf.extend(h)
+        buf.extend(struct.pack('<I', len(data)))
+        buf.extend(data)
     return bytes(buf)
 
 def parse_prnt(payload):
@@ -537,7 +579,12 @@ def t_font(buf, count):
 # ====================== TYPE SERIALIZERS (write) ======================
 
 def s_string(vals):
-    return write_string_array([str(v) if v is not None else '' for v in vals])
+    # bytes (не-UTF-8 строки, например AttributesSerialize) остаются как есть:
+    # раньше str(v) превращал их в литерал "b'...'" и портил данные при записи.
+    return write_string_array([
+        v if isinstance(v, (str, bytes)) else ('' if v is None else str(v))
+        for v in vals
+    ])
 
 def s_bool(vals):
     return bytes([1 if v else 0 for v in vals])
@@ -849,6 +896,536 @@ TYPE_SERIALIZERS = {
 }
 
 
+def _infer_type_id(sample_value):
+    """Угадывает type_id по Python-значению. Только запасной вариант для
+    свойств, тип которых не известен из файла (созданных в редакторе)."""
+    type_id = 0x01
+    if sample_value is not None:
+        if isinstance(sample_value, str):
+            type_id = 0x01
+        elif isinstance(sample_value, bool):
+            type_id = 0x02
+        elif isinstance(sample_value, int):
+            type_id = 0x03
+        elif isinstance(sample_value, float):
+            type_id = 0x04
+        elif isinstance(sample_value, dict):
+            if 'r' in sample_value and 'g' in sample_value and 'b' in sample_value:
+                r = sample_value.get('r', 0)
+                if isinstance(r, float) and r <= 1.0:
+                    type_id = 0x0c
+                else:
+                    type_id = 0x1a
+            elif 'matrix' in sample_value or 'position' in sample_value:
+                type_id = 0x10
+            elif 'x' in sample_value and 'y' in sample_value and 'z' in sample_value:
+                type_id = 0x0e
+            elif 'x' in sample_value and 'y' in sample_value:
+                # UDim2 (x/y — вложенные {scale, offset}) отличаем от
+                # Vector2 (x/y — голые числа, например GuiObject.
+                # AnchorPoint — то, что реально есть почти в любом
+                # UI-меню). Раньше здесь безусловно делали
+                # sample_value.get('x', {}) и тут же проверяли
+                # 'scale' in <результат> — для Vector2 результат был
+                # float, а не dict, и "in" на float падал с
+                # TypeError, спуская ЛЮБОЕ сохранение файла с хотя бы
+                # одним Vector2-свойством где-то в дереве.
+                xval = sample_value.get('x')
+                if isinstance(xval, dict) and 'scale' in xval:
+                    type_id = 0x07
+                else:
+                    type_id = 0x0d
+            elif 'scale' in sample_value and 'offset' in sample_value:
+                type_id = 0x06
+            elif 'index' in sample_value and 'time' in sample_value:
+                type_id = 0x1f
+            elif 'family' in sample_value:
+                type_id = 0x20
+            elif 'min' in sample_value and 'max' in sample_value:
+                type_id = 0x17
+            else:
+                type_id = 0x01
+    return type_id
+
+
+# ====================== Запись бинарного формата (rbxl / rbxm) ======================
+
+RBX_MAGIC = b'<roblox!\x89\xff\r\n\x1a\n\x00\x00'   # сигнатура + версия формата (u16 = 0)
+
+# Служебные ключи, которые parse_rbxl добавляет для удобства редактора — в
+# реальном файле таких свойств нет, писать их нельзя.
+_SYNTHETIC_PROPS = {'_assets'}
+# Производные имена: настоящее свойство лежит под другим именем (size,
+# Color3uint8/BrickColor, TextureID...). Пишем их, только если файл сам
+# содержал свойство с таким именем у этого класса.
+_DERIVED_PROPS = {'Size', 'Color3', 'Transparency', 'Texture', 'Decal'}
+# Значения свойств по умолчанию (только отличающиеся от нулевых), из
+# rbx_reflection_database (rojo-rbx/rbx-dom, MIT). Studio не пишет свойства,
+# у которых все объекты класса имеют дефолт, поэтому у импортированных или
+# созданных объектов их нет, а массив свойства в файле обязан покрывать все
+# объекты класса. Формат: {класс: {свойство: значение}}, zlib+base64.
+_DEFAULTS_B64 = (
+    "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"
+)
+_defaults_cache = None
+# В файле эти свойства лежат под другими именами, чем в базе рефлексии.
+_BINARY_TO_REFLECTION_NAME = {'Color3uint8': 'Color', 'size': 'Size', 'shape': 'Shape', 'formFactorRaw': 'FormFactor'}
+
+
+def _class_defaults(cls):
+    global _defaults_cache
+    if _defaults_cache is None:
+        import zlib, base64, json
+        _defaults_cache = json.loads(zlib.decompress(base64.b64decode(_DEFAULTS_B64)))
+    return _defaults_cache.get(cls, {})
+
+
+
+
+def _norm_cframe(cf):
+    """CFrame в двух внутренних видах -> {'matrix': 9 чисел, 'position': {...}}.
+    Парсер отдаёт 9 чисел + position, а редактор при правке Rotation/Position
+    пишет 12 чисел построчно (r00 r01 r02 px r10 ...)."""
+    if isinstance(cf, dict):
+        mat = cf.get('matrix')
+        if isinstance(mat, (list, tuple)) and len(mat) >= 12:
+            m = [float(x) for x in mat[:12]]
+            return {
+                'matrix': [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]],
+                'position': {'x': m[3], 'y': m[7], 'z': m[11]},
+            }
+    return cf
+
+
+def _writable_props(cls, p, known):
+    """Оставляет только то, что реально существует как свойство в файле Roblox.
+    known — имена свойств этого класса, увиденные в исходном файле."""
+    out = {}
+    has_cframe = 'CFrame' in p
+    for name, val in p.items():
+        if name in _SYNTHETIC_PROPS:
+            continue
+        # У частей Position/Rotation — производные от CFrame, а у GuiObject
+        # это настоящие свойства (UDim2 / float): их отличает CFrame.
+        if name in ('Position', 'Rotation') and has_cframe and name not in known:
+            continue
+        if known and name not in known and name in _DERIVED_PROPS:
+            continue
+        out[name] = val
+    # Часть, созданная в редакторе: есть CFrame и Size, но нет настоящих
+    # size/Color3uint8. (Без CFrame не трогаем: парсер сам подставляет
+    # дефолтный Size частям без size, это не пользовательские данные.)
+    sz = p.get('Size')
+    if has_cframe and 'size' not in p and 'Size' not in known and isinstance(sz, dict) and 'z' in sz:
+        out['size'] = sz
+        col = p.get('Color')
+        if ('Color3uint8' not in p and 'Color' not in known
+                and isinstance(col, dict) and all(k in col for k in 'rgb')):
+            out.pop('Color', None)
+            scale = 255 if all(float(col[k]) <= 1.0 for k in 'rgb') else 1
+            out['Color3uint8'] = {k: max(0, min(255, int(round(float(col[k]) * scale)))) for k in 'rgb'}
+    return out
+
+
+def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types=None,
+                     shared_strings=None, service_refs=None, renumber=True):
+    """Собирает бинарный .rbxl/.rbxm. Возвращает (bytes, warnings).
+
+    refs — какие инстансы писать и в каком порядке (по умолчанию все, по
+    возрастанию referent'а); родитель, которого нет в refs, превращается в
+    «нет родителя» (-1) — так у rbxm появляются корни. Referent'ы в файле
+    перенумеровываются 0..N-1 (renumber=True; для rbxm), либо остаются как
+    есть (renumber=False; для сохранения сцены — номера стабильны между
+    сохранениями). Ссылки-свойства (Part0, PrimaryPart...) на инстансы вне
+    refs становятся nil."""
+    warnings = []
+    refs = sorted(referent_to_class) if refs is None else [r for r in refs if r in referent_to_class]
+    idx = {r: i for i, r in enumerate(refs)} if renumber else {r: r for r in refs}
+    prop_types = prop_types or {}
+    shared_strings = shared_strings or []
+    service_refs = service_refs or ()
+    known = {}
+    for (c, n) in prop_types:
+        known.setdefault(c, set()).add(n)
+
+    class_order, by_class = [], {}
+    for r in refs:
+        c = referent_to_class[r]
+        if c not in by_class:
+            by_class[c] = []
+            class_order.append(c)
+        by_class[c].append(r)
+    class_id = {c: i for i, c in enumerate(class_order)}
+    if not renumber:
+        for c in class_order:
+            by_class[c].sort()   # как в исходных файлах: referent'ы класса по возрастанию
+
+    sstr_new, sstr_map = [], {}   # старый индекс SSTR -> новый
+
+    inst_chunks, prop_chunks = [], []
+    for c in class_order:
+        rs = by_class[c]
+        flags = [r in service_refs for r in rs]
+        inst_chunks.append(write_chunk(b'INST', write_inst(class_id[c], c, [idx[r] for r in rs], flags)))
+
+        per_prop = {}
+        for r in rs:
+            for name, val in _writable_props(c, props.get(r, {}), known.get(c, ())).items():
+                per_prop.setdefault(name, {})[r] = val
+
+        for name, ref_values in per_prop.items():
+            sample = next((v for v in ref_values.values() if v is not None), None)
+            type_id = prop_types.get((c, name)) or _infer_type_id(sample)
+            vals = [ref_values.get(r) for r in rs]
+            if None in vals:
+                cd = _class_defaults(c)
+                dv = cd.get(_BINARY_TO_REFLECTION_NAME.get(name, name))
+                if dv is None and type_id == 0x0b:
+                    dv = 194   # BrickColor 0 невалиден; 194 = Medium stone grey (серый по умолчанию)
+                if dv is not None:
+                    vals = [dv if v is None else v for v in vals]
+            try:
+                if type_id == 0x10:
+                    vals = [_norm_cframe(v) for v in vals]
+                elif type_id == 0x13:
+                    vals = [idx.get(v, -1) if v is not None else -1 for v in vals]
+                elif type_id == 0x1c:
+                    remapped = []
+                    for v in vals:
+                        if v is None or not (0 <= int(v) < len(shared_strings)):
+                            v = -1
+                        else:
+                            v = int(v)
+                            if v not in sstr_map:
+                                sstr_map[v] = len(sstr_new)
+                                sstr_new.append(shared_strings[v])
+                            v = sstr_map[v]
+                        remapped.append(v)
+                    # значения без SSTR-записи -> пустая строка в конце списка
+                    if any(v == -1 for v in remapped):
+                        empty = len(sstr_new)
+                        sstr_new.append((b'\x00' * 16, b''))
+                        remapped = [empty if v == -1 else v for v in remapped]
+                    vals = remapped
+                serializer = TYPE_SERIALIZERS.get(type_id)
+                if serializer is None:
+                    raise ValueError('нет сериализатора для типа 0x%02x' % type_id)
+                payload = write_prop_header(class_id[c], name, type_id) + serializer(vals)
+            except Exception as e:
+                warnings.append('%s.%s пропущено: %s' % (c, name, e))
+                continue
+            prop_chunks.append(write_chunk(b'PROP', payload))
+
+    pairs = []
+    for r in refs:
+        par = parent_map.get(r, -1)
+        pairs.append((idx[r], idx.get(par, -1)))
+
+    out = bytearray(RBX_MAGIC)
+    out.extend(struct.pack('<II', len(class_order), len(refs)))
+    out.extend(b'\x00' * 8)
+    if sstr_new:
+        out.extend(write_chunk(b'SSTR', write_sstr(sstr_new)))
+    for ch in inst_chunks:
+        out.extend(ch)
+    for ch in prop_chunks:
+        out.extend(ch)
+    if pairs:
+        out.extend(write_chunk(b'PRNT', write_prnt(pairs)))
+    out.extend(write_chunk(b'END\x00', b'</roblox>'))
+    return bytes(out), warnings
+
+
+# ====================== rbxm: экспорт выбранных объектов / импорт в сцену ======================
+
+# Сервисы нельзя положить в модель (rbxm — набор обычных инстансов). Основной
+# признак — флаги object_format из файла (parsed['service_refs']), это — запасной
+# список для файлов, где флагов нет.
+_CORE_SERVICES = {
+    'DataModel', 'Workspace', 'Lighting', 'ReplicatedStorage', 'ReplicatedFirst',
+    'ServerScriptService', 'ServerStorage', 'StarterGui', 'StarterPack',
+    'StarterPlayer', 'SoundService', 'Players', 'Teams', 'Chat', 'TextChatService',
+    'MaterialService', 'TweenService', 'RunService', 'HttpService',
+}
+
+
+def collect_subtree(parsed, root_refs):
+    """Выбранные корни -> (roots, refs). roots — без дублей и без потомков других
+    выбранных (иначе объект попал бы в файл дважды); refs — все инстансы
+    поддеревьев в порядке обхода в глубину (порядок детей как в сцене).
+    ValueError, если выбран сервис или несуществующий объект."""
+    r2c = parsed['referent_to_class']
+    pmap = parsed['parent_map']
+    services = parsed.get('service_refs') or ()
+
+    wanted = []
+    for r in root_refs:
+        r = int(r)
+        if r not in r2c:
+            raise ValueError('Объект %d не найден' % r)
+        if r in services or r2c[r] in _CORE_SERVICES:
+            raise ValueError('«%s» — сервис, его нельзя экспортировать как модель. '
+                             'Выберите объекты внутри него.' % parsed['props'].get(r, {}).get('Name', r2c[r]))
+        if r not in wanted:
+            wanted.append(r)
+    if not wanted:
+        raise ValueError('Ничего не выбрано')
+
+    chosen = set(wanted)
+    roots = []
+    for r in wanted:
+        par, guard, nested = pmap.get(r, -1), 0, False
+        while par in r2c and guard < 100000:
+            if par in chosen:
+                nested = True
+                break
+            par, guard = pmap.get(par, -1), guard + 1
+        if not nested:
+            roots.append(r)
+
+    children_of = {}
+    for child, parent in pmap.items():          # порядок dict = порядок детей (PRNT)
+        if child in r2c:
+            children_of.setdefault(parent, []).append(child)
+
+    refs, seen = [], set()
+    stack = list(reversed(roots))
+    while stack:
+        r = stack.pop()
+        if r in seen:
+            continue
+        seen.add(r)
+        refs.append(r)
+        stack.extend(reversed(children_of.get(r, [])))
+    return roots, refs
+
+
+def export_rbxm(parsed, root_refs):
+    """Выбранные объекты со всеми потомками -> байты .rbxm.
+    Возвращает (bytes, count, warnings)."""
+    roots, refs = collect_subtree(parsed, root_refs)
+    data, warnings = build_rbx_binary(
+        parsed['referent_to_class'], parsed['parent_map'], parsed['props'], refs=refs,
+        prop_types=parsed.get('prop_types'), shared_strings=parsed.get('shared_strings'),
+        renumber=True,
+    )
+    # Свойства, которые парсер не умеет читать, при открытии файла были
+    # потеряны — честно говорим об этом, а не молчим.
+    classes = {parsed['referent_to_class'][r] for r in refs}
+    lost = sorted({'%s.%s' % (c, n) for (c, n, _t) in parsed.get('skipped_props', []) if c in classes})
+    if lost:
+        warnings.append('не удалось прочитать при открытии файла и потому не попало в rbxm: ' + ', '.join(lost[:8])
+                        + (' …' if len(lost) > 8 else ''))
+    return data, len(refs), warnings
+
+
+def import_rbxm(parsed, path, parent=None):
+    """Читает .rbxm и добавляет его объекты в parsed под родителя parent.
+    Возвращает (новые_корни, количество_объектов, warnings)."""
+    with open(path, 'rb') as f:
+        head = f.read(16)
+    if not head.startswith(b'<roblox!'):
+        if head.lstrip().startswith(b'<roblox') or head.lstrip().startswith(b'<?xml'):
+            raise ValueError('XML-модели (.rbxmx) не поддерживаются — сохраните как бинарный .rbxm')
+        raise ValueError('Это не файл Roblox (.rbxm)')
+    other = parse_rbxl(path)
+    if other.get('service_refs'):
+        raise ValueError('В файле есть сервисы — это сцена (.rbxl), а не модель. Откройте её через Open.')
+    if not other['referent_to_class']:
+        raise ValueError('В файле нет объектов')
+
+    r2c, pmap, props = parsed['referent_to_class'], parsed['parent_map'], parsed['props']
+    if parent is None or parent == -1:
+        parent = next((r for r, c in r2c.items() if c == 'Workspace'), -1)
+    elif parent not in r2c:
+        raise ValueError('Родитель %s не найден' % parent)
+
+    base = max(r2c.keys(), default=-1) + 1
+    old_refs = sorted(other['referent_to_class'])
+    mapping = {old: base + i for i, old in enumerate(old_refs)}
+
+    parsed_types = parsed.setdefault('prop_types', {})
+    for k, v in other['prop_types'].items():
+        parsed_types.setdefault(k, v)
+    parsed.setdefault('skipped_props', []).extend(other.get('skipped_props', []))
+    sstr = parsed.setdefault('shared_strings', [])
+    sstr_offset = len(sstr)
+    sstr.extend(other.get('shared_strings', []))
+
+    import copy
+    for old in old_refs:
+        new = mapping[old]
+        cls = other['referent_to_class'][old]
+        r2c[new] = cls
+        pr = copy.deepcopy(other['props'].get(old, {}))
+        for name in list(pr):
+            tid = other['prop_types'].get((cls, name))
+            if tid == 0x13:            # ссылка на другой инстанс модели
+                pr[name] = mapping.get(pr[name], -1)
+            elif tid == 0x1c and pr[name] is not None:   # индекс в SSTR
+                pr[name] = pr[name] + sstr_offset
+        props[new] = pr
+
+    roots = []
+    # порядок детей = порядок записей PRNT исходного файла
+    for old in [r for r in other['parent_map'] if r in mapping] + \
+               [r for r in old_refs if r not in other['parent_map']]:
+        par = other['parent_map'].get(old, -1)
+        if par in mapping:
+            pmap[mapping[old]] = mapping[par]
+        else:
+            pmap[mapping[old]] = parent
+            roots.append(mapping[old])
+
+    parsed['_modified'] = True
+    warnings = []
+    if other.get('skipped_props'):
+        lost = sorted({'%s.%s' % (c, n) for (c, n, _t) in other['skipped_props']})
+        warnings.append('не удалось прочитать свойства: ' + ', '.join(lost[:8]) + (' …' if len(lost) > 8 else ''))
+    return roots, len(old_refs), warnings
+
+
 # ====================== Parse / Save ======================
 
 def parse_rbxl(path):
@@ -857,6 +1434,8 @@ def parse_rbxl(path):
     class_id_to_referents = {}
     class_id_to_name = {}
     referent_to_class = {}
+    service_refs = set()   # инстансы-сервисы (Workspace и т.п.) — нужны при записи
+    shared_strings = []    # SSTR: значения свойств SharedString — индексы сюда
     
     for chunk in chunks:
         if chunk['name'] == b'INST':
@@ -865,6 +1444,14 @@ def parse_rbxl(path):
             class_id_to_name[class_id] = class_name
             for r in referents:
                 referent_to_class[r] = class_name
+            if obj_fmt == 1:
+                flags = parse_inst_service_flags(chunk['payload'], len(referents))
+                service_refs.update(r for r, f in zip(referents, flags) if f)
+        elif chunk['name'] == b'SSTR':
+            try:
+                shared_strings = parse_sstr(chunk['payload'])
+            except Exception:
+                shared_strings = []
 
     parent_map = {}
     for chunk in chunks:
@@ -874,21 +1461,31 @@ def parse_rbxl(path):
 
     props = {}
     skipped = 0
+    # (класс, свойство) -> type_id из файла. Нужен при записи: тип нельзя
+    # надёжно угадать по значению (enum и referent выглядят как обычный int).
+    prop_types = {}
+    skipped_props = []   # (класс, свойство, type_id), которые не удалось разобрать
     for chunk in chunks:
         if chunk['name'] == b'PROP':
+            class_name = prop_name = type_id = None
             try:
                 class_id, prop_name, type_id, rest = parse_prop_header(chunk['payload'])
+                class_name = class_id_to_name.get(class_id)
                 referents = class_id_to_referents.get(class_id, [])
                 count = len(referents)
                 decoder = TYPE_DECODERS.get(type_id)
                 if decoder is None:
                     skipped += 1
+                    skipped_props.append((class_name, prop_name, type_id))
                     continue
                 values = decoder(rest, count)
+                prop_types[(class_name, prop_name)] = type_id
                 for r, v in zip(referents, values):
                     props.setdefault(r, {})[prop_name] = v
             except Exception:
                 skipped += 1
+                if prop_name is not None:
+                    skipped_props.append((class_name, prop_name, type_id))
                 continue
 
     # Пост-обработка: разбиваем CFrame на Position и Rotation
@@ -1083,6 +1680,10 @@ def parse_rbxl(path):
         'class_id_to_name': class_id_to_name,
         'class_id_to_referents': class_id_to_referents,
         'skipped_prop_chunks': skipped,
+        'skipped_props': skipped_props,
+        'prop_types': prop_types,
+        'shared_strings': shared_strings,
+        'service_refs': service_refs,
         '_raw_chunks': chunks,
         '_raw_data': raw_data,
         '_file_size': file_size,
@@ -1115,130 +1716,24 @@ def save_rbxl(parsed: dict, path: str):
             f.write(bytes(file_data))
         return True
     
-    referent_to_class = parsed['referent_to_class']
-    parent_map = parsed['parent_map']
-    props = parsed['props']
-    class_id_to_name = parsed.get('class_id_to_name', {})
-    class_id_to_referents = parsed.get('class_id_to_referents', {})
-    
-    class_to_refs = {}
-    if class_id_to_name and class_id_to_referents:
-        for class_id, class_name in class_id_to_name.items():
-            referents = class_id_to_referents.get(class_id, [])
-            if referents:
-                class_to_refs[class_name] = sorted(referents)
-    
-    if not class_to_refs:
-        for ref, cls in referent_to_class.items():
-            if cls not in class_to_refs:
-                class_to_refs[cls] = []
-            class_to_refs[cls].append(ref)
-        for cls in class_to_refs:
-            class_to_refs[cls] = sorted(class_to_refs[cls])
-    
-    class_id_map = {}
-    class_id = 0
-    for cls_name in sorted(class_to_refs.keys()):
-        class_id_map[cls_name] = class_id
-        class_id += 1
-    
-    file_data = bytearray()
-    
-    file_data.extend(b'roblox!\x00')
-    file_data.extend(struct.pack('<I', 0))
-    file_data.extend(struct.pack('<I', len(class_to_refs)))
-    file_data.extend(struct.pack('<I', len(referent_to_class)))
-    file_data.extend(struct.pack('<I', 0))
-    file_data.extend(b'\x00' * 8)
-    
-    for cls_name in sorted(class_to_refs.keys()):
-        referents = class_to_refs[cls_name]
-        cid = class_id_map[cls_name]
-        inst_payload = write_inst(cid, cls_name, referents)
-        file_data.extend(write_chunk(b'INST', inst_payload))
-    
-    pairs = [(child, parent) for child, parent in parent_map.items()]
-    if pairs:
-        prnt_payload = write_prnt(pairs)
-        file_data.extend(write_chunk(b'PRNT', prnt_payload))
-    
-    for cls_name, referents in class_to_refs.items():
-        cid = class_id_map[cls_name]
-        class_props = {}
-        for ref in referents:
-            if ref in props:
-                for pname, pval in props[ref].items():
-                    if pname not in class_props:
-                        class_props[pname] = {}
-                    class_props[pname][ref] = pval
-        
-        for pname, ref_values in class_props.items():
-            sample_value = next((v for v in ref_values.values() if v is not None), None)
-            
-            type_id = 0x01
-            if sample_value is not None:
-                if isinstance(sample_value, str):
-                    type_id = 0x01
-                elif isinstance(sample_value, bool):
-                    type_id = 0x02
-                elif isinstance(sample_value, int):
-                    type_id = 0x03
-                elif isinstance(sample_value, float):
-                    type_id = 0x04
-                elif isinstance(sample_value, dict):
-                    if 'r' in sample_value and 'g' in sample_value and 'b' in sample_value:
-                        r = sample_value.get('r', 0)
-                        if isinstance(r, float) and r <= 1.0:
-                            type_id = 0x0c
-                        else:
-                            type_id = 0x1a
-                    elif 'matrix' in sample_value or 'position' in sample_value:
-                        type_id = 0x10
-                    elif 'x' in sample_value and 'y' in sample_value and 'z' in sample_value:
-                        type_id = 0x0e
-                    elif 'x' in sample_value and 'y' in sample_value:
-                        # UDim2 (x/y — вложенные {scale, offset}) отличаем от
-                        # Vector2 (x/y — голые числа, например GuiObject.
-                        # AnchorPoint — то, что реально есть почти в любом
-                        # UI-меню). Раньше здесь безусловно делали
-                        # sample_value.get('x', {}) и тут же проверяли
-                        # 'scale' in <результат> — для Vector2 результат был
-                        # float, а не dict, и "in" на float падал с
-                        # TypeError, спуская ЛЮБОЕ сохранение файла с хотя бы
-                        # одним Vector2-свойством где-то в дереве.
-                        xval = sample_value.get('x')
-                        if isinstance(xval, dict) and 'scale' in xval:
-                            type_id = 0x07
-                        else:
-                            type_id = 0x0d
-                    elif 'scale' in sample_value and 'offset' in sample_value:
-                        type_id = 0x06
-                    elif 'index' in sample_value and 'time' in sample_value:
-                        type_id = 0x1f
-                    elif 'family' in sample_value:
-                        type_id = 0x20
-                    elif 'min' in sample_value and 'max' in sample_value:
-                        type_id = 0x17
-                    else:
-                        type_id = 0x01
-            
-            values = [ref_values.get(ref) for ref in referents]
-            
-            serializer = TYPE_SERIALIZERS.get(type_id, s_string)
-            try:
-                serialized_values = serializer(values)
-            except Exception:
-                serialized_values = s_string(values)
-            
-            prop_header = write_prop_header(cid, pname, type_id)
-            prop_payload = prop_header + serialized_values
-            file_data.extend(write_chunk(b'PROP', prop_payload))
-    
-    file_data.extend(write_chunk(b'END\x00', b''))
-    
+    r2c = parsed['referent_to_class']
+    pmap = parsed['parent_map']
+    # Порядок детей у Roblox = порядок записей в PRNT, а parent_map (dict)
+    # его сохраняет: пишем в этом порядке, новые инстансы — в конец.
+    refs = [r for r in pmap if r in r2c] + [r for r in sorted(r2c) if r not in pmap]
+
+    data, warnings = build_rbx_binary(
+        r2c, pmap, parsed['props'], refs=refs,
+        prop_types=parsed.get('prop_types'),
+        shared_strings=parsed.get('shared_strings'),
+        service_refs=parsed.get('service_refs'), renumber=False,
+    )
+    for w in warnings:
+        print('save_rbxl:', w)
+
     with open(path, 'wb') as f:
-        f.write(bytes(file_data))
-    
+        f.write(data)
+
     return True
 
 
