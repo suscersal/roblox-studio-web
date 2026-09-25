@@ -3047,6 +3047,7 @@
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
+            _camReturnToCharT = null;
             if (charMesh) { scene.remove(charMesh); charMesh.geometry.dispose(); charMesh.material.dispose(); charMesh = null; }
             canJump = false;
             jumpQueued = false;
@@ -5190,7 +5191,16 @@ end
                         enumName = lua.lua_tojsstring(L2, 3);
                     }
                     if (luaByRef[ref] && luaByRef[ref].cls === 'Camera') {
+                        const wasScriptable = cameraIsScriptable;
                         cameraIsScriptable = (enumName === 'Scriptable');
+                        // Scriptable -> Custom (например MenuCamera.lua при
+                        // возврате в меню песен): раньше followCharacterCamera
+                        // в СЛЕДУЮЩИЙ же кадр мгновенно ставила target на
+                        // charBody.position — с точки зрения игрока камера,
+                        // всё это время стоявшая где-то у объекта 'camera'
+                        // песни, "телепортировалась" обратно к персонажу за
+                        // один кадр. Плавно подводим её вместо скачка.
+                        if (wasScriptable && !cameraIsScriptable) _camReturnToCharT = 0;
                     }
                     luaSetGenericProp(ref, name, enumName);
                     fireLuaSignal(ref, '__prop_' + name, []);
@@ -6038,6 +6048,17 @@ end
             // FocusLost/Focused — TextBox (contentEditable div, см.
             if (props.cls === 'TextBox') {
                 let enterPressed = false;
+                // На части мобильных браузеров голый tap по contentEditable
+                // div (без tabindex) фокусирует элемент, но НЕ поднимает
+                // экранную клавиатуру — нужен явный .focus() внутри самого
+                // обработчика тача. Без этого поле выглядит нерабочим: курсор
+                // как будто появляется, а печатать нельзя.
+                el.tabIndex = 0;
+                el.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    el.focus();
+                }, { passive: false });
+                el.addEventListener('mousedown', () => el.focus());
                 // Живая правка contentEditable не попадает в guiPropsByRef
                 el.addEventListener('input', () => { if (guiPropsByRef[ref]) guiPropsByRef[ref].Text = el.textContent; });
                 el.addEventListener('keydown', (e) => {
@@ -6397,11 +6418,32 @@ end
         // Enum.CameraType.Scriptable — настоящий Roblox по нему полностью
         let cameraIsScriptable = false;
 
+        // 0..1 — прогресс плавного возврата камеры к персонажу после
+        // CameraType.Scriptable; null, когда обычный (мгновенный) follow.
+        let _camReturnToCharT = null;
+        const CAM_RETURN_DURATION = 0.35; // секунд
         function followCharacterCamera() {
             if (!charBody || cameraIsScriptable) return;
-            target.x = charBody.position.x;
-            target.y = charBody.position.y + EYE_HEIGHT;
-            target.z = charBody.position.z;
+            const desiredX = charBody.position.x;
+            const desiredY = charBody.position.y + EYE_HEIGHT;
+            const desiredZ = charBody.position.z;
+            if (_camReturnToCharT !== null) {
+                _camReturnToCharT += (1 / 60) / CAM_RETURN_DURATION;
+                if (_camReturnToCharT >= 1) {
+                    _camReturnToCharT = null;
+                    target.x = desiredX; target.y = desiredY; target.z = desiredZ;
+                } else {
+                    // ease-out — быстрый старт, плавное сближение к цели
+                    const a = 1 - Math.pow(1 - _camReturnToCharT, 3);
+                    target.x += (desiredX - target.x) * a * 0.3;
+                    target.y += (desiredY - target.y) * a * 0.3;
+                    target.z += (desiredZ - target.z) * a * 0.3;
+                }
+            } else {
+                target.x = desiredX;
+                target.y = desiredY;
+                target.z = desiredZ;
+            }
             if (charMesh) {
                 charMesh.position.set(charBody.position.x, charBody.position.y, charBody.position.z);
                 charMesh.rotation.y = spherical.theta; // куб развёрнут туда же, куда смотрит камера
