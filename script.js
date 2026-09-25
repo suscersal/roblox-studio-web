@@ -29,6 +29,7 @@
                 confirm_discard_unsaved: 'The current scene (if unsaved) will be replaced with an empty one. Continue?',
                 notify_new_scene: 'New empty scene created',
                 notify_download_cancelled: 'Download cancelled',
+                notify_loading_model: 'Loading model…',
                 notify_import_failed: 'Import failed: ',
                 notify_import_error: 'Import error',
                 notify_import_net: 'Network error during import',
@@ -195,6 +196,7 @@
                 confirm_discard_unsaved: 'Текущая сцена (если не сохранена) будет заменена пустой. Продолжить?',
                 notify_new_scene: 'Создана новая пустая сцена',
                 notify_download_cancelled: 'Скачивание отменено',
+                notify_loading_model: 'Загружаю модель…',
                 notify_import_failed: 'Не удалось импортировать: ',
                 notify_import_error: 'Ошибка импорта',
                 notify_import_net: 'Ошибка сети при импорте',
@@ -1345,8 +1347,38 @@
                 }
             }
 
-            stepPhysics();
-            renderer.render(scene, camera);
+            // Раньше исключение внутри stepPhysics() (например, из-за плохих
+            // данных от Lua-скрипта карты) улетало из animate() необработанным.
+            // requestAnimationFrame(animate) уже был вызван строкой выше, так
+            // что следующий кадр планировался и цикл не останавливался — но
+            // если ошибка повторялась КАЖДЫЙ кадр (например, что-то на карте
+            // стабильно портит один и тот же объект), физика и рендер той же
+            // сцены молча не выполнялись НИ РАЗУ: экран замирал ("не идёт
+            // время в игре"), а сама ошибка была видна только в консоли
+            // браузера, до которой на телефоне не добраться. Теперь она
+            // попадает в Output — и не спамит: одно и то же сообщение
+            // печатается не чаще раза в 2 секунды, а рендер всё равно
+            // пытаемся сделать отдельно, чтобы падение именно физики не
+            // морозило картинку целиком.
+            try {
+                stepPhysics();
+            } catch (e) {
+                _reportFrameError('stepPhysics', e);
+            }
+            try {
+                renderer.render(scene, camera);
+            } catch (e) {
+                _reportFrameError('render', e);
+            }
+        }
+        let _lastFrameErrorMsg = null, _lastFrameErrorAt = 0;
+        function _reportFrameError(where, e) {
+            const msg = where + ': ' + (e && e.message || e);
+            const now = performance.now();
+            if (msg === _lastFrameErrorMsg && now - _lastFrameErrorAt < 2000) return;
+            _lastFrameErrorMsg = msg;
+            _lastFrameErrorAt = now;
+            logLuaOutput('error', msg, null, e && e.stack || null);
         }
 
         let thirdPerson = false; // true — камера позади куба-персонажа, не в глазах
@@ -2086,8 +2118,28 @@
         }
 
         // Асинхронно подменяет box-приближение на реальную геометрию, когда
+        // Сколько реальных мешей/текстур сейчас грузится по сети — Play
+        // ждёт, пока счётчик не опустеет (см. waitForPendingModelLoads),
+        // чтобы модель игрока (и остальная сцена) появлялась сразу целиком,
+        // как при скачивании аватара, а не проявлялась кусками уже во время
+        // игры.
+        let _pendingModelLoads = 0;
+        function _trackLoad(promiseLike) {
+            _pendingModelLoads++;
+            const done = () => { _pendingModelLoads = Math.max(0, _pendingModelLoads - 1); };
+            promiseLike.then(done, done);
+        }
+        function waitForPendingModelLoads(maxMs) {
+            const start = performance.now();
+            return new Promise((resolve) => {
+                (function poll() {
+                    if (_pendingModelLoads <= 0 || performance.now() - start > maxMs) { resolve(); return; }
+                    setTimeout(poll, 50);
+                })();
+            });
+        }
         function scheduleRealMeshSwap(o, mesh) {
-            loadRealMeshGeometry(o.meshId).then((result) => {
+            const p = loadRealMeshGeometry(o.meshId).then((result) => {
                 if (!result) return;
                 if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
                 mesh.geometry = result.geometry;
@@ -2118,6 +2170,7 @@
                 // масштаб (и вообще любая правка mesh.matrix) не применялась.
                 mesh.matrixWorldNeedsUpdate = true;
             });
+            _trackLoad(p);
         }
 
         // ============ ТЕКСТУРЫ ОБЫЧНЫХ ЧАСТЕЙ (Decal/MeshPart/SpecialMesh) ============
@@ -2143,16 +2196,20 @@
         function getOrLoadPartTexture(assetId) {
             if (_partTexCache[assetId]) return _partTexCache[assetId];
             if (!_partTexLoader) _partTexLoader = new THREE.TextureLoader();
+            let resolveLoad;
+            _trackLoad(new Promise((res) => { resolveLoad = res; }));
             const tex = _partTexLoader.load('/api/asset-proxy?id=' + assetId, (loaded) => {
                 // Тот же r128-фикс насыщенности, что и у аватаров (см.
                 // importAvatarIntoScene) — иначе текстура выглядит блёкло.
                 loaded.encoding = THREE.sRGBEncoding;
                 loaded.anisotropy = renderer.capabilities.getMaxAnisotropy();
                 loaded.needsUpdate = true;
+                resolveLoad();
             }, undefined, () => {
                 // 3-й колбэк TextureLoader.load — onError, раньше не
                 logLuaOutput('warn', t('warn_texture_failed', { id: assetId }));
                 reportAssetFailure(assetId);
+                resolveLoad();
             });
             _partTexCache[assetId] = tex;
             return tex;
@@ -2173,13 +2230,16 @@
         function getTiledTexture(id, rx, ry, srgb) {
             const key = id + '_' + rx.toFixed(2) + '_' + ry.toFixed(2) + (srgb ? 's' : 'l');
             if (_tiledTexCache[key]) return _tiledTexCache[key];
+            let resolveTiled;
+            _trackLoad(new Promise((res) => { resolveTiled = res; }));
             const tex = new THREE.TextureLoader().load('/api/asset-proxy?id=' + id, (l) => {
                 l.wrapS = l.wrapT = THREE.RepeatWrapping;
                 l.repeat.set(rx, ry);
                 if (srgb) l.encoding = THREE.sRGBEncoding;
                 l.anisotropy = renderer.capabilities.getMaxAnisotropy();
                 l.needsUpdate = true;
-            }, undefined, () => { logLuaOutput('warn', t('warn_texture_failed', { id })); reportAssetFailure(id); });
+                resolveTiled();
+            }, undefined, () => { logLuaOutput('warn', t('warn_texture_failed', { id })); reportAssetFailure(id); resolveTiled(); });
             _tiledTexCache[key] = tex;
             return tex;
         }
@@ -2251,7 +2311,7 @@
             tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
             // штаны под рубашкой; порядок отрисовки не зависит от порядка загрузки
             const layers = [pantsId, shirtId].filter(Boolean);
-            Promise.all(layers.map(id => new Promise(res => {
+            const p = Promise.all(layers.map(id => new Promise(res => {
                 const im = new Image();
                 im.onload = () => res(im);
                 im.onerror = () => { logLuaOutput('warn', t('warn_texture_failed', { id })); reportAssetFailure(id); res(null); };
@@ -2261,6 +2321,7 @@
                 tex.needsUpdate = true;
                 logLuaOutput('info', t('log_cloth_loaded', { n: imgs.filter(Boolean).length, total: layers.length }));
             });
+            _trackLoad(p);
             _clothTexCache[key] = tex;
             return tex;
         }
@@ -2596,8 +2657,15 @@
         const CHAR_RADIUS = 1.4;      // примерный радиус капсулы персонажа
         // (было 2.2 — со стандартным Roblox-персонажем шириной ~2 стада
         const CHAR_SPEED = 16;        // стадов/сек — дефолтный Humanoid.WalkSpeed
+        // Реальный WalkSpeed/JumpPower виртуального Humanoid (см.
+        // bootstrapClientPlayer) — карта может их менять (например,
+        // MenuCamera.lua ставит WalkSpeed=0 на время камеры песни); раньше
+        // Humanoid у игрока не существовал вообще, и такие вызовы были
+        // no-op'ами — игрок продолжал ходить, пока шла сценарная камера.
+        let charWalkSpeed = CHAR_SPEED;
         const STEP_HEIGHT = 3.2;      // студов — низкий бордюр перешагиваем автоматически
         const JUMP_VELOCITY = 50;
+        let charJumpPower = JUMP_VELOCITY;
         const EYE_HEIGHT = CHAR_RADIUS + 3;
         // Физику считаем не для всей загруженной сцены (при Quality=High это
         function maxStreamedBodies() { return qualitySettings.playBodies; }
@@ -3027,6 +3095,24 @@
             if (padE) { padE.textContent = '⤴'; padE.title = t('pad_jump_title'); }
             if (padQ) { padQ.style.visibility = 'hidden'; }
             _updateTouchControlsVisibility(); // luaControlsDisabled сбрасывается в stopLuaScripts/startLuaScriptsInner — на старте контролы должны быть видны, если скрипт не решит иначе
+            // Модель игрока (голова/торс/руки/ноги/одежда — обычные MeshPart
+            // рядом со спавном) уже перечислена выше и начала грузить
+            // реальную геометрию и текстуры по сети
+            // (scheduleRealMeshSwap/getOrLoadPartTexture/getClothTexture —
+            // каждый асинхронный запрос сам регистрируется в
+            // _pendingModelLoads). Раньше рендер уже шёл (requestAnimationFrame
+            // не ждёт этот await), поэтому первые секунды игрок ВИДЕЛ, как
+            // персонаж доснашивает текстуры и меши прямо во время игры —
+            // "доскачивался" по кускам. Закрываем экран модалкой (как при
+            // скачивании аватара через "Импорт аватара") на время ожидания
+            // — тогда модель появляется сразу целиком; не дольше 2.5 сек,
+            // чтобы не превращать это в зависание на тяжёлой карте.
+            if (_pendingModelLoads > 0) {
+                showModal('<h3>' + t('notify_loading_model') + '</h3>');
+                await waitForPendingModelLoads(2500);
+                closeModal();
+            }
+            if (!isPlaying) return; // Stop нажали, пока ждали загрузку
             notify(t('notify_play_started', { n: Object.keys(physicsBodies).length }));
             startLuaScripts(); // асинхронно — не блокирует появление игрока на спавне
         }
@@ -3048,6 +3134,10 @@
             physicsBodies = {};
             charBody = null;
             _camReturnToCharT = null;
+            luaHumanoidRootPartRef = -1;
+            luaHumanoidRef = -1;
+            charWalkSpeed = CHAR_SPEED;
+            charJumpPower = JUMP_VELOCITY;
             if (charMesh) { scene.remove(charMesh); charMesh.geometry.dispose(); charMesh.material.dispose(); charMesh = null; }
             canJump = false;
             jumpQueued = false;
@@ -3417,6 +3507,25 @@ InstanceMT.__index = function(t, k)
     -- ref через __get_character_ref, so=Wait() до него просто не доходит.
     if k == "Character" and __get_class(ref) == "Player" then
         return wrap(__get_character_ref())
+    end
+    -- workspace.CurrentCamera — раньше НЕ было особого случая вообще: этот
+    -- ключ проваливался в самый нижний fallback __index, который ищет
+    -- РЕБЁНКА с именем "CurrentCamera" (а не свойство-ссылку на Camera) —
+    -- такого ребёнка не бывает, поэтому workspace.CurrentCamera всегда был
+    -- nil. Любой скрипт вида "local camera = workspace.CurrentCamera;
+    -- camera.CameraType = ..." падал на первой же строке с камерой
+    -- ("attempt to index a nil value") — то есть ВООБЩЕ ничего из логики
+    -- сценарной камеры (MenuCamera.lua и подобные) не выполнялось, включая
+    -- сам телепорт игрока и переключение CameraType. Находим Camera-ребёнка
+    -- Workspace по классу — так же, как реальный Roblox всегда возвращает
+    -- единственную настоящую камеру независимо от того, как она названа.
+    if k == "CurrentCamera" and __get_class(ref) == "Workspace" then
+        local n = __child_count(ref)
+        for i = 1, n do
+            local c = __child_at(ref, i - 1)
+            if __get_class(c) == "Camera" then return wrap(c) end
+        end
+        return nil
     end
     if k == "Position" then
         if __is_gui_ref(ref) then
@@ -4618,6 +4727,10 @@ end
             if (guiPropsByRef[ref]) {
                 if (guiPatchProp(ref, name, value)) return;
             }
+            if (ref === luaHumanoidRef && (name === 'WalkSpeed' || name === 'JumpPower')) {
+                if (name === 'WalkSpeed') charWalkSpeed = Number(value) || 0;
+                else charJumpPower = Number(value) || 0;
+            }
             if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
             const mesh = sceneObjs[ref];
             if (name === 'Transparency' && mesh && mesh.material) {
@@ -5660,6 +5773,8 @@ end
         // Создаёт game.Players.LocalPlayer (виртуальный, как и всё Play-only
         let luaCharacterRef = -1; // ref виртуального "Model", изображающего player.Character (см. __get_character_ref) — тот самый ходящий куб из Play, а не настоящий Humanoid
         let luaPlayerRef = -1;    // ref единственного LocalPlayer (см. bootstrapClientPlayer) — нужен, чтобы подставлять его первым аргументом в OnServerEvent (см. processRemoteQueue)
+        let luaHumanoidRootPartRef = -1; // ref виртуального HumanoidRootPart — physicsBodies[этот ref] === charBody (см. bootstrapClientPlayer)
+        let luaHumanoidRef = -1;         // ref виртуального Humanoid — WalkSpeed/JumpPower реально применяются (см. luaSetGenericProp)
 
         function bootstrapClientPlayer() {
             let playersRef = luaFindServiceRef('Players');
@@ -5671,6 +5786,22 @@ end
             luaCharacterRef = luaCreateVirtualInstance('Model');
             luaByRef[luaCharacterRef].name = 'LocalCharacter';
             luaSetParent(luaCharacterRef, luaWorkspaceRef());
+
+            luaHumanoidRootPartRef = luaCreateVirtualInstance('Part');
+            luaByRef[luaHumanoidRootPartRef].name = 'HumanoidRootPart';
+            luaSetParent(luaHumanoidRootPartRef, luaCharacterRef);
+            // Так Position/CFrame-геттеры и сеттеры (luaPositionOfRef/
+            // luaSetPositionOfRef/applyCFrameValue) начинают работать сами
+            // собой — они уже умеют physicsBodies[ref], отдельный код не
+            // нужен: чтение/запись CFrame этого рефа напрямую двигает
+            // charBody, то есть по-настоящему телепортирует игрока.
+            if (charBody) physicsBodies[luaHumanoidRootPartRef] = charBody;
+
+            luaHumanoidRef = luaCreateVirtualInstance('Humanoid');
+            luaByRef[luaHumanoidRef].name = 'Humanoid';
+            luaSetParent(luaHumanoidRef, luaCharacterRef);
+            virtualInstanceProps[luaHumanoidRef].WalkSpeed = charWalkSpeed;
+            virtualInstanceProps[luaHumanoidRef].JumpPower = charJumpPower;
 
             const playerGuiRef = luaCreateVirtualInstance('PlayerGui');
             luaSetParent(playerGuiRef, playerRef);
@@ -6348,8 +6479,8 @@ end
             let dirX = 0, dirZ = 0;
             if (len > 0.001) {
                 dirX = vx / len; dirZ = vz / len;
-                vx = dirX * CHAR_SPEED;
-                vz = dirZ * CHAR_SPEED;
+                vx = dirX * charWalkSpeed;
+                vz = dirZ * charWalkSpeed;
             } else {
                 vx = 0; vz = 0;
             }
@@ -6384,10 +6515,11 @@ end
             charBody.velocity.x = vx;
             charBody.velocity.z = vz;
 
-            if (jumpQueued && canJump) {
-                charBody.velocity.y = JUMP_VELOCITY;
+            if (jumpQueued && canJump && charJumpPower > 0) {
+                charBody.velocity.y = charJumpPower;
                 canJump = false;
             }
+            jumpQueued = jumpQueued && charJumpPower <= 0 ? false : jumpQueued;
             jumpQueued = false;
         }
 
