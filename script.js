@@ -763,15 +763,23 @@
                     panel.style.height = newH + 'px';
                 }, { passive: true });
 
-                document.addEventListener('touchend', () => {
+                // touchend ИЛИ touchcancel — браузер иногда шлёт cancel вместо end
+                // (жест прерван системой), и без этого userSelect:none навсегда
+                // застревал на body — после чего переставали работать ЛЮБЫЕ
+                // текстовые поля на странице (промокод, скрипты и т.д.), пока
+                // страницу не перезагружали.
+                const endHResize = () => {
                     if (hResizer.classList.contains('active')) {
                         hResizer.classList.remove('active');
                         document.body.style.userSelect = '';
+                        document.body.style.webkitUserSelect = '';
                         try {
                             localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
                         } catch (e) { }
                     }
-                });
+                };
+                document.addEventListener('touchend', endHResize);
+                document.addEventListener('touchcancel', endHResize);
             }
 
             // === Общие обработчики для вертикальных ресайзеров (mousemove/mouseup) ===
@@ -788,15 +796,17 @@
                 resize();
             });
 
-            document.addEventListener('mouseup', () => {
+            const endVResize = () => {
                 if (currentResizer) {
                     currentResizer.classList.remove('active');
                     currentResizer = null;
                     document.body.style.cursor = '';
                     document.body.style.userSelect = '';
+                    document.body.style.webkitUserSelect = '';
                     saveLayout();
                 }
-            });
+            };
+            document.addEventListener('mouseup', endVResize);
 
             // === Touch-поддержка для вертикальных ресайзеров ===
             resizers.forEach(resizer => {
@@ -827,14 +837,8 @@
                 resize();
             }, { passive: true });
 
-            document.addEventListener('touchend', () => {
-                if (currentResizer) {
-                    currentResizer.classList.remove('active');
-                    currentResizer = null;
-                    document.body.style.userSelect = '';
-                    saveLayout();
-                }
-            });
+            document.addEventListener('touchend', endVResize);
+            document.addEventListener('touchcancel', endVResize);
         }
 
         // ============ НАСТРОЙКИ ИНТЕРФЕЙСА (размер текста/кнопок, ползунки-разделители) ============
@@ -5952,9 +5956,22 @@ end
                 el.style.fontSize = (props.TextSize || 14) + 'px';
                 el.style.whiteSpace = props.TextWrapped === false ? 'nowrap' : 'pre-wrap';
                 el.style.border = 'none';
-                el.textContent = props.Text != null ? String(props.Text) : '';
                 if (cls === 'TextBox') {
                     el.contentEditable = 'true';
+                    el.style.cursor = 'text';
+                    // ВАЖНО: applyGuiElementStyle вызывается не только при
+                    // изменении Text, а на КАЖДЫЙ проход UIListLayout (и на
+                    // любой другой patch того же контейнера). Если в этот
+                    // момент поле редактируется (сфокусировано), перезапись
+                    // el.textContent сбрасывает курсор на начало и стирает
+                    // непереданные в Lua символы — с точки зрения игрока
+                    // поле просто "не принимает ввод". Пока элемент в
+                    // фокусе, доверяем тому, что уже введено в DOM.
+                    if (document.activeElement !== el) {
+                        el.textContent = props.Text != null ? String(props.Text) : '';
+                    }
+                } else {
+                    el.textContent = props.Text != null ? String(props.Text) : '';
                 }
             } else if (cls === 'ImageLabel' || cls === 'ImageButton') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
@@ -6054,7 +6071,14 @@ end
             applyUIListLayout(ref);
         }
 
-        // UIListLayout — раньше был только числом-заглушкой в GUI_CLASS_NAMES
+        // UIListLayout — раньше был только числом-заглушкой в GUI_CLASS_NAMES.
+        // Высота/ширина элемента бралась ТОЛЬКО из пиксельной части Size
+        // (Size.Y.offset), а в реальных меню размер почти всегда задан в
+        // Scale ({0.08, 0} и т.п.) — offset получался 0 у ВСЕХ элементов,
+        // список не сдвигался, и все пункты рисовались друг на друге в
+        // одной точке (наложенный текст в меню песен). Меряем то, что
+        // РЕАЛЬНО отрисовано в DOM (offsetWidth/offsetHeight) — там уже
+        // учтены и scale, и offset, как в настоящем AbsoluteSize у Roblox.
         function applyUIListLayout(containerRef) {
             const kids = (guiChildrenByRef[containerRef] || []).slice();
             let layoutRef = null;
@@ -6064,6 +6088,7 @@ end
             if (!layoutRef) return;
             const layoutProps = guiPropsByRef[layoutRef] || {};
             const paddingPx = (layoutProps.Padding && layoutProps.Padding.offset) || 0;
+            const horizontal = layoutProps.FillDirection === 'Horizontal';
             let offset = 0;
             for (const k of kids) {
                 const p = guiPropsByRef[k];
@@ -6071,12 +6096,19 @@ end
                 if (p.cls && p.cls.indexOf('UI') === 0) continue; // UIPadding/UICorner/... — не элементы списка
                 // Visible === false — это как раз наш случай "скрытый
                 if (p.Visible === false) continue;
-                const oldX = (p.Position && p.Position.x) || { scale: 0, offset: 0 };
-                p.Position = { x: oldX, y: { scale: 0, offset } };
                 const el = guiDomByRef[k];
-                if (el) applyGuiElementStyle(el, p);
-                const heightPx = (p.Size && p.Size.y && p.Size.y.offset) || 0;
-                offset += heightPx + paddingPx;
+                if (!el) continue;
+                if (horizontal) {
+                    const oldY = (p.Position && p.Position.y) || { scale: 0, offset: 0 };
+                    p.Position = { x: { scale: 0, offset }, y: oldY };
+                    applyGuiElementStyle(el, p);
+                    offset += el.offsetWidth + paddingPx;
+                } else {
+                    const oldX = (p.Position && p.Position.x) || { scale: 0, offset: 0 };
+                    p.Position = { x: oldX, y: { scale: 0, offset } };
+                    applyGuiElementStyle(el, p);
+                    offset += el.offsetHeight + paddingPx;
+                }
             }
         }
 
@@ -6209,6 +6241,13 @@ end
             if (ref !== -1) fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]);
         });
         // Тач-эквиваленты — раньше их не было вовсе, только мышиные.
+        document.addEventListener('touchstart', () => {
+            if (document.body.style.userSelect === 'none' && !currentResizer &&
+                !document.querySelector('.resizer-h.active')) {
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
+            }
+        }, { passive: true, capture: true });
         document.addEventListener('touchstart', (e) => {
             if (!luaServerL && !luaClientL) return;
             const ref = luaFindServiceRef('UserInputService');
