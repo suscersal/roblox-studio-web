@@ -1,6 +1,48 @@
         // ============ I18N ============
         const I18N = {
             en: {
+                err_3d: '3D: error',
+                ui_btn_title: 'Text, button and splitter sizes',
+                ui_text: 'Text',
+                ui_buttons: 'Buttons and fields',
+                ui_splitters: 'Panel splitters',
+                ui_scrollbars: 'Scrollbars',
+                ui_auto: 'auto',
+                ui_reset: 'Reset',
+                ui_close: 'Close',
+                cam_third: 'Third person',
+                cam_first: 'First person (eyes)',
+                log_draco_lod0: 'Draco: using LOD0 ({n} of {total} faces)',
+                log_mesh_load_failed: 'Mesh {id}: load failed ({msg}), using approximation',
+                log_cloth_loaded: 'Clothing: loaded {n} of {total} layer(s)',
+                asset_fail_reason: 'Asset {id} did not load: {reason}',
+                asset_not_image: 'Asset {id}: the server returned "{type}", not an image',
+                asset_decode_failed: 'Asset {id}: the browser could not decode the image ({type})',
+                lua_compile_error: 'compile error: ',
+                lua_run_aborted: 'Lua run aborted: ',
+                lua_scripts_no_reply: '/api/scripts did not respond',
+                lua_no_scripts: 'No enabled Script/LocalScript in the map',
+                lua_fengari_fail: 'fengari failed to load — check your internet',
+                lua_vm_fail_notify: 'Lua VM (fengari) failed to load — check your internet',
+                lua_instances_no_reply: '/api/all_instances did not respond',
+                notify_editor_unavailable: 'Script editor unavailable (CodeMirror failed to load)',
+                confirm_discard_unsaved: 'The current scene (if unsaved) will be replaced with an empty one. Continue?',
+                notify_new_scene: 'New empty scene created',
+                notify_download_cancelled: 'Download cancelled',
+                notify_import_failed: 'Import failed: ',
+                notify_import_error: 'Import error',
+                notify_import_net: 'Network error during import',
+                notify_reading_file: 'Reading file…',
+                notify_read_error: 'File read error: ',
+                notify_archive_failed: 'Could not read the archive',
+                av_net_error: 'Network/server: ',
+                av_status_failed: 'Could not request the status',
+                av_roblox_failed: 'Roblox could not generate a model for this User ID',
+                av_timeout: 'Roblox is taking too long to prepare the model — try again a bit later',
+                av_download_error: 'Download error: ',
+                av_download_failed: 'Could not download the files',
+                av_import_failed: 'Import failed: ',
+                av_zip_android: 'Saving .zip is only available in the Android app (in desktop mode the file is already written next to app.py: {path})',
                 tb_new: '🆕 New', tb_new_title: 'New empty scene',
                 tb_open: '📂 Open', tb_open_title: 'Open file (Ctrl+O)',
                 tb_save: '💾 Save', tb_save_title: 'Save (Ctrl+S)',
@@ -125,6 +167,48 @@
                 preview_stop: 'Stop',
             },
             ru: {
+                err_3d: '3D: ошибка',
+                ui_btn_title: 'Размер текста, кнопок и разделителей',
+                ui_text: 'Текст',
+                ui_buttons: 'Кнопки и поля',
+                ui_splitters: 'Разделители панелей',
+                ui_scrollbars: 'Полосы прокрутки',
+                ui_auto: 'авто',
+                ui_reset: 'Сбросить',
+                ui_close: 'Закрыть',
+                cam_third: '3-е лицо',
+                cam_first: '1-е лицо (от глаз)',
+                log_draco_lod0: 'Draco: использую LOD0 ({n} из {total} граней)',
+                log_mesh_load_failed: 'Mesh {id}: загрузка не удалась ({msg}), использую приближение',
+                log_cloth_loaded: 'Одежда: загружено слоёв {n} из {total}',
+                asset_fail_reason: 'Ассет {id} не загрузился: {reason}',
+                asset_not_image: 'Ассет {id}: сервер вернул «{type}», а не картинку',
+                asset_decode_failed: 'Ассет {id}: браузер не смог декодировать картинку ({type})',
+                lua_compile_error: 'ошибка компиляции: ',
+                lua_run_aborted: 'Запуск Lua прерван: ',
+                lua_scripts_no_reply: '/api/scripts не ответил',
+                lua_no_scripts: 'Нет включённых Script/LocalScript на карте',
+                lua_fengari_fail: 'fengari не загрузилась — проверь интернет',
+                lua_vm_fail_notify: 'Lua VM (fengari) не загрузилась — проверь интернет',
+                lua_instances_no_reply: '/api/all_instances не ответил',
+                notify_editor_unavailable: 'Редактор скриптов недоступен (CodeMirror не загрузился)',
+                confirm_discard_unsaved: 'Текущая сцена (если не сохранена) будет заменена пустой. Продолжить?',
+                notify_new_scene: 'Создана новая пустая сцена',
+                notify_download_cancelled: 'Скачивание отменено',
+                notify_import_failed: 'Не удалось импортировать: ',
+                notify_import_error: 'Ошибка импорта',
+                notify_import_net: 'Ошибка сети при импорте',
+                notify_reading_file: 'Читаю файл…',
+                notify_read_error: 'Ошибка чтения файла: ',
+                notify_archive_failed: 'Не удалось прочитать архив',
+                av_net_error: 'Сеть/сервер: ',
+                av_status_failed: 'Не удалось запросить статус',
+                av_roblox_failed: 'Roblox не смог сгенерировать модель для этого User ID',
+                av_timeout: 'Roblox слишком долго готовит модель — попробуйте ещё раз чуть позже',
+                av_download_error: 'Ошибка скачивания: ',
+                av_download_failed: 'Не удалось скачать файлы',
+                av_import_failed: 'Не удалось импортировать: ',
+                av_zip_android: 'Сохранение .zip доступно только в Android-приложении (в десктоп-режиме файл уже записан рядом с app.py: {path})',
                 tb_new: '🆕 Новый', tb_new_title: 'Новая пустая сцена',
                 tb_open: '📂 Открыть', tb_open_title: 'Открыть файл (Ctrl+O)',
                 tb_save: '💾 Сохранить', tb_save_title: 'Сохранить (Ctrl+S)',
@@ -305,7 +389,7 @@
             function tryLoad(i) {
                 if (i >= scripts.length) {
                     console.error('Three.js не загружен');
-                    document.getElementById('fps-counter').textContent = '3D: ошибка';
+                    document.getElementById('fps-counter').textContent = t('err_3d');
                     return;
                 }
                 const s = document.createElement('script');
@@ -773,16 +857,16 @@
             const btn = document.createElement('button');
             btn.id = 'ui-btn';
             btn.textContent = '🎚 UI';
-            btn.title = 'Размер текста, кнопок и разделителей';
+            btn.title = t('ui_btn_title');
             lang.parentNode.insertBefore(btn, lang);
             const panel = document.createElement('div');
             panel.id = 'ui-settings';
             panel.style.display = 'none';
             const rows = [
-                ['fs', 'Текст', 0.7, 2.2, 0.05, '', 1],
-                ['bs', 'Кнопки и поля', 0.7, 2.2, 0.05, '', 1],
-                ['rz', 'Разделители панелей', 4, 40, 1, 'px', 16],
-                ['sb', 'Полосы прокрутки', 4, 30, 1, 'px', 10],
+                ['fs', t('ui_text'), 0.7, 2.2, 0.05, '', 1],
+                ['bs', t('ui_buttons'), 0.7, 2.2, 0.05, '', 1],
+                ['rz', t('ui_splitters'), 4, 40, 1, 'px', 16],
+                ['sb', t('ui_scrollbars'), 4, 30, 1, 'px', 10],
             ];
             const syncers = [];
             for (const [key, label, min, max, step, unit, dflt] of rows) {
@@ -793,7 +877,7 @@
                 rng.type = 'range'; rng.min = min; rng.max = max; rng.step = step;
                 const sync = () => {
                     rng.value = uiCfg[key] || dflt;
-                    cap.textContent = label + ': ' + (uiCfg[key] ? uiCfg[key] + unit : 'авто');
+                    cap.textContent = label + ': ' + (uiCfg[key] ? uiCfg[key] + unit : t('ui_auto'));
                 };
                 rng.oninput = () => { uiCfg[key] = parseFloat(rng.value); sync(); applyUiSettings(); };
                 sync(); syncers.push(sync);
@@ -801,10 +885,10 @@
                 panel.appendChild(row);
             }
             const reset = document.createElement('button');
-            reset.textContent = 'Сбросить';
+            reset.textContent = t('ui_reset');
             reset.onclick = () => { uiCfg = { ...UI_DEFAULTS }; applyUiSettings(); syncers.forEach(f => f()); };
             const close = document.createElement('button');
-            close.textContent = 'Закрыть';
+            close.textContent = t('ui_close');
             close.onclick = () => { panel.style.display = 'none'; };
             const btns = document.createElement('div');
             btns.className = 'ui-btns';
@@ -1285,7 +1369,7 @@
         function toggleThirdPerson() {
             thirdPerson = !thirdPerson;
             updateCamera();
-            notify(thirdPerson ? '3-е лицо' : '1-е лицо (от глаз)');
+            notify(thirdPerson ? t('cam_third') : t('cam_first'));
         }
 
         // ============ ПРЕСЕТЫ КАМЕРЫ ============
@@ -1939,7 +2023,7 @@
                         const lod0 = _findLod0FaceCount(bodyBytes, dracoOffset + dracoLength, totalFaces);
                         if (lod0 && lod0 < totalFaces) {
                             result.indices = result.indices.subarray(0, lod0 * 3);
-                            logLuaOutput('info', 'Draco: использую LOD0 (' + lod0 + ' из ' + totalFaces + ' граней)');
+                            logLuaOutput('info', t('log_draco_lod0', { n: lod0, total: totalFaces }));
                         }
                     }
                     return result;
@@ -1989,7 +2073,7 @@
                     }
                     return _buildGeometryFromParsed(parsed);
                 } catch (e) {
-                    logLuaOutput('warn', 'Mesh ' + meshId + ': загрузка не удалась (' + e.message + '), использую приближение');
+                    logLuaOutput('warn', t('log_mesh_load_failed', { id: meshId, msg: e.message }));
                     return null;
                 }
             })();
@@ -2036,6 +2120,22 @@
         const _partTexCache = {};
         // Раньше THREE.TextureLoader создавался здесь же, на верхнем уровне
         let _partTexLoader = null;
+        // Почему ассет не загрузился: TextureLoader/Image не говорят причину, поэтому
+        // повторно спрашиваем прокси и показываем его ответ (401/403, XML вместо картинки...).
+        const _assetReported = new Set();
+        function reportAssetFailure(id) {
+            if (_assetReported.has(id)) return;
+            _assetReported.add(id);
+            fetch('/api/asset-proxy?id=' + id).then(async r => {
+                if (!r.ok) {
+                    const txt = (await r.text()).replace(/\s+/g, ' ').slice(0, 300);
+                    logLuaOutput('warn', t('asset_fail_reason', { id, reason: r.status + ' ' + txt }));
+                } else {
+                    const ct = r.headers.get('content-type') || '?';
+                    logLuaOutput('warn', t(ct.startsWith('image/') ? 'asset_decode_failed' : 'asset_not_image', { id, type: ct }));
+                }
+            }).catch(e => logLuaOutput('warn', t('asset_fail_reason', { id, reason: e.message })));
+        }
         function getOrLoadPartTexture(assetId) {
             if (_partTexCache[assetId]) return _partTexCache[assetId];
             if (!_partTexLoader) _partTexLoader = new THREE.TextureLoader();
@@ -2048,6 +2148,7 @@
             }, undefined, () => {
                 // 3-й колбэк TextureLoader.load — onError, раньше не
                 logLuaOutput('warn', t('warn_texture_failed', { id: assetId }));
+                reportAssetFailure(assetId);
             });
             _partTexCache[assetId] = tex;
             return tex;
@@ -2074,7 +2175,7 @@
                 if (srgb) l.encoding = THREE.sRGBEncoding;
                 l.anisotropy = renderer.capabilities.getMaxAnisotropy();
                 l.needsUpdate = true;
-            }, undefined, () => logLuaOutput('warn', t('warn_texture_failed', { id })));
+            }, undefined, () => { logLuaOutput('warn', t('warn_texture_failed', { id })); reportAssetFailure(id); });
             _tiledTexCache[key] = tex;
             return tex;
         }
@@ -2149,12 +2250,12 @@
             Promise.all(layers.map(id => new Promise(res => {
                 const im = new Image();
                 im.onload = () => res(im);
-                im.onerror = () => { logLuaOutput('warn', t('warn_texture_failed', { id })); res(null); };
+                im.onerror = () => { logLuaOutput('warn', t('warn_texture_failed', { id })); reportAssetFailure(id); res(null); };
                 im.src = '/api/asset-proxy?id=' + id;
             }))).then(imgs => {
                 imgs.forEach(im => { if (im) ctx.drawImage(im, 0, 0, CLOTH_W, CLOTH_H); });
                 tex.needsUpdate = true;
-                logLuaOutput('info', 'Одежда: загружено слоёв ' + imgs.filter(Boolean).length + ' из ' + layers.length);
+                logLuaOutput('info', t('log_cloth_loaded', { n: imgs.filter(Boolean).length, total: layers.length }));
             });
             _clothTexCache[key] = tex;
             return tex;
@@ -5481,7 +5582,7 @@ end
             const wrapped = 'return function(script)\n' + scr.source + '\nend';
             let status = loadLuaChunk(L, wrapped, path);
             if (status !== lua.LUA_OK) {
-                logLuaOutput('error', 'ошибка компиляции: ' + luaErrToString(L), path, null, scr.cls);
+                logLuaOutput('error', t('lua_compile_error') + luaErrToString(L), path, null, scr.cls);
                 lua.lua_pop(L, 1);
                 return;
             }
@@ -5579,7 +5680,7 @@ end
             renderLuaOutput();
             try { await startLuaScriptsInner(); }
             catch (e) {
-                logLuaOutput('error', 'Запуск Lua прерван: ' + (e && e.message ? e.message : String(e)));
+                logLuaOutput('error', t('lua_run_aborted') + (e && e.message ? e.message : String(e)));
                 console.error('[Lua] startLuaScripts:', e);
             }
         }
@@ -5588,12 +5689,12 @@ end
             luaLogSessionId = 'play_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
             const r = await api('GET', '/api/scripts');
             if (!isPlaying) return;
-            if (!r || !r.ok) { logLuaOutput('error', '/api/scripts не ответил'); return; }
-            if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', 'Нет включённых Script/LocalScript на карте'); return; }
+            if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
+            if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
             if (!await ensureFengariLoaded()) {
-                logLuaOutput('error', 'fengari не загрузилась — проверь интернет');
-                notify('Lua VM (fengari) не загрузилась — проверь интернет', 'err');
+                logLuaOutput('error', t('lua_fengari_fail'));
+                notify(t('lua_vm_fail_notify'), 'err');
                 return;
             }
             if (!isPlaying) return; // Play могли остановить, пока грузился fengari
@@ -5627,7 +5728,7 @@ end
                     }
                 }
             } else {
-                logLuaOutput('warn', '/api/all_instances не ответил');
+                logLuaOutput('warn', t('lua_instances_no_reply'));
             }
             if (!isPlaying) return; // Play могли остановить, пока шёл запрос
 
@@ -6792,7 +6893,7 @@ end
                 return;
             }
             if (!cmEditor) {
-                notify('Редактор скриптов недоступен (CodeMirror не загрузился)', 'err');
+                notify(t('notify_editor_unavailable'), 'err');
                 return;
             }
             const src = cmEditor.getValue();
@@ -7113,7 +7214,7 @@ end
 
         async function newProject() {
             // Создаёт пустую сцену на сервере (набор стандартных сервисов
-            if (!confirm(t('confirm_discard_unsaved') || 'Текущая сцена (если не сохранена) будет заменена пустой. Продолжить?')) return;
+            if (!confirm(t('confirm_discard_unsaved'))) return;
             const r = await api('POST', '/api/new', {});
             if (!r.ok) {
                 notify(r.error || t('notify_error'), 'err');
@@ -7124,7 +7225,7 @@ end
             expanded.clear();
             window._avatarMeshCache = {};
             await loadTree();
-            notify(t('notify_new_scene') || 'Создана новая пустая сцена');
+            notify(t('notify_new_scene'));
         }
 
         async function saveFile() {
@@ -7456,7 +7557,7 @@ end
             _avatar3dCancelled = true;
             if (_avatar3dAbort) _avatar3dAbort.abort();
             closeModal();
-            notify('Скачивание отменено');
+            notify(t('notify_download_cancelled'));
         }
 
         async function _apiAbortable(url, signal) {
@@ -7500,15 +7601,15 @@ end
                             // Вызываем реальную функцию импорта в сцену
                             importAvatarIntoScene(data.obj_text, data.mtl_text, data.textures, 'local')
                                 .then(() => notify(t('avatar_added_to_scene')))
-                                .catch(e => notify('Не удалось импортировать: ' + e.message, 'err'));
+                                .catch(e => notify(t('notify_import_failed') + e.message, 'err'));
                         } else {
-                            notify(data.error || 'Ошибка импорта', 'err');
+                            notify(data.error || t('notify_import_error'), 'err');
                         }
                     })
                     .catch(err => {
                         document.body.removeChild(fileInput);
                         console.error('Ошибка загрузки файла:', err);
-                        notify('Ошибка сети при импорте', 'err');
+                        notify(t('notify_import_net'), 'err');
                     });
             });
 
@@ -7519,23 +7620,23 @@ end
         window.onAvatarFilePicked = async function (path) {
             if (!path) return; // пользователь отменил выбор
             closeModal();
-            notify('Читаю файл…');
+            notify(t('notify_reading_file'));
             let r;
             try {
                 r = await api('GET', '/api/roblox/avatar3d/import-local?path=' + encodeURIComponent(path));
             } catch (e) {
-                notify('Ошибка чтения файла: ' + (e && e.message || e), 'err');
+                notify(t('notify_read_error') + (e && e.message || e), 'err');
                 return;
             }
             if (!r.ok) {
-                notify(r.error || 'Не удалось прочитать архив', 'err');
+                notify(r.error || t('notify_archive_failed'), 'err');
                 return;
             }
             try {
                 await importAvatarIntoScene(r.obj_text, r.mtl_text, r.textures, 'local');
                 notify(t('avatar_added_to_scene'));
             } catch (e) {
-                notify('Не удалось импортировать: ' + (e && e.message || e), 'err');
+                notify(t('notify_import_failed') + (e && e.message || e), 'err');
             }
         };
 
@@ -7570,11 +7671,11 @@ end
                     st = await _apiAbortable('/api/roblox/avatar3d/status?userId=' + encodeURIComponent(userId), signal);
                 } catch (e) {
                     if (_avatar3dCancelled || e.name === 'AbortError') return;
-                    showModal(_avatarProgressHtml(steps, step, 'Сеть/сервер: ' + (e && e.message || e)));
+                    showModal(_avatarProgressHtml(steps, step, t('av_net_error') + (e && e.message || e)));
                     return;
                 }
                 if (!st.ok) {
-                    showModal(_avatarProgressHtml(steps, step, st.message || st.error || 'Не удалось запросить статус'));
+                    showModal(_avatarProgressHtml(steps, step, st.message || st.error || t('av_status_failed')));
                     return;
                 }
                 if (st.ready) {
@@ -7582,7 +7683,7 @@ end
                     break;
                 }
                 if (st.state === 'Error') {
-                    showModal(_avatarProgressHtml(steps, step, 'Roblox не смог сгенерировать модель для этого User ID'));
+                    showModal(_avatarProgressHtml(steps, step, t('av_roblox_failed')));
                     return;
                 }
                 if (!sawGenerating) {
@@ -7596,7 +7697,7 @@ end
             if (_avatar3dCancelled) return;
 
             if (!bundleUrl) {
-                showModal(_avatarProgressHtml(steps, step, 'Roblox слишком долго готовит модель — попробуйте ещё раз чуть позже'));
+                showModal(_avatarProgressHtml(steps, step, t('av_timeout')));
                 return;
             }
 
@@ -7617,12 +7718,12 @@ end
                 r = await _apiAbortable(fetchUrl, signal);
             } catch (e) {
                 if (_avatar3dCancelled || e.name === 'AbortError') return;
-                showModal(_avatarProgressHtml(steps, step, 'Ошибка скачивания: ' + (e && e.message || e)));
+                showModal(_avatarProgressHtml(steps, step, t('av_download_error') + (e && e.message || e)));
                 return;
             }
             if (_avatar3dCancelled) return;
             if (!r.ok) {
-                showModal(_avatarProgressHtml(steps, step, r.message || r.error || 'Не удалось скачать файлы'));
+                showModal(_avatarProgressHtml(steps, step, r.message || r.error || t('av_download_failed')));
                 return;
             }
 
@@ -7633,7 +7734,7 @@ end
                 try {
                     await importAvatarIntoScene(r.obj_text, r.mtl_text, r.textures, userId);
                 } catch (e) {
-                    showModal(_avatarProgressHtml(steps, step, 'Не удалось импортировать: ' + (e && e.message || e)));
+                    showModal(_avatarProgressHtml(steps, step, t('av_import_failed') + (e && e.message || e)));
                     return;
                 }
                 closeModal();
@@ -7642,7 +7743,7 @@ end
             }
 
             if (!IS_ANDROID) {
-                showModal(_avatarProgressHtml(steps, step, 'Сохранение .zip доступно только в Android-приложении (в десктоп-режиме файл уже записан рядом с app.py: ' + r.zipPath + ')'));
+                showModal(_avatarProgressHtml(steps, step, t('av_zip_android', { path: r.zipPath })));
                 return;
             }
             // Тот же поток, что уже работает для сохранения .rbxl:
