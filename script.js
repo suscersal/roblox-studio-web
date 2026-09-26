@@ -4629,6 +4629,17 @@ end
                 a.addEventListener('error', () => {
                     const nm = (luaByRef[ref] && luaByRef[ref].name) || ref;
                     logLuaOutput('warn', t('warn_sound_failed', { name: nm, src: a.src || '?' }));
+                    // Сама ошибка <audio> не говорит, ПОЧЕМУ не загрузилось —
+                    // переспрашиваем /api/asset-proxy напрямую и показываем,
+                    // что ответил сервер (тот же приём, что и для текстур:
+                    // reportAssetFailure). Без этого "Failed to load sound"
+                    // ничего не говорит о причине (401 от Roblox, битый файл,
+                    // сеть) — и в этой карте таймер "Time: X.XX" в ChartPlayer
+                    // считается от sound.TimePosition, так что незагруженный
+                    // звук выглядит как "не идёт время в игре", хотя причина
+                    // на самом деле в загрузке трека.
+                    const m = a.src && a.src.match(/[?&]id=(\d+)/);
+                    if (m) reportAssetFailure(m[1]);
                 });
                 soundElByRef[ref] = a;
             }
