@@ -2644,6 +2644,16 @@
         let playOnlyRefs = new Set(); // ref-ы мешей, подгруженных только для Play
         // Позиция каждого загруженного (в Play) объекта — независимо от
         let loadedObjPos = {}; // ref -> {x,y,z}
+        // Раньше part.Size для ОБЫЧНОГО (не GUI) BasePart в Lua-скриптах
+        // не читался НИОТКУДА и всегда был nil — .Size вообще не был
+        // особым случаем в мосте (в отличие от Position/CFrame), а общий
+        // "мусорный ящик" свойств (luaGenericPropsByRef) заполняется только
+        // ЗАПИСЯМИ, никогда из данных файла. Любой скрипт вида
+        // "part.Size.Z" на детали, которую сам ни разу не трогал, падал
+        // с ошибкой (в MenuCamera.lua это останавливало enableSongCamera
+        // ДО строки camera.CFrame = ... — камера песни вообще никогда не
+        // переставлялась). См. __get_size ниже.
+        let loadedObjSize = {}; // ref -> {x,y,z}
         let charBody = null;
         let charMesh = null; // куб для вида от третьего лица, см. toggleThirdPerson
 
@@ -2717,6 +2727,7 @@
                 playSnapshot[o.ref] = mesh.matrix.clone();
             }
             loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+            loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
 
             const pos = new THREE.Vector3();
             const quat = new THREE.Quaternion();
@@ -2752,6 +2763,7 @@
         function addVisualMeshForObj(o) {
             if (sceneObjs[o.ref]) {
                 loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+                loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
                 return; // уже загружен (визуально или физически) — трогать не нужно
             }
             const mesh = buildMeshFromObj(o, playGeoCache, playMatCache);
@@ -2762,6 +2774,7 @@
                 playSnapshot[o.ref] = mesh.matrix.clone();
             }
             loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+            loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
         }
 
         // Разжалование из физики в чисто визуальный меш:
@@ -2781,6 +2794,7 @@
                 delete physicsBodies[ref];
             }
             delete loadedObjPos[ref];
+            delete loadedObjSize[ref];
             if (playOnlyRefs.has(ref)) {
                 const mesh = sceneObjs[ref];
                 if (mesh) {
@@ -3164,6 +3178,7 @@
             playSnapshot = {};
             playOnlyRefs = new Set();
             loadedObjPos = {};
+            loadedObjSize = {};
 
             if (prevCameraState) {
                 spherical = prevCameraState.spherical;
@@ -3477,6 +3492,50 @@ end
 -- на обёртку, она может быть собрана сборщиком мусора, а не висеть вечно.
 local instances = setmetatable({}, {__mode = "v"})
 
+-- Цепочки наследования классов для IsA (класс -> список ПРЕДКОВ, от
+-- ближайшего к дальнему). Не полное дерево Instance API, а только классы,
+-- которые реально встречаются в парсере/сцене — этого достаточно, чтобы
+-- ":IsA("BasePart")"/":IsA("GuiObject")"/":IsA("PVInstance")" и т.п.
+-- работали как в настоящем Roblox, а не только по точному совпадению имени.
+INSTANCE_CLASS_ANCESTORS = {
+    Part = {"BasePart", "PVInstance", "Instance"},
+    MeshPart = {"BasePart", "PVInstance", "Instance"},
+    WedgePart = {"BasePart", "PVInstance", "Instance"},
+    CornerWedgePart = {"BasePart", "PVInstance", "Instance"},
+    TrussPart = {"BasePart", "PVInstance", "Instance"},
+    SpherePart = {"BasePart", "PVInstance", "Instance"},
+    SpawnLocation = {"BasePart", "PVInstance", "Instance"},
+    Seat = {"BasePart", "PVInstance", "Instance"},
+    VehicleSeat = {"BasePart", "PVInstance", "Instance"},
+    UnionOperation = {"BasePart", "PVInstance", "Instance"},
+    NegateOperation = {"BasePart", "PVInstance", "Instance"},
+    Model = {"PVInstance", "Instance"},
+    Folder = {"Instance"},
+    Frame = {"GuiObject", "GuiBase2d", "Instance"},
+    ScrollingFrame = {"GuiObject", "GuiBase2d", "Instance"},
+    TextLabel = {"GuiObject", "GuiBase2d", "Instance"},
+    TextButton = {"GuiObject", "GuiBase2d", "Instance"},
+    TextBox = {"GuiObject", "GuiBase2d", "Instance"},
+    ImageLabel = {"GuiObject", "GuiBase2d", "Instance"},
+    ImageButton = {"GuiObject", "GuiBase2d", "Instance"},
+    ViewportFrame = {"GuiObject", "GuiBase2d", "Instance"},
+    ScreenGui = {"LayerCollector", "GuiBase2d", "Instance"},
+    BillboardGui = {"LayerCollector", "GuiBase2d", "Instance"},
+    SurfaceGui = {"LayerCollector", "GuiBase2d", "Instance"},
+    Script = {"LuaSourceContainer", "Instance"},
+    LocalScript = {"LuaSourceContainer", "Instance"},
+    ModuleScript = {"LuaSourceContainer", "Instance"},
+    Sound = {"Instance"},
+    SoundEffect = {"Instance"},
+    PitchShiftSoundEffect = {"SoundEffect", "Instance"},
+    RemoteEvent = {"Instance"},
+    RemoteFunction = {"Instance"},
+    BindableEvent = {"Instance"},
+    BindableFunction = {"Instance"},
+    Humanoid = {"Instance"},
+    Camera = {"Instance"},
+}
+
 -- ВАЖНО: -1 (и только -1) — "нет инстанса" (так JS-мост сигналит "родитель
 -- не найден"/"ребёнок не найден"). Виртуальные инстансы из Instance.new()
 -- используют ДРУГИЕ отрицательные ref'ы (см. __instance_new) — это валидные
@@ -3535,9 +3594,19 @@ InstanceMT.__index = function(t, k)
         local x, y, z = __get_position(ref)
         return Vector3.new(x, y, z)
     end
-    if k == "Size" and __is_gui_ref(ref) then
-        local xs, xo, ys, yo = __get_gui_size(ref)
-        return UDim2.new(xs, xo, ys, yo)
+    if k == "Size" then
+        if __is_gui_ref(ref) then
+            local xs, xo, ys, yo = __get_gui_size(ref)
+            return UDim2.new(xs, xo, ys, yo)
+        end
+        -- BasePart.Size — раньше не было отдельного случая вообще, и
+        -- запрос падал в общий __get_prop-fallback, который для составных
+        -- Vector3-свойств не приспособлен (не запись в файле — значение
+        -- никогда не оказывалось в мусорном ящике свойств) и всегда отдавал
+        -- nil. part.Size.Z на любой нетронутой скриптом детали падало с
+        -- "attempt to index a nil value".
+        local x, y, z = __get_size(ref)
+        return Vector3.new(x, y, z)
     end
     -- Не полноценный CFrame (без умножения/CFrame.Angles) — только чтение
     -- текущей ориентации как Position + три базисных вектора. Этого
@@ -3636,7 +3705,26 @@ InstanceMT.__index = function(t, k)
         end
     end
     if k == "IsA" or k == "isA" then
-        return function(self, cls) return __get_class(ref) == cls end
+        -- Раньше IsA сравнивала класс только буквально ("Part" ~= "BasePart"),
+        -- хотя в реальном Roblox IsA учитывает всю цепочку наследования.
+        -- Из-за этого весь код вида "if part:IsA(\"BasePart\") then ..."
+        -- (крайне частый паттерн) уходил в false-ветку для любого Part/
+        -- MeshPart/WedgePart и т.п. — например, в MenuCamera.lua это
+        -- заставляло брать targetSize = Vector3.new(4,4,4) (фиксированную
+        -- заглушку) вместо реального Size метки-камеры, и позицию через
+        -- GetPivot() у обычного Part вместо .Position — камера каждой
+        -- песни считала практически одну и ту же точку.
+        return function(self, cls)
+            local c = __get_class(ref)
+            if c == cls then return true end
+            local chain = INSTANCE_CLASS_ANCESTORS[c]
+            if chain then
+                for i = 1, #chain do
+                    if chain[i] == cls then return true end
+                end
+            end
+            return false
+        end
     end
     -- GetPropertyChangedSignal(name) — раньше был только заглушкой в списке
     -- подсветки синтаксиса ("attempt to call a nil value"). Отдельный
@@ -4143,6 +4231,26 @@ end
 
 
         // ---- Мост к объектам сцены: только числа/строки/булевы, см. коммент выше ----
+        function luaSizeOfRef(ref) {
+            const p = loadedObjSize[ref];
+            if (p && (p.x || p.y || p.z)) return p;
+            // Заглушка не найдена (объект грузился не через
+            // addPhysicsBodyForObj/addVisualMeshForObj) — считаем реальный
+            // размер геометрии меша как запасной вариант.
+            const mesh = sceneObjs[ref];
+            if (mesh && mesh.geometry) {
+                if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+                const bb = mesh.geometry.boundingBox;
+                const sc = new THREE.Vector3();
+                mesh.matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), sc);
+                return {
+                    x: (bb.max.x - bb.min.x) * sc.x,
+                    y: (bb.max.y - bb.min.y) * sc.y,
+                    z: (bb.max.z - bb.min.z) * sc.z,
+                };
+            }
+            return { x: 0, y: 0, z: 0 };
+        }
         function luaPositionOfRef(ref) {
             const body = physicsBodies[ref];
             if (body) return { x: body.position.x, y: body.position.y, z: body.position.z };
@@ -5156,6 +5264,11 @@ end
             });
             def('__get_position', function (L2) {
                 const p = luaPositionOfRef(lua.lua_tonumber(L2, 1));
+                lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
+                return 3;
+            });
+            def('__get_size', function (L2) {
+                const p = luaSizeOfRef(lua.lua_tonumber(L2, 1));
                 lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
                 return 3;
             });
