@@ -4526,7 +4526,16 @@ end
             }
             async _rebuildProcessedBuffer() {
                 if (!this._rawBuffer) return;
-                const key = this._src + '|' + this._rate.toFixed(3) + '|' + this._pitchOctave.toFixed(3);
+                // Версия в ключе кэша (в памяти И в IndexedDB — последний
+                // переживает перезагрузку страницы): если когда-либо раньше
+                // тут был посчитан и сохранён результат по старой/другой
+                // версии алгоритма растяжки, он бы молча продолжал
+                // отдаваться из кэша и звучать неправильно (писклявый голос)
+                // даже после починки кода — сам код никогда не перезапускался,
+                // просто читался готовый файл из IndexedDB. Бампаем версию,
+                // чтобы прошлые закэшированные результаты гарантированно не
+                // подхватились.
+                const key = 'v2|' + this._src + '|' + this._rate.toFixed(3) + '|' + this._pitchOctave.toFixed(3);
                 if (_stretchedBufferCache[key]) { this._processedBuffer = _stretchedBufferCache[key]; return; }
                 // Дисковый (IndexedDB) кэш — проверяем ДО похода в воркер:
                 const cached = await _stretchDbGet(key);
