@@ -4655,9 +4655,11 @@ end
                     return;
                 }
                 // Сначала темп (PlaybackSpeed, фазовый вокодер — сохраняет
+                logLuaOutput('info', 'Sound: обрабатываю ' + this._src + ' — PlaybackSpeed=' + this._rate.toFixed(3) + ', Octave=' + this._pitchOctave.toFixed(3) + ' (длительность ' + this._rawBuffer.duration.toFixed(2) + 'с, ' + this._rawBuffer.sampleRate + 'Гц)');
                 const tempoCorrected = await _phaseVocoderStretchAsync(this._rawBuffer, this._rate, this._ctx);
                 this._processedBuffer = await _pitchShiftAsync(tempoCorrected, this._pitchOctave, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
+                logLuaOutput('info', 'Sound: готово — новая длительность ' + this._processedBuffer.duration.toFixed(2) + 'с, ' + this._processedBuffer.sampleRate + 'Гц (AudioContext=' + this._ctx.sampleRate + 'Гц)');
                 const channels = [];
                 for (let ch = 0; ch < this._processedBuffer.numberOfChannels; ch++) {
                     channels.push(this._processedBuffer.getChannelData(ch));
