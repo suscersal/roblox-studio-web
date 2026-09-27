@@ -562,6 +562,19 @@ def t_uniqueid(buf, count):
         out.append({'index': index, 'time': time_, 'random': random})
     return out
 
+def t_capabilities(buf, count):
+    # SecurityCapabilities (тип 0x21, свойство "Capabilities" у любого
+    # инстанса) — сравнительно новый тип формата, раньше отсутствовал в
+    # словаре декодеров вообще, из-за чего терялся у КАЖДОГО объекта карты
+    # (Part.Capabilities, Script.Capabilities, Model.Capabilities и т.д. —
+    # ровно то, что было в предупреждении при импорте .rbxm). По той же
+    # раскладке байт, что и обычный Int64 (rbx-dom кодирует его тем же
+    # путём, битовая маска прав хранится как знаковое 64-битное число) —
+    # то есть перемежённые (interleaved) байты + zigzag-преобразование.
+    raw = read_interleaved_u64_array(buf, count)
+    return [untransform_i64(v) for v in raw]
+
+
 def t_font(buf, count):
     out = []
     pos = 0
@@ -849,6 +862,11 @@ def s_uniqueid(vals):
         buf.extend(struct.pack('<QQ', val & 0xFFFFFFFFFFFFFFFF, val >> 64))
     return bytes(buf)
 
+def s_capabilities(vals):
+    raw = [transform_i64(int(v) if v is not None else 0) for v in vals]
+    return write_interleaved_u64_array(raw)
+
+
 def s_font(vals):
     buf = bytearray()
     for v in vals:
@@ -882,6 +900,7 @@ TYPE_DECODERS = {
     0x16: t_colorsequence, 0x17: t_numberrange, 0x18: t_rect,
     0x19: t_physicalproperties, 0x1a: t_color3uint8, 0x1b: t_int64,
     0x1c: t_sharedstring, 0x1d: t_string, 0x1f: t_uniqueid, 0x20: t_font,
+    0x21: t_capabilities,
 }
 
 TYPE_SERIALIZERS = {
@@ -893,6 +912,7 @@ TYPE_SERIALIZERS = {
     0x16: s_colorsequence, 0x17: s_numberrange, 0x18: s_rect,
     0x19: s_physicalproperties, 0x1a: s_color3uint8, 0x1b: s_int64,
     0x1c: s_sharedstring, 0x1d: s_string, 0x1f: s_uniqueid, 0x20: s_font,
+    0x21: s_capabilities,
 }
 
 
