@@ -1365,10 +1365,26 @@ def api_get_instance(ref):
     cls = parsed['referent_to_class'].get(ref, '?')
     props = {k: serialize_prop(v)
              for k, v in parsed['props'].get(ref, {}).items()}
+    # Прослушивание звука прямо из Explorer (buildSoundPreviewRow) раньше
+    # играло его "как есть", без PlaybackSpeed/PitchShiftSoundEffect —
+    # звучало не так, как в реальной игре. Octave лежит не в самом Sound, а
+    # в дочернем PitchShiftSoundEffect, поэтому ищем его отдельно, как и в
+    # /api/all_instances.
+    pitch_octave = None
+    if cls == 'Sound':
+        for child_ref, parent_ref in parsed['parent_map'].items():
+            if parent_ref != ref:
+                continue
+            if parsed['referent_to_class'].get(child_ref) == 'PitchShiftSoundEffect':
+                cp = parsed['props'].get(child_ref, {})
+                if cp.get('Enabled', True):
+                    pitch_octave = safe_float(cp.get('Octave', 0.0), 0.0)
+                break
     return jsonify({
         'ok': True, 'ref': ref, 'cls': cls,
         'icon': icon_src(cls), 'props': props,
         'parent': parsed['parent_map'].get(ref, -1),
+        'pitchOctave': pitch_octave,
     })
 
 

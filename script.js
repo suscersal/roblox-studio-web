@@ -4685,12 +4685,25 @@ end
                     _stretchedBufferCache[key] = outBuf;
                     return;
                 }
-                // Сначала темп (PlaybackSpeed, фазовый вокодер — сохраняет
+                // ТЕМП (PlaybackSpeed) и ПИТЧ (Octave) считались ДВУМЯ
+                // отдельными полными проходами фазового вокодера (сам питч
+                // внутри тоже делает стретч + ресемпл) — на пятиминутном
+                // треке (48 кГц, ~15.5 млн сэмплов) это 2 тяжёлых FFT-прохода
+                // по всей песне ДО того, как звук вообще начинал играть —
+                // отсюда "очень долго думает". Математически стретч на
+                // rate, потом стретч на 1/p и ресемпл на p — это то же
+                // самое, что ОДИН стретч на rate/p и один ресемпл на p
+                // (проверено численно на синтетическом сигнале: та же
+                // длительность, та же частота, с точностью до сэмпла) —
+                // экономим ровно один полный проход по всей песне.
+                const t0 = performance.now();
                 logLuaOutput('info', 'Sound: обрабатываю ' + this._src + ' — PlaybackSpeed=' + this._rate.toFixed(3) + ', Octave=' + this._pitchOctave.toFixed(3) + ' (длительность ' + this._rawBuffer.duration.toFixed(2) + 'с, ' + this._rawBuffer.sampleRate + 'Гц)');
-                const tempoCorrected = await _phaseVocoderStretchAsync(this._rawBuffer, this._rate, this._ctx);
-                this._processedBuffer = await _pitchShiftAsync(tempoCorrected, this._pitchOctave, this._ctx);
+                const p = Math.pow(2, this._pitchOctave);
+                const combinedSpeed = this._rate / p; // stretch(rate) + stretch(1/p) = stretch(rate/p) — см. комментарий выше
+                const stretched = await _phaseVocoderStretchAsync(this._rawBuffer, combinedSpeed, this._ctx);
+                this._processedBuffer = Math.abs(p - 1) < 0.001 ? stretched : await _resampleAsync(stretched, p, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
-                logLuaOutput('info', 'Sound: готово — новая длительность ' + this._processedBuffer.duration.toFixed(2) + 'с, ' + this._processedBuffer.sampleRate + 'Гц (AudioContext=' + this._ctx.sampleRate + 'Гц)');
+                logLuaOutput('info', 'Sound: готово за ' + ((performance.now() - t0) / 1000).toFixed(1) + 'с — новая длительность ' + this._processedBuffer.duration.toFixed(2) + 'с, ' + this._processedBuffer.sampleRate + 'Гц (AudioContext=' + this._ctx.sampleRate + 'Гц)');
                 const channels = [];
                 for (let ch = 0; ch < this._processedBuffer.numberOfChannels; ch++) {
                     channels.push(this._processedBuffer.getChannelData(ch));
@@ -7041,7 +7054,9 @@ end
             _editorPreviewBtn = null;
             _editorPreviewSoundId = null;
         }
-        function buildSoundPreviewRow(soundId) {
+        function buildSoundPreviewRow(soundId, playbackSpeed, pitchOctave) {
+            playbackSpeed = playbackSpeed || 1;
+            pitchOctave = pitchOctave || 0;
             const row = document.createElement('div');
             row.style.cssText = 'margin-bottom:4px;padding:4px;background:#111827;border-radius:4px';
             const btn = document.createElement('button');
@@ -7057,9 +7072,20 @@ end
                     return;
                 }
                 _stopEditorPreview();
-                if (!_editorPreviewAudio) _editorPreviewAudio = new Audio();
+                // Раньше тут был голый <audio> без PlaybackSpeed/Octave —
+                // прослушивание из Explorer звучало не так, как в самой
+                // игре (например, ускоренные/питчнутые треки играли
+                // обычным голосом). RobloxSoundElement — тот же движок,
+                // что и в Play, с тем же объединённым стретч+ресемпл.
+                if (!_editorPreviewAudio) _editorPreviewAudio = new RobloxSoundElement();
                 _editorPreviewAudio.src = url;
-                _editorPreviewAudio.onended = () => _stopEditorPreview();
+                _editorPreviewAudio.playbackRate = playbackSpeed;
+                _editorPreviewAudio.pitchOctave = pitchOctave;
+                // RobloxSoundElement — не настоящий <audio>, у него нет
+                // IDL-свойства onended, только addEventListener (как и у
+                // остальных Sound-обёрток в этом файле) — прямое
+                // "audio.onended = fn" тут молча ничего не делает.
+                _editorPreviewAudio.addEventListener('ended', () => _stopEditorPreview());
                 _editorPreviewAudio.play().catch((e) => { notify(String(e.message || e), 'err'); _stopEditorPreview(); });
                 _editorPreviewBtn = btn;
                 _editorPreviewSoundId = soundId;
@@ -7104,7 +7130,9 @@ end
 
             // Прослушать звук прямо из Explorer, вне Play — раньше это
             if (r.cls === 'Sound' && r.props.SoundId) {
-                panel.appendChild(buildSoundPreviewRow(r.props.SoundId));
+                const rawSpeed = r.props.PlaybackSpeed != null ? r.props.PlaybackSpeed
+                    : (r.props.Pitch != null ? r.props.Pitch : 1);
+                panel.appendChild(buildSoundPreviewRow(r.props.SoundId, rawSpeed, r.pitchOctave || 0));
             }
 
             // Position, Rotation, Size
