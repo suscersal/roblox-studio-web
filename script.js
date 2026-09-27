@@ -4685,23 +4685,32 @@ end
                     _stretchedBufferCache[key] = outBuf;
                     return;
                 }
-                // ТЕМП (PlaybackSpeed) и ПИТЧ (Octave) считались ДВУМЯ
-                // отдельными полными проходами фазового вокодера (сам питч
-                // внутри тоже делает стретч + ресемпл) — на пятиминутном
-                // треке (48 кГц, ~15.5 млн сэмплов) это 2 тяжёлых FFT-прохода
-                // по всей песне ДО того, как звук вообще начинал играть —
-                // отсюда "очень долго думает". Математически стретч на
-                // rate, потом стретч на 1/p и ресемпл на p — это то же
-                // самое, что ОДИН стретч на rate/p и один ресемпл на p
-                // (проверено численно на синтетическом сигнале: та же
-                // длительность, та же частота, с точностью до сэмпла) —
-                // экономим ровно один полный проход по всей песне.
+                // ВАЖНО: в настоящем Roblox Sound.PlaybackSpeed — это НЕ
+                // сохраняющая тон растяжка времени, а обычный множитель
+                // скорости чтения (как audio.playbackRate у HTML5): меняет
+                // И темп, И питч одновременно (это задокументированное и
+                // хорошо известное поведение Roblox). Раньше PlaybackSpeed
+                // здесь шёл через фазовый вокодер (сохраняя тон) — то есть
+                // звучал ИНАЧЕ, чем в настоящем Roblox, а маперы подбирают
+                // Octave у PitchShiftSoundEffect ИМЕННО под естественный
+                // подъём/понижение тона от PlaybackSpeed (как в примерах
+                // этой карты: у превью песен разные PlaybackSpeed и разные
+                // компенсирующие Octave). Наша "сохраняющая тон" растяжка
+                // ломала этот баланс — отсюда писклявость даже там, где в
+                // настоящем Roblox всё звучит нормально.
+                // PitchShiftSoundEffect.Octave — НАСТОЯЩИЙ отдельный эффект:
+                // он честно меняет питч БЕЗ изменения длительности (в
+                // отличие от PlaybackSpeed) — это тоже задокументированное
+                // поведение, и его сохраняем как есть.
                 const t0 = performance.now();
                 logLuaOutput('info', 'Sound: обрабатываю ' + this._src + ' — PlaybackSpeed=' + this._rate.toFixed(3) + ', Octave=' + this._pitchOctave.toFixed(3) + ' (длительность ' + this._rawBuffer.duration.toFixed(2) + 'с, ' + this._rawBuffer.sampleRate + 'Гц)');
                 const p = Math.pow(2, this._pitchOctave);
-                const combinedSpeed = this._rate / p; // stretch(rate) + stretch(1/p) = stretch(rate/p) — см. комментарий выше
-                const stretched = await _phaseVocoderStretchAsync(this._rawBuffer, combinedSpeed, this._ctx);
-                this._processedBuffer = Math.abs(p - 1) < 0.001 ? stretched : await _resampleAsync(stretched, p, this._ctx);
+                // PlaybackSpeed — наивный ресемпл (меняет питч, как в Roblox).
+                const speedApplied = Math.abs(this._rate - 1) < 0.001
+                    ? this._rawBuffer
+                    : await _resampleAsync(this._rawBuffer, this._rate, this._ctx);
+                // PitchShiftSoundEffect — честный сдвиг тона без изменения темпа.
+                this._processedBuffer = Math.abs(p - 1) < 0.001 ? speedApplied : await _pitchShiftAsync(speedApplied, this._pitchOctave, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
                 logLuaOutput('info', 'Sound: готово за ' + ((performance.now() - t0) / 1000).toFixed(1) + 'с — новая длительность ' + this._processedBuffer.duration.toFixed(2) + 'с, ' + this._processedBuffer.sampleRate + 'Гц (AudioContext=' + this._ctx.sampleRate + 'Гц)');
                 const channels = [];
