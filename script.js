@@ -4312,6 +4312,37 @@ end
             }
             return _sharedAudioCtx;
         }
+        // Мобильные браузеры разрешают звуку играть только после реального
+        // тача/клика — а AudioContext для звуков с PlaybackSpeed/Octave
+        // (фазовый вокодер) раньше создавался и получал .resume() только
+        // ГЛУБОКО ВНУТРИ асинхронной цепочки (fetch → decodeAudioData →
+        // воркер → ...), когда браузер уже не считает это "прямым откликом"
+        // на жест пользователя. .resume() в такой ситуации может остаться
+        // подвешенным навсегда — контекст стоит на паузе, и звук просто НЕ
+        // ИГРАЕТ (тишина), хотя весь код вокруг отрабатывает без ошибок.
+        // Обычные <audio> (без PlaybackSpeed/Octave) эту проблему не
+        // получали — у них своя, более мягкая политика автовоспроизведения,
+        // отсюда и было "пропадает только у звуков с pitch-эффектами".
+        // Лечится стандартно: создать и разблокировать AudioContext сразу
+        // на первое же касание/клик по странице, заранее, до того как он
+        // реально понадобится какой-либо песне.
+        let _audioUnlockDone = false;
+        function _unlockAudioContext() {
+            if (_audioUnlockDone) return;
+            const ctx = _getAudioCtx();
+            const finish = () => { if (ctx.state === 'running') _audioUnlockDone = true; };
+            if (ctx.state === 'suspended') { ctx.resume().then(finish).catch(() => { }); } else { finish(); }
+            // Немой блип нулевой громкости — на iOS одного resume() иногда
+            // недостаточно, помогает реальный (пусть и беззвучный) source.start().
+            try {
+                const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
+                const src = ctx.createBufferSource();
+                src.buffer = buf; src.connect(ctx.destination); src.start(0);
+            } catch (e) { /* не критично */ }
+        }
+        ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'keydown'].forEach((ev) => {
+            document.addEventListener(ev, _unlockAudioContext, { passive: true });
+        });
         const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, чтобы не пересчитывать заново при повторном Play/пересборке сцены
 
         // Фазовый вокодер — раньше здесь был WSOLA (время-доменный поиск
@@ -4675,7 +4706,17 @@ end
             }
             _startPlayback(offset) {
                 if (!this._processedBuffer) return;
-                if (this._ctx.state === 'suspended') this._ctx.resume().catch(() => { });
+                if (this._ctx.state === 'suspended') {
+                    // На всякий случай (если по какой-то причине разблокировка
+                    // при первом тапе не сработала) — пробуем ещё раз при
+                    // самом запуске; логируем, чтобы было видно в Output,
+                    // если звук всё равно не слышен именно по этой причине.
+                    this._ctx.resume().then(() => {
+                        if (this._ctx.state !== 'running') {
+                            logLuaOutput('warn', 'AudioContext не разблокировался (state=' + this._ctx.state + ') — звук может быть не слышен');
+                        }
+                    }).catch(() => { });
+                }
                 const node = this._ctx.createBufferSource();
                 node.buffer = this._processedBuffer;
                 node.connect(this._gain);
