@@ -4278,6 +4278,7 @@ end
         // Camera — особый случай:
         function applyCFrameValue(ref, x, y, z, lx, ly, lz) {
             if (luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined') {
+                logLuaOutput('info', 'Camera: CFrame -> (' + x.toFixed(1) + ',' + y.toFixed(1) + ',' + z.toFixed(1) + ') look (' + lx.toFixed(2) + ',' + ly.toFixed(2) + ',' + lz.toFixed(2) + ')');
                 camera.position.set(x, y, z);
                 camera.lookAt(x + lx, y + ly, z + lz);
             } else {
@@ -5504,6 +5505,7 @@ end
                     if (luaByRef[ref] && luaByRef[ref].cls === 'Camera') {
                         const wasScriptable = cameraIsScriptable;
                         cameraIsScriptable = (enumName === 'Scriptable');
+                        logLuaOutput('info', 'Camera: CameraType -> ' + enumName + ' (ref ' + ref + ')');
                         // Scriptable -> Custom (например MenuCamera.lua при
                         // возврате в меню песен): раньше followCharacterCamera
                         // в СЛЕДУЮЩИЙ же кадр мгновенно ставила target на
