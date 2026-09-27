@@ -4886,8 +4886,24 @@ end
             if (name in GENERIC_PROP_DEFAULTS) return GENERIC_PROP_DEFAULTS[name];
             return null;
         }
+        const VALUE_BASE_CLASSES = new Set(['StringValue', 'NumberValue', 'BoolValue',
+            'IntValue', 'ObjectValue', 'Vector3Value', 'CFrameValue', 'Color3Value', 'BrickColorValue']);
         function luaSetGenericProp(ref, name, value) {
             if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
+            // ValueBase.Value — раньше запись просто клалась в общий
+            // "мусорный ящик" свойств и на этом всё: сигнал .Changed
+            // никогда не стрелял. Это крайне частый паттерн в реальных
+            // играх (StringValue как канал связи между скриптами,
+            // например CurrentSong в этой карте) — "obj.Changed:Connect(...)"
+            // просто никогда не срабатывал, и весь код внутри (в этой карте
+            // — включение камеры песни, MenuCamera.lua) не выполнялся ВООБЩЕ,
+            // без единой ошибки — выглядело как "телепорт не работает",
+            // хотя сам расчёт камеры (уже проверенный) был ни при чём.
+            if (name === 'Value' && luaByRef[ref] && VALUE_BASE_CLASSES.has(luaByRef[ref].cls)) {
+                (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {}).Value = value;
+                fireLuaSignal(ref, 'Changed', [value]);
+                return;
+            }
             // Sound — до GUI/virtualInstanceProps веток:
             if (luaByRef[ref] && luaByRef[ref].cls === 'Sound') {
                 if (name === 'SoundId') {
