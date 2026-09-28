@@ -4276,9 +4276,19 @@ end
             }
         }
         // Camera — особый случай:
+        let _lastCamLogKey = null;
         function applyCFrameValue(ref, x, y, z, lx, ly, lz) {
             if (luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined') {
-                logLuaOutput('info', 'Camera: CFrame -> (' + x.toFixed(1) + ',' + y.toFixed(1) + ',' + z.toFixed(1) + ') look (' + lx.toFixed(2) + ',' + ly.toFixed(2) + ',' + lz.toFixed(2) + ')');
+                // Скрипт карты пересчитывает и переставляет CFrame камеры
+                // КАЖДЫЙ кадр (RenderStepped), даже когда объект не
+                // двигался — без дедупликации это заливало Output одной и
+                // той же строкой десятки раз в секунду. Печатаем только при
+                // реальном изменении координат.
+                const key = x.toFixed(2) + ',' + y.toFixed(2) + ',' + z.toFixed(2) + '|' + lx.toFixed(3) + ',' + ly.toFixed(3) + ',' + lz.toFixed(3);
+                if (key !== _lastCamLogKey) {
+                    _lastCamLogKey = key;
+                    logLuaOutput('info', 'Camera: CFrame -> (' + x.toFixed(1) + ',' + y.toFixed(1) + ',' + z.toFixed(1) + ') look (' + lx.toFixed(2) + ',' + ly.toFixed(2) + ',' + lz.toFixed(2) + ')');
+                }
                 camera.position.set(x, y, z);
                 camera.lookAt(x + lx, y + ly, z + lz);
             } else {
