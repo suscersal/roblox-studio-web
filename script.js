@@ -2170,6 +2170,22 @@
                 if (!geo) return;
                 if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
                 mesh.geometry = geo;
+                // Внутренняя поверхность выреза (та, что "смотрит" внутрь
+                // полости) видна ТОЛЬКО если материал рисует обе стороны —
+                // материал box-заглушки общий (matCache) и по умолчанию
+                // однобокий: снаружи выемка/дырка не читалась (сплошная
+                // деталь), хотя геометрия внутри уже правильная. Клонируем
+                // материал (общий кэш трогать нельзя) и включаем DoubleSide
+                // только для реальных union-мешей.
+                const applyDoubleSide = (m) => {
+                    if (m.side === THREE.DoubleSide) return m;
+                    const c = m.clone();
+                    c.side = THREE.DoubleSide;
+                    return c;
+                };
+                mesh.material = Array.isArray(mesh.material)
+                    ? mesh.material.map(applyDoubleSide)
+                    : applyDoubleSide(mesh.material);
             });
             _trackLoad(p);
         }
