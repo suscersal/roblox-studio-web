@@ -10,6 +10,7 @@ import traceback
 import json
 from urllib.parse import quote
 from rbxl_parser import parse_rbxl, save_rbxl, publish_place, export_rbxm, import_rbxm
+from rbxl_parser import union_mesh_from_parsed, union_mesh_render_json
 from flask import Flask, request, jsonify, Response, send_from_directory
 from pathlib import Path
 import sys
@@ -398,7 +399,9 @@ def chunk_large_objects(objs):
         # суб-боксы буквально по его Size, что для реального меша (форма
         # почти никогда не совпадает с прямоугольником) раздробило бы
         # видимую модель на набор неверных кубов вместо неё самой.
-        if o.get('shape') == 'box' and not o.get('meshId'):
+        # unionMesh — то же самое: у юниона своя геометрия (с вырезами),
+        # суб-боксы по Size закрыли бы вырезы.
+        if o.get('shape') == 'box' and not o.get('meshId') and not o.get('unionMesh'):
             out.extend(chunk_box_object(o))
         else:
             out.append(o)
@@ -800,6 +803,11 @@ def build_all_scene_objects():
         if isinstance(cancollide, str):
             cancollide = cancollide.lower() in ('true', '1')
 
+        # У юниона есть настоящий меш, если SolidMeshHolder декодируется.
+        # Сам меш по сети не гоняем — клиент заберёт его по /api/union_mesh.
+        union_mesh = (cls == 'UnionOperation'
+                      and union_mesh_from_parsed(parsed, ref) is not None)
+
         objs.append({
             'ref': ref, 'class': cls, 'name': name,
             'shape': shape,
@@ -810,6 +818,7 @@ def build_all_scene_objects():
             'opacity': opacity,
             'meshScale': mesh_scale, 'meshOffset': mesh_offset, 'cloth': cloth,
             'material': material, 'mvar': mvar,
+            'unionMesh': union_mesh,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
         })
 
@@ -2149,6 +2158,31 @@ def _asset_cache_disk_put(asset_id, content_type, raw_bytes):
             f.write_bytes(raw_bytes)
     except Exception:
         pass  # дисковый кэш — best-effort, не должен ронять сам запрос
+
+
+@flask_app.route('/api/union_mesh')
+def api_union_mesh():
+    """Геометрия UnionOperation: {'position': [...], 'normal': [...], 'triangles': N}.
+    Координаты локальные (относительно CFrame юниона). 404 — меша нет или
+    формат не поддержан (клиент оставляет box)."""
+    parsed = state.get('parsed')
+    ref = request.args.get('ref', type=int)
+    if not parsed or ref is None or parsed['referent_to_class'].get(ref) != 'UnionOperation':
+        return jsonify({'ok': False, 'error': 'not a union'}), 404
+    key = (id(parsed), ref, parsed['props'].get(ref, {}).get('SolidMeshHolder'))
+    hit = _union_mesh_cache.get(key)
+    if hit is None:
+        m = union_mesh_from_parsed(parsed, ref)
+        hit = union_mesh_render_json(m) if m else False
+        if len(_union_mesh_cache) > 512:
+            _union_mesh_cache.clear()
+        _union_mesh_cache[key] = hit
+    if not hit:
+        return jsonify({'ok': False, 'error': 'no solid mesh'}), 404
+    return jsonify(hit)
+
+
+_union_mesh_cache = {}
 
 
 def _asset_response(raw_bytes, content_type):

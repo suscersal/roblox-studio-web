@@ -1777,3 +1777,103 @@ def publish_place(rbxl_path, universe_id, place_id, api_key, version_type="Publi
                 return resp.status, resp.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
+
+# ====================== UnionOperation: SolidMeshHolder ======================
+# Форма юниона (деталь с уже вычтенными NegateOperation) лежит в свойстве
+# SolidMeshHolder (SharedString). Старые MeshData/MeshData2 (CSGMDL) у таких
+# файлов пустые. Формат расшифрован по образцам (little-endian):
+#   u8 0x03, u8 0x01, u32 size, u32 0, u32 size, b'SolidMesh', u32 0
+#   дальше каналы, у каждого заголовок  u32 count, u32 0:
+#     1) positions   count * vec3 f32
+#     2) normals     count * vec3 f32   (уникальные нормали)
+#     3) пустой канал (UV; если непустой — формат не разобран)
+#     4) канал X     count * vec3 f32   (в образцах везде (1,0,0), для рендера не нужен)
+#     5) index_pos    3*N значений: signed LEB128 дельты -> индекс в positions
+#     6) index_normal 3*N значений: то же -> индекс в normals
+#     7) пустой канал
+#     8) index_x      3*N значений (для рендера не нужен)
+# Сверено на реальных юнионах: объём меша == UnscaledVolume, нормали граней
+# совпадают с геометрическими.
+
+def _sleb128(buf, pos):
+    result = shift = 0
+    while True:
+        b = buf[pos]
+        pos += 1
+        result |= (b & 0x7F) << shift
+        shift += 7
+        if not (b & 0x80):
+            if b & 0x40:
+                result -= 1 << shift
+            return result, pos
+
+
+def decode_solid_mesh(blob):
+    """blob (bytes) -> {'positions','normals','index','normal_index','triangles'}.
+    Бросает ValueError на неизвестный формат — вызывающий откатывается на box."""
+    blob = bytes(blob)
+    if len(blob) < 40 or blob[0] != 3 or blob[14:23] != b'SolidMesh':
+        raise ValueError('не SolidMesh-блоб')
+    if struct.unpack_from('<I', blob, 2)[0] != len(blob) - 14:
+        raise ValueError('неожиданный размер SolidMesh')
+    pos = 27
+
+    def hdr():
+        nonlocal pos
+        n = struct.unpack_from('<I', blob, pos)[0]
+        pos += 8
+        return n
+
+    def vec3(n):
+        nonlocal pos
+        a = struct.unpack_from('<%df' % (3 * n), blob, pos)
+        pos += 12 * n
+        return [tuple(a[i:i + 3]) for i in range(0, 3 * n, 3)]
+
+    def idx(n):
+        nonlocal pos
+        out, prev = [], 0
+        for _ in range(n):
+            d, pos = _sleb128(blob, pos)
+            prev += d
+            out.append(prev)
+        return out
+
+    try:
+        positions = vec3(hdr())
+        normals = vec3(hdr())
+        if hdr():
+            raise ValueError('непустой UV-канал: формат не разобран')
+        vec3(hdr())
+        index = idx(hdr())
+        normal_index = idx(hdr())
+    except (struct.error, IndexError):
+        raise ValueError('SolidMesh обрезан')
+    if (not index or len(index) % 3 or len(normal_index) != len(index)
+            or max(index) >= len(positions) or min(index) < 0
+            or max(normal_index) >= len(normals) or min(normal_index) < 0):
+        raise ValueError('индексы SolidMesh вне диапазона')
+    return {'positions': positions, 'normals': normals, 'index': index,
+            'normal_index': normal_index, 'triangles': len(index) // 3}
+
+
+def union_mesh_from_parsed(parsed, ref):
+    """Меш UnionOperation (локальные координаты, центр = pivot детали) или None."""
+    idx = parsed['props'].get(ref, {}).get('SolidMeshHolder')
+    ss = parsed.get('shared_strings') or []
+    if not isinstance(idx, int) or not (0 <= idx < len(ss)) or not ss[idx][1]:
+        return None
+    try:
+        return decode_solid_mesh(ss[idx][1])
+    except ValueError:
+        return None
+
+
+def union_mesh_render_json(m):
+    """Плоские массивы под THREE.BufferGeometry (без индексов: у граней
+    плоские нормали, вершины разворачиваются по углам треугольников)."""
+    pos, nrm = [], []
+    for k, i in enumerate(m['index']):
+        pos.extend(m['positions'][i])
+        nrm.extend(m['normals'][m['normal_index'][k]])
+    return {'position': pos, 'normal': nrm, 'triangles': m['triangles']}

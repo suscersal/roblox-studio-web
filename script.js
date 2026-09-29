@@ -2138,6 +2138,42 @@
                 })();
             });
         }
+        // ============ UnionOperation: реальная геометрия (деталь минус Negate) ============
+        // Сервер отдаёт готовый меш из SolidMeshHolder (см. /api/union_mesh);
+        // координаты локальные, в настоящем размере (Size уже "вшит"), поэтому
+        // масштабировать не нужно — просто подменяем geometry у box-приближения.
+        // Нет меша / формат не разобран (404) — остаётся box по Size.
+        let _unionGeoCache = {}; // ref -> Promise<BufferGeometry|null>; сбрасывается в reloadScene
+        function loadUnionGeometry(ref) {
+            if (_unionGeoCache[ref]) return _unionGeoCache[ref];
+            const p = (async () => {
+                try {
+                    const resp = await fetch('/api/union_mesh?ref=' + ref);
+                    if (!resp.ok) return null;
+                    const d = await resp.json();
+                    const geo = new THREE.BufferGeometry();
+                    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(d.position), 3));
+                    geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.normal), 3));
+                    geo.computeBoundingBox();
+                    geo.computeBoundingSphere();
+                    geo.userData.sharedMesh = true; // не dispose при очистке сцены (общий кэш)
+                    return geo;
+                } catch (e) {
+                    return null;
+                }
+            })();
+            _unionGeoCache[ref] = p;
+            return p;
+        }
+        function scheduleUnionMeshSwap(o, mesh) {
+            const p = loadUnionGeometry(o.ref).then((geo) => {
+                if (!geo) return;
+                if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
+                mesh.geometry = geo;
+            });
+            _trackLoad(p);
+        }
+
         function scheduleRealMeshSwap(o, mesh) {
             const p = loadRealMeshGeometry(o.meshId).then((result) => {
                 if (!result) return;
@@ -2482,6 +2518,7 @@
                 else mesh.material.depthWrite = dw;
             }
             if (o.meshId) scheduleRealMeshSwap(o, mesh);
+            if (o.unionMesh) scheduleUnionMeshSwap(o, mesh);
             return mesh;
         }
 
@@ -2521,6 +2558,7 @@
                 }
             }
             sceneObjs = {};
+            _unionGeoCache = {}; // другой файл — те же ref, другая геометрия
 
             // Сбрасываем кеш raycasting
             raycasterCache.objects = [];
