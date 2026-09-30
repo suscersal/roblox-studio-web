@@ -3207,7 +3207,8 @@
             luaHumanoidRef = -1;
             charWalkSpeed = CHAR_SPEED;
             charJumpPower = JUMP_VELOCITY;
-            _proximityPrompts = [];
+            _promptRegistry = {};
+            _activePromptRef = null;
             _activePrompt = null;
             _promptHoldStart = null;
             const _promptEl = document.getElementById('proximity-prompt');
@@ -5007,6 +5008,9 @@ end
             if (guiPropsByRef[ref]) {
                 if (guiPatchProp(ref, name, value)) return;
             }
+            if (_promptRegistry[ref] && name in _promptRegistry[ref]) {
+                _promptRegistry[ref][name] = value;
+            }
             if (ref === luaHumanoidRef && (name === 'WalkSpeed' || name === 'JumpPower')) {
                 if (name === 'WalkSpeed') charWalkSpeed = Number(value) || 0;
                 else charJumpPower = Number(value) || 0;
@@ -5154,6 +5158,17 @@ end
             if (GUI_CLASS_NAMES.has(className)) {
                 guiPropsByRef[ref] = { ref, cls: className, Name: className, parent: -1 };
             }
+            // ProximityPrompt почти всегда создаётся СКРИПТОМ в рантайме
+            // (Instance.new("ProximityPrompt")), а не хранится в файле —
+            // например, в холодильнике из этого разговора подсказку
+            // "Спрятаться"/"Выкинуть полки" создаёт сам Script карты. Раньше
+            // список подсказок брался ТОЛЬКО из файла один раз при старте
+            // Play — такие подсказки никогда не появлялись вообще. Заводим
+            // запись в реестре сразу при создании; .Parent и свойства
+            // подтянутся через luaSetParent/luaSetGenericProp ниже.
+            if (className === 'ProximityPrompt') {
+                _promptRegistry[ref] = _defaultPromptEntry(); // parent проставится через luaSetParent
+            }
             return ref;
         }
         function luaCloneRef(ref) {
@@ -5200,6 +5215,10 @@ end
             if (parentRef !== -1) {
                 (luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef] || []).push(ref);
             }
+            // ProximityPrompt.Parent = somePart — дистанция меряется от
+            // родителя, так что перепривязку нужно отслеживать так же, как
+            // и создание (см. luaCreateVirtualInstance).
+            if (_promptRegistry[ref]) _promptRegistry[ref].parentRef = parentRef;
             // GUI-репарентинг (например, songCard.Parent = scroll после
             if (guiPropsByRef[ref]) {
                 if (oldParent !== undefined && guiChildrenByRef[oldParent]) {
@@ -6834,19 +6853,40 @@ end
         }
 
         // ============ ProximityPrompt — кнопка взаимодействия у детали ============
-        let _proximityPrompts = [];      // статический список с сервера (см. /api/proximity_prompts)
+        // Живой реестр: и подсказки из файла (сервер отдаёт их начальные
+        // значения один раз), и созданные скриптом в рантайме через
+        // Instance.new (см. luaCreateVirtualInstance/luaSetParent/
+        // luaSetGenericProp) — ключи те же, что имена свойств в Roblox.
+        let _promptRegistry = {};
         let _activePrompt = null;        // ближайшая подсказка в радиусе прямо сейчас (или null)
         let _promptHoldStart = null;     // performance.now() начала удержания, или null
         const KEYCODE_LABELS = { 69: 'E', 70: 'F', 71: 'G', 32: 'Space' }; // самые частые; иначе просто "E"
+        function _defaultPromptEntry(parentRef) {
+            return {
+                ActionText: 'Interact', ObjectText: '', KeyboardKeyCode: 69,
+                HoldDuration: 0, MaxActivationDistance: 10, RequiresLineOfSight: true,
+                Enabled: true, parentRef: parentRef !== undefined ? parentRef : -1,
+            };
+        }
         async function loadProximityPrompts() {
             try {
                 const r = await api('GET', '/api/proximity_prompts');
-                _proximityPrompts = (r && r.ok) ? r.prompts : [];
-            } catch (e) { _proximityPrompts = []; }
+                if (r && r.ok) {
+                    for (const p of r.prompts) {
+                        _promptRegistry[p.ref] = {
+                            ActionText: p.actionText, ObjectText: p.objectText,
+                            KeyboardKeyCode: p.keyCode, HoldDuration: p.holdDuration,
+                            MaxActivationDistance: p.maxDistance, RequiresLineOfSight: p.requiresLineOfSight,
+                            Enabled: p.enabled, parentRef: p.parentRef,
+                        };
+                        if (!luaByRef[p.ref]) luaByRef[p.ref] = { cls: 'ProximityPrompt', name: 'ProximityPrompt' };
+                    }
+                }
+            } catch (e) { /* подсказок из файла не будет — рантаймовые всё равно подхватятся через хуки */ }
         }
         function _promptKeyLabel(p) {
-            if (typeof p.keyCode === 'number') return KEYCODE_LABELS[p.keyCode] || 'E';
-            if (typeof p.keyCode === 'string' && p.keyCode) return p.keyCode.replace(/^KeyCode\.?/, '').slice(0, 3) || 'E';
+            if (typeof p.KeyboardKeyCode === 'number') return KEYCODE_LABELS[p.KeyboardKeyCode] || 'E';
+            if (typeof p.KeyboardKeyCode === 'string' && p.KeyboardKeyCode) return p.KeyboardKeyCode.replace(/^KeyCode\.?/, '').slice(0, 3) || 'E';
             return 'E';
         }
         function _promptWorldPos(p) {
@@ -6858,35 +6898,39 @@ end
             if (mesh) { const v = new THREE.Vector3(); mesh.matrix.decompose(v, new THREE.Quaternion(), new THREE.Vector3()); return v; }
             return null;
         }
+        let _activePromptRef = null;
         function updateProximityPrompts() {
             const el = document.getElementById('proximity-prompt');
             if (!el) return;
-            if (!charBody || !_proximityPrompts.length) { el.style.display = 'none'; _activePrompt = null; return; }
-            let best = null, bestDist = Infinity;
-            for (const p of _proximityPrompts) {
-                if (!p.enabled) continue;
+            const refs = Object.keys(_promptRegistry);
+            if (!charBody || !refs.length) { el.style.display = 'none'; _activePromptRef = null; _activePrompt = null; return; }
+            let bestRef = null, best = null, bestDist = Infinity;
+            for (const refStr of refs) {
+                const p = _promptRegistry[refStr];
+                if (!p.Enabled || p.parentRef === -1 || p.parentRef === undefined) continue;
                 const wp = _promptWorldPos(p);
                 if (!wp) continue;
                 const d = Math.hypot(wp.x - charBody.position.x, wp.y - charBody.position.y, wp.z - charBody.position.z);
-                if (d <= p.maxDistance && d < bestDist) { best = p; bestDist = d; }
+                if (d <= p.MaxActivationDistance && d < bestDist) { best = p; bestRef = refStr; bestDist = d; }
             }
-            if (best !== _activePrompt) {
+            if (bestRef !== _activePromptRef) {
                 _promptHoldStart = null; // сменилась цель — сброс удержания
                 const ring = document.getElementById('proximity-prompt-ring');
                 if (ring) ring.classList.remove('held');
             }
+            _activePromptRef = bestRef;
             _activePrompt = best;
             if (!best) { el.style.display = 'none'; return; }
             el.style.display = 'flex';
             document.getElementById('proximity-prompt-key').textContent = _promptKeyLabel(best);
-            document.getElementById('proximity-prompt-action').textContent = best.actionText || 'Interact';
-            document.getElementById('proximity-prompt-object').textContent = best.objectText || '';
+            document.getElementById('proximity-prompt-action').textContent = best.ActionText || 'Interact';
+            document.getElementById('proximity-prompt-object').textContent = best.ObjectText || '';
             // Прогресс удержания (HoldDuration=0 — мгновенное срабатывание по тапу,
             // без кольца заполнения).
             const fill = document.getElementById('proximity-prompt-fill');
             if (fill) {
-                if (_promptHoldStart !== null && best.holdDuration > 0) {
-                    const frac = Math.min(1, (performance.now() - _promptHoldStart) / (best.holdDuration * 1000));
+                if (_promptHoldStart !== null && best.HoldDuration > 0) {
+                    const frac = Math.min(1, (performance.now() - _promptHoldStart) / (best.HoldDuration * 1000));
                     fill.style.height = (frac * 100) + '%';
                     if (frac >= 1) _triggerActivePrompt();
                 } else {
@@ -6895,13 +6939,13 @@ end
             }
         }
         function _triggerActivePrompt() {
-            if (!_activePrompt) return;
+            if (!_activePrompt || _activePromptRef === null) return;
             _promptHoldStart = null;
             const ring = document.getElementById('proximity-prompt-ring');
             if (ring) ring.classList.remove('held');
             const fill = document.getElementById('proximity-prompt-fill');
             if (fill) fill.style.height = '0%';
-            fireLuaSignal(_activePrompt.ref, 'Triggered', [{ __instanceRef: luaPlayerRef }]);
+            fireLuaSignal(Number(_activePromptRef), 'Triggered', [{ __instanceRef: luaPlayerRef }]);
         }
         window.addEventListener('load', () => {
             const ring = document.getElementById('proximity-prompt-ring');
@@ -6909,7 +6953,7 @@ end
             const onDown = (e) => {
                 e.preventDefault();
                 if (!_activePrompt) return;
-                if (_activePrompt.holdDuration > 0) {
+                if (_activePrompt.HoldDuration > 0) {
                     _promptHoldStart = performance.now();
                     ring.classList.add('held');
                 } else {
@@ -6917,7 +6961,7 @@ end
                 }
             };
             const onUp = () => {
-                if (_activePrompt && _activePrompt.holdDuration > 0) {
+                if (_activePrompt && _activePrompt.HoldDuration > 0) {
                     _promptHoldStart = null;
                     ring.classList.remove('held');
                     const fill = document.getElementById('proximity-prompt-fill');
