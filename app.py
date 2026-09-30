@@ -1337,6 +1337,46 @@ def api_scene():
     return jsonify({'ok': True, 'objects': objs, 'total': total})
 
 
+@flask_app.route('/api/proximity_prompts')
+def api_proximity_prompts():
+    """Все ProximityPrompt на карте — сразу все и один раз (список обычно
+    маленький, не привязан к потоковой загрузке по радиусу, а сам объект
+    может понадобиться игроку ещё до того, как он попадёт в LOD-радиус
+    камеры). Клиент сам меряет дистанцию до parentRef каждый кадр — здесь
+    только статические данные из файла."""
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'nothing open'}), 400
+    out = []
+    for ref, cls in parsed['referent_to_class'].items():
+        if cls != 'ProximityPrompt':
+            continue
+        props = parsed['props'].get(ref, {})
+        parent_ref = parsed['parent_map'].get(ref, -1)
+        parent_cls = parsed['referent_to_class'].get(parent_ref)
+        if parent_cls not in PART_CLASSES and parent_cls != 'Model':
+            continue  # подсказка не на детали/модели — дистанцию мерить не от чего
+        enabled = props.get('Enabled', True)
+        if isinstance(enabled, str):
+            enabled = enabled.lower() in ('true', '1')
+        requires_los = props.get('RequiresLineOfSight', True)
+        if isinstance(requires_los, str):
+            requires_los = requires_los.lower() in ('true', '1')
+        out.append({
+            'ref': ref,
+            'parentRef': parent_ref,
+            'actionText': props.get('ActionText', 'Interact'),
+            'objectText': props.get('ObjectText', ''),
+            'keyCode': props.get('KeyboardKeyCode', 'E'),
+            'holdDuration': safe_float(props.get('HoldDuration', 0.0), 0.0),
+            'maxDistance': safe_float(props.get('MaxActivationDistance', 10.0), 10.0),
+            'requiresLineOfSight': bool(requires_los),
+            'enabled': bool(enabled),
+            'style': props.get('Style', 'Default'),
+        })
+    return jsonify({'ok': True, 'prompts': out})
+
+
 @flask_app.route('/api/spawn')
 def api_spawn_point():
     # Отдельная ручка, не зависящая от того, какой кусок сцены сейчас

@@ -15,8 +15,7 @@
         // не будет делать вообще ничего, без единого алерта из самой
         // функции. Этот перехватчик покажет такую ошибку.
         window.addEventListener('error', function (e) {
-            alert('DEBUG GLOBAL ERROR: ' + e.message +
-                '\n' + (e.filename || '') + ':' + e.lineno + ':' + e.colno);
+            console.error('GLOBAL ERROR:', e.message, (e.filename || '') + ':' + e.lineno + ':' + e.colno);
         });
     </script>
 
@@ -118,6 +117,13 @@
             <div id="vp-label" data-i18n-html="vp_hint">
                 🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
                 ⌨️ WASD — move | F — focus | Esc — deselect
+            </div>
+            <div id="proximity-prompt" style="display:none">
+                <div id="proximity-prompt-ring"><div id="proximity-prompt-fill"></div><span id="proximity-prompt-key">E</span></div>
+                <div id="proximity-prompt-text">
+                    <div id="proximity-prompt-action"></div>
+                    <div id="proximity-prompt-object"></div>
+                </div>
             </div>
             <div id="mobile-pad">
                 <div id="joy-zone"></div>

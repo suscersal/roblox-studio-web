@@ -985,12 +985,26 @@
     padding: calc(6px * var(--bs));
 }
 
+/* Заголовок Properties (имя класса + ref): раньше при увеличенном
+   размере текста (--fs) слова, не помещавшиеся по ширине узкой панели,
+   переносились посимвольно ("B a s e p l a t e") — не было ни nowrap,
+   ни ellipsis. */
+.prop-header {
+    overflow: hidden;
+}
+
 .prop-cls {
     font-size: calc(13px * var(--fs));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .prop-ref {
     font-size: calc(10px * var(--fs));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .prop-row {
@@ -1173,6 +1187,77 @@
     flex-direction: column;
     gap: 10px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+
+/* ProximityPrompt — кнопка/кольцо взаимодействия у объекта поблизости */
+#proximity-prompt {
+    position: absolute;
+    left: 50%;
+    bottom: 22%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 250;
+    pointer-events: none;
+    /* touch-action:none тут не нужен — сам тап обрабатывается через
+       pointerdown/up на #proximity-prompt-ring ниже */
+}
+
+#proximity-prompt-ring {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(17, 24, 39, 0.75);
+    border: 2px solid #9ca3af;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: bold;
+    font-size: 18px;
+    pointer-events: auto;
+    touch-action: none;
+    overflow: hidden;
+}
+
+#proximity-prompt-ring.held {
+    border-color: #3b82f6;
+}
+
+#proximity-prompt-fill {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 0%;
+    background: rgba(59, 130, 246, 0.45);
+    transition: none;
+    pointer-events: none;
+}
+
+#proximity-prompt-key {
+    position: relative;
+    z-index: 1;
+}
+
+#proximity-prompt-text {
+    background: rgba(17, 24, 39, 0.75);
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: #fff;
+    max-width: 220px;
+}
+
+#proximity-prompt-action {
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#proximity-prompt-object {
+    font-size: 12px;
+    color: #9ca3af;
 }
 
 #ui-settings .ui-row {

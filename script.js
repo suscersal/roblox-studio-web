@@ -3063,6 +3063,7 @@
             await saveCurrentScriptIfDirty();
 
             const spawn = await findSpawnPoint();
+            loadProximityPrompts(); // не блокирует старт — подтянется чуть позже, если не успеет
 
             // Геометрия для физики запрашивается заново, центрированная на
             const params = new URLSearchParams({
@@ -3206,6 +3207,11 @@
             luaHumanoidRef = -1;
             charWalkSpeed = CHAR_SPEED;
             charJumpPower = JUMP_VELOCITY;
+            _proximityPrompts = [];
+            _activePrompt = null;
+            _promptHoldStart = null;
+            const _promptEl = document.getElementById('proximity-prompt');
+            if (_promptEl) _promptEl.style.display = 'none';
             if (charMesh) { scene.remove(charMesh); charMesh.geometry.dispose(); charMesh.material.dispose(); charMesh = null; }
             canJump = false;
             jumpQueued = false;
@@ -6827,6 +6833,104 @@ end
             if (charBody.velocity.y < 0) charBody.velocity.y = 0;
         }
 
+        // ============ ProximityPrompt — кнопка взаимодействия у детали ============
+        let _proximityPrompts = [];      // статический список с сервера (см. /api/proximity_prompts)
+        let _activePrompt = null;        // ближайшая подсказка в радиусе прямо сейчас (или null)
+        let _promptHoldStart = null;     // performance.now() начала удержания, или null
+        const KEYCODE_LABELS = { 69: 'E', 70: 'F', 71: 'G', 32: 'Space' }; // самые частые; иначе просто "E"
+        async function loadProximityPrompts() {
+            try {
+                const r = await api('GET', '/api/proximity_prompts');
+                _proximityPrompts = (r && r.ok) ? r.prompts : [];
+            } catch (e) { _proximityPrompts = []; }
+        }
+        function _promptKeyLabel(p) {
+            if (typeof p.keyCode === 'number') return KEYCODE_LABELS[p.keyCode] || 'E';
+            if (typeof p.keyCode === 'string' && p.keyCode) return p.keyCode.replace(/^KeyCode\.?/, '').slice(0, 3) || 'E';
+            return 'E';
+        }
+        function _promptWorldPos(p) {
+            // Позиция родителя (Part/Model) — та же логика, что и для обычных
+            // объектов: физика, если есть, иначе текущая матрица меша.
+            const body = physicsBodies[p.parentRef];
+            if (body) return body.position;
+            const mesh = sceneObjs[p.parentRef];
+            if (mesh) { const v = new THREE.Vector3(); mesh.matrix.decompose(v, new THREE.Quaternion(), new THREE.Vector3()); return v; }
+            return null;
+        }
+        function updateProximityPrompts() {
+            const el = document.getElementById('proximity-prompt');
+            if (!el) return;
+            if (!charBody || !_proximityPrompts.length) { el.style.display = 'none'; _activePrompt = null; return; }
+            let best = null, bestDist = Infinity;
+            for (const p of _proximityPrompts) {
+                if (!p.enabled) continue;
+                const wp = _promptWorldPos(p);
+                if (!wp) continue;
+                const d = Math.hypot(wp.x - charBody.position.x, wp.y - charBody.position.y, wp.z - charBody.position.z);
+                if (d <= p.maxDistance && d < bestDist) { best = p; bestDist = d; }
+            }
+            if (best !== _activePrompt) {
+                _promptHoldStart = null; // сменилась цель — сброс удержания
+                const ring = document.getElementById('proximity-prompt-ring');
+                if (ring) ring.classList.remove('held');
+            }
+            _activePrompt = best;
+            if (!best) { el.style.display = 'none'; return; }
+            el.style.display = 'flex';
+            document.getElementById('proximity-prompt-key').textContent = _promptKeyLabel(best);
+            document.getElementById('proximity-prompt-action').textContent = best.actionText || 'Interact';
+            document.getElementById('proximity-prompt-object').textContent = best.objectText || '';
+            // Прогресс удержания (HoldDuration=0 — мгновенное срабатывание по тапу,
+            // без кольца заполнения).
+            const fill = document.getElementById('proximity-prompt-fill');
+            if (fill) {
+                if (_promptHoldStart !== null && best.holdDuration > 0) {
+                    const frac = Math.min(1, (performance.now() - _promptHoldStart) / (best.holdDuration * 1000));
+                    fill.style.height = (frac * 100) + '%';
+                    if (frac >= 1) _triggerActivePrompt();
+                } else {
+                    fill.style.height = '0%';
+                }
+            }
+        }
+        function _triggerActivePrompt() {
+            if (!_activePrompt) return;
+            _promptHoldStart = null;
+            const ring = document.getElementById('proximity-prompt-ring');
+            if (ring) ring.classList.remove('held');
+            const fill = document.getElementById('proximity-prompt-fill');
+            if (fill) fill.style.height = '0%';
+            fireLuaSignal(_activePrompt.ref, 'Triggered', [{ __instanceRef: luaPlayerRef }]);
+        }
+        window.addEventListener('load', () => {
+            const ring = document.getElementById('proximity-prompt-ring');
+            if (!ring) return;
+            const onDown = (e) => {
+                e.preventDefault();
+                if (!_activePrompt) return;
+                if (_activePrompt.holdDuration > 0) {
+                    _promptHoldStart = performance.now();
+                    ring.classList.add('held');
+                } else {
+                    _triggerActivePrompt();
+                }
+            };
+            const onUp = () => {
+                if (_activePrompt && _activePrompt.holdDuration > 0) {
+                    _promptHoldStart = null;
+                    ring.classList.remove('held');
+                    const fill = document.getElementById('proximity-prompt-fill');
+                    if (fill) fill.style.height = '0%';
+                }
+            };
+            ring.addEventListener('touchstart', onDown, { passive: false });
+            ring.addEventListener('mousedown', onDown);
+            ring.addEventListener('touchend', onUp);
+            ring.addEventListener('touchcancel', onUp);
+            ring.addEventListener('mouseup', onUp);
+        });
+
         // Enum.CameraType.Scriptable — настоящий Roblox по нему полностью
         let cameraIsScriptable = false;
 
@@ -6897,6 +7001,7 @@ end
                 );
             }
             followCharacterCamera();
+            updateProximityPrompts();
             maybeStreamGeometry();
             updateLuaScheduler();
         }
