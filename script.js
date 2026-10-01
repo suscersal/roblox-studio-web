@@ -3263,18 +3263,34 @@
             if (window.fengari) return Promise.resolve(true);
             if (fengariLoadPromise) return fengariLoadPromise;
             fengariLoadPromise = new Promise((resolve) => {
-                // Локальная копия (vendor/fengari-web.js), скачанная
-                const s = document.createElement('script');
-                s.src = 'vendor/fengari-web.js';
-                s.onload = () => resolve(!!window.fengari);
-                s.onerror = () => {
-                    const cdn = document.createElement('script');
-                    cdn.src = 'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js';
-                    cdn.onload = () => resolve(!!window.fengari);
-                    cdn.onerror = () => { console.error('[Lua] fengari не загрузился (нет сети и нет vendor/fengari-web.js)'); resolve(false); };
-                    document.head.appendChild(cdn);
+                // Пробуем по очереди: локальная копия (с cache-bust, чтобы
+                // WebView не отдал закэшированный 404/сбой прошлой попытки),
+                // затем CDN-зеркала. Причина каждого сбоя пишется в Output.
+                const urls = [
+                    'vendor/fengari-web.js?_=' + Date.now(),
+                    'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js',
+                    'https://raw.githubusercontent.com/suscersal/roblox-studio-web/main/vendor/fengari-web.js',
+                ];
+                const tryNext = (i) => {
+                    if (i >= urls.length) {
+                        console.error('[Lua] fengari не загрузился ни с одного адреса');
+                        resolve(false);
+                        return;
+                    }
+                    const s = document.createElement('script');
+                    s.src = urls[i];
+                    s.onload = () => {
+                        if (window.fengari) { resolve(true); return; }
+                        logLuaOutput('warn', 'fengari: ' + urls[i] + ' загрузился, но window.fengari не появился');
+                        s.remove(); tryNext(i + 1);
+                    };
+                    s.onerror = () => {
+                        logLuaOutput('warn', 'fengari: не загрузился ' + urls[i]);
+                        s.remove(); tryNext(i + 1);
+                    };
+                    document.head.appendChild(s);
                 };
-                document.head.appendChild(s);
+                tryNext(0);
             });
             return fengariLoadPromise;
         }
@@ -3304,6 +3320,36 @@ end
 Vector3.__unm = function(a) return Vector3.new(-a.X, -a.Y, -a.Z) end
 Vector3.__tostring = function(v) return v.X .. ", " .. v.Y .. ", " .. v.Z end
 function Vector3.new_magnitude(v) return math.sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z) end
+-- Magnitude/Unit/Dot/Cross/Lerp и деление — раньше были только + - * и
+-- new_magnitude, из-за чего v.Magnitude/v.Unit давали nil.
+function Vector3.Dot(a, b) return a.X*b.X + a.Y*b.Y + a.Z*b.Z end
+function Vector3.Cross(a, b)
+    return Vector3.new(a.Y*b.Z - a.Z*b.Y, a.Z*b.X - a.X*b.Z, a.X*b.Y - a.Y*b.X)
+end
+function Vector3.Lerp(a, b, t)
+    return Vector3.new(a.X + (b.X-a.X)*t, a.Y + (b.Y-a.Y)*t, a.Z + (b.Z-a.Z)*t)
+end
+Vector3.__div = function(a, b)
+    if type(b) == "number" then return Vector3.new(a.X / b, a.Y / b, a.Z / b) end
+    return Vector3.new(a.X / b.X, a.Y / b.Y, a.Z / b.Z)
+end
+Vector3.__eq = function(a, b) return a.X == b.X and a.Y == b.Y and a.Z == b.Z end
+Vector3.__index = function(t, k)
+    if k == "Magnitude" or k == "magnitude" then
+        return math.sqrt(t.X*t.X + t.Y*t.Y + t.Z*t.Z)
+    end
+    if k == "Unit" or k == "unit" then
+        local m = math.sqrt(t.X*t.X + t.Y*t.Y + t.Z*t.Z)
+        if m == 0 then return Vector3.new(0, 0, 0) end
+        return Vector3.new(t.X/m, t.Y/m, t.Z/m)
+    end
+    return rawget(Vector3, k)
+end
+Vector3.zero = Vector3.new(0, 0, 0)
+Vector3.one = Vector3.new(1, 1, 1)
+Vector3.xAxis = Vector3.new(1, 0, 0)
+Vector3.yAxis = Vector3.new(0, 1, 0)
+Vector3.zAxis = Vector3.new(0, 0, 1)
 
 Color3 = {}
 Color3.__index = Color3
@@ -3428,6 +3474,17 @@ function CFrame.new(a, b, c)
 end
 function CFrame.fromAxisAngle(axis, angle) return CFrame.new(0, 0, 0) end -- поворот игнорируется — см. коммент выше
 function CFrame.Angles(rx, ry, rz) return CFrame.new(0, 0, 0) end
+-- CFrame.lookAt(at, target) — то же, что двухточечный CFrame.new.
+function CFrame.lookAt(at, target) return CFrame.new(at, target) end
+-- Умножение — БЕЗ матрицы поворота (её в движке нет, см. комментарий выше):
+-- CFrame*CFrame складывает позиции (поворот игнорируется), CFrame*Vector3
+-- сдвигает точку.
+CFrame.__mul = function(a, b)
+    if b.lookVector ~= nil then
+        return CFrame.new(Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z))
+    end
+    return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z)
+end
 CFrame.__tostring = function(c) return c.X .. ", " .. c.Y .. ", " .. c.Z end
 -- cf:Lerp(goal, alpha) — раньше не существовало вообще, а это ИМЕННО тот
 -- метод, которым камерные скрипты (MenuCamera.lua и подобные) плавно ведут
@@ -4093,6 +4150,184 @@ function TweenInfo.new(time, easingStyle, easingDirection, repeatCount, reverses
         RepeatCount = repeatCount or 0, Reverses = reverses or false, DelayTime = delayTime or 0,
     }
 end
+-- ============ COMPAT: атрибуты, теги, сигналы, GetPivot и т.п. ============
+-- Чисто-Lua простой сигнал (для событий, которых нет на JS-стороне):
+-- Connect/Wait/Fire. Wait опрашивает флаг через wait().
+local function newSignal()
+    local handlers, fired, lastArgs = {}, 0, nil
+    local sig = {}
+    function sig.Connect(self, fn)
+        local h = { fn = fn }
+        handlers[#handlers + 1] = h
+        return setmetatable({}, { __index = {
+            Disconnect = function() h.dead = true end,
+            disconnect = function() h.dead = true end,
+        } })
+    end
+    sig.connect = sig.Connect
+    function sig.Once(self, fn)
+        local conn
+        conn = self:Connect(function(...) conn:Disconnect(); fn(...) end)
+        return conn
+    end
+    function sig.Wait(self)
+        local start = fired
+        while fired == start do wait(0.03) end
+        return table.unpack(lastArgs or {})
+    end
+    sig.wait = sig.Wait
+    function sig.__fire(...)
+        fired = fired + 1
+        lastArgs = { ... }
+        for _, h in ipairs(handlers) do
+            if not h.dead then
+                local ok, err = pcall(h.fn, ...)
+                if not ok then warn("ошибка в обработчике: " .. tostring(err)) end
+            end
+        end
+    end
+    return sig
+end
+
+local __attrs, __attrSignals = {}, {}
+local __tagsByRef, __refsByTag = {}, {}
+local __tagAdded, __tagRemoved = {}, {}
+
+local function refOf(inst) return type(inst) == "table" and rawget(inst, "__ref") or nil end
+
+local function attrSignal(ref, name)
+    local key = tostring(ref) .. ":" .. tostring(name)
+    local sg = __attrSignals[key]
+    if not sg then sg = newSignal(); __attrSignals[key] = sg end
+    return sg
+end
+
+local function addTag(ref, tag)
+    local t = __tagsByRef[ref]
+    if not t then t = {}; __tagsByRef[ref] = t end
+    if t[tag] then return end
+    t[tag] = true
+    local r = __refsByTag[tag]
+    if not r then r = {}; __refsByTag[tag] = r end
+    r[ref] = true
+    if __tagAdded[tag] then __tagAdded[tag].__fire(wrap(ref)) end
+end
+local function removeTag(ref, tag)
+    local t = __tagsByRef[ref]
+    if not (t and t[tag]) then return end
+    t[tag] = nil
+    if __refsByTag[tag] then __refsByTag[tag][ref] = nil end
+    if __tagRemoved[tag] then __tagRemoved[tag].__fire(wrap(ref)) end
+end
+
+local CollectionServiceObj = setmetatable({}, { __index = {
+    AddTag = function(self, inst, tag) addTag(refOf(inst), tag) end,
+    RemoveTag = function(self, inst, tag) removeTag(refOf(inst), tag) end,
+    HasTag = function(self, inst, tag)
+        local t = __tagsByRef[refOf(inst)]
+        return (t and t[tag]) == true
+    end,
+    GetTags = function(self, inst)
+        local out = {}
+        for tag in pairs(__tagsByRef[refOf(inst)] or {}) do out[#out + 1] = tag end
+        return out
+    end,
+    GetTagged = function(self, tag)
+        local out = {}
+        for ref in pairs(__refsByTag[tag] or {}) do out[#out + 1] = wrap(ref) end
+        return out
+    end,
+    GetInstanceAddedSignal = function(self, tag)
+        if not __tagAdded[tag] then __tagAdded[tag] = newSignal() end
+        return __tagAdded[tag]
+    end,
+    GetInstanceRemovedSignal = function(self, tag)
+        if not __tagRemoved[tag] then __tagRemoved[tag] = newSignal() end
+        return __tagRemoved[tag]
+    end,
+} })
+
+local function isDescendantOf(ref, ancestor)
+    local anc = refOf(ancestor)
+    local cur, depth = __get_parent(ref), 0
+    while cur ~= nil and cur ~= -1 and depth < 200 do
+        if anc ~= nil and cur == anc then return true end
+        cur = __get_parent(cur)
+        depth = depth + 1
+    end
+    if ancestor == game then return depth > 0 or __get_parent(ref) ~= -1 end
+    return false
+end
+
+local COMPAT = {
+    SetAttribute = function(t, ref) return function(self, name, value)
+        local a = __attrs[ref]
+        if not a then a = {}; __attrs[ref] = a end
+        local old = a[name]
+        a[name] = value
+        if old ~= value then attrSignal(ref, name).__fire() end
+    end end,
+    GetAttribute = function(t, ref) return function(self, name)
+        local a = __attrs[ref]
+        return a and a[name]
+    end end,
+    GetAttributes = function(t, ref) return function(self)
+        local out = {}
+        for k, v in pairs(__attrs[ref] or {}) do out[k] = v end
+        return out
+    end end,
+    GetAttributeChangedSignal = function(t, ref) return function(self, name)
+        return attrSignal(ref, name)
+    end end,
+    AddTag = function(t, ref) return function(self, tag) addTag(ref, tag) end end,
+    RemoveTag = function(t, ref) return function(self, tag) removeTag(ref, tag) end end,
+    HasTag = function(t, ref) return function(self, tag)
+        local x = __tagsByRef[ref]
+        return (x and x[tag]) == true
+    end end,
+    GetTags = function(t, ref) return function(self)
+        local out = {}
+        for tag in pairs(__tagsByRef[ref] or {}) do out[#out + 1] = tag end
+        return out
+    end end,
+    IsDescendantOf = function(t, ref) return function(self, ancestor)
+        return isDescendantOf(ref, ancestor)
+    end end,
+    IsAncestorOf = function(t, ref) return function(self, descendant)
+        return isDescendantOf(refOf(descendant), t)
+    end end,
+    -- Позиция без поворота (в движке нет матрицы вращения — см. CFrame.new).
+    GetPivot = function(t, ref) return function(self)
+        local x, y, z = __get_position(ref)
+        return CFrame.new(x, y, z)
+    end end,
+    PivotTo = function(t, ref) return function(self, cf)
+        __set_position(ref, cf.X, cf.Y, cf.Z)
+    end end,
+    GetServerTimeNow = function(t, ref) return function(self) return os.time() end end,
+    TakeDamage = function(t, ref) return function(self, amount)
+        local ok, hp = pcall(__get_prop, ref, "Health")
+        if ok and type(hp) == "number" then __set_prop(ref, "Health", hp - amount) end
+    end end,
+    -- Сигналы ProximityPrompt и жизненного цикла: Triggered реально
+    -- стреляет с JS-стороны (см. updateProximityPrompts), остальные —
+    -- честные RBXScriptSignal без срабатывания.
+    Triggered = function(t, ref) return makeEvent(ref, "Triggered") end,
+    TriggerEnded = function(t, ref) return makeEvent(ref, "TriggerEnded") end,
+    PromptShown = function(t, ref) return makeEvent(ref, "PromptShown") end,
+    PromptHidden = function(t, ref) return makeEvent(ref, "PromptHidden") end,
+    AncestryChanged = function(t, ref) return makeEvent(ref, "AncestryChanged") end,
+    Destroying = function(t, ref) return makeEvent(ref, "Destroying") end,
+}
+do
+    local baseIndex = InstanceMT.__index
+    InstanceMT.__index = function(t, k)
+        local h = COMPAT[k]
+        if h then return h(t, rawget(t, "__ref")) end
+        return baseIndex(t, k)
+    end
+end
+
 local function getService(name)
     if serviceCache[name] then return serviceCache[name] end
     if name == "DataStoreService" then
@@ -4110,6 +4345,10 @@ local function getService(name)
     if name == "TweenService" then
         serviceCache[name] = TweenServiceObj
         return TweenServiceObj
+    end
+    if name == "CollectionService" then
+        serviceCache[name] = CollectionServiceObj
+        return CollectionServiceObj
     end
     local ref = __find_service(name)
     if ref == -1 then ref = __instance_new(name) end
@@ -5676,6 +5915,8 @@ end
                 luaSetGenericProp(ref, name, value);
                 // GetPropertyChangedSignal(name) — стреляем ПОСЛЕ применения
                 fireLuaSignal(ref, '__prop_' + name, []);
+                // NumberValue/IntValue/... .Changed(newValue)
+                if (name === 'Value') fireLuaSignal(ref, 'Changed', [value]);
                 return 0;
             });
             def('__workspace_ref', function (L2) { lua.lua_pushnumber(L2, luaWorkspaceRef()); return 1; });
@@ -6733,6 +6974,8 @@ end
                 }
                 const v = t.from + (t.to - t.from) * p;
                 luaSetGenericProp(t.ref, t.propName, v);
+                if (t.propName === 'Value') fireLuaSignal(t.ref, 'Changed', [v]);
+                fireLuaSignal(t.ref, '__prop_' + t.propName, []);
                 if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
                 else stillActive.push(t);
             }
