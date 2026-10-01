@@ -3350,6 +3350,29 @@ UDim2.__add = function(a, b) return UDim2.new(a.X.Scale + b.X.Scale, a.X.Offset 
 UDim2.__sub = function(a, b) return UDim2.new(a.X.Scale - b.X.Scale, a.X.Offset - b.X.Offset, a.Y.Scale - b.Y.Scale, a.Y.Offset - b.Y.Offset) end
 UDim2.__tostring = function(u) return "{" .. tostring(u.X) .. "}, {" .. tostring(u.Y) .. "}" end
 
+-- Обобщённый for из Luau: "for k, v in tbl do" (без pairs/ipairs).
+-- В Lua 5.3 такая запись пыталась ВЫЗВАТЬ таблицу как итератор —
+-- "attempt to call a table value". Препроцессор (expandGenericFor)
+-- оборачивает выражение после "in" в __geniter(...): таблица без
+-- __call превращается в next-итерацию, всё остальное (pairs(t),
+-- ipairs(t), функции-итераторы) проходит как есть.
+function __geniter(f, s, c)
+    if type(f) == "table" and s == nil and c == nil then
+        local mt = getmetatable(f)
+        if not (mt and mt.__call) then
+            if #f > 0 then
+                local n = #f
+                return function(_, i)
+                    i = i + 1
+                    if i <= n then return i, f[i] end
+                end, f, 0
+            end
+            return next, f, nil
+        end
+    end
+    return f, s, c
+end
+
 -- math.clamp/round/sign — расширения Luau, которых нет в обычной Lua 5.3
 -- (см. math в fengari, стандартная библиотека). Были только в списке
 -- подсветки синтаксиса, реально не существовали — "attempt to call a nil
@@ -5874,6 +5897,40 @@ end
             return out;
         }
 
+        // "for k, v in EXPR do" -> "for k, v in __geniter(EXPR) do"
+        // (обобщённый for Luau). Числовой for ("for i = 1, n do") не трогаем.
+        function expandGenericFor(segs) {
+            const tokRe = /[A-Za-z_][A-Za-z0-9_]*|[()\[\]{}]/g;
+            let stage = null, depth = 0;   // stage: null | 'names' | 'expr'
+            for (const seg of segs) {
+                if (seg.type !== 'code') continue;
+                let out = '', last = 0, m;
+                tokRe.lastIndex = 0;
+                while ((m = tokRe.exec(seg.text))) {
+                    const w = m[0], idx = m.index, end = idx + w.length;
+                    if (stage === null) {
+                        if (w === 'for') stage = 'names';
+                    } else if (stage === 'names') {
+                        if (w === 'in') {
+                            out += seg.text.slice(last, end) + ' __geniter(';
+                            last = end; stage = 'expr'; depth = 0;
+                        } else if (w === 'do') {
+                            stage = null; // числовой for
+                        }
+                    } else { // expr
+                        if (w === '(' || w === '[' || w === '{') depth++;
+                        else if (w === ')' || w === ']' || w === '}') depth--;
+                        else if (w === 'do' && depth <= 0) {
+                            out += seg.text.slice(last, idx) + ') ';
+                            last = idx; stage = null;
+                        }
+                    }
+                }
+                out += seg.text.slice(last);
+                seg.text = out;
+            }
+        }
+
         // continue -> goto __continue_N + метка перед закрывающим end/until
         function expandContinue(src) {
             const segs = splitLuaSegments(src);
@@ -5938,6 +5995,7 @@ end
         function preprocessLuau(src) {
             const segs = splitLuaSegments(src);
             for (const seg of segs) if (seg.type === 'code') seg.text = expandCompoundAssign(seg.text);
+            expandGenericFor(segs);
             return expandContinue(segs.map(s => s.text).join(''));
         }
 
