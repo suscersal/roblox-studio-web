@@ -1299,7 +1299,7 @@
                 }
                 document.getElementById('fps-counter').textContent = 'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
-                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '');
+                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length + ' | ws:' + charWalkSpeed + ' jp:' + charJumpPower + (luaControlsDisabled ? ' CTRL-OFF' : '') + (charBody ? ' y:' + charBody.position.y.toFixed(1) : '')) : '');
                 fpsFrames = 0;
                 fpsTime = now;
             }
@@ -5588,8 +5588,14 @@ end
             }
             if (ref === luaHumanoidRef && name === 'JumpHeight' && Number(value) <= 0) charJumpPower = 0;
             if (ref === luaHumanoidRef && (name === 'WalkSpeed' || name === 'JumpPower')) {
-                if (name === 'WalkSpeed') charWalkSpeed = Number(value) || 0;
-                else charJumpPower = Number(value) || 0;
+                // Скрипт поменял скорость/прыжок — пишем в Output, кто и на что
+                // (раньше «персонаж не двигается» невозможно было отследить).
+                const nv = Number(value);
+                logLuaOutput('info', 'Humanoid.' + name + ' = ' + String(value));
+                if (!Number.isFinite(nv)) {
+                    logLuaOutput('warn', 'Humanoid.' + name + ': значение не число (' + String(value) + ') — проигнорировано');
+                } else if (name === 'WalkSpeed') charWalkSpeed = nv;
+                else charJumpPower = nv;
             }
             if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
             const mesh = sceneObjs[ref];
@@ -7377,8 +7383,45 @@ end
             return true;
         }
 
+        // Кнопка «Выйти»: в оригинальной игре у шкафа/холодильника есть клиентский
+        // скрипт с кнопкой, которая шлёт RemoteEvent «WardrobeExit». В .rbxm его нет,
+        // поэтому, пока объект занят (атрибут Occupied=true), показываем её сами.
+        let _exitBtn = null, _exitBtnRef = null, _exitBtnT = 0;
+        function updateWardrobeExitButton() {
+            const now = performance.now();
+            if (now - _exitBtnT < 200) return; // не чаще 5 раз/с
+            _exitBtnT = now;
+            let target = null;
+            for (const k of Object.keys(luaAttrs)) {
+                const bag = luaAttrs[k];
+                if (!bag || bag.Occupied !== true) continue;
+                for (const c of (luaChildrenByRef[k] || [])) {
+                    if (luaByRef[c] && luaByRef[c].name === 'WardrobeExit') { target = c; break; }
+                }
+                if (target !== null) break;
+            }
+            _exitBtnRef = target;
+            if (target === null) { if (_exitBtn) _exitBtn.style.display = 'none'; return; }
+            if (!_exitBtn) {
+                _exitBtn = document.createElement('button');
+                _exitBtn.textContent = '🚪 Выйти';
+                _exitBtn.style.cssText = 'position:fixed;left:50%;bottom:90px;transform:translateX(-50%);' +
+                    'z-index:9999;padding:14px 28px;font-size:20px;border:0;border-radius:12px;' +
+                    'background:#e8452c;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.5);touch-action:manipulation;';
+                const fire = (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (_exitBtnRef !== null) remoteQueue.push({ ref: _exitBtnRef, targetSide: 'server', args: [], dueAt: performance.now() });
+                };
+                _exitBtn.addEventListener('click', fire);
+                _exitBtn.addEventListener('touchend', fire);
+                document.body.appendChild(_exitBtn);
+            }
+            _exitBtn.style.display = 'block';
+        }
+
         function updateLuaScheduler() {
-            if (!luaServerL && !luaClientL) return;
+            if (!luaServerL && !luaClientL) { if (_exitBtn) _exitBtn.style.display = 'none'; return; }
+            updateWardrobeExitButton();
             processRemoteQueue();
             updateRunServiceSignals();
             updateTweens();
