@@ -1102,6 +1102,7 @@
                     e.preventDefault();
                     e.stopPropagation();
                     keysPressed[key] = true;
+                    if (key === 'e') luaSetKeySrc('Space', 'virt', true);
                     if (isPlaying && key === 'e' && !luaControlsDisabled) jumpQueued = true;
                     btn.classList.add('active');
                 }, { passive: false });
@@ -1109,6 +1110,7 @@
                     btn.addEventListener(ev, e => {
                         e.preventDefault();
                         keysPressed[key] = false;
+                        if (key === 'e') luaSetKeySrc('Space', 'virt', false);
                         btn.classList.remove('active');
                     }, { passive: false })
                 );
@@ -3744,11 +3746,13 @@ local __nextAnimTrackId = 0 -- см. Animator:LoadAnimation в InstanceMT.__inde
 -- тут, в момент Connect, а не на JS-стороне: Enum это Lua-таблицы,
 -- строить их из JS было бы либо копированием той же кэширующей логики
 -- дважды, либо синтетическими объектами, не равными настоящим Enum.*.
-local function wrapInputEventFn(fn)
-    return function(typeName, x, y)
+local function wrapInputEventFn(fn, evName)
+    local state = evName == "InputBegan" and "Begin" or (evName == "InputEnded" and "End" or "Change")
+    return function(typeName, x, y, keyName)
         local input = setmetatable({
             UserInputType = Enum.UserInputType[typeName],
-            KeyCode = Enum.KeyCode.Unknown,
+            UserInputState = Enum.UserInputState[state],
+            KeyCode = keyName and Enum.KeyCode[keyName] or Enum.KeyCode.Unknown,
             Position = Vector3.new(x or 0, y or 0, 0),
         }, {})
         return fn(input, false)
@@ -3760,7 +3764,7 @@ local function makeEvent(ref, evName)
             local id = __nextConnId
             __nextConnId = __nextConnId + 1
             local isInputEvent = evName == "InputBegan" or evName == "InputEnded" or evName == "InputChanged"
-            __conns[id] = isInputEvent and wrapInputEventFn(fn) or fn
+            __conns[id] = isInputEvent and wrapInputEventFn(fn, evName) or fn
             __register_conn(id, ref, evName)
             return setmetatable({}, { __index = {
                 Disconnect = function() __conns[id] = nil; __unregister_conn(id) end,
@@ -4420,8 +4424,14 @@ local COMPAT = {
         return CFrame.new(__get_pivot(ref))
     end end,
     PivotTo = function(t, ref) return function(self, cf)
-        __set_pivot(ref, cf:GetComponents())
+        cf = __toCFrame(cf)
+        -- Если мост (JS) падает — в Output будет настоящая причина, а не голый стек.
+        local ok, err = pcall(__set_pivot, ref, cf:GetComponents())
+        if not ok then
+            error("PivotTo не выполнен: " .. tostring(err) .. " [ref=" .. tostring(ref) .. ", класс=" .. tostring(__get_class(ref)) .. "]", 2)
+        end
     end end,
+    MoveDirection = function(t, ref) return Vector3.new(__get_move_dir()) end,
     AssemblyLinearVelocity = function(t, ref) return Vector3.new(__get_velocity(ref, 0)) end,
     Velocity = function(t, ref) return Vector3.new(__get_velocity(ref, 0)) end,
     AssemblyAngularVelocity = function(t, ref) return Vector3.new(__get_velocity(ref, 1)) end,
@@ -4441,6 +4451,20 @@ local COMPAT = {
     AncestryChanged = function(t, ref) return makeEvent(ref, "AncestryChanged") end,
     Destroying = function(t, ref) return makeEvent(ref, "Destroying") end,
 }
+-- Принимает CFrame-объект ИЛИ «голую» таблицу с X/Y/Z (и R00..R22) —
+-- например, Value у CFrameValue из .rbxm может прийти без метатаблицы.
+function __toCFrame(v)
+    if type(v) ~= "table" then
+        error("PivotTo/CFrame ожидает CFrame, получено " .. type(v), 3)
+    end
+    if v.GetComponents ~= nil then return v end
+    local p = rawget(v, "Position") or v
+    local x, y, z = rawget(v, "X") or rawget(p, "X") or 0, rawget(v, "Y") or rawget(p, "Y") or 0, rawget(v, "Z") or rawget(p, "Z") or 0
+    if rawget(v, "R00") ~= nil then
+        return CFrame.new(x, y, z, v.R00, v.R01, v.R02, v.R10, v.R11, v.R12, v.R20, v.R21, v.R22)
+    end
+    return CFrame.new(x, y, z)
+end
 local __tblVals = {}   -- Value-свойства, хранящие таблицы (CFrameValue/Vector3Value/ObjectValue)
 local COMPAT_PROPS = {
     AssemblyLinearVelocity = true, Velocity = true, AssemblyAngularVelocity = true, RotVelocity = true,
@@ -4449,6 +4473,26 @@ do
     local baseIndex = InstanceMT.__index
     InstanceMT.__index = function(t, k)
         local ref = rawget(t, "__ref")
+        if k == "IsKeyDown" and __get_class(ref) == "UserInputService" then
+            return function(self, kc) return kc ~= nil and __is_key_down(kc.Name) end
+        end
+        if k == "GetKeysPressed" and __get_class(ref) == "UserInputService" then
+            return function(self)
+                local out = {}
+                for name in string.gmatch(__keys_down(), "[^,]+") do
+                    out[#out + 1] = { KeyCode = Enum.KeyCode[name], UserInputType = Enum.UserInputType.Keyboard,
+                                      UserInputState = Enum.UserInputState.Begin }
+                end
+                return out
+            end
+        end
+        if (k == "TouchEnabled" or k == "KeyboardEnabled" or k == "MouseEnabled" or k == "GamepadEnabled")
+            and __get_class(ref) == "UserInputService" then
+            local touch = __is_touch()
+            if k == "TouchEnabled" then return touch end
+            if k == "GamepadEnabled" then return false end
+            return not touch   -- Keyboard/Mouse: только когда нет сенсорного экрана
+        end
         if k == "Value" then
             local v = __tblVals[ref]
             if v ~= nil then return v end
@@ -6173,6 +6217,28 @@ end
                 const M = (luaIsPartRef(ref) && !luaIsCharRef(ref)) ? luaPartMatrix(ref) : luaGetPivotMatrix(ref);
                 return _pushMatrix(L2, M);
             });
+            def('__is_key_down', function (L2) {
+                lua.lua_pushboolean(L2, luaKeyIsDown(lua.lua_tojsstring(L2, 1)) ? 1 : 0);
+                return 1;
+            });
+            def('__keys_down', function (L2) {
+                const names = Object.keys(luaKeySrc).filter(luaKeyIsDown);
+                lua.lua_pushstring(L2, names.join(','));
+                return 1;
+            });
+            def('__get_move_dir', function (L2) {
+                lua.lua_pushnumber(L2, luaMoveDir.x);
+                lua.lua_pushnumber(L2, 0);
+                lua.lua_pushnumber(L2, luaMoveDir.z);
+                return 3;
+            });
+            // UserInputService.TouchEnabled и т.п.: экранный джойстик есть на
+            // сенсорных устройствах, WASD — на устройствах с клавиатурой.
+            def('__is_touch', function (L2) {
+                const touch = (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window);
+                lua.lua_pushboolean(L2, touch ? 1 : 0);
+                return 1;
+            });
             def('__get_pivot', function (L2) {
                 return _pushMatrix(L2, luaGetPivotMatrix(lua.lua_tonumber(L2, 1)));
             });
@@ -6920,7 +6986,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: full-cframe-2026-10-02 (CFrame+rotation, PivotTo, Attributes, Tags, Character)');
+            logLuaOutput('info', 'script.js build: virtual-keys-2026-10-02d');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7042,6 +7108,7 @@ end
             luaCharacterRef = -1;
             luaPlayerRef = -1;
             luaControlsDisabled = false;
+            luaReleaseAllKeys();
             luaNextVirtualRef = -1000;
             luaResetSignals();
             renderLuaOutput();
@@ -7462,6 +7529,47 @@ end
             activeTweens = stillActive;
         }
 
+        // ============ Виртуальная клавиатура для UserInputService ============
+        // Источники нажатия: 'dom' — настоящая клавиатура, 'virt' — экранный
+        // джойстик (W/A/S/D) и кнопка прыжка (Space). Клавиша «нажата», если
+        // активен любой источник; InputBegan/InputEnded стреляют на переходах,
+        // как в Roblox. Так клиентские скрипты на телефоне видят «WASD/пробел».
+        const luaKeySrc = {}; // имя KeyCode -> { dom: bool, virt: bool }
+        function luaKeyIsDown(name) { const k = luaKeySrc[name]; return !!(k && (k.dom || k.virt)); }
+        function luaSetKeySrc(name, src, down) {
+            if (!luaServerL && !luaClientL) return;
+            const k = luaKeySrc[name] || (luaKeySrc[name] = { dom: false, virt: false });
+            const was = k.dom || k.virt;
+            k[src] = !!down;
+            const now = k.dom || k.virt;
+            if (was === now) return;
+            const ref = luaFindServiceRef('UserInputService');
+            if (ref !== -1) fireLuaSignal(ref, now ? 'InputBegan' : 'InputEnded', ['Keyboard', 0, 0, name]);
+        }
+        function luaReleaseAllKeys() { for (const k of Object.keys(luaKeySrc)) delete luaKeySrc[k]; }
+        const _digitNames = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+        const _codeNames = {
+            Space: 'Space', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+            ShiftLeft: 'LeftShift', ShiftRight: 'RightShift', ControlLeft: 'LeftControl', ControlRight: 'RightControl',
+            AltLeft: 'LeftAlt', AltRight: 'RightAlt', Enter: 'Return', Escape: 'Escape', Tab: 'Tab', Backspace: 'Backspace',
+        };
+        // e.code — физическая клавиша, поэтому W/A/S/D работают и на русской раскладке
+        function luaKeyNameFromDom(e) {
+            const c = e.code || '';
+            if (/^Key[A-Z]$/.test(c)) return c[3];
+            if (/^Digit[0-9]$/.test(c)) return _digitNames[+c[5]];
+            return _codeNames[c] || null;
+        }
+        // Экранный джойстик -> виртуальные W/A/S/D (порог 0.3); вызывается каждый кадр
+        function luaUpdateVirtualKeys() {
+            if (!luaServerL && !luaClientL) return;
+            const T = 0.3;
+            luaSetKeySrc('W', 'virt', joyVector.y > T);
+            luaSetKeySrc('S', 'virt', joyVector.y < -T);
+            luaSetKeySrc('D', 'virt', joyVector.x > T);
+            luaSetKeySrc('A', 'virt', joyVector.x < -T);
+        }
+
         // UserInputService.InputBegan/InputChanged/InputEnded — глобальные
         document.addEventListener('mousedown', (e) => {
             if (!luaServerL && !luaClientL) return;
@@ -7541,6 +7649,7 @@ end
             }
         }
 
+        const luaMoveDir = { x: 0, z: 0 };
         let charVelX = 0, charVelZ = 0; // последняя заданная игроком горизонтальная скорость
         // Устанавливается настоящим PlayerModule:GetControls():Disable()
         let luaControlsDisabled = false;
@@ -7548,6 +7657,7 @@ end
         function applyCharacterControl() {
             if (!charBody) return;
             charBody.wakeUp();
+            luaUpdateVirtualKeys();
 
             const forward = luaControlsDisabled ? 0 : Math.max(-1, Math.min(1,
                 (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
@@ -7563,6 +7673,16 @@ end
             let vz = fwdZ * forward + rightZ * strafe;
             const len = Math.hypot(vx, vz);
             let dirX = 0, dirZ = 0;
+            // Humanoid.MoveDirection: желаемое направление ввода (джойстик/WASD),
+            // как в Roblox — не зависит от WalkSpeed (при WalkSpeed=0 оно всё равно
+            // ненулевое, по нему клиентские скрипты видят «игрок пытается идти»).
+            {
+                const mx = len > 0.001 ? vx / len : 0, mz = len > 0.001 ? vz / len : 0;
+                if (mx !== luaMoveDir.x || mz !== luaMoveDir.z) {
+                    luaMoveDir.x = mx; luaMoveDir.z = mz;
+                    if (luaHumanoidRef !== -1) fireLuaSignal(luaHumanoidRef, '__prop_MoveDirection', []);
+                }
+            }
             if (len > 0.001) {
                 dirX = vx / len; dirZ = vz / len;
                 vx = dirX * charWalkSpeed;
@@ -9421,6 +9541,7 @@ end
             }
 
             keysPressed[e.key.toLowerCase()] = true;
+            if (!e.repeat) { const kn = luaKeyNameFromDom(e); if (kn) luaSetKeySrc(kn, 'dom', true); }
 
             if (isPlaying && !luaControlsDisabled && (e.key === ' ' || e.key.toLowerCase() === 'e')) {
                 e.preventDefault();
@@ -9456,7 +9577,9 @@ end
 
         document.addEventListener('keyup', (e) => {
             keysPressed[e.key.toLowerCase()] = false;
+            const kn = luaKeyNameFromDom(e); if (kn) luaSetKeySrc(kn, 'dom', false);
         });
+        window.addEventListener('blur', () => { for (const n of Object.keys(luaKeySrc)) luaSetKeySrc(n, 'dom', false); });
 
         document.getElementById('modal-overlay').onclick = e => {
             if (e.target.id === 'modal-overlay') closeModal();
