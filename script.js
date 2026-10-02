@@ -4745,8 +4745,28 @@ end
             }
             return { x: 0, y: 0, z: 0 };
         }
+        let _lastBridgeL = null, _tpLogs = 0, _tpLastT = 0;
+        // Диагностика: кто телепортирует/двигает персонажа из Lua. Пишем в Output
+        // стек (скрипт:строка) — первые 8 раз, не чаще раза в секунду.
+        function _logCharTeleport(how, x, y, z) {
+            const now = performance.now();
+            if (_tpLogs >= 8 || now - _tpLastT < 1000) return;
+            _tpLogs++; _tpLastT = now;
+            let tb = '';
+            try {
+                const { lua, lauxlib } = window.fengari;
+                if (_lastBridgeL) {
+                    lauxlib.luaL_traceback(_lastBridgeL, _lastBridgeL, null, 1);
+                    tb = lua.lua_tojsstring(_lastBridgeL, -1) || '';
+                    lua.lua_pop(_lastBridgeL, 1);
+                }
+            } catch (e) {}
+            logLuaOutput('warn', 'Скрипт двигает персонажа (' + how + ') → ' +
+                [x, y, z].map(v => Number(v).toFixed(1)).join(', '), null, tb || null);
+        }
         function luaSetPositionOfRef(ref, x, y, z) {
             const body = physicsBodies[ref];
+            if (body && body === charBody) _logCharTeleport('Position/CFrame', x, y, z);
             if (body) body.position.set(x, y, z);
             if (loadedObjPos[ref]) loadedObjPos[ref] = { x, y, z };
             const mesh = sceneObjs[ref];
@@ -4827,7 +4847,7 @@ end
             M.decompose(pos, q, sc);
             const body = physicsBodies[ref];
             if (ref === luaHumanoidRootPartRef) {
-                if (charBody) { charBody.position.set(pos.x, pos.y, pos.z); charBody.wakeUp(); }
+                if (charBody) { _logCharTeleport('CFrame/PivotTo', pos.x, pos.y, pos.z); charBody.position.set(pos.x, pos.y, pos.z); charBody.wakeUp(); }
                 return;
             }
             if (body) {
@@ -4854,6 +4874,7 @@ end
             if (luaIsCharRef(ref)) {
                 const e = M.elements;
                 if (charBody) {
+                    _logCharTeleport('PivotTo персонажа', e[12], e[13], e[14]);
                     charBody.position.set(e[12], e[13], e[14]);
                     charBody.velocity.set(0, 0, 0);
                     charBody.wakeUp();
@@ -5874,7 +5895,7 @@ end
         function installLuaBridge(L) {
             const { lua } = window.fengari;
             function def(name, fn) {
-                lua.lua_pushcfunction(L, fn);
+                lua.lua_pushcfunction(L, function (L2) { _lastBridgeL = L2; return fn(L2); });
                 lua.lua_setglobal(L, name);
             }
             def('print', function (L2) {
