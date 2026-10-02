@@ -1299,7 +1299,7 @@
                 }
                 document.getElementById('fps-counter').textContent = 'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
-                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length + ' | ws:' + charWalkSpeed + ' jp:' + charJumpPower + (luaControlsDisabled ? ' CTRL-OFF' : '') + (charBody ? ' y:' + charBody.position.y.toFixed(1) : '')) : '');
+                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length + ' | ws:' + charWalkSpeed + ' jp:' + charJumpPower + (luaControlsDisabled ? ' CTRL-OFF' : '') + (charBody ? ' y:' + charBody.position.y.toFixed(1) : '') + (window._dbgMove ? ' in:' + window._dbgMove.f.toFixed(1) + ',' + window._dbgMove.s.toFixed(1) + ' v:' + Math.hypot(window._dbgMove.vx, window._dbgMove.vz).toFixed(1) : '')) : '');
                 fpsFrames = 0;
                 fpsTime = now;
             }
@@ -7623,7 +7623,38 @@ end
             }
             jumpQueued = jumpQueued && charJumpPower <= 0 ? false : jumpQueued;
             jumpQueued = false;
+
+            // Детектор «застрял»: игрок давит на джойстик/WASD, скорость > 0, а
+            // позиция за секунду почти не изменилась — пишем в Output, с чем
+            // персонаж сейчас сталкивается (какая деталь держит).
+            window._dbgMove = { f: forward, s: strafe, vx: vx, vz: vz };
+            const wantMove = Math.hypot(forward, strafe) > 0.2 && charWalkSpeed > 0;
+            const tNow = performance.now();
+            if (wantMove) {
+                if (!_stk.t) { _stk.t = tNow; _stk.x = charBody.position.x; _stk.z = charBody.position.z; }
+                else if (tNow - _stk.t > 1000) {
+                    const moved = Math.hypot(charBody.position.x - _stk.x, charBody.position.z - _stk.z);
+                    if (moved < 0.3 && !_stk.logged) {
+                        _stk.logged = true;
+                        const hits = [];
+                        for (const c of (physicsWorld.contacts || [])) {
+                            const other = c.bi === charBody ? c.bj : (c.bj === charBody ? c.bi : null);
+                            if (!other) continue;
+                            const rk = Object.keys(physicsBodies).find(k => physicsBodies[k] === other);
+                            const nm = rk !== undefined && luaByRef[rk] ? luaByRef[rk].name : (rk !== undefined ? ('ref ' + rk) : '?');
+                            hits.push(nm + ' [' + (other.type === 2 ? 'static' : 'dynamic') + ' @' +
+                                other.position.x.toFixed(1) + ',' + other.position.y.toFixed(1) + ',' + other.position.z.toFixed(1) + ']');
+                        }
+                        logLuaOutput('warn', 'Движение не идёт (joy ' + forward.toFixed(1) + ',' + strafe.toFixed(1) +
+                            ', скорость ' + vx.toFixed(1) + ',' + vz.toFixed(1) + ', pos ' +
+                            charBody.position.x.toFixed(1) + ',' + charBody.position.y.toFixed(1) + ',' + charBody.position.z.toFixed(1) +
+                            '). Контакты: ' + (hits.length ? hits.slice(0, 6).join('; ') : 'нет'));
+                    }
+                    _stk.t = tNow; _stk.x = charBody.position.x; _stk.z = charBody.position.z;
+                }
+            } else { _stk.t = 0; _stk.logged = false; }
         }
+        const _stk = { t: 0, x: 0, z: 0, logged: false };
 
         // Сфера плохо лезет по отдельным боксам-ступеням:
         function tryStepUp(dirX, dirZ) {
