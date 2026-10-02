@@ -808,9 +808,21 @@ def build_all_scene_objects():
         union_mesh = (cls == 'UnionOperation'
                       and union_mesh_from_parsed(parsed, ref) is not None)
 
+        # PivotOffset детали (смещение точки вращения для GetPivot/PivotTo —
+        # например петля двери): [x, y, z, R00..R22]; None, если единичный.
+        pivot_offset = None
+        _po = props.get('PivotOffset')
+        if isinstance(_po, dict):
+            _pp = list(get_pos(_po))
+            _pr = [float(v) for v in get_rot_matrix(_po)]
+            if (any(abs(v) > 1e-6 for v in _pp)
+                    or any(abs(x - y) > 1e-6 for x, y in zip(_pr, [1, 0, 0, 0, 1, 0, 0, 0, 1]))):
+                pivot_offset = _pp + _pr
+
         objs.append({
             'ref': ref, 'class': cls, 'name': name,
             'shape': shape,
+            'pivotOffset': pivot_offset,
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
@@ -910,11 +922,26 @@ def _download_vendor_file(fn):
     url = VENDOR_SOURCES.get(fn)
     if not url:
         return False
+    # Запасные зеркала: jsdelivr/cdnjs часто недоступны без VPN, а
+    # github raw с копией из самого репозитория — обычно доступен.
+    urls = [url]
+    if (VENDOR_DIR / fn).suffix == '.js':
+        urls.append('https://raw.githubusercontent.com/suscersal/roblox-studio-web/main/vendor/' + fn)
     try:
         VENDOR_DIR.mkdir(parents=True, exist_ok=True)
-        req = _req.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with _req.urlopen(req, timeout=15) as resp:
-            data = resp.read()
+        data = None
+        last_err = None
+        for u in urls:
+            try:
+                req = _req.Request(u, headers={'User-Agent': 'Mozilla/5.0'})
+                with _req.urlopen(req, timeout=15) as resp:
+                    data = resp.read()
+                if data:
+                    break
+            except (_urlerr.URLError, _urlerr.HTTPError, OSError, TimeoutError) as e:
+                last_err = e
+        if not data:
+            raise last_err or OSError('пустой ответ')
         # Пишем во временный файл и переименовываем — если параллельный
         # запрос на тот же файл долетит одновременно, никто не увидит
         # частично записанный .js/.css.
@@ -2622,19 +2649,46 @@ with open("script.js", "r", encoding="utf-8") as file:
     JS_TEMPLATE = file.read()
 
 
+def _no_cache(resp):
+    # index/style/script читаются с диска ОДИН раз при старте, а WebView/
+    # браузер раньше мог держать старую копию script.js — после правки
+    # старая версия продолжала работать. no-cache заставляет перепроверять.
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
+
+
+def _asset_version():
+    import hashlib
+    h = hashlib.md5()
+    for name in ('script.js', 'style.css'):
+        try:
+            with open(name, 'rb') as f:
+                h.update(f.read())
+        except OSError:
+            pass
+    return h.hexdigest()[:10]
+
+
 @flask_app.route('/')
 def index():
-    return Response(HTML_TEMPLATE, mimetype='text/html')
+    # ?v=<хэш> в ссылках на script.js/style.css — WebView не может отдать
+    # старую копию из кеша после замены файлов.
+    v = _asset_version()
+    html = HTML_TEMPLATE.replace('src="script.js"', 'src="script.js?v=%s"' % v) \
+                        .replace('href="style.css"', 'href="style.css?v=%s"' % v)
+    return _no_cache(Response(html, mimetype='text/html'))
 
 
 @flask_app.route('/style.css')
 def style_css():
-    return Response(CSS_TEMPLATE, mimetype='text/css')
+    return _no_cache(Response(CSS_TEMPLATE, mimetype='text/css'))
 
 
 @flask_app.route('/script.js')
 def script_js():
-    return Response(JS_TEMPLATE, mimetype='application/javascript')
+    return _no_cache(Response(JS_TEMPLATE, mimetype='application/javascript'))
 
 
 if __name__ == '__main__':

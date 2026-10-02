@@ -2521,6 +2521,7 @@
             mesh.userData.ref = o.ref;
             mesh.userData.cls = o.class;
             mesh.userData.shape = o.shape;
+            mesh.userData.pivotOffset = o.pivotOffset || null; // PivotOffset детали (GetPivot/PivotTo)
             mesh.userData.sx = o.sx || 1;
             mesh.userData.sy = o.sy || 1;
             mesh.userData.sz = o.sz || 1;
@@ -2708,6 +2709,7 @@
         // ДО строки camera.CFrame = ... — камера песни вообще никогда не
         // переставлялась). См. __get_size ниже.
         let loadedObjSize = {}; // ref -> {x,y,z}
+        let charPushX = 0, charPushZ = 0, charPushT = 0;
         let charBody = null;
         let charMesh = null; // куб для вида от третьего лица, см. toggleThirdPerson
 
@@ -3442,69 +3444,226 @@ end
 -- переносит позицию (см. __set_prop), CFrame.new(pos, lookAt) поворот не
 -- считает вообще (для этого нужна честная матрица взгляда, которой тут
 -- нет) — известное ограничение, не притворяемся, что его нет.
+-- В Lua 5.3 (fengari) нет math.atan2 — а в Roblox/Luau он есть.
+if not math.atan2 then math.atan2 = function(y, x) return math.atan(y, x) end end
 CFrame = {}
-CFrame.__index = CFrame
-function CFrame.new(a, b, c)
-    local x, y, z
-    local lx, ly, lz = 0, 0, -1 -- lookVector по умолчанию — вдоль -Z, как в настоящем Roblox
-    if type(a) == "table" and type(b) == "table" then
-        -- CFrame.new(pos, lookAt) — двухточечная форма (position + target).
-        -- Раньше вообще не проверялась (проверялся только type(a)=="table"
-        -- без взгляда на b) — lookAt тихо игнорировался, lookVector всегда
-        -- оставался (0,0,-1) независимо от переданной точки. Именно эта
-        -- форма используется в MenuCamera.lua (CFrame.new(cameraPos,
-        -- lookAt)) — камера меню никогда реально не "смотрела" туда, куда
-        -- просил скрипт.
-        x, y, z = a.X, a.Y, a.Z
-        local dx, dy, dz = b.X - x, b.Y - y, b.Z - z
-        local len = math.sqrt(dx * dx + dy * dy + dz * dz)
-        if len > 0.0001 then lx, ly, lz = dx / len, dy / len, dz / len end
-    elseif type(a) == "table" then
-        x, y, z = a.X, a.Y, a.Z
-    else
-        x, y, z = a or 0, b or 0, c or 0
-    end
+-- Полноценный CFrame: позиция + матрица поворота 3x3 (R00..R22, строки),
+-- как в Roblox: RightVector = столбец 0, UpVector = столбец 1,
+-- LookVector = -столбец 2. Поля X/Y/Z/Position/lookVector/... оставлены
+-- «плоскими», потому что JS-мост (камера, твины) читает их напрямую.
+local function _cfNew(x, y, z, a, b, c, d, e, f, g, h, i)
+    local p = Vector3.new(x, y, z)
+    local lv = Vector3.new(-c, -f, -i)
+    local rv = Vector3.new(a, d, g)
+    local uv = Vector3.new(b, e, h)
     return setmetatable({
         X = x, Y = y, Z = z,
-        Position = Vector3.new(x, y, z), p = Vector3.new(x, y, z),
-        lookVector = Vector3.new(lx, ly, lz), LookVector = Vector3.new(lx, ly, lz),
-        rightVector = Vector3.new(1, 0, 0), RightVector = Vector3.new(1, 0, 0),
-        upVector = Vector3.new(0, 1, 0), UpVector = Vector3.new(0, 1, 0),
+        R00 = a, R01 = b, R02 = c, R10 = d, R11 = e, R12 = f, R20 = g, R21 = h, R22 = i,
+        Position = p, p = p,
+        lookVector = lv, LookVector = lv,
+        rightVector = rv, RightVector = rv,
+        upVector = uv, UpVector = uv,
     }, CFrame)
 end
-function CFrame.fromAxisAngle(axis, angle) return CFrame.new(0, 0, 0) end -- поворот игнорируется — см. коммент выше
-function CFrame.Angles(rx, ry, rz) return CFrame.new(0, 0, 0) end
--- CFrame.lookAt(at, target) — то же, что двухточечный CFrame.new.
-function CFrame.lookAt(at, target) return CFrame.new(at, target) end
--- Умножение — БЕЗ матрицы поворота (её в движке нет, см. комментарий выше):
--- CFrame*CFrame складывает позиции (поворот игнорируется), CFrame*Vector3
--- сдвигает точку.
-CFrame.__mul = function(a, b)
-    if b.lookVector ~= nil then
-        return CFrame.new(Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z))
-    end
-    return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z)
+local function _m3(A, B)
+    return {
+        A[1]*B[1] + A[2]*B[4] + A[3]*B[7], A[1]*B[2] + A[2]*B[5] + A[3]*B[8], A[1]*B[3] + A[2]*B[6] + A[3]*B[9],
+        A[4]*B[1] + A[5]*B[4] + A[6]*B[7], A[4]*B[2] + A[5]*B[5] + A[6]*B[8], A[4]*B[3] + A[5]*B[6] + A[6]*B[9],
+        A[7]*B[1] + A[8]*B[4] + A[9]*B[7], A[7]*B[2] + A[8]*B[5] + A[9]*B[8], A[7]*B[3] + A[8]*B[6] + A[9]*B[9],
+    }
 end
-CFrame.__tostring = function(c) return c.X .. ", " .. c.Y .. ", " .. c.Z end
--- cf:Lerp(goal, alpha) — раньше не существовало вообще, а это ИМЕННО тот
--- метод, которым камерные скрипты (MenuCamera.lua и подобные) плавно ведут
--- камеру каждый кадр: camera.CFrame = camera.CFrame:Lerp(target, 0.1).
--- Без него вызов падал "attempt to call a nil value (method 'Lerp')" —
--- RenderStepped-соединение обрывалось на первом же кадре, и следующее
--- присвоение camera.CFrame (когда скрипт где-то ещё СРАЗУ ставит его на
--- целевую точку, например при смене персонажа в меню) особенно на
--- медленном первом кадре выглядело как мгновенный "телепорт" камеры
--- вместо плавного пролёта. Линейно интерполируем позицию и lookVector
--- (нормализуем результат — честного slerp по кватерниону тут нет, но для
--- почти всех углов поворота камеры разница на глаз не заметна).
+local function _rx(a) local c, s = math.cos(a), math.sin(a) return { 1, 0, 0, 0, c, -s, 0, s, c } end
+local function _ry(a) local c, s = math.cos(a), math.sin(a) return { c, 0, s, 0, 1, 0, -s, 0, c } end
+local function _rz(a) local c, s = math.cos(a), math.sin(a) return { c, -s, 0, s, c, 0, 0, 0, 1 } end
+local function _fromR(x, y, z, M)
+    return _cfNew(x, y, z, M[1], M[2], M[3], M[4], M[5], M[6], M[7], M[8], M[9])
+end
+local function _lookAt(at, tg, up)
+    local lx, ly, lz = tg.X - at.X, tg.Y - at.Y, tg.Z - at.Z
+    local len = math.sqrt(lx*lx + ly*ly + lz*lz)
+    if len < 1e-9 then return _cfNew(at.X, at.Y, at.Z, 1, 0, 0, 0, 1, 0, 0, 0, 1) end
+    lx, ly, lz = lx/len, ly/len, lz/len
+    local bx, by, bz = -lx, -ly, -lz
+    local ux, uy, uz = 0, 1, 0
+    if up then ux, uy, uz = up.X, up.Y, up.Z end
+    local rx, ry, rz = uy*bz - uz*by, uz*bx - ux*bz, ux*by - uy*bx
+    local rl = math.sqrt(rx*rx + ry*ry + rz*rz)
+    if rl < 1e-6 then rx, ry, rz = 1, 0, 0 else rx, ry, rz = rx/rl, ry/rl, rz/rl end
+    local vx, vy, vz = by*rz - bz*ry, bz*rx - bx*rz, bx*ry - by*rx
+    return _cfNew(at.X, at.Y, at.Z, rx, vx, bx, ry, vy, by, rz, vz, bz)
+end
+local function _isCF(v) return type(v) == "table" and rawget(v, "R00") ~= nil end
+function CFrame.new(a, b, c, qx, qy, qz, qw, ...)
+    if a == nil then return _cfNew(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1) end
+    if type(a) == "table" then
+        if type(b) == "table" then return _lookAt(a, b) end
+        return _cfNew(a.X, a.Y, a.Z, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+    end
+    local rest = { ... }
+    if qx ~= nil and qy == nil then -- (на всякий случай) неполный набор
+        return _cfNew(a, b or 0, c or 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+    end
+    if qw ~= nil and rest[1] == nil then -- x,y,z, qx,qy,qz,qw
+        local n = math.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
+        if n > 0 then qx, qy, qz, qw = qx/n, qy/n, qz/n, qw/n end
+        return _cfNew(a, b, c,
+            1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw),
+            2*(qx*qy + qz*qw), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw),
+            2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx*qx + qy*qy))
+    end
+    if rest[1] ~= nil then -- 12 компонент: x,y,z,R00,R01,R02,R10,R11,R12,R20,R21,R22
+        return _cfNew(a, b, c, qx, qy, qz, qw, rest[1], rest[2], rest[3], rest[4], rest[5])
+    end
+    return _cfNew(a, b or 0, c or 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+end
+CFrame.identity = _cfNew(0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+function CFrame.Angles(rx, ry, rz)
+    return _fromR(0, 0, 0, _m3(_m3(_rx(rx or 0), _ry(ry or 0)), _rz(rz or 0)))
+end
+CFrame.fromEulerAnglesXYZ = CFrame.Angles
+function CFrame.fromOrientation(rx, ry, rz)
+    return _fromR(0, 0, 0, _m3(_m3(_ry(ry or 0), _rx(rx or 0)), _rz(rz or 0)))
+end
+CFrame.fromEulerAnglesYXZ = CFrame.fromOrientation
+function CFrame.fromAxisAngle(axis, angle)
+    local l = math.sqrt(axis.X*axis.X + axis.Y*axis.Y + axis.Z*axis.Z)
+    if l < 1e-9 then return CFrame.identity end
+    local x, y, z = axis.X/l, axis.Y/l, axis.Z/l
+    local c, s = math.cos(angle), math.sin(angle)
+    local t = 1 - c
+    return _fromR(0, 0, 0, {
+        t*x*x + c,   t*x*y - s*z, t*x*z + s*y,
+        t*x*y + s*z, t*y*y + c,   t*y*z - s*x,
+        t*x*z - s*y, t*y*z + s*x, t*z*z + c })
+end
+function CFrame.lookAt(at, target, up) return _lookAt(at, target, up) end
+function CFrame.fromMatrix(pos, vx, vy, vz)
+    vz = vz or vx:Cross(vy)
+    return _cfNew(pos.X, pos.Y, pos.Z, vx.X, vy.X, vz.X, vx.Y, vy.Y, vz.Y, vx.Z, vy.Z, vz.Z)
+end
+CFrame.__index = function(t, k)
+    local v = rawget(CFrame, k)
+    if v ~= nil then return v end
+    if k == "Rotation" then
+        return _cfNew(0, 0, 0, t.R00, t.R01, t.R02, t.R10, t.R11, t.R12, t.R20, t.R21, t.R22)
+    end
+    return nil
+end
+CFrame.__mul = function(a, b)
+    if _isCF(b) then
+        local R = _m3({ a.R00, a.R01, a.R02, a.R10, a.R11, a.R12, a.R20, a.R21, a.R22 },
+                      { b.R00, b.R01, b.R02, b.R10, b.R11, b.R12, b.R20, b.R21, b.R22 })
+        return _fromR(
+            a.R00*b.X + a.R01*b.Y + a.R02*b.Z + a.X,
+            a.R10*b.X + a.R11*b.Y + a.R12*b.Z + a.Y,
+            a.R20*b.X + a.R21*b.Y + a.R22*b.Z + a.Z, R)
+    end
+    return Vector3.new(
+        a.R00*b.X + a.R01*b.Y + a.R02*b.Z + a.X,
+        a.R10*b.X + a.R11*b.Y + a.R12*b.Z + a.Y,
+        a.R20*b.X + a.R21*b.Y + a.R22*b.Z + a.Z)
+end
+CFrame.__add = function(a, b)
+    return _cfNew(a.X + b.X, a.Y + b.Y, a.Z + b.Z, a.R00, a.R01, a.R02, a.R10, a.R11, a.R12, a.R20, a.R21, a.R22)
+end
+CFrame.__sub = function(a, b)
+    return _cfNew(a.X - b.X, a.Y - b.Y, a.Z - b.Z, a.R00, a.R01, a.R02, a.R10, a.R11, a.R12, a.R20, a.R21, a.R22)
+end
+CFrame.__eq = function(a, b)
+    return a.X == b.X and a.Y == b.Y and a.Z == b.Z and a.R00 == b.R00 and a.R01 == b.R01
+        and a.R02 == b.R02 and a.R10 == b.R10 and a.R11 == b.R11 and a.R12 == b.R12
+        and a.R20 == b.R20 and a.R21 == b.R21 and a.R22 == b.R22
+end
+CFrame.__tostring = function(c)
+    return c.X .. ", " .. c.Y .. ", " .. c.Z .. ", " .. c.R00 .. ", " .. c.R01 .. ", " .. c.R02 .. ", "
+        .. c.R10 .. ", " .. c.R11 .. ", " .. c.R12 .. ", " .. c.R20 .. ", " .. c.R21 .. ", " .. c.R22
+end
+function CFrame.Inverse(self)
+    return _cfNew(
+        -(self.R00*self.X + self.R10*self.Y + self.R20*self.Z),
+        -(self.R01*self.X + self.R11*self.Y + self.R21*self.Z),
+        -(self.R02*self.X + self.R12*self.Y + self.R22*self.Z),
+        self.R00, self.R10, self.R20, self.R01, self.R11, self.R21, self.R02, self.R12, self.R22)
+end
+function CFrame.GetComponents(self)
+    return self.X, self.Y, self.Z, self.R00, self.R01, self.R02, self.R10, self.R11, self.R12, self.R20, self.R21, self.R22
+end
+CFrame.components = CFrame.GetComponents
+function CFrame.ToWorldSpace(self, cf) return self * cf end
+function CFrame.ToObjectSpace(self, cf) return self:Inverse() * cf end
+function CFrame.PointToWorldSpace(self, v) return self * v end
+function CFrame.PointToObjectSpace(self, v) return self:Inverse() * v end
+function CFrame.VectorToWorldSpace(self, v)
+    return Vector3.new(self.R00*v.X + self.R01*v.Y + self.R02*v.Z,
+                       self.R10*v.X + self.R11*v.Y + self.R12*v.Z,
+                       self.R20*v.X + self.R21*v.Y + self.R22*v.Z)
+end
+function CFrame.VectorToObjectSpace(self, v)
+    return Vector3.new(self.R00*v.X + self.R10*v.Y + self.R20*v.Z,
+                       self.R01*v.X + self.R11*v.Y + self.R21*v.Z,
+                       self.R02*v.X + self.R12*v.Y + self.R22*v.Z)
+end
+function CFrame.ToEulerAnglesXYZ(self)
+    local s = math.max(-1, math.min(1, self.R02))
+    local ry = math.asin(s)
+    if math.abs(s) < 0.99999 then
+        return math.atan2(-self.R12, self.R22), ry, math.atan2(-self.R01, self.R00)
+    end
+    return math.atan2(self.R21, self.R11), ry, 0
+end
+function CFrame.ToOrientation(self)
+    local s = math.max(-1, math.min(1, -self.R12))
+    local rx = math.asin(s)
+    if math.abs(s) < 0.99999 then
+        return rx, math.atan2(self.R02, self.R22), math.atan2(self.R10, self.R11)
+    end
+    return rx, math.atan2(-self.R20, self.R00), 0
+end
+CFrame.ToEulerAnglesYXZ = CFrame.ToOrientation
+function CFrame.Orthonormalize(self) return self end
+function CFrame.FuzzyEq(self, o, eps)
+    eps = eps or 1e-5
+    local a = { self:GetComponents() }
+    local b = { o:GetComponents() }
+    for i = 1, 12 do if math.abs(a[i] - b[i]) > eps then return false end end
+    return true
+end
+local function _toQuat(M)
+    local tr = M[1] + M[5] + M[9]
+    local w, x, y, z
+    if tr > 0 then
+        local s = math.sqrt(tr + 1) * 2
+        w = s / 4; x = (M[8] - M[6]) / s; y = (M[3] - M[7]) / s; z = (M[4] - M[2]) / s
+    elseif M[1] > M[5] and M[1] > M[9] then
+        local s = math.sqrt(1 + M[1] - M[5] - M[9]) * 2
+        w = (M[8] - M[6]) / s; x = s / 4; y = (M[2] + M[4]) / s; z = (M[3] + M[7]) / s
+    elseif M[5] > M[9] then
+        local s = math.sqrt(1 + M[5] - M[1] - M[9]) * 2
+        w = (M[3] - M[7]) / s; x = (M[2] + M[4]) / s; y = s / 4; z = (M[6] + M[8]) / s
+    else
+        local s = math.sqrt(1 + M[9] - M[1] - M[5]) * 2
+        w = (M[4] - M[2]) / s; x = (M[3] + M[7]) / s; y = (M[6] + M[8]) / s; z = s / 4
+    end
+    return x, y, z, w
+end
+-- cf:Lerp(goal, alpha) — позиция линейно, поворот сферически (slerp)
 function CFrame.Lerp(self, goal, alpha)
     local x = self.X + (goal.X - self.X) * alpha
     local y = self.Y + (goal.Y - self.Y) * alpha
     local z = self.Z + (goal.Z - self.Z) * alpha
-    local lx = self.lookVector.X + (goal.lookVector.X - self.lookVector.X) * alpha
-    local ly = self.lookVector.Y + (goal.lookVector.Y - self.lookVector.Y) * alpha
-    local lz = self.lookVector.Z + (goal.lookVector.Z - self.lookVector.Z) * alpha
-    return CFrame.new(Vector3.new(x, y, z), Vector3.new(x + lx, y + ly, z + lz))
+    local ax, ay, az, aw = _toQuat({ self.R00, self.R01, self.R02, self.R10, self.R11, self.R12, self.R20, self.R21, self.R22 })
+    local bx, by, bz, bw = _toQuat({ goal.R00, goal.R01, goal.R02, goal.R10, goal.R11, goal.R12, goal.R20, goal.R21, goal.R22 })
+    local dot = ax*bx + ay*by + az*bz + aw*bw
+    if dot < 0 then bx, by, bz, bw, dot = -bx, -by, -bz, -bw, -dot end
+    local k0, k1
+    if dot > 0.9995 then
+        k0, k1 = 1 - alpha, alpha
+    else
+        local th = math.acos(dot)
+        local sn = math.sin(th)
+        k0, k1 = math.sin((1 - alpha) * th) / sn, math.sin(alpha * th) / sn
+    end
+    return CFrame.new(x, y, z, k0*ax + k1*bx, k0*ay + k1*by, k0*az + k1*bz, k0*aw + k1*bw)
 end
 
 -- NumberSequence/NumberSequenceKeypoint/ColorSequence(Keypoint) — просто
@@ -3755,15 +3914,7 @@ InstanceMT.__index = function(t, k)
     -- но НЕ достаточно для составления новых CFrame через "*" — такие
     -- скрипты этот движок пока не поддерживает.
     if k == "CFrame" then
-        local px, py, pz = __get_position(ref)
-        local lx, ly, lz, rx, ry, rz, ux, uy, uz = __get_cframe_vecs(ref)
-        local pos = Vector3.new(px, py, pz)
-        return {
-            Position = pos, p = pos, X = px, Y = py, Z = pz,
-            lookVector = Vector3.new(lx, ly, lz), LookVector = Vector3.new(lx, ly, lz),
-            rightVector = Vector3.new(rx, ry, rz), RightVector = Vector3.new(rx, ry, rz),
-            upVector = Vector3.new(ux, uy, uz), UpVector = Vector3.new(ux, uy, uz),
-        }
+        return CFrame.new(__get_cframe(ref))
     end
     if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
         return function(self, name) return wrap(__find_first_child(ref, name)) end
@@ -4189,52 +4340,32 @@ local function newSignal()
     return sig
 end
 
-local __attrs, __attrSignals = {}, {}
-local __tagsByRef, __refsByTag = {}, {}
+-- Атрибуты и теги лежат на JS-стороне и ОБЩИЕ для серверной и клиентской
+-- Lua-VM (раньше были локальными для каждой VM, и LocalScript не видел
+-- SetAttribute из Script).
 local __tagAdded, __tagRemoved = {}, {}
 
 local function refOf(inst) return type(inst) == "table" and rawget(inst, "__ref") or nil end
 
 local function attrSignal(ref, name)
-    local key = tostring(ref) .. ":" .. tostring(name)
-    local sg = __attrSignals[key]
-    if not sg then sg = newSignal(); __attrSignals[key] = sg end
-    return sg
+    return makeEvent(ref, "__attr_" .. tostring(name))
 end
 
 local function addTag(ref, tag)
-    local t = __tagsByRef[ref]
-    if not t then t = {}; __tagsByRef[ref] = t end
-    if t[tag] then return end
-    t[tag] = true
-    local r = __refsByTag[tag]
-    if not r then r = {}; __refsByTag[tag] = r end
-    r[ref] = true
-    if __tagAdded[tag] then __tagAdded[tag].__fire(wrap(ref)) end
+    if __tag_add(ref, tag) and __tagAdded[tag] then __tagAdded[tag].__fire(wrap(ref)) end
 end
 local function removeTag(ref, tag)
-    local t = __tagsByRef[ref]
-    if not (t and t[tag]) then return end
-    t[tag] = nil
-    if __refsByTag[tag] then __refsByTag[tag][ref] = nil end
-    if __tagRemoved[tag] then __tagRemoved[tag].__fire(wrap(ref)) end
+    if __tag_remove(ref, tag) and __tagRemoved[tag] then __tagRemoved[tag].__fire(wrap(ref)) end
 end
 
 local CollectionServiceObj = setmetatable({}, { __index = {
     AddTag = function(self, inst, tag) addTag(refOf(inst), tag) end,
     RemoveTag = function(self, inst, tag) removeTag(refOf(inst), tag) end,
-    HasTag = function(self, inst, tag)
-        local t = __tagsByRef[refOf(inst)]
-        return (t and t[tag]) == true
-    end,
-    GetTags = function(self, inst)
-        local out = {}
-        for tag in pairs(__tagsByRef[refOf(inst)] or {}) do out[#out + 1] = tag end
-        return out
-    end,
+    HasTag = function(self, inst, tag) return __tag_has(refOf(inst), tag) end,
+    GetTags = function(self, inst) return __tag_list(refOf(inst)) end,
     GetTagged = function(self, tag)
         local out = {}
-        for ref in pairs(__refsByTag[tag] or {}) do out[#out + 1] = wrap(ref) end
+        for _, ref in ipairs(__tag_tagged(tag)) do out[#out + 1] = wrap(ref) end
         return out
     end,
     GetInstanceAddedSignal = function(self, tag)
@@ -4261,49 +4392,35 @@ end
 
 local COMPAT = {
     SetAttribute = function(t, ref) return function(self, name, value)
-        local a = __attrs[ref]
-        if not a then a = {}; __attrs[ref] = a end
-        local old = a[name]
-        a[name] = value
-        if old ~= value then attrSignal(ref, name).__fire() end
+        __attr_set(ref, name, value)
     end end,
     GetAttribute = function(t, ref) return function(self, name)
-        local a = __attrs[ref]
-        return a and a[name]
+        return __attr_get(ref, name)
     end end,
-    GetAttributes = function(t, ref) return function(self)
-        local out = {}
-        for k, v in pairs(__attrs[ref] or {}) do out[k] = v end
-        return out
-    end end,
+    GetAttributes = function(t, ref) return function(self) return __attr_all(ref) end end,
     GetAttributeChangedSignal = function(t, ref) return function(self, name)
         return attrSignal(ref, name)
     end end,
     AddTag = function(t, ref) return function(self, tag) addTag(ref, tag) end end,
     RemoveTag = function(t, ref) return function(self, tag) removeTag(ref, tag) end end,
-    HasTag = function(t, ref) return function(self, tag)
-        local x = __tagsByRef[ref]
-        return (x and x[tag]) == true
-    end end,
-    GetTags = function(t, ref) return function(self)
-        local out = {}
-        for tag in pairs(__tagsByRef[ref] or {}) do out[#out + 1] = tag end
-        return out
-    end end,
+    HasTag = function(t, ref) return function(self, tag) return __tag_has(ref, tag) end end,
+    GetTags = function(t, ref) return function(self) return __tag_list(ref) end end,
     IsDescendantOf = function(t, ref) return function(self, ancestor)
         return isDescendantOf(ref, ancestor)
     end end,
     IsAncestorOf = function(t, ref) return function(self, descendant)
         return isDescendantOf(refOf(descendant), t)
     end end,
-    -- Позиция без поворота (в движке нет матрицы вращения — см. CFrame.new).
     GetPivot = function(t, ref) return function(self)
-        local x, y, z = __get_position(ref)
-        return CFrame.new(x, y, z)
+        return CFrame.new(__get_pivot(ref))
     end end,
     PivotTo = function(t, ref) return function(self, cf)
-        __set_position(ref, cf.X, cf.Y, cf.Z)
+        __set_pivot(ref, cf:GetComponents())
     end end,
+    AssemblyLinearVelocity = function(t, ref) return Vector3.new(__get_velocity(ref, 0)) end,
+    Velocity = function(t, ref) return Vector3.new(__get_velocity(ref, 0)) end,
+    AssemblyAngularVelocity = function(t, ref) return Vector3.new(__get_velocity(ref, 1)) end,
+    RotVelocity = function(t, ref) return Vector3.new(__get_velocity(ref, 1)) end,
     GetServerTimeNow = function(t, ref) return function(self) return os.time() end end,
     TakeDamage = function(t, ref) return function(self, amount)
         local ok, hp = pcall(__get_prop, ref, "Health")
@@ -4319,12 +4436,53 @@ local COMPAT = {
     AncestryChanged = function(t, ref) return makeEvent(ref, "AncestryChanged") end,
     Destroying = function(t, ref) return makeEvent(ref, "Destroying") end,
 }
+local __tblVals = {}   -- Value-свойства, хранящие таблицы (CFrameValue/Vector3Value/ObjectValue)
+local COMPAT_PROPS = {
+    AssemblyLinearVelocity = true, Velocity = true, AssemblyAngularVelocity = true, RotVelocity = true,
+}
 do
     local baseIndex = InstanceMT.__index
     InstanceMT.__index = function(t, k)
+        local ref = rawget(t, "__ref")
+        if k == "Value" then
+            local v = __tblVals[ref]
+            if v ~= nil then return v end
+        elseif (k == "Rotation" or k == "Orientation") and not __is_gui_ref(ref) then
+            local cf = CFrame.new(__get_cframe(ref))
+            local rx, ry, rz = cf:ToOrientation()
+            return Vector3.new(math.deg(rx), math.deg(ry), math.deg(rz))
+        end
         local h = COMPAT[k]
-        if h then return h(t, rawget(t, "__ref")) end
+        if h then
+            if COMPAT_PROPS[k] then return h(t, ref) end
+            return h(t, ref)
+        end
         return baseIndex(t, k)
+    end
+    local baseNew = InstanceMT.__newindex
+    InstanceMT.__newindex = function(t, k, v)
+        local ref = rawget(t, "__ref")
+        if type(v) == "table" then
+            if k == "Value" then
+                __tblVals[ref] = v
+                return
+            elseif k == "CFrame" and rawget(v, "R00") ~= nil then
+                __set_cframe(ref, v:GetComponents())
+                return
+            elseif (k == "Rotation" or k == "Orientation") and not __is_gui_ref(ref) and rawget(v, "R00") == nil then
+                local x, y, z = __get_position(ref)
+                local cf = CFrame.new(x, y, z) * CFrame.fromOrientation(math.rad(v.X), math.rad(v.Y), math.rad(v.Z))
+                __set_cframe(ref, cf:GetComponents())
+                return
+            elseif k == "AssemblyLinearVelocity" or k == "Velocity" then
+                __set_velocity(ref, 0, v.X, v.Y, v.Z)
+                return
+            elseif k == "AssemblyAngularVelocity" or k == "RotVelocity" then
+                __set_velocity(ref, 1, v.X, v.Y, v.Z)
+                return
+            end
+        end
+        return baseNew(t, k, v)
     end
 end
 
@@ -4596,6 +4754,140 @@ end
                 const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
                 mesh.matrix.decompose(pos, q, sc);
                 mesh.matrix.compose(new THREE.Vector3(x, y, z), q, sc);
+            }
+        }
+        // ============ ПОЛНОЦЕННЫЙ CFrame: поворот, GetPivot/PivotTo ============
+        // Мировая матрица детали БЕЗ масштаба (THREE.Matrix4, column-major).
+        let luaAttrs = {};  // ref -> {имя: значение}  (SetAttribute/GetAttribute)
+        let luaTags = {};   // ref -> Set<tag>        (CollectionService)
+        const _modelPivots = {}; // ref контейнера (Model/Folder) -> THREE.Matrix4 пивота
+        function luaIsCharRef(ref) {
+            return ref !== -1 && (ref === luaCharacterRef || ref === luaHumanoidRootPartRef || ref === luaHumanoidRef);
+        }
+        function luaIsPartRef(ref) { return !!(sceneObjs[ref] || physicsBodies[ref]); }
+        function luaIsCameraRef(ref) {
+            return !!(luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined');
+        }
+        function luaPartMatrix(ref) {
+            const p = luaPositionOfRef(ref);
+            const q = new THREE.Quaternion();
+            const body = physicsBodies[ref];
+            const mesh = sceneObjs[ref];
+            if (body && ref !== luaHumanoidRootPartRef) {
+                q.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
+            } else if (mesh) {
+                mesh.matrix.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+            }
+            return new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(1, 1, 1));
+        }
+        function luaPivotOffsetMatrix(ref) {
+            const mesh = sceneObjs[ref];
+            const po = mesh && mesh.userData && mesh.userData.pivotOffset;
+            const m = new THREE.Matrix4();
+            if (!po || po.length < 12) return m;
+            m.set(po[3], po[4], po[5], po[0],
+                  po[6], po[7], po[8], po[1],
+                  po[9], po[10], po[11], po[2],
+                  0, 0, 0, 1);
+            return m;
+        }
+        function luaCharMatrix() {
+            const m = new THREE.Matrix4().makeRotationY(spherical.theta);
+            if (charBody) m.setPosition(charBody.position.x, charBody.position.y, charBody.position.z);
+            return m;
+        }
+        function luaCollectParts(ref, out, depth) {
+            if ((depth || 0) > 64) return out;
+            if (luaIsPartRef(ref) && !luaIsCharRef(ref)) out.push(ref);
+            for (const c of (luaChildrenByRef[ref] || [])) luaCollectParts(c, out, (depth || 0) + 1);
+            return out;
+        }
+        function luaGetPivotMatrix(ref) {
+            if (luaIsCharRef(ref)) return luaCharMatrix();
+            if (luaIsCameraRef(ref)) {
+                return new THREE.Matrix4().compose(camera.position.clone(), camera.quaternion.clone(), new THREE.Vector3(1, 1, 1));
+            }
+            if (luaIsPartRef(ref)) return luaPartMatrix(ref).multiply(luaPivotOffsetMatrix(ref));
+            if (_modelPivots[ref]) return _modelPivots[ref].clone();
+            const parts = luaCollectParts(ref, []);
+            const m = new THREE.Matrix4();
+            if (parts.length) {
+                const mn = new THREE.Vector3(Infinity, Infinity, Infinity), mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+                for (const pr of parts) {
+                    const p = luaPositionOfRef(pr);
+                    mn.min(new THREE.Vector3(p.x, p.y, p.z)); mx.max(new THREE.Vector3(p.x, p.y, p.z));
+                }
+                m.setPosition((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2);
+                _modelPivots[ref] = m.clone();
+            }
+            return m;
+        }
+        function luaApplyPartMatrix(ref, M) {
+            const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+            M.decompose(pos, q, sc);
+            const body = physicsBodies[ref];
+            if (ref === luaHumanoidRootPartRef) {
+                if (charBody) { charBody.position.set(pos.x, pos.y, pos.z); charBody.wakeUp(); }
+                return;
+            }
+            if (body) {
+                body.position.set(pos.x, pos.y, pos.z);
+                body.quaternion.set(q.x, q.y, q.z, q.w);
+                body.aabbNeedsUpdate = true;
+                if (body.wakeUp) body.wakeUp();
+            }
+            if (loadedObjPos[ref]) loadedObjPos[ref] = { x: pos.x, y: pos.y, z: pos.z };
+            const mesh = sceneObjs[ref];
+            if (mesh) {
+                const p0 = new THREE.Vector3(), q0 = new THREE.Quaternion(), s0 = new THREE.Vector3();
+                mesh.matrix.decompose(p0, q0, s0);
+                mesh.matrix.compose(pos, q, s0);
+            }
+        }
+        function luaFirePoseSignals(ref) {
+            fireLuaSignal(ref, '__prop_CFrame', []);
+            fireLuaSignal(ref, '__prop_Position', []);
+        }
+        // PivotTo: деталь — с учётом PivotOffset; Model/Folder — жёстким
+        // переносом всех деталей внутри; персонаж — телепорт charBody.
+        function luaSetPivotMatrix(ref, M) {
+            if (luaIsCharRef(ref)) {
+                const e = M.elements;
+                if (charBody) {
+                    charBody.position.set(e[12], e[13], e[14]);
+                    charBody.velocity.set(0, 0, 0);
+                    charBody.wakeUp();
+                }
+                charVelX = 0; charVelZ = 0;
+                const lx = -e[8], lz = -e[10];
+                if (Math.hypot(lx, lz) > 1e-4) spherical.theta = Math.atan2(-lx, -lz);
+                return;
+            }
+            if (luaIsCameraRef(ref)) {
+                const e = M.elements;
+                applyCFrameValue(ref, e[12], e[13], e[14], -e[8], -e[9], -e[10]);
+                return;
+            }
+            if (luaIsPartRef(ref)) {
+                luaApplyPartMatrix(ref, M.clone().multiply(luaPivotOffsetMatrix(ref).invert()));
+                luaFirePoseSignals(ref);
+                return;
+            }
+            const old = luaGetPivotMatrix(ref);
+            const delta = M.clone().multiply(old.clone().invert());
+            for (const pr of luaCollectParts(ref, [])) {
+                luaApplyPartMatrix(pr, delta.clone().multiply(luaPartMatrix(pr)));
+                luaFirePoseSignals(pr);
+            }
+            _modelPivots[ref] = M.clone();
+        }
+        // part.CFrame = cf — задаёт именно CFrame детали (без PivotOffset)
+        function luaSetCFrameMatrix(ref, M) {
+            if (luaIsPartRef(ref) && !luaIsCharRef(ref)) {
+                luaApplyPartMatrix(ref, M);
+                luaFirePoseSignals(ref);
+            } else {
+                luaSetPivotMatrix(ref, M);
             }
         }
         // Camera — особый случай:
@@ -5273,6 +5565,28 @@ end
             if (_promptRegistry[ref] && name in _promptRegistry[ref]) {
                 _promptRegistry[ref][name] = value;
             }
+            if (name === 'Anchored' && ref !== luaHumanoidRootPartRef) {
+                // Anchored=false — деталь становится динамической (падает, летит,
+                // получает AssemblyLinearVelocity); true — снова статична.
+                const abody = physicsBodies[ref];
+                if (abody && typeof CANNON !== 'undefined') {
+                    if (!value) {
+                        if (!(abody.mass > 0)) abody.mass = 1;
+                        abody.type = CANNON.Body.DYNAMIC;
+                        abody.updateMassProperties();
+                        abody.allowSleep = true;
+                        abody.wakeUp();
+                    } else {
+                        abody.type = CANNON.Body.STATIC;
+                        abody.mass = 0;
+                        abody.updateMassProperties();
+                        abody.velocity.set(0, 0, 0);
+                        abody.angularVelocity.set(0, 0, 0);
+                    }
+                    abody.aabbNeedsUpdate = true;
+                }
+            }
+            if (ref === luaHumanoidRef && name === 'JumpHeight' && Number(value) <= 0) charJumpPower = 0;
             if (ref === luaHumanoidRef && (name === 'WalkSpeed' || name === 'JumpPower')) {
                 if (name === 'WalkSpeed') charWalkSpeed = Number(value) || 0;
                 else charJumpPower = Number(value) || 0;
@@ -5375,6 +5689,7 @@ end
         }
 
         function luaResetSignals() {
+            luaAttrs = {}; luaTags = {};
             luaSignalConns = {};
             luaSignalsByKey = {};
             luaNextSignalId = 1;
@@ -5740,6 +6055,135 @@ end
                 lua.lua_pushnumber(L2, right.x); lua.lua_pushnumber(L2, right.y); lua.lua_pushnumber(L2, right.z);
                 lua.lua_pushnumber(L2, up.x); lua.lua_pushnumber(L2, up.y); lua.lua_pushnumber(L2, up.z);
                 return 9;
+            });
+            // ---- общие Атрибуты и Теги (для серверной и клиентской VM) ----
+            const _pushJsVal = (L2, v) => {
+                if (v === null || v === undefined) lua.lua_pushnil(L2);
+                else if (typeof v === 'number') lua.lua_pushnumber(L2, v);
+                else if (typeof v === 'boolean') lua.lua_pushboolean(L2, v);
+                else lua.lua_pushstring(L2, String(v));
+            };
+            def('__attr_set', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), name = lua.lua_tojsstring(L2, 2);
+                const ty = lua.lua_type(L2, 3);
+                let v = null;
+                if (ty === lua.LUA_TNUMBER) v = lua.lua_tonumber(L2, 3);
+                else if (ty === lua.LUA_TBOOLEAN) v = !!lua.lua_toboolean(L2, 3);
+                else if (ty === lua.LUA_TSTRING) v = lua.lua_tojsstring(L2, 3);
+                const bag = (luaAttrs[ref] = luaAttrs[ref] || {});
+                const old = bag[name];
+                if (v === null) delete bag[name]; else bag[name] = v;
+                if (old !== v && !(old === undefined && v === null)) fireLuaSignal(ref, '__attr_' + name, []);
+                return 0;
+            });
+            def('__attr_get', function (L2) {
+                const bag = luaAttrs[lua.lua_tonumber(L2, 1)];
+                _pushJsVal(L2, bag ? bag[lua.lua_tojsstring(L2, 2)] : null);
+                return 1;
+            });
+            def('__attr_all', function (L2) {
+                const bag = luaAttrs[lua.lua_tonumber(L2, 1)] || {};
+                lua.lua_createtable(L2, 0, 0);
+                for (const k of Object.keys(bag)) { _pushJsVal(L2, bag[k]); lua.lua_setfield(L2, -2, k); }
+                return 1;
+            });
+            def('__tag_add', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), tag = lua.lua_tojsstring(L2, 2);
+                const set = (luaTags[ref] = luaTags[ref] || new Set());
+                const isNew = !set.has(tag);
+                set.add(tag);
+                lua.lua_pushboolean(L2, isNew);
+                return 1;
+            });
+            def('__tag_remove', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), tag = lua.lua_tojsstring(L2, 2);
+                const set = luaTags[ref];
+                lua.lua_pushboolean(L2, !!(set && set.delete(tag)));
+                return 1;
+            });
+            def('__tag_has', function (L2) {
+                const set = luaTags[lua.lua_tonumber(L2, 1)];
+                lua.lua_pushboolean(L2, !!(set && set.has(lua.lua_tojsstring(L2, 2))));
+                return 1;
+            });
+            def('__tag_list', function (L2) {
+                const set = luaTags[lua.lua_tonumber(L2, 1)];
+                lua.lua_createtable(L2, 0, 0);
+                let i = 1;
+                if (set) for (const t of set) { lua.lua_pushstring(L2, t); lua.lua_rawseti(L2, -2, i++); }
+                return 1;
+            });
+            def('__tag_tagged', function (L2) {
+                const tag = lua.lua_tojsstring(L2, 1);
+                lua.lua_createtable(L2, 0, 0);
+                let i = 1;
+                for (const k of Object.keys(luaTags)) {
+                    if (luaTags[k].has(tag)) { lua.lua_pushnumber(L2, Number(k)); lua.lua_rawseti(L2, -2, i++); }
+                }
+                return 1;
+            });
+            const _pushMatrix = (L2, M) => {
+                const e = M.elements;
+                const vals = [e[12], e[13], e[14], e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
+                for (const v of vals) lua.lua_pushnumber(L2, v);
+                return 12;
+            };
+            const _readMatrix = (L2, first) => {
+                const n = (i) => lua.lua_tonumber(L2, first + i);
+                return new THREE.Matrix4().set(
+                    n(3), n(4), n(5), n(0),
+                    n(6), n(7), n(8), n(1),
+                    n(9), n(10), n(11), n(2),
+                    0, 0, 0, 1);
+            };
+            def('__get_cframe', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const M = (luaIsPartRef(ref) && !luaIsCharRef(ref)) ? luaPartMatrix(ref) : luaGetPivotMatrix(ref);
+                return _pushMatrix(L2, M);
+            });
+            def('__get_pivot', function (L2) {
+                return _pushMatrix(L2, luaGetPivotMatrix(lua.lua_tonumber(L2, 1)));
+            });
+            def('__set_cframe', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const M = _readMatrix(L2, 2);
+                if (luaIsCameraRef(ref)) {
+                    const e = M.elements;
+                    applyCFrameValue(ref, e[12], e[13], e[14], -e[8], -e[9], -e[10]);
+                    fireLuaSignal(ref, '__prop_CFrame', []);
+                } else {
+                    luaSetCFrameMatrix(ref, M);
+                }
+                return 0;
+            });
+            def('__set_pivot', function (L2) {
+                luaSetPivotMatrix(lua.lua_tonumber(L2, 1), _readMatrix(L2, 2));
+                return 0;
+            });
+            // __set_velocity(ref, kind[0=линейная,1=угловая], x, y, z)
+            def('__set_velocity', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), kind = lua.lua_tonumber(L2, 2);
+                const x = lua.lua_tonumber(L2, 3), y = lua.lua_tonumber(L2, 4), z = lua.lua_tonumber(L2, 5);
+                const body = physicsBodies[ref];
+                if (!body) return 0;
+                if (ref === luaHumanoidRootPartRef) {
+                    if (kind === 0) {
+                        body.velocity.y = y;
+                        charPushX = x; charPushZ = z; charPushT = 0.4; // горизонтальный толчок затухает
+                        body.wakeUp();
+                    }
+                    return 0;
+                }
+                if (kind === 0) body.velocity.set(x, y, z); else body.angularVelocity.set(x, y, z);
+                if (body.type === CANNON.Body.DYNAMIC && body.wakeUp) body.wakeUp();
+                return 0;
+            });
+            def('__get_velocity', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), kind = lua.lua_tonumber(L2, 2);
+                const body = physicsBodies[ref];
+                const v = body ? (kind === 0 ? body.velocity : body.angularVelocity) : { x: 0, y: 0, z: 0 };
+                lua.lua_pushnumber(L2, v.x); lua.lua_pushnumber(L2, v.y); lua.lua_pushnumber(L2, v.z);
+                return 3;
             });
             def('__set_position', function (L2) {
                 luaSetPositionOfRef(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3), lua.lua_tonumber(L2, 4));
@@ -6406,6 +6850,9 @@ end
             luaSetParent(luaHumanoidRef, luaCharacterRef);
             virtualInstanceProps[luaHumanoidRef].WalkSpeed = charWalkSpeed;
             virtualInstanceProps[luaHumanoidRef].JumpPower = charJumpPower;
+            virtualInstanceProps[luaHumanoidRef].Health = 100;
+            virtualInstanceProps[luaHumanoidRef].MaxHealth = 100;
+            virtualInstanceProps[luaHumanoidRef].JumpHeight = 7.2;
 
             const playerGuiRef = luaCreateVirtualInstance('PlayerGui');
             luaSetParent(playerGuiRef, playerRef);
@@ -6441,6 +6888,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
+            logLuaOutput('info', 'script.js build: full-cframe-2026-10-02 (CFrame+rotation, PivotTo, Attributes, Tags, Character)');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7116,6 +7564,11 @@ end
                 tryStepUp(dirX, dirZ);
             }
 
+            if (charPushT > 0) { // толчок от HumanoidRootPart.AssemblyLinearVelocity
+                const k = Math.min(1, charPushT / 0.4);
+                vx += charPushX * k; vz += charPushZ * k;
+                charPushT -= 1 / 60;
+            }
             charVelX = vx;
             charVelZ = vz;
             charBody.velocity.x = vx;
