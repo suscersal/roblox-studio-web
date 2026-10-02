@@ -7666,6 +7666,19 @@ end
                             hits.push(nm + ' [' + (other.type === 2 ? 'static' : 'dynamic') + ' @' +
                                 other.position.x.toFixed(1) + ',' + other.position.y.toFixed(1) + ',' + other.position.z.toFixed(1) + ']');
                         }
+                        const cb = charBody;
+                        const inWorld = physicsWorld.bodies.indexOf(cb) !== -1;
+                        logLuaOutput('warn', 'Физика персонажа: inWorld=' + inWorld + ' type=' + cb.type +
+                            ' mass=' + cb.mass + ' sleep=' + cb.sleepState + ' vel=' +
+                            cb.velocity.x.toFixed(1) + ',' + cb.velocity.y.toFixed(1) + ',' + cb.velocity.z.toFixed(1) +
+                            ' gravityY=' + physicsWorld.gravity.y + ' shapes=' + cb.shapes.length +
+                            ' group/mask=' + cb.collisionFilterGroup + '/' + cb.collisionFilterMask +
+                            ' linFactor=' + (cb.linearFactor ? [cb.linearFactor.x, cb.linearFactor.y, cb.linearFactor.z].join(',') : 'n/a') +
+                            ' bodies=' + physicsWorld.bodies.length + ' sameAsHRP=' + (physicsBodies[luaHumanoidRootPartRef] === cb));
+                        if (!inWorld) {
+                            physicsWorld.addBody(cb);
+                            logLuaOutput('warn', 'Тело персонажа не было в физическом мире — добавлено обратно');
+                        }
                         logLuaOutput('warn', 'Движение не идёт (joy ' + forward.toFixed(1) + ',' + strafe.toFixed(1) +
                             ', скорость ' + vx.toFixed(1) + ',' + vz.toFixed(1) + ', pos ' +
                             charBody.position.x.toFixed(1) + ',' + charBody.position.y.toFixed(1) + ',' + charBody.position.z.toFixed(1) +
