@@ -2836,6 +2836,10 @@
         // Разжалование из физики в чисто визуальный меш:
         function demoteToVisualOnly(ref) {
             const body = physicsBodies[ref];
+            // Тело игрока (оно же physicsBodies[HumanoidRootPart]) нельзя выгружать:
+            // раньше при подгрузке геометрии оно вылетало из физмира, и персонаж
+            // не мог двигаться (скорость есть, позиция стоит).
+            if (body && body === charBody) return;
             if (body) {
                 physicsWorld.removeBody(body);
                 delete physicsBodies[ref];
@@ -2845,6 +2849,7 @@
         // Убирает физическое тело (если было) и, если меш был подгружен
         function removePhysicsBodyForRef(ref) {
             const body = physicsBodies[ref];
+            if (body && body === charBody) return;
             if (body) {
                 physicsWorld.removeBody(body);
                 delete physicsBodies[ref];
@@ -5867,7 +5872,7 @@ end
                 const mesh = sceneObjs[ref];
                 if (mesh) mesh.visible = false;
                 const body = physicsBodies[ref];
-                if (body && physicsWorld) { physicsWorld.removeBody(body); delete physicsBodies[ref]; }
+                if (body && body !== charBody && physicsWorld) { physicsWorld.removeBody(body); delete physicsBodies[ref]; }
             }
             // GUI-узлы (ScreenGui/Frame/TextLabel/...) тут вообще не
             const guiEl = guiDomByRef[ref];
@@ -7413,13 +7418,24 @@ end
             if (now - _exitBtnT < 200) return; // не чаще 5 раз/с
             _exitBtnT = now;
             let target = null;
+            const EXIT_BTN_RANGE = 12; // studs: кнопка только пока игрок рядом/внутри
             for (const k of Object.keys(luaAttrs)) {
                 const bag = luaAttrs[k];
                 if (!bag || bag.Occupied !== true) continue;
+                let exitRef = null, anchorRef = null;
                 for (const c of (luaChildrenByRef[k] || [])) {
-                    if (luaByRef[c] && luaByRef[c].name === 'WardrobeExit') { target = c; break; }
+                    const nm = luaByRef[c] && luaByRef[c].name;
+                    if (nm === 'WardrobeExit') exitRef = c;
+                    else if (nm === 'main' && luaIsPartRef(c)) anchorRef = c;
                 }
-                if (target !== null) break;
+                if (exitRef === null) continue;
+                if (charBody && anchorRef !== null) {
+                    const ap = luaPositionOfRef(anchorRef);
+                    const d = Math.hypot(ap.x - charBody.position.x, ap.y - charBody.position.y, ap.z - charBody.position.z);
+                    if (d > EXIT_BTN_RANGE) continue;
+                }
+                target = exitRef;
+                break;
             }
             _exitBtnRef = target;
             if (target === null) { if (_exitBtn) _exitBtn.style.display = 'none'; return; }
