@@ -7409,56 +7409,8 @@ end
             return true;
         }
 
-        // Кнопка «Выйти»: в оригинальной игре у шкафа/холодильника есть клиентский
-        // скрипт с кнопкой, которая шлёт RemoteEvent «WardrobeExit». В .rbxm его нет,
-        // поэтому, пока объект занят (атрибут Occupied=true), показываем её сами.
-        let _exitBtn = null, _exitBtnRef = null, _exitBtnT = 0;
-        function updateWardrobeExitButton() {
-            const now = performance.now();
-            if (now - _exitBtnT < 200) return; // не чаще 5 раз/с
-            _exitBtnT = now;
-            let target = null;
-            const EXIT_BTN_RANGE = 12; // studs: кнопка только пока игрок рядом/внутри
-            for (const k of Object.keys(luaAttrs)) {
-                const bag = luaAttrs[k];
-                if (!bag || bag.Occupied !== true) continue;
-                let exitRef = null, anchorRef = null;
-                for (const c of (luaChildrenByRef[k] || [])) {
-                    const nm = luaByRef[c] && luaByRef[c].name;
-                    if (nm === 'WardrobeExit') exitRef = c;
-                    else if (nm === 'main' && luaIsPartRef(c)) anchorRef = c;
-                }
-                if (exitRef === null) continue;
-                if (charBody && anchorRef !== null) {
-                    const ap = luaPositionOfRef(anchorRef);
-                    const d = Math.hypot(ap.x - charBody.position.x, ap.y - charBody.position.y, ap.z - charBody.position.z);
-                    if (d > EXIT_BTN_RANGE) continue;
-                }
-                target = exitRef;
-                break;
-            }
-            _exitBtnRef = target;
-            if (target === null) { if (_exitBtn) _exitBtn.style.display = 'none'; return; }
-            if (!_exitBtn) {
-                _exitBtn = document.createElement('button');
-                _exitBtn.textContent = '🚪 Выйти';
-                _exitBtn.style.cssText = 'position:fixed;left:50%;bottom:90px;transform:translateX(-50%);' +
-                    'z-index:9999;padding:14px 28px;font-size:20px;border:0;border-radius:12px;' +
-                    'background:#e8452c;color:#fff;box-shadow:0 4px 16px rgba(0,0,0,.5);touch-action:manipulation;';
-                const fire = (e) => {
-                    e.preventDefault(); e.stopPropagation();
-                    if (_exitBtnRef !== null) remoteQueue.push({ ref: _exitBtnRef, targetSide: 'server', args: [], dueAt: performance.now() });
-                };
-                _exitBtn.addEventListener('click', fire);
-                _exitBtn.addEventListener('touchend', fire);
-                document.body.appendChild(_exitBtn);
-            }
-            _exitBtn.style.display = 'block';
-        }
-
         function updateLuaScheduler() {
-            if (!luaServerL && !luaClientL) { if (_exitBtn) _exitBtn.style.display = 'none'; return; }
-            updateWardrobeExitButton();
+            if (!luaServerL && !luaClientL) return;
             processRemoteQueue();
             updateRunServiceSignals();
             updateTweens();
