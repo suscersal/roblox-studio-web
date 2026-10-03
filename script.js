@@ -1301,7 +1301,7 @@
                 }
                 document.getElementById('fps-counter').textContent = 'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
-                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length + ' | ws:' + charWalkSpeed + ' jp:' + charJumpPower + (luaControlsDisabled ? ' CTRL-OFF' : '') + (charBody ? ' y:' + charBody.position.y.toFixed(1) : '') + (window._dbgMove ? ' in:' + window._dbgMove.f.toFixed(1) + ',' + window._dbgMove.s.toFixed(1) + ' v:' + Math.hypot(window._dbgMove.vx, window._dbgMove.vz).toFixed(1) : '')) : '');
+                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '');
                 fpsFrames = 0;
                 fpsTime = now;
             }
@@ -1458,6 +1458,7 @@
         function onMM(e) {
             if (!e.buttons) return;
             if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — камера тоже не должна крутиться
+            if (isPlaying && cameraIsScriptable) return; // как в Roblox: Scriptable-камеру игрок не крутит — ею управляет скрипт
 
             const dx = e.clientX - prevMouse.x;
             const dy = e.clientY - prevMouse.y;
@@ -1534,6 +1535,7 @@
         function onTM(e) {
             e.preventDefault();
             if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — та же блокировка, что и для мыши (onMM)
+            if (isPlaying && cameraIsScriptable) return; // то же для касаний (Scriptable-камеру не крутим)
             if (e.targetTouches.length === 1) {
                 const t = e.targetTouches[0];
                 if (!_tch[0]) { _tch = [t]; return; }
@@ -3726,6 +3728,8 @@ Enum = setmetatable({}, { __index = function(t, enumType)
 end })
 
 local InstanceMT = {}
+-- свойство -> тип Enum (значения хранятся на JS-стороне строкой)
+local __ENUM_PROPS = { CameraType = "CameraType", MouseBehavior = "MouseBehavior" }
 
 -- Event:Connect(fn) — функция-колбэк хранится ЦЕЛИКОМ на Lua-стороне (в
 -- обычной Lua-таблице __conns), а не через luaL_ref в JS-реестр — так
@@ -4152,6 +4156,17 @@ InstanceMT.__index = function(t, k)
         return function(self, player, ...) __fire_remote(ref, "client", ...) end
     end
     local ok, v = pcall(__get_prop, ref, k)
+    -- Свойства-перечисления JS хранит строкой ('Scriptable'), а скрипты сравнивают
+    -- их с Enum-значениями: camera.CameraType == Enum.CameraType.Scriptable.
+    -- Строка никогда не равна таблице-Enum, из-за чего такое условие всегда было
+    -- ложным (например, камера после выхода из шкафа навсегда оставалась Scriptable).
+    local enumType = __ENUM_PROPS[k]
+    if enumType then
+        if ok and type(v) == "string" then return Enum[enumType][v] end
+        if (not ok or v == nil) and k == "CameraType" and __get_class(ref) == "Camera" then
+            return Enum.CameraType.Custom -- значение по умолчанию у камеры в Roblox
+        end
+    end
     if ok and v ~= nil then return v end
     -- Roblox поддерживает доступ к дочернему объекту прямо через точку —
     -- part.Engine эквивалентно part:FindFirstChild("Engine"), а не только
@@ -4794,28 +4809,8 @@ end
             }
             return { x: 0, y: 0, z: 0 };
         }
-        let _lastBridgeL = null, _tpLogs = 0, _tpLastT = 0;
-        // Диагностика: кто телепортирует/двигает персонажа из Lua. Пишем в Output
-        // стек (скрипт:строка) — первые 8 раз, не чаще раза в секунду.
-        function _logCharTeleport(how, x, y, z) {
-            const now = performance.now();
-            if (_tpLogs >= 8 || now - _tpLastT < 1000) return;
-            _tpLogs++; _tpLastT = now;
-            let tb = '';
-            try {
-                const { lua, lauxlib } = window.fengari;
-                if (_lastBridgeL) {
-                    lauxlib.luaL_traceback(_lastBridgeL, _lastBridgeL, null, 1);
-                    tb = lua.lua_tojsstring(_lastBridgeL, -1) || '';
-                    lua.lua_pop(_lastBridgeL, 1);
-                }
-            } catch (e) {}
-            logLuaOutput('warn', 'Скрипт двигает персонажа (' + how + ') → ' +
-                [x, y, z].map(v => Number(v).toFixed(1)).join(', '), null, tb || null);
-        }
         function luaSetPositionOfRef(ref, x, y, z) {
             const body = physicsBodies[ref];
-            if (body && body === charBody) _logCharTeleport('Position/CFrame', x, y, z);
             if (body) body.position.set(x, y, z);
             if (loadedObjPos[ref]) loadedObjPos[ref] = { x, y, z };
             const mesh = sceneObjs[ref];
@@ -4896,7 +4891,7 @@ end
             M.decompose(pos, q, sc);
             const body = physicsBodies[ref];
             if (ref === luaHumanoidRootPartRef) {
-                if (charBody) { _logCharTeleport('CFrame/PivotTo', pos.x, pos.y, pos.z); charBody.position.set(pos.x, pos.y, pos.z); charBody.wakeUp(); }
+                if (charBody) { charBody.position.set(pos.x, pos.y, pos.z); charBody.wakeUp(); }
                 return;
             }
             if (body) {
@@ -4923,7 +4918,6 @@ end
             if (luaIsCharRef(ref)) {
                 const e = M.elements;
                 if (charBody) {
-                    _logCharTeleport('PivotTo персонажа', e[12], e[13], e[14]);
                     charBody.position.set(e[12], e[13], e[14]);
                     charBody.velocity.set(0, 0, 0);
                     charBody.wakeUp();
@@ -5661,7 +5655,6 @@ end
                 // Скрипт поменял скорость/прыжок — пишем в Output, кто и на что
                 // (раньше «персонаж не двигается» невозможно было отследить).
                 const nv = Number(value);
-                logLuaOutput('info', 'Humanoid.' + name + ' = ' + String(value));
                 if (!Number.isFinite(nv)) {
                     logLuaOutput('warn', 'Humanoid.' + name + ': значение не число (' + String(value) + ') — проигнорировано');
                 } else if (name === 'WalkSpeed') charWalkSpeed = nv;
@@ -5944,7 +5937,7 @@ end
         function installLuaBridge(L) {
             const { lua } = window.fengari;
             function def(name, fn) {
-                lua.lua_pushcfunction(L, function (L2) { _lastBridgeL = L2; return fn(L2); });
+                lua.lua_pushcfunction(L, fn);
                 lua.lua_setglobal(L, name);
             }
             def('print', function (L2) {
@@ -6986,7 +6979,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: virtual-keys-2026-10-02d');
+            logLuaOutput('info', 'script.js build: camera-enum-2026-10-03');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7733,50 +7726,14 @@ end
             jumpQueued = jumpQueued && charJumpPower <= 0 ? false : jumpQueued;
             jumpQueued = false;
 
-            // Детектор «застрял»: игрок давит на джойстик/WASD, скорость > 0, а
-            // позиция за секунду почти не изменилась — пишем в Output, с чем
-            // персонаж сейчас сталкивается (какая деталь держит).
-            window._dbgMove = { f: forward, s: strafe, vx: vx, vz: vz };
-            const wantMove = Math.hypot(forward, strafe) > 0.2 && charWalkSpeed > 0;
+            // Страховка: тело игрока обязано быть в физическом мире (раз в секунду).
             const tNow = performance.now();
-            if (wantMove) {
-                if (!_stk.t) { _stk.t = tNow; _stk.x = charBody.position.x; _stk.z = charBody.position.z; }
-                else if (tNow - _stk.t > 1000) {
-                    const moved = Math.hypot(charBody.position.x - _stk.x, charBody.position.z - _stk.z);
-                    if (moved < 0.3 && !_stk.logged) {
-                        _stk.logged = true;
-                        const hits = [];
-                        for (const c of (physicsWorld.contacts || [])) {
-                            const other = c.bi === charBody ? c.bj : (c.bj === charBody ? c.bi : null);
-                            if (!other) continue;
-                            const rk = Object.keys(physicsBodies).find(k => physicsBodies[k] === other);
-                            const nm = rk !== undefined && luaByRef[rk] ? luaByRef[rk].name : (rk !== undefined ? ('ref ' + rk) : '?');
-                            hits.push(nm + ' [' + (other.type === 2 ? 'static' : 'dynamic') + ' @' +
-                                other.position.x.toFixed(1) + ',' + other.position.y.toFixed(1) + ',' + other.position.z.toFixed(1) + ']');
-                        }
-                        const cb = charBody;
-                        const inWorld = physicsWorld.bodies.indexOf(cb) !== -1;
-                        logLuaOutput('warn', 'Физика персонажа: inWorld=' + inWorld + ' type=' + cb.type +
-                            ' mass=' + cb.mass + ' sleep=' + cb.sleepState + ' vel=' +
-                            cb.velocity.x.toFixed(1) + ',' + cb.velocity.y.toFixed(1) + ',' + cb.velocity.z.toFixed(1) +
-                            ' gravityY=' + physicsWorld.gravity.y + ' shapes=' + cb.shapes.length +
-                            ' group/mask=' + cb.collisionFilterGroup + '/' + cb.collisionFilterMask +
-                            ' linFactor=' + (cb.linearFactor ? [cb.linearFactor.x, cb.linearFactor.y, cb.linearFactor.z].join(',') : 'n/a') +
-                            ' bodies=' + physicsWorld.bodies.length + ' sameAsHRP=' + (physicsBodies[luaHumanoidRootPartRef] === cb));
-                        if (!inWorld) {
-                            physicsWorld.addBody(cb);
-                            logLuaOutput('warn', 'Тело персонажа не было в физическом мире — добавлено обратно');
-                        }
-                        logLuaOutput('warn', 'Движение не идёт (joy ' + forward.toFixed(1) + ',' + strafe.toFixed(1) +
-                            ', скорость ' + vx.toFixed(1) + ',' + vz.toFixed(1) + ', pos ' +
-                            charBody.position.x.toFixed(1) + ',' + charBody.position.y.toFixed(1) + ',' + charBody.position.z.toFixed(1) +
-                            '). Контакты: ' + (hits.length ? hits.slice(0, 6).join('; ') : 'нет'));
-                    }
-                    _stk.t = tNow; _stk.x = charBody.position.x; _stk.z = charBody.position.z;
-                }
-            } else { _stk.t = 0; _stk.logged = false; }
+            if (tNow - _bodyCheckT > 1000) {
+                _bodyCheckT = tNow;
+                if (physicsWorld.bodies.indexOf(charBody) === -1) physicsWorld.addBody(charBody);
+            }
         }
-        const _stk = { t: 0, x: 0, z: 0, logged: false };
+        let _bodyCheckT = 0;
 
         // Сфера плохо лезет по отдельным боксам-ступеням:
         function tryStepUp(dirX, dirZ) {
