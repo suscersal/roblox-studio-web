@@ -2190,8 +2190,56 @@
                 mesh.material = Array.isArray(mesh.material)
                     ? mesh.material.map(applyDoubleSide)
                     : applyDoubleSide(mesh.material);
+                // Полый ли юнион (холодильник, шкаф, комната): объём меша заметно меньше
+                // объёма габаритного бокса. Физика у юниона — сплошной бокс, и игрока,
+                // телепортированного внутрь, выталкивало наружу.
+                try {
+                    const pa = geo.attributes && geo.attributes.position;
+                    if (pa && pa.count >= 12) {
+                        let vol = 0;
+                        const idx = geo.index;
+                        const tri = idx ? idx.count / 3 : pa.count / 3;
+                        for (let t = 0; t < tri; t++) {
+                            const ia = idx ? idx.getX(t * 3) : t * 3, ib = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, ic = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+                            const ax = pa.getX(ia), ay = pa.getY(ia), az = pa.getZ(ia);
+                            const bx = pa.getX(ib), by = pa.getY(ib), bz = pa.getZ(ib);
+                            const cx = pa.getX(ic), cy = pa.getY(ic), cz = pa.getZ(ic);
+                            vol += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+                        }
+                        geo.computeBoundingBox();
+                        const bb = geo.boundingBox;
+                        const boxVol = (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) * (bb.max.z - bb.min.z);
+                        if (boxVol > 0 && Math.abs(vol) < boxVol * 0.75) luaHollowUnions.add(o.ref);
+                    }
+                } catch (e) {}
             });
             _trackLoad(p);
+        }
+
+        // ref полых юнионов + «призрак»: пока центр игрока внутри габаритов юниона,
+        // его тело не сталкивается с персонажем (иначе сфера игрока вылетает из полости).
+        const luaHollowUnions = new Set();
+        const luaGhostedUnions = new Set();
+        function updateHollowUnionGhosts() {
+            if (!charBody || !luaHollowUnions.size) return;
+            for (const ref of luaHollowUnions) {
+                const body = physicsBodies[ref], sz = loadedObjSize[ref];
+                if (!body || !sz) continue;
+                const dx = charBody.position.x - body.position.x, dy = charBody.position.y - body.position.y, dz = charBody.position.z - body.position.z;
+                const v = new CANNON.Vec3(dx, dy, dz);
+                const inv = new CANNON.Quaternion(-body.quaternion.x, -body.quaternion.y, -body.quaternion.z, body.quaternion.w);
+                const l = inv.vmult(v);
+                const m = 0.8;
+                const inside = Math.abs(l.x) <= sz.x * 0.5 + m && Math.abs(l.y) <= sz.y * 0.5 + m && Math.abs(l.z) <= sz.z * 0.5 + m;
+                if (inside && !luaGhostedUnions.has(ref)) {
+                    luaGhostedUnions.add(ref);
+                    body.__savedMask = body.collisionFilterMask;
+                    body.collisionFilterMask = 0;
+                } else if (!inside && luaGhostedUnions.has(ref)) {
+                    luaGhostedUnions.delete(ref);
+                    body.collisionFilterMask = body.__savedMask === undefined ? 1 : body.__savedMask;
+                }
+            }
         }
 
         function scheduleRealMeshSwap(o, mesh) {
@@ -4825,6 +4873,47 @@ end
         let luaAttrs = {};  // ref -> {имя: значение}  (SetAttribute/GetAttribute)
         let luaTags = {};   // ref -> Set<tag>        (CollectionService)
         const _modelPivots = {}; // ref контейнера (Model/Folder) -> THREE.Matrix4 пивота
+        // Деталь стала динамической (скрипт сделал Anchored=false — например, полки
+        // холодильника). В Roblox всё, что лежало сверху и само не заякорено в файле
+        // (мясо: Anchored=false), начинает падать. Включать динамику для ВСЕХ незаякоренных
+        // деталей карты нельзя (в Castle Warfare их 2300+ — это тысячи тел и «рассыпающиеся»
+        // стены), поэтому будим только тех, кто касается/стоит на убранной опоре.
+        function luaPromoteResting(sbody) {
+            if (typeof CANNON === 'undefined') return;
+            sbody.computeAABB();
+            const lb = sbody.aabb.lowerBound, ub = sbody.aabb.upperBound;
+            const M = 0.6;
+            let n = 0;
+            for (const [k, b] of Object.entries(physicsBodies)) {
+                if (n >= 60) break;
+                if (b === sbody || b === charBody || b.type !== CANNON.Body.STATIC) continue;
+                if (b.collisionFilterMask === 0) continue;                 // CanCollide=false
+                const mesh = sceneObjs[k];
+                if (!mesh || mesh.userData.anchoredFlag !== false) continue; // заякорена в файле — стоит на месте
+                b.computeAABB();
+                const bl = b.aabb.lowerBound, bu = b.aabb.upperBound;
+                const touches = bl.x <= ub.x + M && bu.x >= lb.x - M &&
+                                bl.y <= ub.y + M && bu.y >= lb.y - M &&
+                                bl.z <= ub.z + M && bu.z >= lb.z - M;
+                if (!touches) continue;
+                if (b.position.y < sbody.position.y - 0.3) continue;       // лежит ниже опоры — не падает
+                // у падающего тела настоящие габариты (у статики толщина раздута до 1.0)
+                const sz = loadedObjSize[k];
+                if (sz && mesh.userData.shape !== 'sphere') {
+                    const half = new CANNON.Vec3(Math.max(sz.x * 0.5, 0.05), Math.max(sz.y * 0.5, 0.05), Math.max(sz.z * 0.5, 0.05));
+                    b.shapes.length = 0; b.shapeOffsets.length = 0; b.shapeOrientations.length = 0;
+                    b.addShape(new CANNON.Box(half));
+                }
+                b.mass = 1;
+                b.type = CANNON.Body.DYNAMIC;
+                b.updateMassProperties();
+                b.allowSleep = true;
+                b.wakeUp();
+                b.aabbNeedsUpdate = true;
+                n++;
+            }
+        }
+
         function luaIsCharRef(ref) {
             return ref !== -1 && (ref === luaCharacterRef || ref === luaHumanoidRootPartRef || ref === luaHumanoidRef);
         }
@@ -5640,6 +5729,7 @@ end
                         abody.updateMassProperties();
                         abody.allowSleep = true;
                         abody.wakeUp();
+                        luaPromoteResting(abody);
                     } else {
                         abody.type = CANNON.Body.STATIC;
                         abody.mass = 0;
@@ -6979,7 +7069,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: camera-enum-2026-10-03');
+            logLuaOutput('info', 'script.js build: fridge-physics-2026-10-03');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7102,6 +7192,7 @@ end
             luaPlayerRef = -1;
             luaControlsDisabled = false;
             luaReleaseAllKeys();
+            luaHollowUnions.clear(); luaGhostedUnions.clear();
             luaNextVirtualRef = -1000;
             luaResetSignals();
             renderLuaOutput();
@@ -7224,9 +7315,13 @@ end
 
             if (cls === 'Frame' || cls === 'ScrollingFrame') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
-                el.style.border = (props.BorderSizePixel || 1) > 0
-                    ? (props.BorderSizePixel || 1) + 'px solid ' + color3ToCss(props.BorderColor3)
+                // BorderSizePixel = 0 (частый случай: затемняющий Frame) раньше превращался
+                // в 1 из-за `|| 1` и рисовал рамку вокруг экрана — проверяем на null/undefined.
+                const bsp = (props.BorderSizePixel === undefined || props.BorderSizePixel === null) ? 1 : Number(props.BorderSizePixel);
+                el.style.border = bsp > 0
+                    ? bsp + 'px solid ' + color3ToCss(props.BorderColor3)
                     : 'none';
+                if (props.BackgroundTransparency >= 1) el.style.background = 'transparent';
                 if (props.ClipsDescendants) el.style.overflow = 'hidden';
                 if (cls === 'ScrollingFrame') {
                     // Раньше ScrollingFrame рендерился 1-в-1 как обычный
@@ -7927,6 +8022,7 @@ end
         function stepPhysics() {
             if (!isPlaying || !physicsWorld) return;
             applyCharacterControl();
+            updateHollowUnionGhosts();
 
             if (charBody && charBody.velocity.y < -MAX_FALL_SPEED) {
                 charBody.velocity.y = -MAX_FALL_SPEED;
@@ -8052,6 +8148,8 @@ end
             const row = document.createElement('div');
             row.className = 'tree-node' + (selectedRefs.has(node.ref) ? ' selected' : '');
             row.style.paddingLeft = (depth * 14 + 2) + 'px';
+            row.dataset.ref = node.ref;
+            row.style.webkitTouchCallout = 'none';
 
             const arrow = document.createElement('span');
             arrow.className = 'tree-arrow';
@@ -8084,10 +8182,13 @@ end
             }
             label.title = node.cls;
 
-            row.onclick = (e) => selectRef(node.ref, {
-                additive: e.ctrlKey || e.metaKey || multiSelectMode,
-                range: e.shiftKey
-            });
+            row.onclick = (e) => {
+                if (performance.now() < _treeSuppressClickUntil) return; // клик после отпускания при перетаскивании
+                selectRef(node.ref, {
+                    additive: e.ctrlKey || e.metaKey || multiSelectMode,
+                    range: e.shiftKey
+                });
+            };
             row.appendChild(label);
 
             parentEl.appendChild(row);
@@ -8098,6 +8199,218 @@ end
                 }
             }
         }
+
+        // ============ EXPLORER: перетаскивание объектов (смена Parent) ============
+        // Мышь: потянуть строку. Телефон: удерживать строку ~0.35 с, затем вести
+        // палец (пока держишь — прокрутка списка не срабатывает). Если навести на
+        // строку с потомками и подержать ~0.6 с, ветка раскрывается. Отпустить на
+        // строке = сделать её родителем (на сервере /api/reparent).
+        const TREE_LONGPRESS_MS = 350;
+        const TREE_HOVER_EXPAND_MS = 600;
+        const TREE_MOVE_CANCEL_PX = 8;      // сдвиг до долгого нажатия = это прокрутка, не перетаскивание
+        const TREE_MOUSE_START_PX = 6;
+        let _tdrag = null;
+        let _treeSuppressClickUntil = 0;
+
+        function treeCanDrag(ref) {
+            if (isPlaying) return false;
+            const n = treeByRef[ref];
+            if (!n) return false;
+            const par = parentByRef[ref];
+            if (par === undefined || par === -1) return false;       // сервисы/корни
+            if (n.cls === 'Terrain' || n.cls === 'Camera') return false;
+            return true;
+        }
+        function treeInside(ref, ancestorRef) { // ref лежит внутри ancestorRef (или это он сам)
+            let cur = ref, guard = 0;
+            while (cur !== undefined && cur !== null && cur !== -1 && guard++ < 500) {
+                if (cur === ancestorRef) return true;
+                cur = parentByRef[cur];
+            }
+            return false;
+        }
+        function treeDropValid(targetRef) {
+            if (targetRef === null || !_tdrag) return false;
+            if (!treeByRef[targetRef]) return false;
+            for (const r of _tdrag.refs) {
+                if (treeInside(targetRef, r)) return false;           // в себя или в своего потомка
+            }
+            return _tdrag.refs.some(r => parentByRef[r] !== targetRef); // всё уже там — нечего делать
+        }
+        function treeRowAt(x, y) {
+            const el = document.elementFromPoint(x, y);
+            return el && el.closest ? el.closest('#tree .tree-node') : null;
+        }
+        function treeDragMarkRows() {
+            if (!_tdrag || !_tdrag.active) return;
+            const treeEl = document.getElementById('tree');
+            for (const row of treeEl.querySelectorAll('.tree-node')) {
+                const ref = Number(row.dataset.ref);
+                row.classList.toggle('dragging-src', _tdrag.refs.indexOf(ref) !== -1);
+                const isHover = _tdrag.hoverRef === ref;
+                row.classList.toggle('drop-target', isHover && treeDropValid(ref));
+                row.classList.toggle('drop-invalid', isHover && !treeDropValid(ref));
+            }
+        }
+        function treeScrollParent(el) {
+            let cur = el;
+            while (cur && cur !== document.body) {
+                const oy = getComputedStyle(cur).overflowY;
+                if ((oy === 'auto' || oy === 'scroll') && cur.scrollHeight > cur.clientHeight + 1) return cur;
+                cur = cur.parentElement;
+            }
+            return null;
+        }
+        function treeDragStart() {
+            const d = _tdrag;
+            if (!d || d.active) return;
+            // что тащим: все выделенные (если тянем выделенный), иначе одну строку
+            let refs = (selectedRefs.has(d.srcRef) && selectedRefs.size > 1) ? [...selectedRefs] : [d.srcRef];
+            refs = refs.filter(treeCanDrag);
+            refs = refs.filter(r => !refs.some(o => o !== r && treeInside(r, o)));  // вложенные не нужны — поедут с родителем
+            if (!refs.length) { treeDragEnd(false); return; }
+            d.refs = refs;
+            d.active = true;
+            document.body.classList.add('tree-dragging');
+            const treeEl = document.getElementById('tree');
+            try { treeEl.setPointerCapture(d.pointerId); } catch (e) {}
+            const ghost = document.createElement('div');
+            ghost.id = 'tree-drag-ghost';
+            const first = treeByRef[refs[0]];
+            ghost.textContent = (refs.length > 1 ? '📦 ' + refs.length + ' объектов' : '↕ ' + (first ? first.name : ''));
+            document.body.appendChild(ghost);
+            d.ghost = ghost;
+            d.scrollEl = treeScrollParent(treeEl);
+            if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+            treeDragUpdate(d.lastX, d.lastY);
+            const tick = () => {
+                if (!_tdrag || !_tdrag.active) return;
+                const sc = _tdrag.scrollEl;
+                if (sc) {
+                    const r = sc.getBoundingClientRect();
+                    const EDGE = 44;
+                    if (_tdrag.lastY < r.top + EDGE) sc.scrollTop -= Math.ceil((r.top + EDGE - _tdrag.lastY) / 4);
+                    else if (_tdrag.lastY > r.bottom - EDGE) sc.scrollTop += Math.ceil((_tdrag.lastY - (r.bottom - EDGE)) / 4);
+                }
+                _tdrag.raf = requestAnimationFrame(tick);
+            };
+            d.raf = requestAnimationFrame(tick);
+        }
+        function treeDragUpdate(x, y) {
+            const d = _tdrag;
+            if (!d || !d.active) return;
+            d.lastX = x; d.lastY = y;
+            if (d.ghost) { d.ghost.style.left = (x + 14) + 'px'; d.ghost.style.top = (y - 14) + 'px'; }
+            const row = treeRowAt(x, y);
+            const ref = row ? Number(row.dataset.ref) : null;
+            if (ref !== d.hoverRef) {
+                d.hoverRef = ref;
+                clearTimeout(d.hoverTimer);
+                d.hoverTimer = null;
+                const n = ref !== null ? treeByRef[ref] : null;
+                // наведение на строку с потомками: через паузу раскрыть ветку
+                if (n && n.children && n.children.length && !expanded.has(ref)) {
+                    d.hoverTimer = setTimeout(() => {
+                        if (!_tdrag || !_tdrag.active || _tdrag.hoverRef !== ref) return;
+                        expanded.add(ref);
+                        renderTree();
+                        treeDragMarkRows();
+                    }, TREE_HOVER_EXPAND_MS);
+                }
+            }
+            treeDragMarkRows();
+        }
+        function treeDragEnd(commit) {
+            const d = _tdrag;
+            if (!d) return;
+            clearTimeout(d.timer);
+            clearTimeout(d.hoverTimer);
+            if (d.raf) cancelAnimationFrame(d.raf);
+            if (d.ghost) d.ghost.remove();
+            document.body.classList.remove('tree-dragging');
+            const treeEl = document.getElementById('tree');
+            try { treeEl.releasePointerCapture(d.pointerId); } catch (e) {}
+            for (const row of treeEl.querySelectorAll('.drop-target,.drop-invalid,.dragging-src')) {
+                row.classList.remove('drop-target', 'drop-invalid', 'dragging-src');
+            }
+            const wasActive = d.active;
+            const target = d.hoverRef;
+            const refs = d.refs;
+            _tdrag = null;
+            if (wasActive) _treeSuppressClickUntil = performance.now() + 500;
+            if (wasActive && commit && target !== null && target !== undefined) {
+                // проверяем с теми же правилами (d уже обнулён — временно восстановим)
+                _tdrag = { refs };
+                const ok = treeDropValid(target);
+                _tdrag = null;
+                if (ok) treeReparent(refs, target);
+            }
+        }
+        async function treeReparent(refs, targetRef) {
+            const r = await api('POST', '/api/reparent', { refs, parent: targetRef });
+            if (!r || !r.ok) { notify((r && r.error) || 'Не удалось перенести', 'err'); return; }
+            if (r.moved.length) {
+                expanded.add(targetRef);
+                const tr = await api('GET', '/api/tree');
+                if (tr && tr.ok) {
+                    treeData = tr.tree;
+                    rebuildTreeIndex();
+                    renderTree();
+                }
+                notify('Перенесено объектов: ' + r.moved.length + (r.skipped.length ? ' (пропущено ' + r.skipped.length + ')' : ''));
+            } else {
+                notify('Ничего не перенесено', 'err');
+            }
+        }
+        function initTreeDragDrop() {
+            const treeEl = document.getElementById('tree');
+            if (!treeEl || treeEl._dndInit) return;
+            treeEl._dndInit = true;
+            treeEl.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                if (e.target.closest && e.target.closest('.tree-arrow')) return;
+                const row = e.target.closest ? e.target.closest('.tree-node') : null;
+                if (!row) return;
+                const ref = Number(row.dataset.ref);
+                if (!treeCanDrag(ref)) return;
+                if (_tdrag) treeDragEnd(false);
+                _tdrag = { pointerId: e.pointerId, pointerType: e.pointerType, startX: e.clientX, startY: e.clientY,
+                           lastX: e.clientX, lastY: e.clientY, srcRef: ref, active: false, refs: [], hoverRef: null };
+                if (e.pointerType !== 'mouse') {
+                    _tdrag.timer = setTimeout(() => { if (_tdrag && !_tdrag.active) treeDragStart(); }, TREE_LONGPRESS_MS);
+                }
+            });
+            treeEl.addEventListener('pointermove', (e) => {
+                const d = _tdrag;
+                if (!d || e.pointerId !== d.pointerId) return;
+                d.lastX = e.clientX; d.lastY = e.clientY;
+                if (!d.active) {
+                    const dist = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
+                    if (d.pointerType === 'mouse') {
+                        if (dist > TREE_MOUSE_START_PX) treeDragStart();
+                    } else if (dist > TREE_MOVE_CANCEL_PX) {
+                        treeDragEnd(false);            // палец поехал раньше долгого нажатия — это прокрутка
+                    }
+                    return;
+                }
+                e.preventDefault();
+                treeDragUpdate(e.clientX, e.clientY);
+            });
+            const finish = (commit) => (e) => {
+                const d = _tdrag;
+                if (!d || e.pointerId !== d.pointerId) return;
+                if (d.active && commit) { d.lastX = e.clientX; d.lastY = e.clientY; treeDragUpdate(e.clientX, e.clientY); }
+                treeDragEnd(commit);
+            };
+            treeEl.addEventListener('pointerup', finish(true));
+            treeEl.addEventListener('pointercancel', finish(false));
+            // Пока тащим — не даём браузеру прокручивать список/вызывать меню
+            treeEl.addEventListener('touchmove', (e) => { if (_tdrag && _tdrag.active && e.cancelable) e.preventDefault(); }, { passive: false });
+            treeEl.addEventListener('contextmenu', (e) => { if (_tdrag) e.preventDefault(); });
+            window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _tdrag) treeDragEnd(false); });
+        }
+        if (document.getElementById('tree')) initTreeDragDrop();
+        else document.addEventListener('DOMContentLoaded', initTreeDragDrop);
 
         function anyMatch(n) {
             if (!searchText) return true;

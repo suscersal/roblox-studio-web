@@ -1289,3 +1289,33 @@
     border-radius: 6px;
     font-size: 14px;
 }
+
+
+/* ============ Explorer: перетаскивание (drag & drop) ============ */
+.tree-node.drop-target {
+    background: #1d4ed8 !important;
+    outline: 1px dashed #93c5fd;
+    outline-offset: -1px;
+}
+.tree-node.drop-invalid {
+    background: #7f1d1d !important;
+    opacity: .75;
+}
+.tree-node.dragging-src { opacity: .45; }
+#tree-drag-ghost {
+    position: fixed;
+    z-index: 100000;
+    pointer-events: none;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: rgba(30, 58, 95, .95);
+    border: 1px solid #60a5fa;
+    color: #fff;
+    font-size: 13px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .5);
+    max-width: 70vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+body.tree-dragging, body.tree-dragging * { user-select: none !important; -webkit-user-select: none !important; }

@@ -1641,6 +1641,55 @@ def api_add():
     return jsonify({'ok': True, 'ref': new_ref})
 
 
+@flask_app.route('/api/reparent', methods=['POST'])
+def api_reparent():
+    """Перенос объектов в другого родителя (drag & drop в Explorer).
+    Тело: {"refs": [..], "parent": ref}. Мировые координаты не меняются —
+    как в Roblox, меняется только дерево."""
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'Файл не загружен'}), 400
+    data = request.json or {}
+    try:
+        refs = [int(r) for r in (data.get('refs') or [])]
+        parent = int(data.get('parent'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Некорректные refs/parent'}), 400
+    r2c, pm = parsed['referent_to_class'], parsed['parent_map']
+    if parent not in r2c:
+        return jsonify({'ok': False, 'error': 'Родитель не найден'}), 400
+
+    def ancestors(ref):
+        seen, cur = set(), ref
+        while cur in pm and cur not in seen:
+            seen.add(cur)
+            cur = pm[cur]
+            if cur == -1 or cur not in r2c:
+                break
+            seen.add(cur)
+        return seen
+
+    parent_chain = ancestors(parent) | {parent}
+    moved, skipped = [], []
+    for ref in refs:
+        if ref not in r2c or ref == parent:
+            skipped.append(ref); continue
+        # нельзя класть объект в самого себя или в своего потомка
+        if ref in parent_chain:
+            skipped.append(ref); continue
+        # сервисы (корни без родителя) и Terrain/Camera не переносим
+        if pm.get(ref, -1) in (-1, None) or pm.get(ref) not in r2c or r2c[ref] in ('Terrain', 'Camera'):
+            skipped.append(ref); continue
+        if pm.get(ref) == parent:
+            skipped.append(ref); continue
+        pm[ref] = parent
+        moved.append(ref)
+    if moved:
+        parsed['_modified'] = True
+        bump_scene_version()
+    return jsonify({'ok': True, 'moved': moved, 'skipped': skipped})
+
+
 @flask_app.route('/api/instance/<int:ref>', methods=['DELETE'])
 def api_delete(ref):
     parsed = state['parsed']
