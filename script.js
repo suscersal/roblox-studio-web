@@ -3256,6 +3256,7 @@
             isPlaying = false;
             _updateTouchControlsVisibility(); // возвращаем джойстик/кнопку — она могла остаться скрытой, если скрипт вызвал Disable() и не успел/не стал явно включать обратно
             cameraIsScriptable = false;
+            _scriptCam = null;
             setEditorPanelsCollapsedForPlay(false);
             stopLuaScripts();
             physicsWorld = null;
@@ -5059,6 +5060,7 @@ end
                 }
                 camera.position.set(x, y, z);
                 camera.lookAt(x + lx, y + ly, z + lz);
+                _scriptCam = { p: camera.position.clone(), q: camera.quaternion.clone() };
             } else {
                 luaSetPositionOfRef(ref, x, y, z);
             }
@@ -7069,7 +7071,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: fridge-physics-2026-10-03');
+            logLuaOutput('info', 'script.js build: scriptcam-2026-10-04');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7984,7 +7986,15 @@ end
         // CameraType.Scriptable; null, когда обычный (мгновенный) follow.
         let _camReturnToCharT = null;
         const CAM_RETURN_DURATION = 0.35; // секунд
+        // Последний CFrame, который скрипт поставил камере. Пока камера Scriptable,
+        // переустанавливаем его каждый кадр, чтобы ничто другое не сбивало вид
+        // (раньше камера внутри холодильника оставалась под «редакторским» углом).
+        let _scriptCam = null;
         function followCharacterCamera() {
+            if (charBody && cameraIsScriptable) {
+                if (_scriptCam) { camera.position.copy(_scriptCam.p); camera.quaternion.copy(_scriptCam.q); }
+                return;
+            }
             if (!charBody || cameraIsScriptable) return;
             const desiredX = charBody.position.x;
             const desiredY = charBody.position.y + EYE_HEIGHT;
