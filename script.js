@@ -1490,6 +1490,7 @@
         }
 
         function onMU(e) {
+            if (!isDragging && (e.button === 0 || e.button === 2) && isPlaying && luaClickDetectorAt(e.clientX, e.clientY, e.button === 2)) return;
             if (!isDragging && e.button === 0) {
                 pick(e.clientX, e.clientY, { additive: e.ctrlKey || e.metaKey || multiSelectMode });
             }
@@ -1560,6 +1561,7 @@
             if (e.changedTouches.length === 1 && _ts) {
                 const t = e.changedTouches[0];
                 if (Math.abs(t.clientX - _ts.x) < 8 && Math.abs(t.clientY - _ts.y) < 8) {
+                    if (isPlaying && luaClickDetectorAt(t.clientX, t.clientY, false)) return;
                     pick(t.clientX, t.clientY, { additive: multiSelectMode });
                 }
             }
@@ -3832,10 +3834,20 @@ local function makeEvent(ref, evName)
         -- вида "t, s = r.Stepped:wait()" получали t=nil и падали на
         -- следующей же строке арифметикой на nil.
         Wait = function(self) return __wait_signal(ref, evName) end,
+        -- Once: сработать один раз и сам отключиться (sound.Ended:Once(fn) и т.п.)
+        Once = function(self, fn)
+            local conn
+            conn = self:Connect(function(...)
+                if conn then conn:Disconnect() end
+                return fn(...)
+            end)
+            return conn
+        end,
     } })
     local mt = getmetatable(ev).__index
     mt.connect = mt.Connect
     mt.wait = mt.Wait
+    mt.once = mt.Once
     return ev
 end
 
@@ -4155,7 +4167,8 @@ InstanceMT.__index = function(t, k)
     -- которая могла бы их вызвать. Это реальное ограничение движка, а не
     -- сознательная заглушка "на будущее" — сигнал существует, событие в
     -- игре просто ещё не происходит.
-    if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseButton1Click"
+    if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseClick" or k == "RightMouseClick"
+        or k == "MouseHoverEnter" or k == "MouseHoverLeave" or k == "MouseButton1Click"
         or k == "MouseButton1Down" or k == "MouseButton1Up" or k == "MouseEnter" or k == "MouseLeave"
         or k == "InputBegan" or k == "InputEnded" or k == "InputChanged"
         or k == "FocusLost" or k == "Focused"
@@ -4501,6 +4514,24 @@ local COMPAT = {
     AssemblyAngularVelocity = function(t, ref) return Vector3.new(__get_velocity(ref, 1)) end,
     RotVelocity = function(t, ref) return Vector3.new(__get_velocity(ref, 1)) end,
     GetServerTimeNow = function(t, ref) return function(self) return os.time() end end,
+    GetPlayers = function(t, ref) return function(self)
+        if __get_class(ref) ~= "Players" then return nil end
+        local out = {}
+        for _, c in ipairs(t:GetChildren()) do
+            if c.ClassName == "Player" then out[#out + 1] = c end
+        end
+        return out
+    end end,
+    -- Model:GetBoundingBox() -> CFrame центра, Vector3 размер (оси мира, как у модели без PrimaryPart);
+    -- для детали — её CFrame и Size.
+    GetBoundingBox = function(t, ref) return function(self)
+        local cx, cy, cz, sx, sy, sz = __get_bbox(ref)
+        return CFrame.new(cx, cy, cz), Vector3.new(sx, sy, sz)
+    end end,
+    GetExtentsSize = function(t, ref) return function(self)
+        local _, _, _, sx, sy, sz = __get_bbox(ref)
+        return Vector3.new(sx, sy, sz)
+    end end,
     TakeDamage = function(t, ref) return function(self, amount)
         local ok, hp = pcall(__get_prop, ref, "Health")
         if ok and type(hp) == "number" then __set_prop(ref, "Health", hp - amount) end
@@ -4913,6 +4944,62 @@ end
                 b.aabbNeedsUpdate = true;
                 n++;
             }
+        }
+
+        // Габаритный ящик (оси мира): по 8 углам каждой детали внутри Model/Folder.
+        function luaBoundingBox(ref) {
+            const refs = (luaIsPartRef(ref) && !(luaChildrenByRef[ref] && luaChildrenByRef[ref].length))
+                ? [ref] : luaCollectParts(ref, []);
+            const mn = new THREE.Vector3(Infinity, Infinity, Infinity), mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+            const c = new THREE.Vector3();
+            for (const pr of refs) {
+                const sz = loadedObjSize[pr];
+                if (!sz) continue;
+                const M = luaPartMatrix(pr);
+                for (let i = 0; i < 8; i++) {
+                    c.set((i & 1 ? 0.5 : -0.5) * sz.x, (i & 2 ? 0.5 : -0.5) * sz.y, (i & 4 ? 0.5 : -0.5) * sz.z).applyMatrix4(M);
+                    mn.min(c); mx.max(c);
+                }
+            }
+            if (!isFinite(mn.x)) { const p = luaPositionOfRef(ref) || { x: 0, y: 0, z: 0 }; return { cx: p.x, cy: p.y, cz: p.z, sx: 0, sy: 0, sz: 0 }; }
+            return { cx: (mn.x + mx.x) / 2, cy: (mn.y + mx.y) / 2, cz: (mn.z + mx.z) / 2,
+                     sx: mx.x - mn.x, sy: mx.y - mn.y, sz: mx.z - mn.z };
+        }
+
+        // ClickDetector: клик/тап по детали (или по детали внутри Model, у которой он есть)
+        // в Play -> MouseClick(player) / RightMouseClick(player) на ClickDetector, если игрок
+        // в пределах MaxActivationDistance (по умолчанию 32). Сигнал общий для серверной и
+        // клиентской Lua-VM (как и у ProximityPrompt).
+        function luaClickDetectorAt(cx, cy, right) {
+            if (!isPlaying || (!luaServerL && !luaClientL) || luaControlsDisabled) return false;
+            const vp = document.getElementById('viewport');
+            const rect = vp.getBoundingClientRect();
+            const m = new THREE.Vector2(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
+            const rc = new THREE.Raycaster();
+            rc.setFromCamera(m, camera);
+            const hits = rc.intersectObjects(Object.values(sceneObjs), true);
+            if (!hits.length) return false;
+            let obj = hits[0].object;
+            while (obj && !(obj.userData && obj.userData.ref)) obj = obj.parent;
+            if (!obj) return false;
+            const hitRef = parseInt(obj.userData.ref);
+            let node = hitRef, guard = 0;
+            while (node !== undefined && node !== -1 && guard++ < 200) {
+                for (const c of (luaChildrenByRef[node] || [])) {
+                    if (!luaByRef[c] || luaByRef[c].cls !== 'ClickDetector') continue;
+                    let maxD = luaGetGenericProp(c, 'MaxActivationDistance');
+                    if (typeof maxD !== 'number' || !(maxD > 0)) maxD = 32;
+                    const pp = luaPositionOfRef(hitRef);
+                    if (charBody && pp) {
+                        const d = Math.hypot(pp.x - charBody.position.x, pp.y - charBody.position.y, pp.z - charBody.position.z);
+                        if (d > maxD) continue;
+                    }
+                    fireLuaSignal(c, right ? 'RightMouseClick' : 'MouseClick', [{ __instanceRef: luaPlayerRef }]);
+                    return true;
+                }
+                node = luaParentByRef[node];
+            }
+            return false;
         }
 
         function luaIsCharRef(ref) {
@@ -6302,6 +6389,11 @@ end
                 const M = (luaIsPartRef(ref) && !luaIsCharRef(ref)) ? luaPartMatrix(ref) : luaGetPivotMatrix(ref);
                 return _pushMatrix(L2, M);
             });
+            def('__get_bbox', function (L2) {
+                const b = luaBoundingBox(lua.lua_tonumber(L2, 1));
+                for (const v of [b.cx, b.cy, b.cz, b.sx, b.sy, b.sz]) lua.lua_pushnumber(L2, v);
+                return 6;
+            });
             def('__is_key_down', function (L2) {
                 lua.lua_pushboolean(L2, luaKeyIsDown(lua.lua_tojsstring(L2, 1)) ? 1 : 0);
                 return 1;
@@ -6576,8 +6668,23 @@ end
                         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
                         flx = dir.x; fly = dir.y; flz = dir.z;
                     }
+                    // Полный поворот цели (R00..R22 у нашего CFrame) — иначе деталь теряла крен/наклон
+                    let toQuat = null;
+                    if (!(luaByRef[ref] && luaByRef[ref].cls === 'Camera')) {
+                        const rr = [];
+                        for (const f of ['R00', 'R01', 'R02', 'R10', 'R11', 'R12', 'R20', 'R21', 'R22']) rr.push(gx(f));
+                        if (rr.some(v => v !== 0)) {
+                            const Rm = new THREE.Matrix4().set(rr[0], rr[1], rr[2], 0, rr[3], rr[4], rr[5], 0, rr[6], rr[7], rr[8], 0, 0, 0, 0, 1);
+                            toQuat = new THREE.Quaternion().setFromRotationMatrix(Rm);
+                        }
+                    }
+                    let fromQuat = null;
+                    if (toQuat && sceneObjs[ref]) {
+                        const p1 = new THREE.Vector3(), s1 = new THREE.Vector3(); fromQuat = new THREE.Quaternion();
+                        luaPartMatrix(ref).decompose(p1, fromQuat, s1);
+                    }
                     activeTweens.push({
-                        ref, propName, cframe: true,
+                        ref, propName, cframe: true, fromQuat, toQuat,
                         fromPos: { x: fx, y: fy, z: fz }, toPos: { x: tx, y: ty, z: tz },
                         fromLook: { x: flx, y: fly, z: flz }, toLook: { x: tlx, y: tly, z: tlz },
                         duration, startTime: performance.now(), completedRef: completedKey,
@@ -6629,6 +6736,12 @@ end
                 const ref = lua.lua_tonumber(L2, 2);
                 const evName = lua.lua_tojsstring(L2, 3);
                 luaSignalConns[id] = { L: L2, ref, evName };
+                if (/^(Input(Began|Ended|Changed)|Mouse(Enter|Leave|Moved|Wheel|Button[12](Down|Up|Click)))$/.test(evName) &&
+                    (guiPropsByRef[ref] || (luaByRef[ref] && guiClassSet.has(luaByRef[ref].cls)))) {
+                    luaGuiInputRefs.add(ref);
+                    const node = document.querySelector('#gui-overlay [data-ref="' + ref + '"]');
+                    if (node) node.style.pointerEvents = 'auto';
+                }
                 const key = ref + '|' + evName;
                 (luaSignalsByKey[key] = luaSignalsByKey[key] || []).push(id);
                 return 0;
@@ -7071,7 +7184,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: scriptcam-2026-10-04');
+            logLuaOutput('info', 'script.js build: lift-2026-10-04');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7294,6 +7407,18 @@ end
             };
         }
 
+        // В Roblox Frame/TextLabel/ImageLabel НЕ перехватывают ввод, пока Active=false
+        // (и не стоят под курсором с подключённым InputBegan/MouseEnter и т.п.); перехватывают
+        // только кнопки, TextBox и ScrollingFrame. Раньше любой Frame получал pointer-events:auto,
+        // и полноэкранный прозрачный Frame (затемнение) блокировал вращение камеры и клики по миру.
+        const guiClassSet = new Set(['ScreenGui','Frame','TextLabel','TextButton','TextBox','ImageLabel','ImageButton','ScrollingFrame','ViewportFrame','CanvasGroup','BillboardGui','SurfaceGui']);
+        const luaGuiInputRefs = new Set(); // ref GUI-объектов, у которых скрипт подписан на мышь/тач
+        const _GUI_SINK_CLASSES = new Set(['TextButton', 'ImageButton', 'TextBox', 'ScrollingFrame']);
+        function guiApplyPointer(el, props) {
+            const ref = Number(el.dataset.ref);
+            const interactive = _GUI_SINK_CLASSES.has(props.cls) || props.Active === true || luaGuiInputRefs.has(ref);
+            el.style.pointerEvents = interactive ? 'auto' : 'none';
+        }
         function applyGuiElementStyle(el, props) {
             const cls = props.cls;
             const pos = udim2ToCssPos(props.Position);
@@ -7377,6 +7502,7 @@ end
                 }
                 el.title = props.Image || '';
             }
+            guiApplyPointer(el, props);
         }
 
         function domInputTypeName(e, isMove) {
@@ -7595,7 +7721,13 @@ end
                     let ly = t.fromLook.y + (t.toLook.y - t.fromLook.y) * p;
                     let lz = t.fromLook.z + (t.toLook.z - t.fromLook.z) * p;
                     const llen = Math.hypot(lx, ly, lz) || 1;
-                    applyCFrameValue(t.ref, x, y, z, lx / llen, ly / llen, lz / llen);
+                    if (t.fromQuat && t.toQuat && luaIsPartRef(t.ref)) {
+                        const qq = t.fromQuat.clone().slerp(t.toQuat, p);
+                        luaApplyPartMatrix(t.ref, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), qq, new THREE.Vector3(1, 1, 1)));
+                        fireLuaSignal(t.ref, '__prop_CFrame', []); fireLuaSignal(t.ref, '__prop_Position', []);
+                    } else {
+                        applyCFrameValue(t.ref, x, y, z, lx / llen, ly / llen, lz / llen);
+                    }
                     if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
                     else stillActive.push(t);
                     continue;
