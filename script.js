@@ -6075,6 +6075,21 @@ end
             if (virtualInstanceProps[ref]) {
                 virtualInstanceProps[newRef] = Object.assign({}, virtualInstanceProps[ref]);
             }
+            // Sound: у клона раньше не было аудио-элемента (SoundId лежал только у оригинала), поэтому
+            // sound:Clone():Play() молчал, а luaSoundControl тихо выходил с «SoundId ещё не задан».
+            if (cls === 'Sound') {
+                if (luaGenericPropsByRef[ref]) luaGenericPropsByRef[newRef] = Object.assign({}, luaGenericPropsByRef[ref]);
+                const sa = soundElByRef[ref];
+                if (sa) {
+                    const na = getOrCreateSoundEl(newRef);
+                    if (sa.src) na.src = sa.src;
+                    na.volume = sa.volume;
+                    na.loop = sa.loop;
+                    if (_soundBaseSpeed[ref] != null) _soundBaseSpeed[newRef] = _soundBaseSpeed[ref];
+                    if (_soundPitchOctave[ref] != null) _soundPitchOctave[newRef] = _soundPitchOctave[ref];
+                    _applySoundRate(newRef);
+                }
+            }
             const p = luaPositionOfRef(ref);
             if (p) luaSetPositionOfRef(newRef, p.x, p.y, p.z);
             // GUI (Frame/TextButton/...) раньше тут вообще не копировался —
@@ -7254,7 +7269,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: connids-2026-10-05');
+            logLuaOutput('info', 'script.js build: sg-sound-2026-10-05');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7277,6 +7292,7 @@ end
                         const a = getOrCreateSoundEl(inst.ref);
                         const url = rbxAssetIdToProxyUrl(inst.soundId);
                         if (url) a.src = url;
+                        (luaGenericPropsByRef[inst.ref] = luaGenericPropsByRef[inst.ref] || {}).SoundId = inst.soundId;
                         if (typeof inst.volume === 'number') a.volume = Math.max(0, Math.min(1, inst.volume));
                         if (inst.looped) a.loop = true;
                         // PlaybackSpeed, заданный ПРЯМО в файле (см.
@@ -7895,7 +7911,11 @@ end
                 if (sg.dirty) surfaceGuiRedraw(sg);
                 if (!sceneObjs[sg.partRef]) { sg.mesh.visible = false; continue; }
                 sg.mesh.visible = sceneObjs[sg.partRef].visible !== false;
-                sg.mesh.matrixWorld.copy(luaPartMatrix(sg.partRef)).multiply(sg.local);
+                // matrix (а не только matrixWorld): в этой версии three.js сцена каждый кадр делает
+                // matrixWorld = parent.matrixWorld * matrix, и плоскость с единичной matrix оказывалась в (0,0,0).
+                sg.mesh.matrix.copy(luaPartMatrix(sg.partRef)).multiply(sg.local);
+                sg.mesh.matrixWorld.copy(sg.mesh.matrix);
+                sg.mesh.matrixWorldNeedsUpdate = true;
             }
         }
 
