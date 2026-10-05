@@ -4975,11 +4975,23 @@ end
         // в Play -> MouseClick(player) / RightMouseClick(player) на ClickDetector, если игрок
         // в пределах MaxActivationDistance (по умолчанию 32). Сигнал общий для серверной и
         // клиентской Lua-VM (как и у ProximityPrompt).
+        let _cdLogT = 0;
+        function _cdLog(msg) { // не чаще раза в 300 мс, чтобы не засорять Output
+            const n = performance.now();
+            if (n - _cdLogT < 300) return;
+            _cdLogT = n;
+            logLuaOutput('info', 'ClickDetector: ' + msg);
+        }
         function luaClickDetectorAt(cx, cy, right, fat) {
             if (!isPlaying || (!luaServerL && !luaClientL) || luaControlsDisabled) return false;
             const vp = document.getElementById('viewport');
             const rect = vp.getBoundingClientRect();
-            const fire = (det) => { fireLuaSignal(det, right ? 'RightMouseClick' : 'MouseClick', [{ __instanceRef: luaPlayerRef }]); return true; };
+            const fire = (det) => {
+                const pn = luaByRef[luaParentByRef[det]];
+                _cdLog((right ? 'RightMouseClick' : 'MouseClick') + ' → «' + (pn ? pn.name : '?') + '»');
+                fireLuaSignal(det, right ? 'RightMouseClick' : 'MouseClick', [{ __instanceRef: luaPlayerRef }]);
+                return true;
+            };
             const inRange = (det, partRef) => {
                 let maxD = luaGetGenericProp(det, 'MaxActivationDistance');
                 if (typeof maxD !== 'number' || !(maxD > 0)) maxD = 32;
@@ -5001,6 +5013,7 @@ end
                 while (obj && !(obj.userData && obj.userData.ref)) obj = obj.parent;
                 if (obj) {
                     const hitRef = parseInt(obj.userData.ref);
+                    if (!fat) { /* мышь: диагностика ниже */ }
                     let node = hitRef, guard = 0;
                     while (node !== undefined && node !== -1 && guard++ < 200) {
                         for (const c of (luaChildrenByRef[node] || [])) {
@@ -5011,7 +5024,13 @@ end
                     }
                 }
             }
-            if (!fat) return false; // запас ниже — только для касаний (мышью целимся точно)
+            if (!fat) {
+                const h0 = hits.length ? hits[0].object : null;
+                let o0 = h0; while (o0 && !(o0.userData && o0.userData.ref)) o0 = o0.parent;
+                const r0 = o0 ? parseInt(o0.userData.ref) : null;
+                _cdLog('клик попал в ' + (r0 !== null && luaByRef[r0] ? '«' + luaByRef[r0].name + '» (' + luaByRef[r0].cls + ')' : 'пустоту') + ' — ClickDetector нет или он далеко');
+                return false; // запас ниже — только для касаний (мышью целимся точно)
+            }
             // 2) запас для пальца: кнопки бывают в десятые доли студа (у лифта 0.19), попасть лучом
             // с телефона трудно. Берём ближайший к касанию ClickDetector в радиусе ~30 px
             // (или в проекции размера детали, если она крупнее) — как «щедрый» клик в Roblox на сенсорных.
@@ -5035,6 +5054,14 @@ end
                 if (dpx <= radius && dpx < bestD && inRange(Number(cRef), partRef)) { best = Number(cRef); bestD = dpx; }
             }
             if (best !== null) return fire(best);
+            {
+                const h0 = hits.length ? hits[0].object : null;
+                let o0 = h0; while (o0 && !(o0.userData && o0.userData.ref)) o0 = o0.parent;
+                const r0 = o0 ? parseInt(o0.userData.ref) : null;
+                let n = 0; for (const info of Object.values(luaByRef)) if (info.cls === 'ClickDetector') n++;
+                _cdLog('тап попал в ' + (r0 !== null && luaByRef[r0] ? '«' + luaByRef[r0].name + '» (' + luaByRef[r0].cls + ')' : 'пустоту') +
+                       '; ClickDetector рядом не найден (всего в карте: ' + n + ')');
+            }
             return false;
         }
 
@@ -7220,7 +7247,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: click-dedupe-2026-10-05');
+            logLuaOutput('info', 'script.js build: click-diag-2026-10-05');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
