@@ -3798,7 +3798,11 @@ local __ENUM_PROPS = { CameraType = "CameraType", MouseBehavior = "MouseBehavior
 -- годов, до перехода на PascalCase) — без них скрипты того времени падали
 -- уже на первом же :connect(), даже когда сам сигнал был честный.
 local __conns = {}
-local __nextConnId = 1
+-- id подписок должны быть уникальны МЕЖДУ серверной и клиентской Lua-VM: JS хранит их в одной
+-- общей таблице luaSignalConns. Раньше обе VM считали с 1, клиентские подписки затирали серверные
+-- с теми же номерами, и событие (например, ClickDetector.MouseClick) вызывало чужую функцию
+-- в другой VM или не вызывало ничего.
+local __nextConnId = (__CONN_BASE or 0) + 1
 local __nextAnimTrackId = 0 -- см. Animator:LoadAnimation в InstanceMT.__index ниже
 -- InputBegan/InputEnded/InputChanged — единственные события, где JS шлёт
 -- НЕ готовые аргументы колбэка, а "сырые" (typeName, x, y) — само
@@ -4988,7 +4992,10 @@ end
             const rect = vp.getBoundingClientRect();
             const fire = (det) => {
                 const pn = luaByRef[luaParentByRef[det]];
-                _cdLog((right ? 'RightMouseClick' : 'MouseClick') + ' → «' + (pn ? pn.name : '?') + '»');
+                const evn = right ? 'RightMouseClick' : 'MouseClick';
+                const ids = luaSignalsByKey[det + '|' + evn] || [];
+                _cdLog(evn + ' → «' + (pn ? pn.name : '?') + '» (ClickDetector ref ' + det + ', подписчиков: ' + ids.length +
+                       ', игрок ref ' + luaPlayerRef + ')');
                 fireLuaSignal(det, right ? 'RightMouseClick' : 'MouseClick', [{ __instanceRef: luaPlayerRef }]);
                 return true;
             };
@@ -7247,7 +7254,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: click-diag-2026-10-05');
+            logLuaOutput('info', 'script.js build: connids-2026-10-05');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7305,6 +7312,9 @@ end
             installLuaBridge(luaClientL);
 
             for (const [L, label] of [[luaServerL, 'сервера'], [luaClientL, 'клиента']]) {
+                // база для id подписок: у клиентской VM свой диапазон (см. __nextConnId в prelude)
+                lua.lua_pushnumber(L, L === luaClientL ? 1000000 : 0);
+                lua.lua_setglobal(L, '__CONN_BASE');
                 const preludeStatus = doLuaString(L, LUA_PRELUDE, 'prelude');
                 if (preludeStatus !== lua.LUA_OK) {
                     logLuaOutput('error', 'Lua prelude (' + label + '): ' + luaErrToString(L));
