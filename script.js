@@ -1489,8 +1489,12 @@
             updateCamera();
         }
 
+        // После тапа браузер ещё присылает «синтетические» mousedown/mouseup/click — без этой
+        // защиты тот же тап обрабатывался дважды (ClickDetector срабатывал и сразу же выделялся объект).
+        let _lastTouchEndT = -1e9;
         function onMU(e) {
-            if (!isDragging && (e.button === 0 || e.button === 2) && isPlaying && luaClickDetectorAt(e.clientX, e.clientY, e.button === 2)) return;
+            if (performance.now() - _lastTouchEndT < 700) return;
+            if (!isDragging && (e.button === 0 || e.button === 2) && isPlaying && luaClickDetectorAt(e.clientX, e.clientY, e.button === 2, false)) return;
             if (!isDragging && e.button === 0) {
                 pick(e.clientX, e.clientY, { additive: e.ctrlKey || e.metaKey || multiSelectMode });
             }
@@ -1558,10 +1562,11 @@
         }
 
         function onTE(e) {
+            _lastTouchEndT = performance.now();
             if (e.changedTouches.length === 1 && _ts) {
                 const t = e.changedTouches[0];
                 if (Math.abs(t.clientX - _ts.x) < 8 && Math.abs(t.clientY - _ts.y) < 8) {
-                    if (isPlaying && luaClickDetectorAt(t.clientX, t.clientY, false)) return;
+                    if (isPlaying && luaClickDetectorAt(t.clientX, t.clientY, false, true)) return;
                     pick(t.clientX, t.clientY, { additive: multiSelectMode });
                 }
             }
@@ -4970,35 +4975,66 @@ end
         // в Play -> MouseClick(player) / RightMouseClick(player) на ClickDetector, если игрок
         // в пределах MaxActivationDistance (по умолчанию 32). Сигнал общий для серверной и
         // клиентской Lua-VM (как и у ProximityPrompt).
-        function luaClickDetectorAt(cx, cy, right) {
+        function luaClickDetectorAt(cx, cy, right, fat) {
             if (!isPlaying || (!luaServerL && !luaClientL) || luaControlsDisabled) return false;
             const vp = document.getElementById('viewport');
             const rect = vp.getBoundingClientRect();
+            const fire = (det) => { fireLuaSignal(det, right ? 'RightMouseClick' : 'MouseClick', [{ __instanceRef: luaPlayerRef }]); return true; };
+            const inRange = (det, partRef) => {
+                let maxD = luaGetGenericProp(det, 'MaxActivationDistance');
+                if (typeof maxD !== 'number' || !(maxD > 0)) maxD = 32;
+                const pp = luaPositionOfRef(partRef);
+                if (!charBody || !pp) return true;
+                return Math.hypot(pp.x - charBody.position.x, pp.y - charBody.position.y, pp.z - charBody.position.z) <= maxD;
+            };
+            const detectorOf = (partRef) => {
+                for (const c of (luaChildrenByRef[partRef] || [])) if (luaByRef[c] && luaByRef[c].cls === 'ClickDetector') return c;
+                return null;
+            };
+            // 1) точное попадание лучом: деталь с ClickDetector (или её родители-Model)
             const m = new THREE.Vector2(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
             const rc = new THREE.Raycaster();
             rc.setFromCamera(m, camera);
             const hits = rc.intersectObjects(Object.values(sceneObjs), true);
-            if (!hits.length) return false;
-            let obj = hits[0].object;
-            while (obj && !(obj.userData && obj.userData.ref)) obj = obj.parent;
-            if (!obj) return false;
-            const hitRef = parseInt(obj.userData.ref);
-            let node = hitRef, guard = 0;
-            while (node !== undefined && node !== -1 && guard++ < 200) {
-                for (const c of (luaChildrenByRef[node] || [])) {
-                    if (!luaByRef[c] || luaByRef[c].cls !== 'ClickDetector') continue;
-                    let maxD = luaGetGenericProp(c, 'MaxActivationDistance');
-                    if (typeof maxD !== 'number' || !(maxD > 0)) maxD = 32;
-                    const pp = luaPositionOfRef(hitRef);
-                    if (charBody && pp) {
-                        const d = Math.hypot(pp.x - charBody.position.x, pp.y - charBody.position.y, pp.z - charBody.position.z);
-                        if (d > maxD) continue;
+            if (hits.length) {
+                let obj = hits[0].object;
+                while (obj && !(obj.userData && obj.userData.ref)) obj = obj.parent;
+                if (obj) {
+                    const hitRef = parseInt(obj.userData.ref);
+                    let node = hitRef, guard = 0;
+                    while (node !== undefined && node !== -1 && guard++ < 200) {
+                        for (const c of (luaChildrenByRef[node] || [])) {
+                            if (!luaByRef[c] || luaByRef[c].cls !== 'ClickDetector') continue;
+                            if (inRange(c, hitRef)) return fire(c);
+                        }
+                        node = luaParentByRef[node];
                     }
-                    fireLuaSignal(c, right ? 'RightMouseClick' : 'MouseClick', [{ __instanceRef: luaPlayerRef }]);
-                    return true;
                 }
-                node = luaParentByRef[node];
             }
+            if (!fat) return false; // запас ниже — только для касаний (мышью целимся точно)
+            // 2) запас для пальца: кнопки бывают в десятые доли студа (у лифта 0.19), попасть лучом
+            // с телефона трудно. Берём ближайший к касанию ClickDetector в радиусе ~30 px
+            // (или в проекции размера детали, если она крупнее) — как «щедрый» клик в Roblox на сенсорных.
+            let best = null, bestD = Infinity;
+            const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+            const v = new THREE.Vector3();
+            for (const [cRef, info] of Object.entries(luaByRef)) {
+                if (info.cls !== 'ClickDetector') continue;
+                const partRef = luaParentByRef[cRef];
+                if (!sceneObjs[partRef]) continue;
+                const pp = luaPositionOfRef(partRef);
+                if (!pp) continue;
+                v.set(pp.x, pp.y, pp.z).project(camera);
+                if (v.z < -1 || v.z > 1) continue;
+                const sx = rect.left + (v.x + 1) / 2 * rect.width, sy = rect.top + (1 - v.y) / 2 * rect.height;
+                const dpx = Math.hypot(sx - cx, sy - cy);
+                const camD = Math.max(0.1, camera.position.distanceTo(new THREE.Vector3(pp.x, pp.y, pp.z)));
+                const pxPerStud = rect.height / (2 * camD * tanHalf);
+                const sz = loadedObjSize[partRef] || { x: 1, y: 1, z: 1 };
+                const radius = Math.max(30, Math.hypot(sz.x, sz.y, sz.z) / 2 * pxPerStud);
+                if (dpx <= radius && dpx < bestD && inRange(Number(cRef), partRef)) { best = Number(cRef); bestD = dpx; }
+            }
+            if (best !== null) return fire(best);
             return false;
         }
 
@@ -5802,7 +5838,7 @@ end
             }
             // GUI — ПЕРЕД virtualInstanceProps, той же причине, что и в
             if (guiPropsByRef[ref]) {
-                if (guiPatchProp(ref, name, value)) return;
+                if (guiPatchProp(ref, name, value)) { surfaceGuiMarkDirty(ref); return; }
             }
             if (_promptRegistry[ref] && name in _promptRegistry[ref]) {
                 _promptRegistry[ref][name] = value;
@@ -7184,7 +7220,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: lift-2026-10-04');
+            logLuaOutput('info', 'script.js build: click-dedupe-2026-10-05');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7290,6 +7326,7 @@ end
             }
 
             renderGuiOverlayFromClient();
+            buildSurfaceGuis();
         }
 
         function stopLuaScripts() {
@@ -7664,6 +7701,7 @@ end
         }
 
         function clearGuiOverlay() {
+            clearSurfaceGuis();
             const overlay = document.getElementById('gui-overlay');
             if (overlay) { overlay.innerHTML = ''; overlay.classList.remove('active'); }
             guiPropsByRef = {};
@@ -7672,6 +7710,158 @@ end
         }
 
         // Патчит уже отрисованный DOM-узел после того, как Lua-скрипт
+        // ============ SurfaceGui: интерфейс на грани детали (3D) ============
+        // Рисуем потомков SurfaceGui на canvas -> CanvasTexture на плоскости, приклеенной
+        // к нужной грани детали. Свойства Lua (TextLabel.Text и т.д.) помечают canvas
+        // «грязным», перерисовка — не чаще раза в кадр. Поддержка: Frame/TextLabel/TextButton/
+        // TextBox (фон, рамка, текст с TextScaled и выравниванием) и ImageLabel (только фон).
+        const surfaceGuis = {}; // ref SurfaceGui -> { partRef, mesh, canvas, ctx, tex, dw, dh, k, local, dirty }
+        const _SG_FACES = {
+            // NormalId: Right=0 Top=1 Back=2 Left=3 Bottom=4 Front=5 (Front = -Z детали)
+            0: { n: [1, 0, 0], ry: Math.PI / 2, rx: 0 },
+            1: { n: [0, 1, 0], ry: 0, rx: -Math.PI / 2 },
+            2: { n: [0, 0, 1], ry: 0, rx: 0 },
+            3: { n: [-1, 0, 0], ry: -Math.PI / 2, rx: 0 },
+            4: { n: [0, -1, 0], ry: 0, rx: Math.PI / 2 },
+            5: { n: [0, 0, -1], ry: Math.PI, rx: 0 },
+        };
+        function surfaceGuiRootOf(ref) {
+            let cur = ref, guard = 0;
+            while (cur !== undefined && cur !== -1 && guard++ < 50) {
+                if (surfaceGuis[cur]) return cur;
+                cur = luaParentByRef[cur];
+            }
+            return null;
+        }
+        function surfaceGuiMarkDirty(ref) {
+            const r = surfaceGuiRootOf(ref);
+            if (r !== null) surfaceGuis[r].dirty = true;
+        }
+        function surfaceGuiChildren(ref) {
+            return (luaChildrenByRef[ref] || []).filter(c => guiPropsByRef[c]);
+        }
+        function surfaceGuiDrawNode(ctx, ref, px, py, pw, ph) {
+            const p = guiPropsByRef[ref];
+            if (!p || p.Visible === false) return;
+            if (p.cls === 'UICorner' || p.cls === 'UIStroke') return;
+            const sz = p.Size || {}, ps = p.Position || {}, an = p.AnchorPoint || { x: 0, y: 0 };
+            const w = ((sz.x && sz.x.scale) || 0) * pw + ((sz.x && sz.x.offset) || 0);
+            const h = ((sz.y && sz.y.scale) || 0) * ph + ((sz.y && sz.y.offset) || 0);
+            const x = px + ((ps.x && ps.x.scale) || 0) * pw + ((ps.x && ps.x.offset) || 0) - (an.x || 0) * w;
+            const y = py + ((ps.y && ps.y.scale) || 0) * ph + ((ps.y && ps.y.offset) || 0) - (an.y || 0) * h;
+            if (!(w > 0 && h > 0)) return;
+            const bgT = typeof p.BackgroundTransparency === 'number' ? p.BackgroundTransparency : 0;
+            if (bgT < 1 && p.cls !== 'ImageLabel' || (p.cls === 'ImageLabel' && bgT < 1)) {
+                ctx.fillStyle = color3ToCss(p.BackgroundColor3, bgT);
+                ctx.fillRect(x, y, w, h);
+            }
+            const bsp = (p.BorderSizePixel === undefined || p.BorderSizePixel === null) ? 1 : Number(p.BorderSizePixel);
+            if (bsp > 0 && bgT < 1) {
+                ctx.strokeStyle = color3ToCss(p.BorderColor3, 0);
+                ctx.lineWidth = bsp;
+                ctx.strokeRect(x + bsp / 2, y + bsp / 2, w - bsp, h - bsp);
+            }
+            if (typeof p.Text === 'string' && p.Text !== '' && (p.cls === 'TextLabel' || p.cls === 'TextButton' || p.cls === 'TextBox')) {
+                const txtT = typeof p.TextTransparency === 'number' ? p.TextTransparency : 0;
+                ctx.fillStyle = color3ToCss(p.TextColor3 || { r: 0, g: 0, b: 0 }, txtT);
+                let size = Number(p.TextSize) || 14;
+                const family = 'sans-serif';
+                const lines = String(p.Text).split('\n');
+                if (p.TextScaled) {
+                    size = Math.max(4, h / Math.max(1, lines.length) * 0.95);
+                    ctx.font = 'bold ' + size + 'px ' + family;
+                    const widest = Math.max(...lines.map(l => ctx.measureText(l).width), 1);
+                    if (widest > w) size = Math.max(4, size * (w / widest) * 0.98);
+                }
+                ctx.font = 'bold ' + size + 'px ' + family;
+                const xa = p.TextXAlignment === undefined ? 2 : p.TextXAlignment;  // Left=0 Right=1 Center=2
+                const ya = p.TextYAlignment === undefined ? 1 : p.TextYAlignment;  // Top=0 Center=1 Bottom=2
+                ctx.textAlign = xa === 0 ? 'left' : (xa === 1 ? 'right' : 'center');
+                ctx.textBaseline = 'middle';
+                const tx = xa === 0 ? x + 2 : (xa === 1 ? x + w - 2 : x + w / 2);
+                const lh = size * 1.15, total = lh * lines.length;
+                let ty = ya === 0 ? y + total / 2 : (ya === 2 ? y + h - total / 2 : y + h / 2);
+                ty -= total / 2 - lh / 2;
+                lines.forEach((ln, i) => ctx.fillText(ln, tx, ty + i * lh, w));
+            }
+            const kids = surfaceGuiChildren(ref);
+            if (kids.length) {
+                ctx.save();
+                if (p.ClipsDescendants) { ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); }
+                for (const c of kids) surfaceGuiDrawNode(ctx, c, x, y, w, h);
+                ctx.restore();
+            }
+        }
+        function surfaceGuiRedraw(sg) {
+            const ctx = sg.ctx;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, sg.canvas.width, sg.canvas.height);
+            ctx.setTransform(sg.k, 0, 0, sg.k, 0, 0);
+            for (const c of surfaceGuiChildren(sg.ref)) surfaceGuiDrawNode(ctx, c, 0, 0, sg.dw, sg.dh);
+            sg.tex.needsUpdate = true;
+            sg.dirty = false;
+        }
+        function buildSurfaceGuis() {
+            clearSurfaceGuis();
+            for (const [refStr, p] of Object.entries(guiPropsByRef)) {
+                if (p.cls !== 'SurfaceGui' || p.Enabled === false) continue;
+                const ref = Number(refStr);
+                const partRef = luaParentByRef[ref];
+                const partMesh = sceneObjs[partRef], psz = loadedObjSize[partRef];
+                if (!partMesh || !psz) continue;
+                const face = _SG_FACES[Number(p.Face === undefined ? 5 : p.Face)] || _SG_FACES[5];
+                const fnum = Number(p.Face === undefined ? 5 : p.Face);
+                const sideZ = (fnum === 0 || fnum === 3);
+                const fw = (fnum === 1 || fnum === 4 || fnum === 2 || fnum === 5) ? psz.x : psz.z;
+                const fh = (fnum === 1 || fnum === 4) ? psz.z : psz.y;
+                let dw, dh;
+                if (Number(p.SizingMode) === 0 && p.CanvasSize) {          // FixedSize
+                    dw = Number(p.CanvasSize.x) || 800; dh = Number(p.CanvasSize.y) || 600;
+                } else {                                                   // PixelsPerStud
+                    const pps = Number(p.PixelsPerStud) || 50;
+                    dw = Math.max(1, fw * pps); dh = Math.max(1, fh * pps);
+                }
+                // разрешение текстуры: длинная сторона 128..512 px
+                const longest = Math.max(dw, dh);
+                const target = Math.min(512, Math.max(128, longest));
+                const k = target / longest;
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(2, Math.round(dw * k)); canvas.height = Math.max(2, Math.round(dh * k));
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.anisotropy = 4;
+                const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.FrontSide,
+                    depthTest: !p.AlwaysOnTop, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false });
+                const mesh = new THREE.Mesh(new THREE.PlaneGeometry(fw, fh), mat);
+                mesh.matrixAutoUpdate = false; mesh.matrixWorldAutoUpdate = false; mesh.frustumCulled = false;
+                // локальная матрица плоскости относительно детали: на 0.003 студа от грани наружу
+                const half = [psz.x / 2, psz.y / 2, psz.z / 2];
+                const off = new THREE.Vector3(face.n[0] * (half[0] + 0.003), face.n[1] * (half[1] + 0.003), face.n[2] * (half[2] + 0.003));
+                const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(face.rx, face.ry, 0, 'YXZ'));
+                const local = new THREE.Matrix4().compose(off, q, new THREE.Vector3(1, 1, 1));
+                scene.add(mesh);
+                const sg = { ref, partRef, mesh, canvas, ctx: canvas.getContext('2d'), tex, dw, dh, k, local, dirty: true };
+                surfaceGuis[ref] = sg;
+                surfaceGuiRedraw(sg);
+            }
+        }
+        function clearSurfaceGuis() {
+            for (const ref of Object.keys(surfaceGuis)) {
+                const sg = surfaceGuis[ref];
+                scene.remove(sg.mesh);
+                sg.mesh.geometry.dispose(); sg.mesh.material.dispose(); sg.tex.dispose();
+                delete surfaceGuis[ref];
+            }
+        }
+        // каждый кадр: приклеить плоскость к детали (она может двигаться) и при необходимости перерисовать
+        function updateSurfaceGuis() {
+            for (const sg of Object.values(surfaceGuis)) {
+                if (sg.dirty) surfaceGuiRedraw(sg);
+                if (!sceneObjs[sg.partRef]) { sg.mesh.visible = false; continue; }
+                sg.mesh.visible = sceneObjs[sg.partRef].visible !== false;
+                sg.mesh.matrixWorld.copy(luaPartMatrix(sg.partRef)).multiply(sg.local);
+            }
+        }
+
         function guiPatchProp(ref, name, value) {
             const props = guiPropsByRef[ref];
             if (!props) return false;
@@ -8165,6 +8355,7 @@ end
             if (!isPlaying || !physicsWorld) return;
             applyCharacterControl();
             updateHollowUnionGhosts();
+            updateSurfaceGuis();
 
             if (charBody && charBody.velocity.y < -MAX_FALL_SPEED) {
                 charBody.velocity.y = -MAX_FALL_SPEED;
