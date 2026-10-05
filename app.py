@@ -181,7 +181,7 @@ PART_CLASSES = {
 # Классы 2D-интерфейса (Roblox GUI) — рендерятся отдельным DOM-оверлеем
 # поверх 3D-вьюпорта в Play (см. index.html, buildGuiOverlay/#gui-overlay),
 # а не как объекты сцены three.js/cannon.js, как PART_CLASSES.
-GUI_ROOT_CLASSES = {'ScreenGui', 'BillboardGui'}
+GUI_ROOT_CLASSES = {'ScreenGui', 'BillboardGui', 'SurfaceGui'}
 GUI_CONTAINER_CLASSES = {'Frame', 'ScrollingFrame'}
 GUI_LEAF_CLASSES = {
     'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
@@ -212,6 +212,8 @@ GUI_PROPS = (
     'BottomLeftRadius', 'BottomRightRadius',
     # UIStroke
     'Color', 'Thickness', 'Transparency',
+    # SurfaceGui (интерфейс на грани детали)
+    'Face', 'SizingMode', 'PixelsPerStud', 'CanvasSize', 'AlwaysOnTop', 'Brightness',
 )
 
 # Script/LocalScript исполняются в РАЗНЫХ средах в настоящем Roblox
@@ -792,6 +794,20 @@ def build_all_scene_objects():
         texture_id, texture_face = _extract_part_texture_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
+        # Прозрачность самого Decal (0..1). Decal на невидимой детали (Transparency=1) — частый
+        # приём для постеров/вывесок: деталь не видна, а картинка видна. Раньше текстура
+        # красилась прозрачностью ДЕТАЛИ, и такие постеры пропадали.
+        texture_opacity = None
+        if texture_id and texture_face:
+            for _ch in children_by_parent.get(ref, ()):
+                if parsed['referent_to_class'].get(_ch) == 'Decal':
+                    _dp = parsed['props'].get(_ch, {})
+                    if _rbxassetid_num(_dp.get('Texture')) == texture_id:
+                        try:
+                            texture_opacity = max(0.0, min(1.0, 1.0 - float(_dp.get('Transparency') or 0)))
+                        except (TypeError, ValueError):
+                            texture_opacity = 1.0
+                        break
         real_mesh_id = _extract_real_mesh_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
@@ -826,7 +842,7 @@ def build_all_scene_objects():
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
-            'textureFace': texture_face, 'meshId': real_mesh_id,
+            'textureFace': texture_face, 'textureOpacity': texture_opacity, 'meshId': real_mesh_id,
             'opacity': opacity,
             'meshScale': mesh_scale, 'meshOffset': mesh_offset, 'cloth': cloth,
             'material': material, 'mvar': mvar,

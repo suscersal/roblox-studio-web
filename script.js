@@ -2478,18 +2478,26 @@
             const isBoxShape = !o.meshId && (!o.shape || o.shape === 'block' || o.shape === 'box');
             // Decal — своя явная грань (Face), уже вычислена корректно
             let implicitFaceIdx = null;
-            if (texId && !o.textureFace && isBoxShape) {
+            if (texId && (o.textureFace === null || o.textureFace === undefined || o.textureFace === '') && isBoxShape) {
                 const sx = o.sx || 1, sy = o.sy || 1, sz = o.sz || 1;
                 const areaX = sy * sz, areaY = sx * sz, areaZ = sx * sy;
                 implicitFaceIdx = (areaX >= areaY && areaX >= areaZ) ? 0
                     : (areaY >= areaZ) ? 2 : 4;
             }
-            const faceIdx = (texId && o.textureFace && isBoxShape)
-                ? (FACE_TO_BOX_GROUP[o.textureFace] ?? FACE_TO_BOX_GROUP.Front)
+            // Face у Decal в файле — число NormalId (Right=0, Top=1, Back=2, Left=3, Bottom=4, Front=5),
+            // а не имя: раньше число не находилось в таблице и ВСЕГДА превращалось в Front.
+            const _faceName = (typeof o.textureFace === 'number')
+                ? ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'][o.textureFace]
+                : o.textureFace;
+            const faceIdx = (texId && o.textureFace !== null && o.textureFace !== undefined && o.textureFace !== '' && isBoxShape)
+                ? (FACE_TO_BOX_GROUP[_faceName] ?? FACE_TO_BOX_GROUP.Front)
                 : implicitFaceIdx;
 
             const baseColor = texId && faceIdx === null ? '#ffffff' : (o.color || '#a0a0a0');
-            const matKey = (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' +
+            // Decal на грани: свой уровень непрозрачности (см. textureOpacity на сервере), а не
+            // прозрачность детали — иначе постер на невидимой детали (Transparency=1) пропадает.
+            const decalOp = (faceIdx !== null && o.textureFace !== null && o.textureFace !== undefined && typeof o.textureOpacity === 'number') ? o.textureOpacity : op;
+            const matKey = (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' + decalOp.toFixed(1) + '_' +
                 (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx));
             if (!matCache[matKey]) {
                 const baseOpts = {
@@ -2501,7 +2509,8 @@
                     // Массив материалов по группам граней BoxGeometry:
                     const plain = new THREE.MeshLambertMaterial({ ...baseOpts, color: o.color || '#a0a0a0' });
                     const textured = new THREE.MeshLambertMaterial({
-                        ...baseOpts, color: '#ffffff', map: getOrLoadPartTexture(texId),
+                        ...baseOpts, transparent: true, opacity: decalOp,
+                        color: '#ffffff', map: getOrLoadPartTexture(texId),
                     });
                     const arr = [plain, plain, plain, plain, plain, plain];
                     arr[faceIdx] = textured;
@@ -7269,7 +7278,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: sg-stream-2026-10-05');
+            logLuaOutput('info', 'script.js build: decal-2026-10-06');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
