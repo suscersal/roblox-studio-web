@@ -7269,7 +7269,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: sg-sound-2026-10-05');
+            logLuaOutput('info', 'script.js build: sg-stream-2026-10-05');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7856,9 +7856,18 @@ end
         }
         function buildSurfaceGuis() {
             clearSurfaceGuis();
+            ensureSurfaceGuis();
+        }
+        // Достраивает недостающие SurfaceGui. Геометрию карты подгружают порциями (стриминг около
+        // игрока), поэтому деталь с табло/кнопкой часто загружается ПОЗЖЕ старта Play — раньше
+        // плоскость строилась один раз при старте, пропускала ещё не загруженные детали и больше
+        // не создавалась (кнопки лифта оставались без цифр).
+        function ensureSurfaceGuis() {
+            let made = 0;
             for (const [refStr, p] of Object.entries(guiPropsByRef)) {
                 if (p.cls !== 'SurfaceGui' || p.Enabled === false) continue;
                 const ref = Number(refStr);
+                if (surfaceGuis[ref]) continue;
                 const partRef = luaParentByRef[ref];
                 const partMesh = sceneObjs[partRef], psz = loadedObjSize[partRef];
                 if (!partMesh || !psz) continue;
@@ -7895,8 +7904,11 @@ end
                 const sg = { ref, partRef, mesh, canvas, ctx: canvas.getContext('2d'), tex, dw, dh, k, local, dirty: true };
                 surfaceGuis[ref] = sg;
                 surfaceGuiRedraw(sg);
+                made++;
             }
+            return made;
         }
+        let _sgEnsureT = 0;
         function clearSurfaceGuis() {
             for (const ref of Object.keys(surfaceGuis)) {
                 const sg = surfaceGuis[ref];
@@ -7907,6 +7919,8 @@ end
         }
         // каждый кадр: приклеить плоскость к детали (она может двигаться) и при необходимости перерисовать
         function updateSurfaceGuis() {
+            const nowT = performance.now();
+            if (nowT - _sgEnsureT > 500) { _sgEnsureT = nowT; ensureSurfaceGuis(); }
             for (const sg of Object.values(surfaceGuis)) {
                 if (sg.dirty) surfaceGuiRedraw(sg);
                 if (!sceneObjs[sg.partRef]) { sg.mesh.visible = false; continue; }
