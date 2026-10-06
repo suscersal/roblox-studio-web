@@ -5189,8 +5189,20 @@ end
                 return;
             }
             if (luaIsPartRef(ref)) {
-                luaApplyPartMatrix(ref, M.clone().multiply(luaPivotOffsetMatrix(ref).invert()));
+                // PVInstance:PivotTo в Roblox переносит деталь ВМЕСТЕ со всеми потомками-деталями
+                // (у двери холодильника «стекло» и «ручка» — её дети). Раньше двигалась только сама
+                // деталь, и стекло с ручкой оставались на месте, пока дверь распахивалась.
+                const oldPart = luaPartMatrix(ref);
+                const newPart = M.clone().multiply(luaPivotOffsetMatrix(ref).invert());
+                const deltaP = newPart.clone().multiply(oldPart.clone().invert());
+                const kids = luaCollectParts(ref, []).filter(pr => pr !== ref);
+                const kidMats = kids.map(pr => luaPartMatrix(pr));   // до сдвига
+                luaApplyPartMatrix(ref, newPart);
                 luaFirePoseSignals(ref);
+                kids.forEach((pr, i) => {
+                    luaApplyPartMatrix(pr, deltaP.clone().multiply(kidMats[i]));
+                    luaFirePoseSignals(pr);
+                });
                 return;
             }
             const old = luaGetPivotMatrix(ref);
@@ -7278,7 +7290,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: decal-2026-10-06');
+            logLuaOutput('info', 'script.js build: pivot-children-2026-10-06');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
