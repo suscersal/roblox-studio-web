@@ -1,0 +1,46 @@
+name: Cleanup old releases
+
+on:
+  # Раз в неделю: понедельник, 03:00 UTC
+  schedule:
+    - cron: '0 3 * * 1'
+  # Ручной запуск; по умолчанию dry-run, чтобы сначала посмотреть список
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: 'Сколько свежих релизов оставить (минимум 5)'
+        required: false
+        default: '5'
+      apply:
+        description: 'Реально удалять (false = только dry-run)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanup-releases
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # По расписанию inputs пустые -> keep=5 и удаление включено.
+      # При ручном запуске удаляем только если поставлена галка apply.
+      - name: Delete old releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP: ${{ inputs.keep || '5' }}
+          APPLY: ${{ github.event_name == 'schedule' && 'true' || inputs.apply }}
+        run: |
+          set -euo pipefail
+          ARGS=(--repo "${{ github.repository }}" --keep "$KEEP")
+          if [[ "$APPLY" == "true" ]]; then
+            ARGS+=(--apply)
+          fi
+          python3 .github/scripts/cleanup-releases.py "${ARGS[@]}"
