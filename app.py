@@ -1100,6 +1100,36 @@ def api_new():
     return jsonify({'ok': True, 'count': len(referent_to_class)})
 
 
+_VALUE_CLASSES = ('StringValue', 'NumberValue', 'IntValue', 'BoolValue',
+                  'Vector3Value', 'CFrameValue', 'Color3Value', 'ObjectValue')
+
+
+def _value_for_client(cls, v):
+    # Примитивы отдаём как есть; Vector3/CFrame/Color3/ObjectValue — в виде
+    # {'k': вид, 'v': [...]}, фронтенд соберёт из них Lua-значения.
+    if v is None:
+        return None
+    if cls in ('StringValue',):
+        return str(v)
+    if cls in ('NumberValue', 'IntValue'):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    if cls == 'BoolValue':
+        return bool(v)
+    if cls == 'Vector3Value' and isinstance(v, dict) and 'x' in v:
+        return {'k': 'v3', 'v': [v['x'], v['y'], v['z']]}
+    if cls == 'CFrameValue' and isinstance(v, dict) and 'position' in v:
+        m = v.get('matrix') or [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        p = v['position']
+        return {'k': 'cf', 'v': [p['x'], p['y'], p['z']] + list(m)}
+    if cls == 'Color3Value':
+        if isinstance(v, dict) and all(c in v for c in ('r', 'g', 'b')):
+            return {'k': 'c3', 'v': [v['r'], v['g'], v['b']]}
+        return None
+    if cls == 'ObjectValue':
+        return {'k': 'ref', 'v': [v]} if isinstance(v, int) and v >= 0 else None
+    return None
+
+
 @flask_app.route('/api/all_instances')
 def api_all_instances():
     # Плоский СЫРОЙ список ВСЕХ инстансов карты — ref/class/name/parent, без
@@ -1159,6 +1189,12 @@ def api_all_instances():
                     if cp.get('Enabled', True):
                         item['pitchOctave'] = cp.get('Octave', 0.0)
                     break
+        elif cls in _VALUE_CLASSES:
+            # ValueBase.Value, лежащий В ФАЙЛЕ (IntValue/CFrameValue/...) — иначе
+            # Lua видит nil, пока скрипт сам что-нибудь не запишет в .Value.
+            val = _value_for_client(cls, pr.get(ref, {}).get('Value'))
+            if val is not None:
+                item['value'] = val
         out.append(item)
     return jsonify({'ok': True, 'instances': out})
 

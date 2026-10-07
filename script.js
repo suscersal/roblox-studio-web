@@ -3138,6 +3138,7 @@
             await saveCurrentScriptIfDirty();
 
             const spawn = await findSpawnPoint();
+            playSpawnPos = { x: spawn.x, y: spawn.y, z: spawn.z };
             loadProximityPrompts(); // не блокирует старт — подтянется чуть позже, если не успеет
 
             // Геометрия для физики запрашивается заново, центрированная на
@@ -4130,6 +4131,10 @@ InstanceMT.__index = function(t, k)
     -- живой AnimationTrack — .Play()/.Stop() ничего не анимируют, но и не
     -- падают, KeyframeReached/Ended/Stopped существуют и подключаются, но
     -- никогда не выстрелят по-настоящему.
+    -- Animator:GetPlayingAnimationTracks() — реально играющих треков нет (см. выше), значит список пуст
+    if k == "GetPlayingAnimationTracks" then
+        return function(self) return {} end
+    end
     if k == "LoadAnimation" or k == "loadAnimation" then
         return function(self, anim)
             __nextAnimTrackId = __nextAnimTrackId + 1
@@ -4540,6 +4545,26 @@ local COMPAT = {
         end
         return out
     end end,
+    -- Players:GetPlayerFromCharacter(model) -> Player, чей Character == model (иначе nil)
+    GetPlayerFromCharacter = function(t, ref) return function(self, char)
+        if char == nil then return nil end
+        for _, c in ipairs(t:GetChildren()) do
+            if c.ClassName == "Player" and c.Character == char then return c end
+        end
+        return nil
+    end end,
+    -- Сигналы Humanoid (Running/Jumping/... стреляют в реальном движке при смене состояния)
+    Running = function(t, ref) return makeEvent(ref, "Running") end,
+    Jumping = function(t, ref) return makeEvent(ref, "Jumping") end,
+    Climbing = function(t, ref) return makeEvent(ref, "Climbing") end,
+    GettingUp = function(t, ref) return makeEvent(ref, "GettingUp") end,
+    FreeFalling = function(t, ref) return makeEvent(ref, "FreeFalling") end,
+    FallingDown = function(t, ref) return makeEvent(ref, "FallingDown") end,
+    Seated = function(t, ref) return makeEvent(ref, "Seated") end,
+    PlatformStanding = function(t, ref) return makeEvent(ref, "PlatformStanding") end,
+    Swimming = function(t, ref) return makeEvent(ref, "Swimming") end,
+    StateChanged = function(t, ref) return makeEvent(ref, "StateChanged") end,
+    HealthChanged = function(t, ref) return makeEvent(ref, "HealthChanged") end,
     -- Model:GetBoundingBox() -> CFrame центра, Vector3 размер (оси мира, как у модели без PrimaryPart);
     -- для детали — её CFrame и Size.
     GetBoundingBox = function(t, ref) return function(self)
@@ -4579,6 +4604,14 @@ function __toCFrame(v)
     return CFrame.new(x, y, z)
 end
 local __tblVals = {}   -- Value-свойства, хранящие таблицы (CFrameValue/Vector3Value/ObjectValue)
+-- Начальные Value из файла (Vector3Value/CFrameValue/Color3Value/ObjectValue) — вызывается из JS после prelude
+function __init_value(ref, kind, a, b, c, ...)
+    if kind == "v3" then __tblVals[ref] = Vector3.new(a, b, c)
+    elseif kind == "cf" then __tblVals[ref] = CFrame.new(a, b, c, ...)
+    elseif kind == "c3" then __tblVals[ref] = Color3.new(a, b, c)
+    elseif kind == "ref" then __tblVals[ref] = __wrap(a)
+    end
+end
 local COMPAT_PROPS = {
     AssemblyLinearVelocity = true, Velocity = true, AssemblyAngularVelocity = true, RotVelocity = true,
 }
@@ -4762,12 +4795,24 @@ end
 -- написана под новый task-планировщик. Реализован поверх ТЕХ ЖЕ примитивов
 -- (wait() и стандартной coroutine — обе честно работают, см. фикс
 -- fireLuaSignal/__wait_signal выше), отдельного JS-шедулера не требуется.
+-- wait(t) в Roblox возвращает (сколько реально прошло, время игры с запуска) — Animate: "local _, t = wait(0.1)"
+local __gameStart = tick()
+do
+    local __nativeWait = wait
+    function wait(t)
+        local t0 = tick()
+        __nativeWait(t)
+        local now = tick()
+        return now - t0, now - __gameStart
+    end
+end
+if time == nil then function time() return tick() - __gameStart end end
 task = {}
-task.wait = function(t) return wait(t) end
+task.wait = function(t) local e = wait(t) return e end
 function task.spawn(fn, ...)
     local co = coroutine.create(fn)
     local ok, err = coroutine.resume(co, ...)
-    if not ok then warn("ошибка в task.spawn: " .. tostring(err)) end
+    if not ok then warn("ошибка в task.spawn: " .. tostring(err) .. "\\n" .. (debug and debug.traceback and debug.traceback(co) or "")) end
     return co
 end
 function task.delay(t, fn, ...)
@@ -5807,6 +5852,10 @@ end
             Volume: 0.5, PlaybackSpeed: 1, Pitch: 1, TimePosition: 0, SoundId: '',
             Looped: false, Playing: false, PlayOnRemove: false,
         };
+        let playSpawnPos = null;   // где персонаж появляется при старте Play и после смерти
+        let luaCharDead = false;   // Humanoid.Health дошёл до 0, ждём респавн
+        let luaCharSavedMove = null;
+        let luaInitValues = []; // [{ref, value:{k,v}}] — табличные Value из файла, заливаются в Lua после prelude
         let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
 
         function luaGetGenericProp(ref, name) {
@@ -5846,6 +5895,31 @@ end
         }
         const VALUE_BASE_CLASSES = new Set(['StringValue', 'NumberValue', 'BoolValue',
             'IntValue', 'ObjectValue', 'Vector3Value', 'CFrameValue', 'Color3Value', 'BrickColorValue']);
+        // Смерть персонажа: Humanoid.Died, через Players.RespawnTime (5 c) — новый спавн на старом
+        // месте со здоровьем MaxHealth; Player.CharacterRemoving / CharacterAdded стреляют как в Roblox.
+        function luaKillCharacter() {
+            luaCharDead = true;
+            luaCharSavedMove = { walk: charWalkSpeed, jump: charJumpPower };
+            charWalkSpeed = 0; charJumpPower = 0;
+            logLuaOutput('info', 'Humanoid: Health = 0 — персонаж погиб');
+            fireLuaSignal(luaHumanoidRef, 'Died', []);
+            const hum = luaHumanoidRef;
+            setTimeout(() => {
+                if (!isPlaying || hum !== luaHumanoidRef || !luaCharDead) return;
+                fireLuaSignal(luaPlayerRef, 'CharacterRemoving', [{ __instanceRef: luaCharacterRef }]);
+                if (charBody && playSpawnPos) {
+                    charBody.position.set(playSpawnPos.x, playSpawnPos.y, playSpawnPos.z);
+                    charBody.velocity.set(0, 0, 0);
+                    charBody.wakeUp();
+                }
+                const hp = virtualInstanceProps[hum];
+                hp.Health = hp.MaxHealth != null ? hp.MaxHealth : 100;
+                if (luaCharSavedMove) { charWalkSpeed = luaCharSavedMove.walk; charJumpPower = luaCharSavedMove.jump; }
+                luaCharDead = false;
+                fireLuaSignal(hum, 'HealthChanged', [hp.Health]);
+                fireLuaSignal(luaPlayerRef, 'CharacterAdded', [{ __instanceRef: luaCharacterRef }]);
+            }, 5000);
+        }
         function luaSetGenericProp(ref, name, value) {
             if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
             // ValueBase.Value — раньше запись просто клалась в общий
@@ -5919,6 +5993,18 @@ end
                     }
                     abody.aabbNeedsUpdate = true;
                 }
+            }
+            if (ref === luaHumanoidRef && name === 'Health') {
+                // Health зажат в [0, MaxHealth]; дошёл до 0 — Died, затем респавн (как в Roblox)
+                const hp = virtualInstanceProps[ref];
+                let nv = Number(value);
+                if (!Number.isFinite(nv)) return;
+                nv = Math.max(0, Math.min(nv, hp.MaxHealth != null ? hp.MaxHealth : 100));
+                const old = hp.Health;
+                hp.Health = nv;
+                if (nv !== old) fireLuaSignal(ref, 'HealthChanged', [nv]);
+                if (nv <= 0 && !luaCharDead) luaKillCharacter();
+                return;
             }
             if (ref === luaHumanoidRef && name === 'JumpHeight' && Number(value) <= 0) charJumpPower = 0;
             if (ref === luaHumanoidRef && (name === 'WalkSpeed' || name === 'JumpPower')) {
@@ -6973,6 +7059,8 @@ end
                     if (ch === '(' || ch === '[' || ch === '{') depth++;
                     else if (ch === ')' || ch === ']' || ch === '}') { if (depth === 0) break; depth--; }
                     else if (depth === 0 && (ch === ';' || ch === '\n')) break;
+                    else if (depth === 0 && /[A-Za-z_]/.test(ch) && !/[A-Za-z0-9_]/.test(code[re - 1] || ' ') &&
+                             /^(?:end|else|elseif|until)(?![A-Za-z0-9_])/.test(code.slice(re, re + 7))) break;
                     re++;
                 }
                 const rhs = code.slice(opEnd, re).trim();
@@ -7079,7 +7167,260 @@ end
             return segs.map(s => s.text).join('');
         }
 
+        // ----- Luau: аннотации типов, "::"-касты, type-объявления, if-выражения -----
+        // Токенайзер сохраняет пробелы и комментарии, чтобы номера строк в
+        // сообщениях об ошибках остались такими же, как в исходнике скрипта.
+        function luauTokenize(src) {
+            const toks = [], n = src.length;
+            const wsRe = /\s+/y, idRe = /[A-Za-z_][A-Za-z0-9_]*/y;
+            const numRe = /0[xX][0-9a-fA-F_]+|\d[\d_]*(?:\.[\d_]+)?(?:[eE][+-]?\d+)?/y;
+            let i = 0;
+            while (i < n) {
+                const c = src[i];
+                let m;
+                wsRe.lastIndex = i;
+                if ((m = wsRe.exec(src))) { toks.push({ t: 'ws', s: m[0] }); i += m[0].length; continue; }
+                if (c === '-' && src[i + 1] === '-') {
+                    let j = i + 2;
+                    const lb = matchLuaLongBracket(src, j);
+                    if (lb) j = lb.end; else { while (j < n && src[j] !== '\n') j++; }
+                    toks.push({ t: 'com', s: src.slice(i, j) }); i = j; continue;
+                }
+                if (c === '"' || c === "'") {
+                    let j = i + 1;
+                    while (j < n && src[j] !== c) { if (src[j] === '\\') j++; j++; }
+                    j = Math.min(j + 1, n);
+                    toks.push({ t: 'str', s: src.slice(i, j) }); i = j; continue;
+                }
+                if (c === '[') {
+                    const lb = matchLuaLongBracket(src, i);
+                    if (lb) { toks.push({ t: 'str', s: src.slice(i, lb.end) }); i = lb.end; continue; }
+                }
+                idRe.lastIndex = i;
+                if ((m = idRe.exec(src))) { toks.push({ t: 'id', s: m[0] }); i += m[0].length; continue; }
+                numRe.lastIndex = i;
+                if (c >= '0' && c <= '9' && (m = numRe.exec(src))) { toks.push({ t: 'num', s: m[0] }); i += m[0].length; continue; }
+                if (src.substr(i, 3) === '...') { toks.push({ t: 'p', s: '...' }); i += 3; continue; }
+                const two = src.substr(i, 2);
+                if (two === '..' || two === '::' || two === '->' || two === '==' || two === '~=' || two === '<=' || two === '>=' || two === '//') {
+                    toks.push({ t: 'p', s: two }); i += 2; continue;
+                }
+                toks.push({ t: 'p', s: c }); i++;
+            }
+            return toks;
+        }
+
+        // local x: T? = v / function f<T>(a: T, ...: U): R / v :: T / type X = {...} / export type ...
+        function stripLuauTypes(src) {
+            if (!/::|\btype\s+[A-Za-z_]|\blocal\s+[A-Za-z_]\w*\s*[:,]|\)\s*:|function[^()\n]*<|function[^()\n]*\([^()]*[A-Za-z_.]\s*:/.test(src)) return src;
+            const toks = luauTokenize(src), N = toks.length, out = [];
+            const isTrivia = (k) => toks[k].t === 'ws' || toks[k].t === 'com';
+            const sig = (k) => { while (k < N && isTrivia(k)) k++; return k; };
+            const isP = (k, s) => k < N && toks[k].t === 'p' && toks[k].s === s;
+            const isId = (k, s) => k < N && toks[k].t === 'id' && (s === undefined || toks[k].s === s);
+            const copy = (a, b) => { for (let k = a; k < b; k++) out.push(toks[k].s); };
+            const dropTo = (a, b) => {   // выбросить [a,b), но сохранить переводы строк
+                let nl = 0;
+                for (let k = a; k < b; k++) for (const ch of toks[k].s) if (ch === '\n') nl++;
+                if (nl) out.push('\n'.repeat(nl));
+            };
+            const skipBalanced = (p, open, close) => {   // toks[p] — открывающая скобка
+                let depth = 0;
+                for (; p < N; p++) {
+                    if (isP(p, open)) depth++;
+                    else if (isP(p, close)) { depth--; if (depth === 0) return p + 1; }
+                }
+                return N;
+            };
+            // возвращает индекс сразу после типа, начинающегося с токена p
+            const skipType = (p) => {
+                for (;;) {
+                    p = sig(p);
+                    if (isP(p, '...')) p = sig(p + 1);
+                    if (p >= N) return N;
+                    if (toks[p].t === 'str') p++;
+                    else if (isP(p, '(')) {
+                        p = skipBalanced(p, '(', ')');
+                        const q = sig(p);
+                        if (isP(q, '->')) p = skipType(q + 1);
+                    } else if (isP(p, '{')) p = skipBalanced(p, '{', '}');
+                    else if (isId(p)) {
+                        if (toks[p].s === 'typeof' && isP(sig(p + 1), '(')) p = skipBalanced(sig(p + 1), '(', ')');
+                        else {
+                            p++;
+                            while (isP(p, '.') && isId(p + 1)) p += 2;
+                            if (isP(p, '<')) p = skipBalanced(p, '<', '>');
+                        }
+                    } else return p;
+                    for (;;) { const q = sig(p); if (isP(q, '?')) p = q + 1; else break; }
+                    const q = sig(p);
+                    if (isP(q, '|') || isP(q, '&')) { p = q + 1; continue; }
+                    return p;
+                }
+            };
+            const prevSigIsDotOrColon = (k) => {
+                k--;
+                while (k >= 0 && isTrivia(k)) k--;
+                return k >= 0 && toks[k].t === 'p' && (toks[k].s === '.' || toks[k].s === ':');
+            };
+            let i = 0;
+            while (i < N) {
+                const t = toks[i];
+                if (t.t === 'id' && t.s === 'local') {
+                    out.push('local'); i++;
+                    let j = sig(i);
+                    if (isId(j, 'function')) continue;
+                    copy(i, j); i = j;
+                    while (isId(i)) {
+                        out.push(toks[i].s); i++;
+                        const k = sig(i);
+                        if (isP(k, ':')) { const e = skipType(k + 1); dropTo(i, e); i = e; }
+                        const k2 = sig(i);
+                        if (isP(k2, ',')) { copy(i, k2 + 1); i = k2 + 1; const k3 = sig(i); copy(i, k3); i = k3; continue; }
+                        break;
+                    }
+                    continue;
+                }
+                if (t.t === 'id' && t.s === 'function') {
+                    out.push('function'); i++;
+                    let k = sig(i); copy(i, k); i = k;
+                    while (isId(i) || isP(i, '.') || isP(i, ':')) { out.push(toks[i].s); i++; }
+                    k = sig(i);
+                    if (isP(k, '<')) { const e = skipBalanced(k, '<', '>'); dropTo(i, e); i = e; k = sig(i); }
+                    copy(i, k); i = k;
+                    if (isP(i, '(')) {
+                        out.push('('); i++;
+                        while (i < N && !isP(i, ')')) {
+                            if (isP(i, ':')) { const e = skipType(i + 1); dropTo(i, e); i = e; continue; }
+                            out.push(toks[i].s); i++;
+                        }
+                        if (i < N) { out.push(')'); i++; }
+                        const r = sig(i);
+                        if (isP(r, ':')) { const e = skipType(r + 1); dropTo(i, e); i = e; }
+                    }
+                    continue;
+                }
+                if (t.t === 'id' && (t.s === 'type' || t.s === 'export') && !prevSigIsDotOrColon(i)) {
+                    let k = sig(i + 1);
+                    if (t.s === 'export') { if (isId(k, 'type')) k = sig(k + 1); else k = -1; }
+                    if (k >= 0 && isId(k)) {
+                        let e = sig(k + 1);
+                        if (isP(e, '=') || isP(e, '<')) {
+                            if (isP(e, '<')) e = sig(skipBalanced(e, '<', '>'));
+                            if (isP(e, '=')) { e = skipType(e + 1); dropTo(i, e); i = e; continue; }
+                        }
+                    }
+                }
+                if (t.t === 'p' && t.s === '::') { const e = skipType(i + 1); dropTo(i, e); i = e; continue; }
+                out.push(t.s); i++;
+            }
+            return out.join('');
+        }
+
+        // Luau: "if c then a elseif c2 then b else d" как ВЫРАЖЕНИЕ
+        //   -> (function() if c then return (a) elseif c2 then return (b) else return (d) end end)()
+        function expandIfExpressions(src) {
+            if (!/(?:[=(,{\[+\-*\/%^#<>]|\.\.|\b(?:return|and|or|not))\s*if\b/.test(src)) return src;
+            const toks = luauTokenize(src), N = toks.length;
+            const isTrivia = (k) => toks[k].t === 'ws' || toks[k].t === 'com';
+            const OPS = new Set(['=', '==', '~=', '<', '>', '<=', '>=', '(', ',', '{', '[', '..', '+', '-', '*', '/', '%', '^', '#', '//']);
+            const OPWORDS = new Set(['return', 'and', 'or', 'not']);
+            const prevSig = (k, lo) => { k--; while (k >= lo && isTrivia(k)) k--; return k >= lo ? k : -1; };
+            // 'if' в позиции k — выражение? lo — начало диапазона-выражения (там 'if' сразу в начале — тоже выражение)
+            const isExprIf = (k, lo, rangeIsExpr) => {
+                const p = prevSig(k, lo);
+                if (p < 0) return !!rangeIsExpr;
+                const pt = toks[p];
+                return (pt.t === 'p' && OPS.has(pt.s)) || (pt.t === 'id' && OPWORDS.has(pt.s));
+            };
+            const BLOCK_OPEN = new Set(['function', 'do', 'repeat']);
+            // индекс токена-терминатора выражения, начиная с p
+            const scanExpr = (p) => {
+                let depth = 0, block = 0, nest = 0, prevOperand = false, nl = false;
+                for (; p < N; p++) {
+                    const t = toks[p];
+                    if (t.t === 'ws') { if (t.s.indexOf('\n') >= 0) nl = true; continue; }
+                    if (t.t === 'com') continue;
+                    if (block > 0) {
+                        if (t.t === 'id') {
+                            if (BLOCK_OPEN.has(t.s)) block++;
+                            else if (t.s === 'if' && !isExprIf(p, 0, false)) block++;
+                            else if (t.s === 'end' || t.s === 'until') { block--; if (block === 0) { prevOperand = true; nl = false; } }
+                        }
+                        continue;
+                    }
+                    if (t.t === 'p') {
+                        const s = t.s;
+                        if (s === '(' || s === '[' || s === '{') { depth++; prevOperand = false; }
+                        else if (s === ')' || s === ']' || s === '}') { if (depth === 0) return p; depth--; prevOperand = true; }
+                        else if ((s === ',' || s === ';') && depth === 0) return p;
+                        else prevOperand = (s === '...');
+                        nl = false; continue;
+                    }
+                    if (depth > 0) { if (t.t === 'id' && t.s === 'function') block++; prevOperand = true; continue; }
+                    if (t.t === 'num' || t.t === 'str') {
+                        if (prevOperand && (nl || t.t === 'num')) return p;
+                        prevOperand = true; nl = false; continue;
+                    }
+                    const w = t.s;
+                    if (w === 'and' || w === 'or' || w === 'not') { prevOperand = false; nl = false; continue; }
+                    if (w === 'if') {
+                        if (prevOperand) return p;          // начало следующего оператора
+                        nest++; prevOperand = false; nl = false; continue;
+                    }
+                    if (w === 'then' || w === 'elseif') { if (nest > 0) { prevOperand = false; nl = false; continue; } return p; }
+                    if (w === 'else') { if (nest > 0) { nest--; prevOperand = false; nl = false; continue; } return p; }
+                    if (w === 'function') { block++; prevOperand = false; nl = false; continue; }
+                    if (w === 'end' || w === 'do' || w === 'until' || w === 'local' || w === 'return' ||
+                        w === 'for' || w === 'while' || w === 'repeat' || w === 'break' || w === 'continue') return p;
+                    if (w === 'nil' || w === 'true' || w === 'false') { if (prevOperand) return p; prevOperand = true; nl = false; continue; }
+                    // обычный идентификатор
+                    if (prevOperand) return p;               // два операнда подряд — граница выражения
+                    prevOperand = true; nl = false;
+                }
+                return N;
+            };
+            const isId = (k, s) => k < N && toks[k].t === 'id' && toks[k].s === s;
+            const rewrite = (a, b, rangeIsExpr) => {
+                let out = '';
+                let k = a;
+                while (k < b) {
+                    if (isId(k, 'if') && isExprIf(k, a, rangeIsExpr)) {
+                        const r = parseIf(k, b);
+                        if (r) { out += r.text; k = r.end; continue; }
+                    }
+                    out += toks[k].s; k++;
+                }
+                return out;
+            };
+            const parseIf = (k, limit) => {
+                const parts = [];
+                let p = k + 1;
+                for (;;) {
+                    const cEnd = scanExpr(p);
+                    if (cEnd >= limit || !isId(cEnd, 'then')) return null;
+                    const vStart = cEnd + 1, vEnd = scanExpr(vStart);
+                    if (vEnd >= limit) return null;
+                    parts.push({ c: [p, cEnd], v: [vStart, vEnd] });
+                    if (isId(vEnd, 'elseif')) { p = vEnd + 1; continue; }
+                    if (isId(vEnd, 'else')) {
+                        const eStart = vEnd + 1, eEnd = Math.min(scanExpr(eStart), limit);
+                        let text = '(function() ';
+                        parts.forEach((pt, idx) => {
+                            text += (idx === 0 ? 'if ' : ' elseif ') + rewrite(pt.c[0], pt.c[1], true) +
+                                ' then return (' + rewrite(pt.v[0], pt.v[1], true) + ')';
+                        });
+                        text += ' else return (' + rewrite(eStart, eEnd, true) + ') end end)()';
+                        return { text, end: eEnd };
+                    }
+                    return null;
+                }
+            };
+            return rewrite(0, N, false);
+        }
+
         function preprocessLuau(src) {
+            src = expandIfExpressions(stripLuauTypes(src));
             const segs = splitLuaSegments(src);
             for (const seg of segs) if (seg.type === 'code') seg.text = expandCompoundAssign(seg.text);
             expandGenericFor(segs);
@@ -7245,7 +7586,8 @@ end
             // собой — они уже умеют physicsBodies[ref], отдельный код не
             // нужен: чтение/запись CFrame этого рефа напрямую двигает
             // charBody, то есть по-настоящему телепортирует игрока.
-            if (charBody) physicsBodies[luaHumanoidRootPartRef] = charBody;
+            if (charBody) { physicsBodies[luaHumanoidRootPartRef] = charBody; charBody.__ref = luaHumanoidRootPartRef; }
+            touchingTriggers = new Set();
 
             luaHumanoidRef = luaCreateVirtualInstance('Humanoid');
             luaByRef[luaHumanoidRef].name = 'Humanoid';
@@ -7253,6 +7595,7 @@ end
             virtualInstanceProps[luaHumanoidRef].WalkSpeed = charWalkSpeed;
             virtualInstanceProps[luaHumanoidRef].JumpPower = charJumpPower;
             virtualInstanceProps[luaHumanoidRef].Health = 100;
+            luaCharDead = false;
             virtualInstanceProps[luaHumanoidRef].MaxHealth = 100;
             virtualInstanceProps[luaHumanoidRef].JumpHeight = 7.2;
 
@@ -7290,7 +7633,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: pivot-children-2026-10-06');
+            logLuaOutput('info', 'script.js build: boss-2026-10-07');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7304,10 +7647,16 @@ end
             luaByRef = {};
             luaParentByRef = {};
             luaChildrenByRef = {};
+            luaInitValues = [];
             if (allR && allR.ok && allR.instances) {
                 for (const inst of allR.instances) {
                     luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
                     luaParentByRef[inst.ref] = inst.parent;
+                    // ValueBase.Value, заданное в самом файле (IntValue = 10, CFrameValue, ...)
+                    if (inst.value !== undefined && inst.value !== null) {
+                        if (typeof inst.value === 'object') luaInitValues.push({ ref: inst.ref, value: inst.value });
+                        else (luaGenericPropsByRef[inst.ref] = luaGenericPropsByRef[inst.ref] || {}).Value = inst.value;
+                    }
                     // Sound, уже лежащий В ФАЙЛЕ (не Instance.new(...) из
                     if (inst.cls === 'Sound' && inst.soundId) {
                         const a = getOrCreateSoundEl(inst.ref);
@@ -7357,6 +7706,12 @@ end
                     logLuaOutput('error', 'Lua prelude (' + label + '): ' + luaErrToString(L));
                     luaServerL = null; luaClientL = null;
                     return;
+                }
+                if (luaInitValues.length) {
+                    const ivCode = luaInitValues.map(iv =>
+                        '__init_value(' + iv.ref + ',"' + iv.value.k + '",' + iv.value.v.join(',') + ')').join('\n');
+                    const ivStatus = doLuaString(L, ivCode, 'initvalues');
+                    if (ivStatus !== lua.LUA_OK) logLuaOutput('warn', 'initvalues (' + label + '): ' + luaErrToString(L));
                 }
             }
 
@@ -8443,6 +8798,48 @@ end
         const MAX_FALL_SPEED = 300; // студов/сек — подстраховка на случай
         // разгона до нереальной скорости (например, пока не подгрузился пол).
 
+        // Touched/TouchEnded для частей с CanCollide=false (триггеры): у них collisionFilterMask=0, поэтому
+        // cannon контактов не создаёт, а в Roblox такие части Touched всё равно получают (если CanTouch).
+        let touchingTriggers = new Set();
+        function updateTouchTriggers() {
+            if (!charBody || luaHumanoidRootPartRef === -1) return;
+            const refs = new Set();
+            for (const key of Object.keys(luaSignalsByKey)) {
+                const bar = key.indexOf('|');
+                const ev = key.slice(bar + 1);
+                if ((ev === 'Touched' || ev === 'TouchEnded') && luaSignalsByKey[key] && luaSignalsByKey[key].length) refs.add(key.slice(0, bar));
+            }
+            const c = charBody.position, r = CHAR_RADIUS;
+            for (const refStr of refs) {
+                const body = physicsBodies[refStr];
+                if (!body || body === charBody || body.collisionFilterMask !== 0 || !body.shapes.length) continue;
+                const sh = body.shapes[0];
+                let inside = false;
+                if (sh instanceof CANNON.Box) {
+                    const local = body.quaternion.inverse().vmult(new CANNON.Vec3(c.x - body.position.x, c.y - body.position.y, c.z - body.position.z));
+                    const h = sh.halfExtents;
+                    const dx = Math.max(Math.abs(local.x) - h.x, 0), dy = Math.max(Math.abs(local.y) - h.y, 0), dz = Math.max(Math.abs(local.z) - h.z, 0);
+                    inside = dx * dx + dy * dy + dz * dz <= r * r;
+                } else if (sh instanceof CANNON.Sphere) {
+                    inside = Math.hypot(c.x - body.position.x, c.y - body.position.y, c.z - body.position.z) <= sh.radius + r;
+                } else {
+                    body.computeAABB();
+                    const a = body.aabb;
+                    inside = c.x >= a.lowerBound.x - r && c.x <= a.upperBound.x + r && c.y >= a.lowerBound.y - r && c.y <= a.upperBound.y + r && c.z >= a.lowerBound.z - r && c.z <= a.upperBound.z + r;
+                }
+                const was = touchingTriggers.has(refStr);
+                if (inside && !was) {
+                    touchingTriggers.add(refStr);
+                    fireLuaSignal(Number(refStr), 'Touched', [{ __instanceRef: luaHumanoidRootPartRef }]);
+                    fireLuaSignal(luaHumanoidRootPartRef, 'Touched', [{ __instanceRef: Number(refStr) }]);
+                } else if (!inside && was) {
+                    touchingTriggers.delete(refStr);
+                    fireLuaSignal(Number(refStr), 'TouchEnded', [{ __instanceRef: luaHumanoidRootPartRef }]);
+                    fireLuaSignal(luaHumanoidRootPartRef, 'TouchEnded', [{ __instanceRef: Number(refStr) }]);
+                }
+            }
+        }
+
         function stepPhysics() {
             if (!isPlaying || !physicsWorld) return;
             applyCharacterControl();
@@ -8472,6 +8869,7 @@ end
                     new THREE.Vector3(1, 1, 1)
                 );
             }
+            updateTouchTriggers();
             followCharacterCamera();
             updateProximityPrompts();
             maybeStreamGeometry();
