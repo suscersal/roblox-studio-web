@@ -2154,6 +2154,17 @@
         // координаты локальные, в настоящем размере (Size уже "вшит"), поэтому
         // масштабировать не нужно — просто подменяем geometry у box-приближения.
         // Нет меша / формат не разобран (404) — остаётся box по Size.
+        function applyUnionTrimesh(body, mesh) {
+            const verts = mesh && mesh.userData && mesh.userData.unionTrimeshVerts;
+            if (!verts || !body || body.__unionTrimesh || body.mass !== 0 || !body.shapes.length) return;
+            const inds = new Array(verts.length / 3);
+            for (let q = 0; q < inds.length; q++) inds[q] = q;
+            body.shapes.length = 0; body.shapeOffsets.length = 0; body.shapeOrientations.length = 0;
+            body.addShape(new CANNON.Trimesh(verts, inds));
+            body.updateBoundingRadius();
+            body.aabbNeedsUpdate = true;
+            body.__unionTrimesh = true;
+        }
         let _unionGeoCache = {}; // ref -> Promise<BufferGeometry|null>; сбрасывается в reloadScene
         function loadUnionGeometry(ref) {
             if (_unionGeoCache[ref]) return _unionGeoCache[ref];
@@ -2216,7 +2227,14 @@
                         geo.computeBoundingBox();
                         const bb = geo.boundingBox;
                         const boxVol = (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) * (bb.max.z - bb.min.z);
-                        if (boxVol > 0 && Math.abs(vol) < boxVol * 0.75) luaHollowUnions.add(o.ref);
+                        const ratio = boxVol > 0 ? Math.abs(vol) / boxVol : 1;
+                        // Любой вырез (проём в стене, комната): сплошной бокс не даёт пройти в дырку —
+                        // коллайдером становится настоящая геометрия (см. applyUnionTrimesh).
+                        // Trimesh в cannon.js хранит индексы в Int16, отсюда лимит ~10 000 треугольников.
+                        if (ratio < 0.98 && tri <= 10000 && !idx) {
+                            mesh.userData.unionTrimeshVerts = Array.from(pa.array);
+                            applyUnionTrimesh(physicsBodies[o.ref], mesh);
+                        } else if (ratio < 0.75) luaHollowUnions.add(o.ref);
                     }
                 } catch (e) {}
             });
@@ -2876,6 +2894,7 @@
                 body.collisionFilterMask = 0;
             }
 
+            applyUnionTrimesh(body, mesh);
             physicsWorld.addBody(body);
             physicsBodies[o.ref] = body;
             body.__ref = o.ref; // для Touched-события (см. beginContact ниже) — по-другому
@@ -5268,19 +5287,8 @@ end
             }
         }
         // Camera — особый случай:
-        let _lastCamLogKey = null;
         function applyCFrameValue(ref, x, y, z, lx, ly, lz) {
             if (luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined') {
-                // Скрипт карты пересчитывает и переставляет CFrame камеры
-                // КАЖДЫЙ кадр (RenderStepped), даже когда объект не
-                // двигался — без дедупликации это заливало Output одной и
-                // той же строкой десятки раз в секунду. Печатаем только при
-                // реальном изменении координат.
-                const key = x.toFixed(2) + ',' + y.toFixed(2) + ',' + z.toFixed(2) + '|' + lx.toFixed(3) + ',' + ly.toFixed(3) + ',' + lz.toFixed(3);
-                if (key !== _lastCamLogKey) {
-                    _lastCamLogKey = key;
-                    logLuaOutput('info', 'Camera: CFrame -> (' + x.toFixed(1) + ',' + y.toFixed(1) + ',' + z.toFixed(1) + ') look (' + lx.toFixed(2) + ',' + ly.toFixed(2) + ',' + lz.toFixed(2) + ')');
-                }
                 camera.position.set(x, y, z);
                 camera.lookAt(x + lx, y + ly, z + lz);
                 _scriptCam = { p: camera.position.clone(), q: camera.quaternion.clone() };
