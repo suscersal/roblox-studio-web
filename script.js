@@ -3294,7 +3294,7 @@
                 shape: new CANNON.Sphere(CHAR_RADIUS),
                 position: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
                 fixedRotation: true,
-                linearDamping: 0.9,
+                linearDamping: 0,      // в Roblox у персонажа нет «сопротивления воздуха»: прыжок/падение без торможения
                 allowSleep: false,
             });
             physicsWorld.addBody(charBody);
@@ -4710,6 +4710,9 @@ local COMPAT_PROPS = {
     AssemblyLinearVelocity = true, Velocity = true, AssemblyAngularVelocity = true, RotVelocity = true,
 }
 do
+local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstChild = true,
+    FindFirstChildOfClass = true, FindFirstChildWhichIsA = true, GetChildren = true, getChildren = true,
+    GetDescendants = true, getDescendants = true }
     local baseIndex = InstanceMT.__index
     InstanceMT.__index = function(t, k)
         local ref = rawget(t, "__ref")
@@ -4746,7 +4749,12 @@ do
             if COMPAT_PROPS[k] then return h(t, ref) end
             return h(t, ref)
         end
-        return baseIndex(t, k)
+        local r = baseIndex(t, k)
+        -- Методы, возвращающие замыкание, зависящее ТОЛЬКО от ref, кешируем прямо в обёртке: иначе каждый
+        -- d:IsA(...) / part:FindFirstChild(...) заново идёт через сотни сравнений в __index (в циклах по
+        -- GetDescendants() это основная причина просадки FPS).
+        if PURE_METHODS[k] and type(r) == "function" then rawset(t, k, r) end
+        return r
     end
     local baseNew = InstanceMT.__newindex
     InstanceMT.__newindex = function(t, k, v)
@@ -6961,6 +6969,19 @@ end
                     });
                     return 0;
                 }
+                // Position (Vector3) у детали — плавный сдвиг с сохранением поворота, как у твина CFrame
+                // (раньше шла общая ветка: без интерполяции и деталь вообще не двигалась).
+                if (propName === 'Position' && lua.lua_type(L2, 4) === lua.LUA_TTABLE && luaIsPartRef(ref) && ref !== luaHumanoidRootPartRef) {
+                    const gv = (f) => { lua.lua_getfield(L2, 4, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
+                    const cur = new THREE.Vector3(), cq = new THREE.Quaternion(), cs = new THREE.Vector3();
+                    luaPartMatrix(ref).decompose(cur, cq, cs);
+                    activeTweens.push({
+                        ref, propName, partPos: true,
+                        fromPos: { x: cur.x, y: cur.y, z: cur.z }, toPos: { x: gv('X'), y: gv('Y'), z: gv('Z') },
+                        duration, startTime: performance.now(), completedRef: completedKey,
+                    });
+                    return 0;
+                }
                 const ty = lua.lua_type(L2, 4);
                 let composite = false, toVal;
                 if (ty === lua.LUA_TTABLE) { toVal = luaTableToJsPropValue(L2, 4); composite = true; }
@@ -7711,7 +7732,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-08-b');
+            logLuaOutput('info', 'script.js build: boss-2026-10-08-e');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -8447,6 +8468,18 @@ end
                     else stillActive.push(t);
                     continue;
                 }
+                if (t.partPos) {
+                    const x = t.fromPos.x + (t.toPos.x - t.fromPos.x) * p;
+                    const y = t.fromPos.y + (t.toPos.y - t.fromPos.y) * p;
+                    const z = t.fromPos.z + (t.toPos.z - t.fromPos.z) * p;
+                    const cm = luaPartMatrix(t.ref), cp = new THREE.Vector3(), cq = new THREE.Quaternion(), cs = new THREE.Vector3();
+                    cm.decompose(cp, cq, cs);
+                    luaApplyPartMatrix(t.ref, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), cq, new THREE.Vector3(1, 1, 1)));
+                    fireLuaSignal(t.ref, '__prop_CFrame', []); fireLuaSignal(t.ref, '__prop_Position', []);
+                    if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
+                    else stillActive.push(t);
+                    continue;
+                }
                 if (t.composite) {
                     if (p >= 1) {
                         luaSetGenericProp(t.ref, t.propName, t.to);
@@ -8870,6 +8903,8 @@ end
             updateCamera();
         }
 
+        let _physLastT = 0, _physAcc = 0;
+        const PHYSICS_MAX_TICKS = 5;   // не больше 5 шагов (1/12 с) за кадр
         const PHYSICS_SUBSTEPS = 4; // дробим шаг — у cannon.js 0.6.2 нет CCD,
         // быстро падающая сфера может за один большой шаг проскочить сквозь
         // тонкий пол ("проваливаюсь"). Мельче шаг — меньше смещение за шаг.
@@ -8950,23 +8985,34 @@ end
 
         function stepPhysics() {
             if (!isPlaying || !physicsWorld) return;
-            applyCharacterControl();
-            updateHollowUnionGhosts();
-            updateSurfaceGuis();
-
-            if (charBody && charBody.velocity.y < -MAX_FALL_SPEED) {
-                charBody.velocity.y = -MAX_FALL_SPEED;
-            }
-
-            const subDt = (1 / 60) / PHYSICS_SUBSTEPS;
-            for (let i = 0; i < PHYSICS_SUBSTEPS; i++) {
-                physicsWorld.step(subDt);
-                // Ступеньки лестницы — это отдельные боксы с вертикальными
-                if (charBody) {
-                    charBody.velocity.x = charVelX;
-                    charBody.velocity.z = charVelZ;
+            // Физика идёт по РЕАЛЬНОМУ времени, как в Roblox (WalkSpeed 16 студов/с — именно в секунду, а не
+            // «за кадр»): накопитель + фиксированный шаг 1/60. Раньше на каждый кадр делался ровно один шаг,
+            // и при 7 FPS мир шёл в ~8 раз медленнее. За кадр не больше PHYSICS_MAX_TICKS шагов, иначе на
+            // слабом телефоне каждый тяжёлый кадр порождал бы ещё более тяжёлый (спираль).
+            const nowT = performance.now();
+            const dtReal = _physLastT ? (nowT - _physLastT) / 1000 : 1 / 60;
+            _physLastT = nowT;
+            _physAcc = Math.min(_physAcc + dtReal, PHYSICS_MAX_TICKS / 60);
+            let ticks = 0;
+            while (_physAcc >= 1 / 60 - 1e-6 && ticks < PHYSICS_MAX_TICKS) {
+                _physAcc -= 1 / 60; ticks++;
+                applyCharacterControl();
+                if (charBody && charBody.velocity.y < -MAX_FALL_SPEED) {
+                    charBody.velocity.y = -MAX_FALL_SPEED;
+                }
+                const subDt = (1 / 60) / PHYSICS_SUBSTEPS;
+                for (let i = 0; i < PHYSICS_SUBSTEPS; i++) {
+                    physicsWorld.step(subDt);
+                    // Ступеньки лестницы — это отдельные боксы с вертикальными
+                    if (charBody) {
+                        charBody.velocity.x = charVelX;
+                        charBody.velocity.z = charVelZ;
+                    }
                 }
             }
+            updateHollowUnionGhosts();
+            updateSurfaceGuis();
+            if (ticks === 0) return;   // экран быстрее 60 Гц: новых шагов нет, картинка не изменилась
 
             for (const [refStr, body] of Object.entries(physicsBodies)) {
                 const mesh = sceneObjs[refStr];

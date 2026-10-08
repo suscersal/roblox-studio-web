@@ -820,10 +820,11 @@
             position: absolute;
             bottom: 10px;
             left: 16px;
+            right: 16px;   /* на всю ширину: джойстик слева, кнопки прыжка/вниз у правого края */
             display: none;
             align-items: flex-end;
             gap: 14px;
-            z-index: 10;
+            z-index: 60;   /* выше плавающей панели Output (z-index 50), иначе она перекрывает кнопки у правого края */
             pointer-events: none
         }
 
@@ -880,10 +881,8 @@
             gap: 4px;
             align-items: center;
             pointer-events: all;
-            /* joy-base/joy-zone больше не в потоке flex (position:absolute),
-               поэтому место под них резервируем отступом вручную: 112px
-               (диаметр) + 14px (тот же gap, что был у #mobile-pad раньше) */
-            margin-left: 126px;
+            /* joy-base/joy-zone вне потока (position:absolute) — колонка кнопок уходит к правому краю */
+            margin-left: auto;
         }
 
         .pad-btn {
@@ -1192,10 +1191,10 @@
 /* ProximityPrompt — кнопка/кольцо взаимодействия у объекта поблизости */
 #proximity-prompt {
     position: absolute;
-    left: 50%;
-    bottom: 22%;
-    transform: translateX(-50%);
+    right: 14px;
+    bottom: calc(10px + 2 * 52px * var(--bs) + 30px);   /* над кнопками прыжка/вниз, не перекрывая их */
     display: flex;
+    flex-direction: row-reverse;   /* кольцо у самого правого края, подпись слева от него */
     align-items: center;
     gap: 10px;
     z-index: 250;
