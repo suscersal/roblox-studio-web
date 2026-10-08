@@ -1708,11 +1708,11 @@
         }
 
         // Точная структура v2.00 (получена из реверс-инжиниринга
-        function _tryParseV2At(dv, buf, stub) {
+        function _tryParseV2At(dv, buf, stub, vertSizeArg, vertOffArg) {
             const numVerts = dv.getUint32(stub, true);
             const numFaces = dv.getUint32(stub + 4, true);
-            const vertSize = 36, faceSize = 12;
-            const vertOff = stub + 8;
+            const vertSize = vertSizeArg || 36, faceSize = 12;
+            const vertOff = vertOffArg != null ? vertOffArg : stub + 8;
             if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) return null;
             const needBytes = vertOff + numVerts * vertSize + numFaces * faceSize;
             if (needBytes > buf.byteLength) return null;
@@ -1749,6 +1749,15 @@
             // 5 байт — подтверждённый реальной документацией размер
             const dbg = 'bufLen=' + buf.byteLength;
             if (buf.byteLength < 13) { _lastMeshParseFailReason = 'буфер короче минимального заголовка v2.00 (' + dbg + ')'; return null; }
+            // Заголовок v2.00: u16 sizeof_Header (=12), u8 sizeof_Vertex (36, либо 40 — с цветом вершины),
+            // u8 sizeof_Face (=12), u32 numVerts, u32 numFaces; данные вершин начинаются с sizeof_Header.
+            if (buf.byteLength >= 12) {
+                const hdrSize = dv.getUint16(0, true), vSize = dv.getUint8(2), fSize = dv.getUint8(3);
+                if (hdrSize >= 12 && hdrSize <= 64 && vSize >= 32 && vSize <= 64 && fSize === 12) {
+                    const result = _tryParseV2At(dv, buf, 4, vSize, hdrSize);
+                    if (result) return result;
+                }
+            }
             for (const stub of [5, 0, 4, 6]) {
                 if (stub + 8 > buf.byteLength) continue;
                 const result = _tryParseV2At(dv, buf, stub);
@@ -2079,8 +2088,22 @@
                 _lastMeshParseFailReason = 'Draco-декодер бросил исключение: ' + e.message;
                 return null;
             }
+            // Заявленная длина/офсет не подошли (например, длина 4 у служебного чанка) — ищем сигнатуру
+            // "DRACO" в теле и пробуем декодировать от неё, без точной длины.
+            try {
+                let from = 0;
+                for (;;) {
+                    const found = _findBytes(bodyBytes, [0x44, 0x52, 0x41, 0x43, 0x4F], from);
+                    if (found < 0) break;
+                    if (found !== dracoOffset) {
+                        const result = _tryDecodeDracoAt(decoderModule, bodyBytes, found, null);
+                        if (result) return result;
+                    }
+                    from = found + 1;
+                }
+            } catch (e) { /* падаем в сообщение ниже */ }
             _lastMeshParseFailReason = 'Draco-декодер не смог разобрать поток по офсету ' + dracoOffset +
-                (dracoLength != null ? (', длина ' + dracoLength) : '');
+                (dracoLength != null ? (', длина ' + dracoLength) : '') + ' (поиск сигнатуры DRACO тоже не помог)';
             return null;
         }
 
@@ -2192,6 +2215,57 @@
                 if (!geo) return;
                 if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
                 mesh.geometry = geo;
+                // Материал-массив (Decal на одной грани бокса) без групп у union-геометрии не нарисуется:
+                // треугольники, смотрящие в сторону грани декали, получают планарные UV и текстурный
+                // материал (группа 1), остальные — базовый (группа 0).
+                if (Array.isArray(mesh.material) && mesh.material.length === 6) {
+                    const mats = mesh.material;
+                    const ti = mats.findIndex(m => m && m.map);
+                    const base = mats.find(m => m && !m.map) || mats[0];
+                    if (ti < 0) {
+                        mesh.material = base;
+                    } else {
+                        const AX = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][ti];
+                        const src = geo.attributes.position.array, nsrc = geo.attributes.normal ? geo.attributes.normal.array : null;
+                        const triN = src.length / 9, hit = [], rest = [];
+                        for (let t = 0; t < triN; t++) {
+                            const o9 = t * 9;
+                            const ux = src[o9 + 3] - src[o9], uy = src[o9 + 4] - src[o9 + 1], uz = src[o9 + 5] - src[o9 + 2];
+                            const vx = src[o9 + 6] - src[o9], vy = src[o9 + 7] - src[o9 + 1], vz = src[o9 + 8] - src[o9 + 2];
+                            let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+                            const ln = Math.hypot(nx, ny, nz) || 1;
+                            (((nx * AX[0] + ny * AX[1] + nz * AX[2]) / ln) > 0.9 ? hit : rest).push(t);
+                        }
+                        const order = hit.concat(rest);
+                        const P = new Float32Array(src.length), N = new Float32Array(src.length), UV = new Float32Array(triN * 6);
+                        const sx = o.sx || 1, sy = o.sy || 1, sz = o.sz || 1;
+                        order.forEach((t, k) => {
+                            for (let c = 0; c < 3; c++) {
+                                const si = t * 9 + c * 3, di = k * 9 + c * 3;
+                                P[di] = src[si]; P[di + 1] = src[si + 1]; P[di + 2] = src[si + 2];
+                                if (nsrc) { N[di] = nsrc[si]; N[di + 1] = nsrc[si + 1]; N[di + 2] = nsrc[si + 2]; }
+                                const x = P[di], y = P[di + 1], z = P[di + 2];
+                                let u, v;   // как у THREE.BoxGeometry для соответствующей грани
+                                if (ti === 0) { u = -z / sz + 0.5; v = y / sy + 0.5; }
+                                else if (ti === 1) { u = z / sz + 0.5; v = y / sy + 0.5; }
+                                else if (ti === 2) { u = x / sx + 0.5; v = -z / sz + 0.5; }
+                                else if (ti === 3) { u = x / sx + 0.5; v = z / sz + 0.5; }
+                                else if (ti === 4) { u = x / sx + 0.5; v = y / sy + 0.5; }
+                                else { u = -x / sx + 0.5; v = y / sy + 0.5; }
+                                UV[k * 6 + c * 2] = u; UV[k * 6 + c * 2 + 1] = v;
+                            }
+                        });
+                        const g2 = new THREE.BufferGeometry();
+                        g2.setAttribute('position', new THREE.BufferAttribute(P, 3));
+                        g2.setAttribute('normal', new THREE.BufferAttribute(nsrc ? N : P.slice(), 3));
+                        g2.setAttribute('uv', new THREE.BufferAttribute(UV, 2));
+                        if (hit.length) g2.addGroup(0, hit.length * 3, 1);
+                        if (rest.length) g2.addGroup(hit.length * 3, rest.length * 3, 0);
+                        if (!nsrc) g2.computeVertexNormals();
+                        mesh.geometry = g2;
+                        mesh.material = [base, mats[ti]];
+                    }
+                }
                 // Внутренняя поверхность выреза (та, что "смотрит" внутрь
                 // полости) видна ТОЛЬКО если материал рисует обе стороны —
                 // материал box-заглушки общий (matCache) и по умолчанию
@@ -7637,7 +7711,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-07');
+            logLuaOutput('info', 'script.js build: boss-2026-10-08-b');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');

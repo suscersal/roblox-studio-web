@@ -2342,6 +2342,26 @@ def api_union_mesh():
     if hit is None:
         m = union_mesh_from_parsed(parsed, ref)
         hit = union_mesh_render_json(m) if m else False
+        if hit:
+            # Меш хранится в InitialSize, а Size детали мог быть изменён (масштаб) — в Roblox
+            # геометрия юниона растягивается на Size/InitialSize по каждой оси.
+            _pp = parsed['props'].get(ref, {})
+            _ini, _sz = _pp.get('InitialSize'), _pp.get('Size', _pp.get('size'))
+            if isinstance(_ini, dict) and isinstance(_sz, dict):
+                try:
+                    k = [float(_sz[c]) / float(_ini[c]) if abs(float(_ini[c])) > 1e-6 else 1.0 for c in 'xyz']
+                except (KeyError, TypeError, ValueError):
+                    k = [1.0, 1.0, 1.0]
+                if any(abs(v - 1.0) > 1e-3 for v in k):
+                    pos, nrm = hit['position'], hit['normal']
+                    hit = dict(hit)
+                    hit['position'] = [pos[i] * k[i % 3] for i in range(len(pos))]
+                    nn = []   # нормаль при неравномерном масштабе: делим на k и нормируем
+                    for i in range(0, len(nrm), 3):
+                        x, y, z = nrm[i] / k[0], nrm[i + 1] / k[1], nrm[i + 2] / k[2]
+                        ln = (x * x + y * y + z * z) ** 0.5 or 1.0
+                        nn.extend((x / ln, y / ln, z / ln))
+                    hit['normal'] = nn
         if len(_union_mesh_cache) > 512:
             _union_mesh_cache.clear()
         _union_mesh_cache[key] = hit

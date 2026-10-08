@@ -1854,10 +1854,22 @@ def decode_solid_mesh(blob):
         normal_index = idx(hdr())
     except (struct.error, IndexError):
         raise ValueError('SolidMesh обрезан')
-    if (not index or len(index) % 3 or len(normal_index) != len(index)
-            or max(index) >= len(positions) or min(index) < 0
-            or max(normal_index) >= len(normals) or min(normal_index) < 0):
+    if (not index or len(index) % 3 or max(index) >= len(positions) or min(index) < 0):
         raise ValueError('индексы SolidMesh вне диапазона')
+    if (len(normal_index) != len(index)
+            or max(normal_index) >= len(normals) or min(normal_index) < 0):
+        # Канал индексов нормалей у части юнионов (со скруглениями) закодирован иначе, чем в
+        # разобранных образцах. Геометрия (positions + index) при этом верна — нормали
+        # считаем сами: плоские, по граням.
+        normals, normal_index = [], []
+        for t in range(0, len(index), 3):
+            a, b, c = (positions[index[t]], positions[index[t + 1]], positions[index[t + 2]])
+            ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+            vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+            nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+            ln = (nx * nx + ny * ny + nz * nz) ** 0.5 or 1.0
+            normals.append((nx / ln, ny / ln, nz / ln))
+            normal_index.extend((len(normals) - 1,) * 3)
     return {'positions': positions, 'normals': normals, 'index': index,
             'normal_index': normal_index, 'triangles': len(index) // 3}
 
