@@ -2831,6 +2831,12 @@
         const STREAM_PRUNE_DIST = 5000;    // общий "дальний" предел (fog/начальный вид) — НЕ радиус подгрузки, см. qualitySettings.loadRadius
         const UNLOAD_MARGIN = 150;   // студов сверх loadRadius — гистерезис, чтобы объект
         // на самой границе загрузки/выгрузки не мигал каждый refresh-цикл
+        // Радиус описанной сферы объекта: расстояния для стриминга/отсечения считаем до БЛИЖАЙШЕГО края,
+        // иначе длинные стены (центр далеко, один конец рядом) пропадают и теряют физику.
+        function objRadiusOfRef(ref) {
+            const sz = loadedObjSize[ref];
+            return sz ? 0.5 * Math.hypot(sz.x || 0, sz.y || 0, sz.z || 0) : 0;
+        }
         function playRenderCutoff() {
             const loadMargin = 100;
             const visualRadius = qualitySettings.visualRadius || qualitySettings.loadRadius || 350;
@@ -2976,7 +2982,7 @@
 
                 // Сервер сортирует ответ с поправкой на размер объекта
                 const physicsCap = maxStreamedBodies();
-                const withDist = sceneResp.objects.map(o => [o, Math.hypot(o.px - cx, o.py - cy, o.pz - cz)]);
+                const withDist = sceneResp.objects.map(o => [o, Math.max(0, Math.hypot(o.px - cx, o.py - cy, o.pz - cz) - 0.5 * Math.hypot(o.sx || 0, o.sy || 0, o.sz || 0))]);
                 withDist.sort((a, b) => a[1] - b[1]);
 
                 const nearRefs = new Set();
@@ -3004,7 +3010,7 @@
                 for (const ref of Array.from(playOnlyRefs)) {
                     const p = loadedObjPos[ref];
                     if (!p) continue;
-                    const d = Math.hypot(p.x - cx, p.y - cy, p.z - cz);
+                    const d = Math.hypot(p.x - cx, p.y - cy, p.z - cz) - objRadiusOfRef(ref);
                     if (d > unloadDist) {
                         removePhysicsBodyForRef(ref);
                     }
@@ -3016,7 +3022,7 @@
                     const mesh = sceneObjs[ref];
                     if (!mesh) continue;
                     const p = loadedObjPos[ref];
-                    const d = Math.hypot(p.x - cx, p.y - cy, p.z - cz);
+                    const d = Math.hypot(p.x - cx, p.y - cy, p.z - cz) - objRadiusOfRef(ref);
                     mesh.visible = d <= renderCutoff;
                 }
             } finally {
@@ -3181,13 +3187,8 @@
             physicsWorld.defaultContactMaterial.restitution = 0.05;
 
             // Touched — настоящее срабатывание по факту контакта в cannon.js
-            physicsWorld.addEventListener('beginContact', (e) => {
-                const refA = e.bodyA.__ref, refB = e.bodyB.__ref;
-                if (refA !== undefined && refB !== undefined) {
-                    fireLuaSignal(refA, 'Touched', [{ __instanceRef: refB }]);
-                    fireLuaSignal(refB, 'Touched', [{ __instanceRef: refA }]);
-                }
-            });
+            // (события beginContact в cannon.js 0.6 нет — см. updateContactTouches)
+            touchContacts = new Map();
 
             physicsBodies = {};
             playSnapshot = {};
@@ -3208,7 +3209,7 @@
                     const mesh = sceneObjs[refStr];
                     if (!mesh) continue;
                     const body = physicsBodies[refStr];
-                    const d = Math.hypot(body.position.x - spawn.x, body.position.y - spawn.y, body.position.z - spawn.z);
+                    const d = Math.hypot(body.position.x - spawn.x, body.position.y - spawn.y, body.position.z - spawn.z) - objRadiusOfRef(refStr);
                     mesh.visible = d <= cutoff;
                 }
             }
@@ -5053,12 +5054,7 @@ end
         // в пределах MaxActivationDistance (по умолчанию 32). Сигнал общий для серверной и
         // клиентской Lua-VM (как и у ProximityPrompt).
         let _cdLogT = 0;
-        function _cdLog(msg) { // не чаще раза в 300 мс, чтобы не засорять Output
-            const n = performance.now();
-            if (n - _cdLogT < 300) return;
-            _cdLogT = n;
-            logLuaOutput('info', 'ClickDetector: ' + msg);
-        }
+        function _cdLog(msg) { /* отладочный лог ClickDetector отключён */ }
         function luaClickDetectorAt(cx, cy, right, fat) {
             if (!isPlaying || (!luaServerL && !luaClientL) || luaControlsDisabled) return false;
             const vp = document.getElementById('viewport');
@@ -8809,6 +8805,36 @@ end
         // Touched/TouchEnded для частей с CanCollide=false (триггеры): у них collisionFilterMask=0, поэтому
         // cannon контактов не создаёт, а в Roblox такие части Touched всё равно получают (если CanTouch).
         let touchingTriggers = new Set();
+        // Touched/TouchEnded от обычных контактов тел. cannon.js 0.6 не шлёт beginContact, поэтому
+        // после шага смотрим physicsWorld.contacts: новая пара -> Touched, пара пропала -> TouchEnded.
+        let touchContacts = new Map();   // "a|b" -> {a, b, frame}
+        let touchFrame = 0;
+        function updateContactTouches() {
+            if (!physicsWorld) return;
+            touchFrame++;
+            const listened = (ref) => {
+                const l1 = luaSignalsByKey[ref + '|Touched'], l2 = luaSignalsByKey[ref + '|TouchEnded'];
+                return (l1 && l1.length) || (l2 && l2.length);
+            };
+            for (const c of physicsWorld.contacts) {
+                const a = c.bi.__ref, b = c.bj.__ref;
+                if (a === undefined || b === undefined || a === b) continue;
+                const key = a < b ? a + '|' + b : b + '|' + a;
+                const rec = touchContacts.get(key);
+                if (rec) { rec.frame = touchFrame; continue; }
+                if (!listened(a) && !listened(b)) continue;
+                touchContacts.set(key, { a, b, frame: touchFrame });
+                fireLuaSignal(a, 'Touched', [{ __instanceRef: b }]);
+                fireLuaSignal(b, 'Touched', [{ __instanceRef: a }]);
+            }
+            for (const [key, rec] of touchContacts) {
+                if (touchFrame - rec.frame > 3) {   // небольшой гистерезис, чтобы не мигало на дребезге контакта
+                    touchContacts.delete(key);
+                    fireLuaSignal(rec.a, 'TouchEnded', [{ __instanceRef: rec.b }]);
+                    fireLuaSignal(rec.b, 'TouchEnded', [{ __instanceRef: rec.a }]);
+                }
+            }
+        }
         function updateTouchTriggers() {
             if (!charBody || luaHumanoidRootPartRef === -1) return;
             const refs = new Set();
@@ -8878,6 +8904,7 @@ end
                 );
             }
             updateTouchTriggers();
+            updateContactTouches();
             followCharacterCamera();
             updateProximityPrompts();
             maybeStreamGeometry();
