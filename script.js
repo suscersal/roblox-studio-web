@@ -6211,8 +6211,21 @@ end
                 return;
             }
             if (name === 'Transparency' && mesh && mesh.material) {
-                mesh.material.transparent = value > 0;
-                mesh.material.opacity = 1 - value;
+                // Материалы деталей ОБЩИЕ (кеш по цвету/прозрачности): раньше opacity менялся прямо у общего
+                // материала, и когда скрипт босса делал setVisibility(0), пропадали ВСЕ детали того же цвета
+                // (серые стены и т.д.). Теперь у детали своя копия материала (создаётся один раз).
+                const tr = Math.max(0, Math.min(1, Number(value) || 0));
+                const own = (m) => {
+                    if (m.map) return m;                       // грань с текстурой (Decal) — не трогаем
+                    if (m.userData && m.userData.ownMat) return m;
+                    const c = m.clone(); c.userData = Object.assign({}, m.userData, { ownMat: true }); return c;
+                };
+                mesh.material = Array.isArray(mesh.material) ? mesh.material.map(own) : own(mesh.material);
+                for (const m of (Array.isArray(mesh.material) ? mesh.material : [mesh.material])) {
+                    if (m.map) continue;
+                    m.transparent = tr > 0;
+                    m.opacity = 1 - tr;
+                }
                 return;
             }
             if (name === 'CanCollide') {
@@ -7853,7 +7866,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-09-a');
+            logLuaOutput('info', 'script.js build: boss-2026-10-09-b');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
