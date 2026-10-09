@@ -3522,6 +3522,78 @@ Vector3.xAxis = Vector3.new(1, 0, 0)
 Vector3.yAxis = Vector3.new(0, 1, 0)
 Vector3.zAxis = Vector3.new(0, 0, 1)
 
+-- BrickColor: палитра частых цветов Roblox (номер, имя, sRGB). Неизвестное имя/номер -> Medium stone grey (как в Roblox).
+local __BC_PALETTE = {
+    {1, "White", 242, 243, 243}, {5, "Brick yellow", 215, 197, 154}, {9, "Light reddish violet", 232, 186, 200},
+    {21, "Bright red", 196, 40, 28}, {23, "Bright blue", 13, 105, 172}, {24, "Bright yellow", 245, 205, 48},
+    {26, "Black", 27, 42, 53}, {28, "Dark green", 40, 127, 71}, {37, "Bright green", 75, 151, 75},
+    {38, "Dark orange", 160, 95, 53}, {45, "Light blue", 180, 210, 228}, {101, "Medium red", 218, 134, 122},
+    {102, "Medium blue", 110, 153, 202}, {104, "Bright violet", 107, 50, 124}, {105, "Br. yellowish orange", 226, 155, 64},
+    {106, "Bright orange", 218, 133, 65}, {119, "Br. yellowish green", 164, 189, 71}, {124, "Bright reddish violet", 146, 57, 120},
+    {125, "Light orange", 234, 184, 146}, {133, "Neon orange", 213, 115, 61}, {141, "Earth green", 39, 70, 45},
+    {192, "Reddish brown", 105, 64, 40}, {194, "Medium stone grey", 163, 162, 165}, {199, "Dark stone grey", 99, 95, 98},
+    {208, "Light stone grey", 229, 228, 223}, {217, "Brown", 124, 92, 70}, {226, "Cool yellow", 253, 234, 141},
+    {1001, "Institutional white", 248, 248, 248}, {1002, "Mid gray", 205, 205, 205}, {1003, "Really black", 17, 17, 17},
+    {1004, "Really red", 255, 0, 0}, {1005, "Deep orange", 255, 175, 0}, {1006, "Alder", 180, 128, 255},
+    {1007, "Dusty Rose", 163, 75, 75}, {1008, "Olive", 193, 190, 66}, {1009, "New Yeller", 255, 255, 0},
+    {1010, "Really blue", 0, 0, 255}, {1011, "Navy blue", 0, 32, 96}, {1012, "Deep blue", 33, 84, 185},
+    {1013, "Cyan", 4, 175, 236}, {1014, "CGA brown", 170, 85, 0}, {1015, "Magenta", 170, 0, 170},
+    {1016, "Pink", 255, 102, 204}, {1017, "Deep orange", 255, 175, 0}, {1018, "Teal", 18, 238, 212},
+    {1019, "Toothpaste", 0, 255, 255}, {1020, "Lime green", 0, 255, 0}, {1025, "Pastel orange", 255, 201, 201},
+    {1026, "Pastel violet", 177, 167, 255}, {1028, "Pastel green", 204, 255, 204}, {1029, "Pastel yellow", 255, 255, 204},
+    {1030, "Pastel brown", 255, 204, 153}, {1031, "Royal purple", 98, 37, 209}, {1032, "Hot pink", 255, 0, 191},
+}
+BrickColor = {}
+BrickColor.__index = BrickColor
+local function __bc_make(entry)
+    local c = Color3.fromRGB(entry[3], entry[4], entry[5])
+    return setmetatable({Number = entry[1], Name = entry[2], Color = c, r = c.R, g = c.G, b = c.B}, BrickColor)
+end
+local function __bc_by_number(n)
+    for i = 1, #__BC_PALETTE do local e = __BC_PALETTE[i]; if e[1] == n then return __bc_make(e) end end
+    return __bc_make({194, "Medium stone grey", 163, 162, 165})
+end
+local function __bc_by_name(name)
+    local want = string.lower(tostring(name))
+    for i = 1, #__BC_PALETTE do local e = __BC_PALETTE[i]; if string.lower(e[2]) == want then return __bc_make(e) end end
+    return __bc_make({194, "Medium stone grey", 163, 162, 165})
+end
+local function __bc_nearest(r, g, b)   -- r,g,b в 0..1
+    local best, bd = nil, math.huge
+    for i = 1, #__BC_PALETTE do
+        local e = __BC_PALETTE[i]
+        local dr, dg, db = e[3] / 255 - r, e[4] / 255 - g, e[5] / 255 - b
+        local d = dr * dr + dg * dg + db * db
+        if d < bd then bd = d; best = e end
+    end
+    return __bc_make(best)
+end
+function BrickColor.new(a, g, b)
+    if type(a) == "number" and g == nil then return __bc_by_number(a) end
+    if type(a) == "string" then return __bc_by_name(a) end
+    if type(a) == "table" and rawget(a, "R") ~= nil then return __bc_nearest(a.R, a.G, a.B) end
+    if type(a) == "table" and rawget(a, "Number") ~= nil then return a end
+    if type(a) == "number" and type(g) == "number" and type(b) == "number" then return __bc_nearest(a, g, b) end
+    return __bc_by_number(194)
+end
+function BrickColor.Random() return __bc_make(__BC_PALETTE[math.random(1, #__BC_PALETTE)]) end
+BrickColor.random = BrickColor.Random
+function BrickColor.palette(i) return __bc_make(__BC_PALETTE[((tonumber(i) or 0) % #__BC_PALETTE) + 1]) end
+-- BrickColor.Red(), BrickColor.White() ... — по имени без пробелов
+for i = 1, #__BC_PALETTE do
+    local e = __BC_PALETTE[i]
+    local key = string.gsub(e[2], "[^%w]", "")
+    if rawget(BrickColor, key) == nil then BrickColor[key] = function() return __bc_make(e) end end
+end
+BrickColor.Red = function() return __bc_by_name("Bright red") end
+BrickColor.Blue = function() return __bc_by_name("Bright blue") end
+BrickColor.Yellow = function() return __bc_by_name("Bright yellow") end
+BrickColor.Green = function() return __bc_by_name("Dark green") end
+BrickColor.Gray = function() return __bc_by_name("Medium stone grey") end
+BrickColor.Orange = function() return __bc_by_name("Bright orange") end
+BrickColor.__eq = function(x, y) return rawget(x, "Number") == rawget(y, "Number") end
+BrickColor.__tostring = function(x) return rawget(x, "Name") end
+
 Color3 = {}
 Color3.__index = Color3
 function Color3.new(r, g, b) return setmetatable({R = r or 0, G = g or 0, B = b or 0}, Color3) end
@@ -3856,6 +3928,9 @@ function ColorSequence_new(a, b)
     return { Keypoints = { ColorSequenceKeypoint_new(0, a), ColorSequenceKeypoint_new(1, a) } }
 end
 ColorSequence = { new = ColorSequence_new }
+-- NumberRange.new(min[, max]) — Min/Max (ParticleEmitter.Lifetime/Speed/..., без эффекта в эмуляторе)
+function NumberRange_new(min, max) return { Min = min or 0, Max = max or min or 0 } end
+NumberRange = { new = NumberRange_new }
 
 Vector2 = {}
 Vector2.__index = Vector2
@@ -4594,6 +4669,15 @@ local function isDescendantOf(ref, ancestor)
 end
 
 local COMPAT = {
+    -- ParticleEmitter:Emit(n) — частицы в эмуляторе не рисуются, вызов допустим и ничего не делает
+    Emit = function(t, ref) return function(self, count) end end,
+    -- Debris:AddItem(item, lifetime) — уничтожить item через lifetime секунд (по умолчанию 10)
+    AddItem = function(t, ref) return function(self, item, lifetime)
+        if item == nil then return end
+        task.delay(tonumber(lifetime) or 10, function()
+            if item.Parent ~= nil then item:Destroy() end
+        end)
+    end end,
     SetAttribute = function(t, ref) return function(self, name, value)
         __attr_set(ref, name, value)
     end end,
@@ -4744,6 +4828,14 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             local rx, ry, rz = cf:ToOrientation()
             return Vector3.new(math.deg(rx), math.deg(ry), math.deg(rz))
         end
+        if k == "Color" and not __is_gui_ref(ref) then
+            local r, g, b = __get_color(ref)
+            if r then return Color3.new(r, g, b) end
+        end
+        if k == "BrickColor" and not __is_gui_ref(ref) then
+            local r, g, b = __get_color(ref)
+            if r then return BrickColor.new(Color3.new(r, g, b)) end
+        end
         local h = COMPAT[k]
         if h then
             if COMPAT_PROPS[k] then return h(t, ref) end
@@ -4760,7 +4852,9 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
     InstanceMT.__newindex = function(t, k, v)
         local ref = rawget(t, "__ref")
         if type(v) == "table" then
-            if k == "Value" then
+            if k == "BrickColor" and rawget(v, "Number") ~= nil and rawget(v, "Color") ~= nil then
+                return baseNew(t, "Color", v.Color)
+            elseif k == "Value" then
                 __tblVals[ref] = v
                 return
             elseif k == "CFrame" and rawget(v, "R00") ~= nil then
@@ -6104,6 +6198,18 @@ end
             }
             if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
             const mesh = sceneObjs[ref];
+            if (name === 'Color' && mesh && mesh.material && value && typeof value === 'object' && 'r' in value) {
+                // Цвет детали: материалы общие (кеш по цвету), поэтому красим СВОЮ копию; текстурные грани
+                // (Decal) не трогаем — цвет детали на них не влияет.
+                const col = new THREE.Color(value.r, value.g, value.b);
+                const tint = (m) => {
+                    if (m.map) return m;
+                    if (m.userData && m.userData.ownColor) { m.color.copy(col); return m; }
+                    const c = m.clone(); c.userData = Object.assign({}, m.userData, { ownColor: true }); c.color.copy(col); return c;
+                };
+                mesh.material = Array.isArray(mesh.material) ? mesh.material.map(tint) : tint(mesh.material);
+                return;
+            }
             if (name === 'Transparency' && mesh && mesh.material) {
                 mesh.material.transparent = value > 0;
                 mesh.material.opacity = 1 - value;
@@ -6288,6 +6394,13 @@ end
             // GUI (Frame/TextButton/...) раньше тут вообще не копировался —
             if (guiPropsByRef[ref]) {
                 cloneGuiSubtreeInto(ref, newRef);
+            } else {
+                // Instance:Clone() копирует и ВСЕХ потомков (Accessory -> Handle -> SpecialMesh/Weld ...):
+                // раньше клон приходил пустым, и FindFirstChild("Handle") у склонированного аксессуара был nil.
+                for (const childRef of (luaChildrenByRef[ref] || [])) {
+                    if (!luaByRef[childRef]) continue;
+                    luaSetParent(luaCloneRef(childRef), newRef);
+                }
             }
             return newRef;
         }
@@ -6798,6 +6911,14 @@ end
             def('__sound_control', function (L2) {
                 luaSoundControl(lua.lua_tonumber(L2, 1), lua.lua_tojsstring(L2, 2));
                 return 0;
+            });
+            def('__get_color', function (L2) {   // part.Color -> r, g, b (0..1) или ничего
+                const m = sceneObjs[lua.lua_tonumber(L2, 1)];
+                if (!m || !m.material) return 0;
+                const mat = Array.isArray(m.material) ? (m.material.find(x => x && !x.map) || m.material[0]) : m.material;
+                if (!mat || !mat.color) return 0;
+                lua.lua_pushnumber(L2, mat.color.r); lua.lua_pushnumber(L2, mat.color.g); lua.lua_pushnumber(L2, mat.color.b);
+                return 3;
             });
             def('__get_prop', function (L2) {
                 const v = luaGetGenericProp(lua.lua_tonumber(L2, 1), lua.lua_tojsstring(L2, 2));
@@ -7732,7 +7853,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-08-e');
+            logLuaOutput('info', 'script.js build: boss-2026-10-09-a');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
