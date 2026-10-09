@@ -1385,6 +1385,26 @@
 
         let thirdPerson = false; // true — камера позади куба-персонажа, не в глазах
         const THIRD_PERSON_DIST = 12;
+        // Дистанция камеры в Play — как у Roblox: от 0.5 до 128 студов (CameraMaxZoomDistance по умолчанию).
+        let playCamDist = THIRD_PERSON_DIST;
+        const PLAY_CAM_MIN = 0.5, PLAY_CAM_MAX = 128;
+        // Растягивать пальцы (или крутить колёсико вниз) — камера отдаляется, сводить — приближается.
+        // Чтобы поменять направление жеста, поставьте true:
+        const PINCH_SPREAD_ZOOMS_IN = false;
+        function applyPlayZoom(factor) {   // factor > 1 — отдаляем, < 1 — приближаем
+            if (!isFinite(factor) || factor <= 0) return;
+            if (!thirdPerson) {
+                if (factor <= 1) return;               // уже вплотную (первое лицо)
+                thirdPerson = true; playCamDist = 1.5; // отдаляем от первого лица — выходим в третье
+                if (charMesh) charMesh.visible = true;
+            }
+            playCamDist = Math.max(PLAY_CAM_MIN, Math.min(PLAY_CAM_MAX, playCamDist * factor));
+            if (playCamDist <= 0.8 && factor < 1) {    // вплотную — снова первое лицо, как в Roblox
+                thirdPerson = false;
+                if (charMesh) charMesh.visible = false;
+            }
+            updateCamera();
+        }
 
         function updateCamera() {
             const { theta, phi } = spherical;
@@ -1393,7 +1413,7 @@
             const dirZ = Math.sin(phi) * Math.cos(theta);
             if (isPlaying && thirdPerson) {
                 // dir — направление "назад" (см.
-                camera.position.set(target.x + dirX * THIRD_PERSON_DIST, target.y + dirY * THIRD_PERSON_DIST, target.z + dirZ * THIRD_PERSON_DIST);
+                camera.position.set(target.x + dirX * playCamDist, target.y + dirY * playCamDist, target.z + dirZ * playCamDist);
                 camera.lookAt(target.x, target.y, target.z);
             } else {
                 // Камера от первого лица: позиция глаза = target,
@@ -1406,6 +1426,7 @@
 
         function toggleThirdPerson() {
             thirdPerson = !thirdPerson;
+            if (thirdPerson && playCamDist < 1) playCamDist = THIRD_PERSON_DIST;
             updateCamera();
             notify(thirdPerson ? t('cam_third') : t('cam_first'));
         }
@@ -1515,6 +1536,10 @@
                 return;
             }
 
+            if (isPlaying && !luaControlsDisabled && !cameraIsScriptable) {
+                applyPlayZoom(Math.pow(1.1, (PINCH_SPREAD_ZOOMS_IN ? 1 : 1) * e.deltaY / 100));
+                return;
+            }
             // r больше не двигает камеру (вид от 1-го лица), но всё ещё
             // задаёт дальность подгрузки сцены и скорость панорамирования
             spherical.r = Math.max(1, Math.min(500, spherical.r + e.deltaY * .05));
@@ -1554,6 +1579,12 @@
                 const dx = e.targetTouches[0].clientX - e.targetTouches[1].clientX;
                 const dy = e.targetTouches[0].clientY - e.targetTouches[1].clientY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
+                if (isPlaying) {
+                    if (_td > 0 && dist > 0) applyPlayZoom(PINCH_SPREAD_ZOOMS_IN ? _td / dist : dist / _td);
+                    _td = dist;
+                    _tch = Array.from(e.targetTouches);
+                    return;
+                }
                 spherical.r = Math.max(1, Math.min(500, spherical.r + (dist - _td) * .05));
                 _td = dist;
                 _tch = Array.from(e.targetTouches);
@@ -2934,6 +2965,21 @@
         // Кэши геометрии/материалов для мешей, которые Play подгружает по
         let playGeoCache = {}, playMatCache = {};
 
+        // Последний CFrame, который СКРИПТ выставил детали (PivotTo/CFrame/Position/твин). Стриминг выгружает и
+        // заново строит детали из исходных данных карты — без этого сдвинутый босс «откатывался» на старое
+        // место, а дистанции отсечения считались от исходной точки, а не от текущей.
+        let luaPartXform = {};   // ref -> {p:[x,y,z], q:[x,y,z,w]}
+        function objPosFor(o) {
+            const t = luaPartXform[o.ref];
+            return t ? { x: t.p[0], y: t.p[1], z: t.p[2] } : { x: o.px, y: o.py, z: o.pz };
+        }
+        function applyMovedXform(ref, mesh) {
+            const t = luaPartXform[ref];
+            if (!t || !mesh) return;
+            const p0 = new THREE.Vector3(), q0 = new THREE.Quaternion(), s0 = new THREE.Vector3();
+            mesh.matrix.decompose(p0, q0, s0);
+            mesh.matrix.compose(new THREE.Vector3(t.p[0], t.p[1], t.p[2]), new THREE.Quaternion(t.q[0], t.q[1], t.q[2], t.q[3]), s0);
+        }
         function addPhysicsBodyForObj(o) {
             if (physicsBodies[o.ref]) return; // уже физически представлен
             let mesh = sceneObjs[o.ref];
@@ -2941,6 +2987,8 @@
                 // Этого объекта не было в текущем виде редактора —
                 // подгружаем именно для физики и добавляем в сцену.
                 mesh = buildMeshFromObj(o, playGeoCache, playMatCache);
+                if (!(o.ref in playSnapshot)) playSnapshot[o.ref] = mesh.matrix.clone();   // снимок — ИСХОДНОЕ положение
+                applyMovedXform(o.ref, mesh);
                 scene.add(mesh);
                 sceneObjs[o.ref] = mesh;
                 playOnlyRefs.add(o.ref);
@@ -2948,7 +2996,7 @@
             if (!(o.ref in playSnapshot)) {
                 playSnapshot[o.ref] = mesh.matrix.clone();
             }
-            loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+            loadedObjPos[o.ref] = objPosFor(o);
             loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
 
             const pos = new THREE.Vector3();
@@ -2985,18 +3033,19 @@
         // Только меш, без CANNON.Body — для объектов, которые видно, но до
         function addVisualMeshForObj(o) {
             if (sceneObjs[o.ref]) {
-                loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+                loadedObjPos[o.ref] = objPosFor(o);
                 loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
                 return; // уже загружен (визуально или физически) — трогать не нужно
             }
             const mesh = buildMeshFromObj(o, playGeoCache, playMatCache);
-            scene.add(mesh);
-            sceneObjs[o.ref] = mesh;
-            playOnlyRefs.add(o.ref);
             if (!(o.ref in playSnapshot)) {
                 playSnapshot[o.ref] = mesh.matrix.clone();
             }
-            loadedObjPos[o.ref] = { x: o.px, y: o.py, z: o.pz };
+            applyMovedXform(o.ref, mesh);
+            scene.add(mesh);
+            sceneObjs[o.ref] = mesh;
+            playOnlyRefs.add(o.ref);
+            loadedObjPos[o.ref] = objPosFor(o);
             loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
         }
 
@@ -3056,7 +3105,7 @@
 
                 // Сервер сортирует ответ с поправкой на размер объекта
                 const physicsCap = maxStreamedBodies();
-                const withDist = sceneResp.objects.map(o => [o, Math.max(0, Math.hypot(o.px - cx, o.py - cy, o.pz - cz) - 0.5 * Math.hypot(o.sx || 0, o.sy || 0, o.sz || 0))]);
+                const withDist = sceneResp.objects.map(o => { const op = objPosFor(o); return [o, Math.max(0, Math.hypot(op.x - cx, op.y - cy, op.z - cz) - 0.5 * Math.hypot(o.sx || 0, o.sy || 0, o.sz || 0))]; });
                 withDist.sort((a, b) => a[1] - b[1]);
 
                 const nearRefs = new Set();
@@ -5392,6 +5441,7 @@ end
                 body.aabbNeedsUpdate = true;
                 if (body.wakeUp) body.wakeUp();
             }
+            luaPartXform[ref] = { p: [pos.x, pos.y, pos.z], q: [q.x, q.y, q.z, q.w] };
             if (loadedObjPos[ref]) loadedObjPos[ref] = { x: pos.x, y: pos.y, z: pos.z };
             const mesh = sceneObjs[ref];
             if (mesh) {
@@ -7866,7 +7916,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-09-b');
+            logLuaOutput('info', 'script.js build: boss-2026-10-09-e');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7881,6 +7931,8 @@ end
             luaParentByRef = {};
             luaChildrenByRef = {};
             luaInitValues = [];
+            luaPartXform = {};
+            playCamDist = THIRD_PERSON_DIST;
             if (allR && allR.ok && allR.instances) {
                 for (const inst of allR.instances) {
                     luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
@@ -9793,9 +9845,64 @@ end
             panel.appendChild(container);
         }
 
+        // Экспорт ассета (меш/текстура/звук) по долгому нажатию на строку свойства: берём тот же файл, что и
+        // игра (/api/asset-proxy, он кешируется на диск), и отдаём через «Поделиться» или обычным скачиванием.
+        const ASSET_PROP_RE = /(mesh\s*id|texture\s*id|sound\s*id|animation\s*id|image|colormap|normalmap|texture)$/i;
+        async function exportAssetById(id, label) {
+            try {
+                notify('Экспорт ' + label + ' ' + id + '…');
+                const r = await fetch('/api/asset-proxy?id=' + id);
+                if (!r.ok) { notify('Не удалось получить ассет ' + id + ' (HTTP ' + r.status + ')', 'warn'); return; }
+                const blob = await r.blob();
+                const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+                const txt = String.fromCharCode.apply(null, head);
+                let ext = '.bin';
+                if (txt.startsWith('version ')) ext = '.mesh';
+                else if (head[0] === 0x89 && txt.slice(1, 4) === 'PNG') ext = '.png';
+                else if (txt.startsWith('OggS')) ext = '.ogg';
+                else if (head[0] === 0xFF && head[1] === 0xD8) ext = '.jpg';
+                const name = 'asset_' + id + ext;
+                const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try { await navigator.share({ files: [file], title: name }); notify('Отправлено: ' + name + ' (' + Math.round(blob.size / 1024) + ' КБ)'); return; }
+                    catch (e) { if (e && e.name === 'AbortError') return; /* иначе — обычное скачивание */ }
+                }
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob); a.download = name;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+                notify('Сохранено: ' + name + ' (' + Math.round(blob.size / 1024) + ' КБ)');
+            } catch (e) {
+                notify('Ошибка экспорта: ' + (e && e.message ? e.message : e), 'warn');
+            }
+        }
+        function attachAssetExport(row, k, v) {
+            if (typeof v !== 'string' || !ASSET_PROP_RE.test(k)) return;
+            const m = /(\d{5,})/.exec(v);
+            if (!m) return;
+            let timer = null, sx = 0, sy = 0;
+            const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+            const start = (e) => {
+                const p = e.touches ? e.touches[0] : e;
+                sx = p.clientX; sy = p.clientY; cancel();
+                timer = setTimeout(() => { timer = null; exportAssetById(m[1], k); }, 700);
+            };
+            const move = (e) => {
+                const p = e.touches ? e.touches[0] : e;
+                if (Math.abs(p.clientX - sx) > 10 || Math.abs(p.clientY - sy) > 10) cancel();
+            };
+            row.addEventListener('touchstart', start, { passive: true });
+            row.addEventListener('touchmove', move, { passive: true });
+            row.addEventListener('touchend', cancel); row.addEventListener('touchcancel', cancel);
+            row.addEventListener('mousedown', start); row.addEventListener('mousemove', move);
+            row.addEventListener('mouseup', cancel); row.addEventListener('mouseleave', cancel);
+            row.title = (row.title ? row.title + ' — ' : '') + 'долгое нажатие: экспорт файла ' + m[1];
+        }
+
         function addPropRow(panel, ref, k, v) {
             const row = document.createElement('div');
             row.className = 'prop-row';
+            attachAssetExport(row, k, v);
 
             const nm = document.createElement('span');
             nm.className = 'prop-name';
