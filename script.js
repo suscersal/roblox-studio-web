@@ -132,6 +132,11 @@
                 avatar_saved: '✅ Avatar saved',
                 avatar_save_cancelled: 'Save cancelled',
                 account_title: '👤 Roblox Account',
+                acc_asset_title: 'Download asset by ID (mesh, texture, sound)',
+                acc_asset_ph: 'MeshId / Asset ID (e.g. 80841113310862)',
+                acc_asset_btn: '⬇ Download',
+                acc_asset_bad: 'Enter a numeric asset ID',
+                acc_asset_failed: '↯ Insert unparsed meshes (IDs can be separated by spaces)',
                 account_section_login: 'Roblox login (cookie)',
                 account_section_apikey: 'Open Cloud API key',
                 apikey_desc: 'Create a key at <a href="https://create.roblox.com/dashboard/credentials" target="_blank">create.roblox.com/dashboard/credentials</a> with read-only Asset Delivery access and paste it here — needed for sounds/images in Play (Roblox requires auth for AssetDelivery since April 2025).',
@@ -299,6 +304,11 @@
                 avatar_saved: '✅ Аватар сохранён',
                 avatar_save_cancelled: 'Сохранение отменено',
                 account_title: '👤 Аккаунт Roblox',
+                acc_asset_title: 'Скачать ассет по ID (меш, текстура, звук)',
+                acc_asset_ph: 'MeshId / Asset ID (например, 80841113310862)',
+                acc_asset_btn: '⬇ Скачать',
+                acc_asset_bad: 'Введи числовой ID ассета',
+                acc_asset_failed: '↯ Вставить неразобранные меши (ID можно через пробел)',
                 account_section_login: 'Вход в Roblox (кука)',
                 account_section_apikey: 'Open Cloud API key',
                 apikey_desc: 'Создайте ключ на <a href="https://create.roblox.com/dashboard/credentials" target="_blank">create.roblox.com/dashboard/credentials</a> с правом только на чтение ассетов (Asset Delivery) и вставьте сюда — нужен для звуков/картинок в Play (Roblox требует авторизацию на AssetDelivery с апреля 2025).',
@@ -1800,6 +1810,7 @@
 
         // Форматы 4.00/4.01 (и, по той же структуре, 5.00/6.00) — с этой
         let _lastMeshParseFailReason = '';
+        const failedMeshIds = new Set();   // меши, которые не удалось разобрать (для кнопки в Account)
         function _tryParseV4Layout(dv, buf, vertOff, vertSize, numVerts, numFaces, dbg) {
             const faceOff = vertOff + numVerts * vertSize;
             const needBytes = faceOff + numFaces * 12;
@@ -2165,10 +2176,12 @@
                         const nl = bytes.indexOf(10);
                         parsed = await _parseRobloxMeshDraco(bytes.subarray(nl + 1));
                     } else {
+                        failedMeshIds.add(String(meshId));
                         logLuaOutput('warn', 'Mesh ' + meshId + ': формат "' + (version || '?') + '" пока не поддержан, использую приближение');
                         return null;
                     }
                     if (!parsed) {
+                        failedMeshIds.add(String(meshId));
                         logLuaOutput('warn', 'Mesh ' + meshId + ' (версия "' + version + '"): не удалось разобрать — ' + (_lastMeshParseFailReason || 'причина неизвестна') + ', использую приближение');
                         return null;
                     }
@@ -7916,7 +7929,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-09-f');
+            logLuaOutput('info', 'script.js build: boss-2026-10-09-h');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -10558,6 +10571,43 @@ end
             showAccountDialog();
         }
 
+        // Скачать ассет по ID из диалога Account: меш / текстура / звук. Дальше — тот же путь, что у долгого
+        // нажатия на MeshId: в приложении системное окно «Сохранить как», в браузере «Поделиться»/скачивание.
+        function downloadAssetFromAccount() {
+            const inp = document.getElementById('acc-asset-id');
+            const ids = Array.from(new Set(((inp ? inp.value : '').match(/\d{4,}/g)) || []));
+            if (!ids.length) { notify(t('acc_asset_bad'), 'warn'); return; }
+            if (ids.length === 1) { exportAssetById(ids[0], 'Asset'); return; }
+            exportAssetsZip(ids);
+        }
+        function fillFailedMeshIds() {
+            const inp = document.getElementById('acc-asset-id');
+            if (!inp) return;
+            inp.value = Array.from(failedMeshIds).join(' ');
+            notify(failedMeshIds.size ? ('Неразобранных мешей: ' + failedMeshIds.size) : 'Неразобранных мешей пока нет (сначала запусти Play)');
+        }
+        // Несколько ассетов одним ZIP: в приложении — окно «Сохранить как», в браузере — «Поделиться»/скачивание.
+        async function exportAssetsZip(ids) {
+            try {
+                notify('Экспорт ' + ids.length + ' ассетов…');
+                const bridge = window.AndroidBridge && typeof window.AndroidBridge.exportRbxlFile === 'function' &&
+                    typeof window.AndroidBridge.getDataDir === 'function';
+                const er = await api('POST', '/api/asset-export', { ids, inline: !bridge });
+                if (!er || !er.ok) { notify('Не удалось получить ассеты: ' + ((er && er.error) || 'ошибка'), 'warn'); return; }
+                if (er.missing && er.missing.length) notify('Не получены: ' + er.missing.join(', '), 'warn');
+                if (bridge) { window.AndroidBridge.exportRbxlFile(er.path, er.name); return; }
+                const blob = _b64ToBlob(er.b64, 'application/zip');
+                const file = new File([blob], er.name, { type: 'application/zip' });
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    try { await navigator.share({ files: [file], title: er.name }); return; }
+                    catch (e) { if (e && e.name === 'AbortError') return; }
+                }
+                _downloadBlob(blob, er.name);
+                notify('Сохранено: ' + er.name + ' (' + Math.round(er.size / 1024) + ' КБ, ассетов: ' + er.got.length + ')');
+            } catch (e) {
+                notify('Ошибка экспорта: ' + (e && e.message ? e.message : e), 'warn');
+            }
+        }
         async function showAccountDialog() {
             let loggedIn = false;
             if (IS_ANDROID) {
@@ -10571,6 +10621,14 @@ end
             const localImportRow = '<div class="modal-row"><button onclick="pickAvatarFileForImport()">' + t('avatar_import_file') + '</button></div>';
             const apiKeyHtml = await _apiKeySectionHtml();
             const hr = '<hr style="border-color:#374151;border-style:solid;margin:12px 0 4px">';
+            const assetHtml =
+                '<h4 style="margin:4px 0">' + t('acc_asset_title') + '</h4>' +
+                '<div style="display:flex; gap:6px; margin-bottom:8px;">' +
+                '<input id="acc-asset-id" inputmode="numeric" placeholder="' + t('acc_asset_ph') + '" style="flex:1; padding:6px;" ' +
+                'onkeydown="if(event.key===\'Enter\')downloadAssetFromAccount()">' +
+                '<button onclick="downloadAssetFromAccount()" style="background:#3b82f6; padding:4px 12px;">' + t('acc_asset_btn') + '</button>' +
+                '</div>' +
+                '<div class="modal-row" style="margin-bottom:6px"><button onclick="fillFailedMeshIds()" style="padding:4px 10px;">' + t('acc_asset_failed') + '</button></div>';
 
             if (!loggedIn) {
                 showModal(
@@ -10583,7 +10641,7 @@ end
                         ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#7c3aed">' + t('avatar_login_btn') + '</button>'
                         : '<p style="opacity:.7">' + t('avatar_login_android_only') + '</p>') +
                     '</div>' +
-                    hr + apiKeyHtml +
+                    hr + assetHtml + hr + apiKeyHtml +
                     '<div class="modal-row" style="margin-top:10px">' +
                     '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                     '</div>'
@@ -10608,7 +10666,7 @@ end
         <div class="modal-row">
             <button onclick="logoutRoblox()">${t('avatar_logout')}</button>
         </div>
-        ${hr}${apiKeyHtml}
+        ${hr}${assetHtml}${hr}${apiKeyHtml}
         <div class="modal-row" style="margin-top:10px">
             <button onclick="closeModal()">${t('btn_cancel')}</button>
         </div>

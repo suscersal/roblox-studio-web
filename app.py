@@ -2390,11 +2390,48 @@ def api_asset_export():
     AndroidBridge.exportRbxlFile (системный диалог «Сохранить как», пользователь сам выбирает папку).
     Берёт байты тем же путём, что /api/asset-proxy (память -> диск -> сеть)."""
     body = request.get_json(silent=True) or {}
-    m = _re.search(r'\d+', str(body.get('id', '')))
-    if not m:
-        return jsonify({'ok': False, 'error': 'bad asset id'}), 400
-    asset_id = m.group()
     data_dir = Path(os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)).resolve()
+    ids = []
+    for x in (body.get('ids') or []):
+        mm = _re.search(r'\d+', str(x))
+        if mm and mm.group() not in ids:
+            ids.append(mm.group())
+    if len(ids) > 1:
+        # Несколько ассетов — один ZIP (удобно отдавать одним файлом). Недоступные пропускаем и перечисляем.
+        import io as _io, zipfile as _zipfile, base64 as _b64
+        buf = _io.BytesIO()
+        got, missing = [], []
+        with _zipfile.ZipFile(buf, 'w', _zipfile.ZIP_DEFLATED) as zf:
+            for aid in ids[:60]:
+                with flask_app.test_request_context('/api/asset-proxy?id=' + aid):
+                    resp = api_asset_proxy()
+                    ok = getattr(resp, 'status_code', 200) == 200
+                    raw = resp.get_data() if ok else b''
+                if not raw:
+                    missing.append(aid)
+                    continue
+                ext = ('.mesh' if raw.startswith(b'version ') else '.png' if raw[:4] == b'\x89PNG' else
+                       '.ogg' if raw[:4] == b'OggS' else '.jpg' if raw[:2] == b'\xff\xd8' else '.bin')
+                zf.writestr('asset_%s%s' % (aid, ext), raw)
+                got.append(aid)
+        if not got:
+            return jsonify({'ok': False, 'error': 'ни один ассет не получен: ' + ', '.join(missing)}), 502
+        zname = 'assets_%d.zip' % len(got)
+        zbytes = buf.getvalue()
+        res = {'ok': True, 'name': zname, 'size': len(zbytes), 'got': got, 'missing': missing}
+        if body.get('inline'):
+            res['b64'] = _b64.b64encode(zbytes).decode('ascii')
+        else:
+            zout = (data_dir / ('export_' + zname)).resolve()
+            if data_dir not in zout.parents:
+                return jsonify({'ok': False, 'error': 'bad path'}), 400
+            zout.write_bytes(zbytes)
+            res['path'] = str(zout)
+        return jsonify(res)
+    mm = _re.search(r'\d+', str(ids[0] if ids else body.get('id', '')))
+    if not mm:
+        return jsonify({'ok': False, 'error': 'bad asset id'}), 400
+    asset_id = mm.group()
     with flask_app.test_request_context('/api/asset-proxy?id=' + asset_id):
         resp = api_asset_proxy()
         status = getattr(resp, 'status_code', 200)
