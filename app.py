@@ -2384,6 +2384,42 @@ def _asset_response(raw_bytes, content_type):
     return resp
 
 
+@flask_app.route('/api/asset-export', methods=['POST'])
+def api_asset_export():
+    """Кладёт ассет (меш/текстуру/звук) во временный файл в папке данных приложения — для Android-моста
+    AndroidBridge.exportRbxlFile (системный диалог «Сохранить как», пользователь сам выбирает папку).
+    Берёт байты тем же путём, что /api/asset-proxy (память -> диск -> сеть)."""
+    body = request.get_json(silent=True) or {}
+    m = _re.search(r'\d+', str(body.get('id', '')))
+    if not m:
+        return jsonify({'ok': False, 'error': 'bad asset id'}), 400
+    asset_id = m.group()
+    data_dir = Path(os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)).resolve()
+    with flask_app.test_request_context('/api/asset-proxy?id=' + asset_id):
+        resp = api_asset_proxy()
+        status = getattr(resp, 'status_code', 200)
+        raw = resp.get_data() if status == 200 else b''
+        err_text = resp.get_data(as_text=True)[:300] if status != 200 else ''
+    if status != 200 or not raw:
+        return jsonify({'ok': False, 'error': 'HTTP %s %s' % (status, err_text)}), 502
+    if raw.startswith(b'version '):
+        ext = '.mesh'
+    elif raw[:4] == b'\x89PNG':
+        ext = '.png'
+    elif raw[:4] == b'OggS':
+        ext = '.ogg'
+    elif raw[:2] == b'\xff\xd8':
+        ext = '.jpg'
+    else:
+        ext = '.bin'
+    name = 'asset_%s%s' % (asset_id, ext)
+    out = (data_dir / ('export_' + name)).resolve()
+    if data_dir not in out.parents:
+        return jsonify({'ok': False, 'error': 'bad path'}), 400
+    out.write_bytes(raw)
+    return jsonify({'ok': True, 'path': str(out), 'name': name, 'size': len(raw)})
+
+
 @flask_app.route('/api/asset-proxy')
 def api_asset_proxy():
     """Прокси-загрузка ассета Roblox по id — превращает rbxassetid://N

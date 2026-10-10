@@ -7916,7 +7916,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-09-e');
+            logLuaOutput('info', 'script.js build: boss-2026-10-09-f');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -9851,6 +9851,15 @@ end
         async function exportAssetById(id, label) {
             try {
                 notify('Экспорт ' + label + ' ' + id + '…');
+                // Приложение Android: системный диалог «Сохранить как» (сам выбираешь папку) через мост —
+                // та же схема, что у экспорта .rbxl. WebView сам файл скачать/поделиться не умеет.
+                if (window.AndroidBridge && typeof window.AndroidBridge.getDataDir === 'function' &&
+                    typeof window.AndroidBridge.exportRbxlFile === 'function') {
+                    const er = await api('POST', '/api/asset-export', { id });
+                    if (!er || !er.ok) { notify('Не удалось получить ассет ' + id + ': ' + ((er && er.error) || 'ошибка'), 'warn'); return; }
+                    window.AndroidBridge.exportRbxlFile(er.path, er.name);
+                    return;
+                }
                 const r = await fetch('/api/asset-proxy?id=' + id);
                 if (!r.ok) { notify('Не удалось получить ассет ' + id + ' (HTTP ' + r.status + ')', 'warn'); return; }
                 const blob = await r.blob();
