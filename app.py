@@ -525,10 +525,11 @@ def _rbxassetid_num(value):
     if not value:
         return None
     s = str(value)
-    if 'rbxassetid://' not in s:
-        return None
-    m = _re.search(r'\d+', s)
-    return m.group() if m else None
+    # Два формата ссылки на ассет: 'rbxassetid://123' (новый) и 'http://www.roblox.com/asset/?id=123'
+    # (старый; так записаны классические R15-руки/ноги 5487114xx и их текстуры). Раньше принимался только
+    # первый — у деталей со вторым терялись и меш, и текстура, и они рисовались запасным кубом.
+    m = _re.search(r'(?:rbxassetid://|[?&]id=)(\d+)', s, _re.I)
+    return m.group(1) if m else None
 
 
 def _asset_url_num(value):
