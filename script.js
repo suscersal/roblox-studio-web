@@ -2412,6 +2412,10 @@
                     scale.z *= (o.sz || 1) / result.size.z;
                 }
                 mesh.matrix.compose(pos, quat, scale);
+                // Масштаб меша (вписывание в Size у MeshPart / Scale у SpecialMesh) запоминаем: цикл синхронизации
+                // с физикой пересобирает матрицу каждый кадр и раньше сбрасывал его в (1,1,1), из-за чего меши
+                // с родным размером != Size (торс, шляпы и прочие аксессуары) рисовались «очень большими».
+                mesh.userData.partScale = scale.clone();
                 // matrixAutoUpdate=false → three.js сам НЕ пересчитает
                 // matrixWorld после первого кадра; без этого флага новый
                 // масштаб (и вообще любая правка mesh.matrix) не применялась.
@@ -3466,6 +3470,11 @@
                     delete sceneObjs[ref];
                 } else {
                     mesh.matrix.copy(playSnapshot[ref]);
+                    if (mesh.userData.partScale) {   // геометрия уже настоящая (меш заменён) — масштаб не терять
+                        const rp = new THREE.Vector3(), rq = new THREE.Quaternion(), rs = new THREE.Vector3();
+                        mesh.matrix.decompose(rp, rq, rs);
+                        mesh.matrix.compose(rp, rq, mesh.userData.partScale);
+                    }
                     mesh.visible = true; // сняли дальнюю обрезку рендера, введённую во время Play
                 }
             }
@@ -7929,7 +7938,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-09-h');
+            logLuaOutput('info', 'script.js build: boss-2026-10-10-a');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -9103,6 +9112,7 @@ end
         }
 
         let _physLastT = 0, _physAcc = 0;
+        let _syncP = null, _syncQ = null, _syncOne = null;   // создаются лениво: THREE подгружается позже скрипта
         const PHYSICS_MAX_TICKS = 5;   // не больше 5 шагов (1/12 с) за кадр
         const PHYSICS_SUBSTEPS = 4; // дробим шаг — у cannon.js 0.6.2 нет CCD,
         // быстро падающая сфера может за один большой шаг проскочить сквозь
@@ -9213,13 +9223,14 @@ end
             updateSurfaceGuis();
             if (ticks === 0) return;   // экран быстрее 60 Гц: новых шагов нет, картинка не изменилась
 
+            if (!_syncP) { _syncP = new THREE.Vector3(); _syncQ = new THREE.Quaternion(); _syncOne = new THREE.Vector3(1, 1, 1); }
             for (const [refStr, body] of Object.entries(physicsBodies)) {
                 const mesh = sceneObjs[refStr];
                 if (!mesh) continue;
                 mesh.matrix.compose(
-                    new THREE.Vector3(body.position.x, body.position.y, body.position.z),
-                    new THREE.Quaternion(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w),
-                    new THREE.Vector3(1, 1, 1)
+                    _syncP.set(body.position.x, body.position.y, body.position.z),
+                    _syncQ.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w),
+                    mesh.userData.partScale || _syncOne
                 );
             }
             updateTouchTriggers();
