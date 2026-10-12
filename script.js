@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-12 · play-avatar';
+        const BUILD_LABEL = '2026-10-12 · r15-size';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -1412,9 +1412,9 @@
         // Дистанция камеры в Play — как у Roblox: от 0.5 до 128 студов (CameraMaxZoomDistance по умолчанию).
         let playCamDist = THIRD_PERSON_DIST;
         const PLAY_CAM_MIN = 0.5, PLAY_CAM_MAX = 128;
-        // Растягивать пальцы (или крутить колёсико вниз) — камера отдаляется, сводить — приближается.
-        // Чтобы поменять направление жеста, поставьте true:
-        const PINCH_SPREAD_ZOOMS_IN = false;
+        // Щипок двумя пальцами: true — растягивать пальцы ПРИБЛИЖАЕТ камеру, сводить — отдаляет;
+        // false — наоборот. (Колёсико мыши не затрагивается: вниз — отдаляет.)
+        const PINCH_SPREAD_ZOOMS_IN = true;
         function applyPlayZoom(factor) {   // factor > 1 — отдаляем, < 1 — приближаем
             if (!isFinite(factor) || factor <= 0) return;
             if (!thirdPerson) {
@@ -2994,7 +2994,13 @@
         let canJump = false;
         let prevCameraState = null;
         const GRAVITY_STUDS = -196.2; // workspace.Gravity в настоящем Roblox
-        const CHAR_RADIUS = 1.4;      // примерный радиус капсулы персонажа
+        // Размеры настоящего Roblox R15 — сняты с content/avatar/characterR15.rbxm:
+        // HumanoidRootPart 2x2x1, Humanoid.HipHeight 1.35 (ступни на 2.35 ниже центра HRP),
+        // макушка на 2.65 выше центра HRP => рост 5.0 стада, ширина торса 2.0.
+        // Глаза (центр головы) — на 4.5 над землёй.
+        const R15_HEIGHT = 5.0;
+        const R15_EYE_ABOVE_GROUND = 4.5;
+        const CHAR_RADIUS = 1.0;      // половина ширины R15 (2 стада); коллайдер — сфера, центр на CHAR_RADIUS над землёй
         // (было 2.2 — со стандартным Roblox-персонажем шириной ~2 стада
         const CHAR_SPEED = 16;        // стадов/сек — дефолтный Humanoid.WalkSpeed
         // Реальный WalkSpeed/JumpPower виртуального Humanoid (см.
@@ -3004,9 +3010,12 @@
         // no-op'ами — игрок продолжал ходить, пока шла сценарная камера.
         let charWalkSpeed = CHAR_SPEED;
         const STEP_HEIGHT = 3.2;      // студов — низкий бордюр перешагиваем автоматически
-        const JUMP_VELOCITY = 50;
+        const JUMP_VELOCITY = 50;     // Humanoid.JumpPower (как видят скрипты)
+        // В Roblox JumpPower 50 == JumpHeight 7.2; чистая v=50 при g=196.2 даёт лишь 6.37,
+        // поэтому реальную начальную скорость берём из высоты: v = sqrt(2*g*7.2) ≈ 53.15.
+        const JUMP_POWER_TO_VELOCITY = Math.sqrt(2 * -GRAVITY_STUDS * 7.2) / 50;
         let charJumpPower = JUMP_VELOCITY;
-        const EYE_HEIGHT = CHAR_RADIUS + 3;
+        const EYE_HEIGHT = R15_EYE_ABOVE_GROUND - CHAR_RADIUS; // от центра сферы-коллайдера до глаз
         // Физику считаем не для всей загруженной сцены (при Quality=High это
         function maxStreamedBodies() { return qualitySettings.playBodies; }
         function maxVisualBodies() { return qualitySettings.visualBodies || qualitySettings.playBodies; }
@@ -3366,7 +3375,7 @@
         // Если аватар смотрит спиной — поставьте PLAY_AVATAR_YAW_OFFSET = Math.PI;
         // если стоит выше/ниже земли — подправьте PLAY_AVATAR_Y_OFFSET.
         const PLAY_AVATAR_YAW_OFFSET = 0;
-        const PLAY_AVATAR_Y_OFFSET = 0;
+        const PLAY_AVATAR_Y_OFFSET = R15_HEIGHT / 2 - CHAR_RADIUS; // ступни на земле (центр сферы — на CHAR_RADIUS над ней)
         let playerAccount = null; // {userId, name, displayName} или null (гость)
         const _playAvatarTemplates = {};
 
@@ -3423,7 +3432,7 @@
             return _fitToCharHeight(g);
         }
 
-        // Центрирует объект и масштабирует до высоты куба-персонажа (CHAR_RADIUS*3.2).
+        // Центрирует объект и масштабирует до роста R15 (5 стадов).
         function _fitToCharHeight(obj) {
             const box = new THREE.Box3().setFromObject(obj);
             const c = box.getCenter(new THREE.Vector3());
@@ -3431,7 +3440,7 @@
             obj.position.sub(c);
             const inner = new THREE.Group();
             inner.add(obj);
-            inner.scale.setScalar((CHAR_RADIUS * 3.2) / Math.max(s.y, 1e-3));
+            inner.scale.setScalar(R15_HEIGHT / Math.max(s.y, 1e-3));
             const outer = new THREE.Group();
             outer.add(inner);
             outer.rotation.y = PLAY_AVATAR_YAW_OFFSET;
@@ -3451,7 +3460,7 @@
             g.fillText(text, 128, 32);
             const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
             sp.scale.set(4, 1, 1);
-            sp.position.y = CHAR_RADIUS * 1.6 + 0.9;
+            sp.position.y = R15_HEIGHT - CHAR_RADIUS + 0.9; // над макушкой
             sp.renderOrder = 10;
             return sp;
         }
@@ -8269,6 +8278,7 @@ end
             luaCharDead = false;
             virtualInstanceProps[luaHumanoidRef].MaxHealth = 100;
             virtualInstanceProps[luaHumanoidRef].JumpHeight = 7.2;
+            virtualInstanceProps[luaHumanoidRef].HipHeight = 1.35; // R15 (characterR15.rbxm)
 
             const playerGuiRef = luaCreateVirtualInstance('PlayerGui');
             luaSetParent(playerGuiRef, playerRef);
@@ -9275,7 +9285,7 @@ end
             charBody.velocity.z = vz;
 
             if (jumpQueued && canJump && charJumpPower > 0) {
-                charBody.velocity.y = charJumpPower;
+                charBody.velocity.y = charJumpPower * JUMP_POWER_TO_VELOCITY;
                 canJump = false;
             }
             jumpQueued = jumpQueued && charJumpPower <= 0 ? false : jumpQueued;
