@@ -574,6 +574,14 @@ def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, ref
     всю поверхность, а не одну грань, так что "на все грани" тут ближе
     к истине (это по-прежнему лишь box-приближение, не настоящий меш)."""
     if cls == 'MeshPart':
+        # SurfaceAppearance.ColorMap — в Roblox он имеет приоритет над
+        # MeshPart.TextureID (у таких мешей TextureID обычно пустой — как
+        # у акул, у которых из-за этого не было текстуры).
+        for child in children_by_parent.get(ref, ()):
+            if referent_to_class.get(child) == 'SurfaceAppearance':
+                tid = _rbxassetid_num(all_props.get(child, {}).get('ColorMap'))
+                if tid:
+                    return tid, None
         tid = _rbxassetid_num(props.get('TextureID') or props.get('Texture'))
         if tid:
             return tid, None
