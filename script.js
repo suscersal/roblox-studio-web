@@ -2407,9 +2407,10 @@
                     scale.set(o.meshScale[0], o.meshScale[1], o.meshScale[2]);
                 } else {
                     // MeshPart: меш вписывается в Size детали.
-                    scale.x *= (o.sx || 1) / result.size.x;
-                    scale.y *= (o.sy || 1) / result.size.y;
-                    scale.z *= (o.sz || 1) / result.size.z;
+                    const cur = loadedObjSize[o.ref] || { x: o.sx || 1, y: o.sy || 1, z: o.sz || 1 };
+                    scale.set(cur.x / result.size.x, cur.y / result.size.y, cur.z / result.size.z);
+                    // исходный масштаб (по размеру из файла) — к нему возвращаемся после Stop
+                    mesh.userData.partScale0 = new THREE.Vector3((o.sx || 1) / result.size.x, (o.sy || 1) / result.size.y, (o.sz || 1) / result.size.z);
                 }
                 mesh.matrix.compose(pos, quat, scale);
                 // Масштаб меша (вписывание в Size у MeshPart / Scale у SpecialMesh) запоминаем: цикл синхронизации
@@ -3470,10 +3471,19 @@
                     delete sceneObjs[ref];
                 } else {
                     mesh.matrix.copy(playSnapshot[ref]);
+                    // Size, выставленный скриптом во время Play, после Stop откатывается (как в Studio)
+                    if (mesh.userData.partScale0 !== undefined) {
+                        if (mesh.userData.partScale0) mesh.userData.partScale = mesh.userData.partScale0.clone();
+                        else delete mesh.userData.partScale;
+                    }
                     if (mesh.userData.partScale) {   // геометрия уже настоящая (меш заменён) — масштаб не терять
                         const rp = new THREE.Vector3(), rq = new THREE.Quaternion(), rs = new THREE.Vector3();
                         mesh.matrix.decompose(rp, rq, rs);
                         mesh.matrix.compose(rp, rq, mesh.userData.partScale);
+                    } else {
+                        const rp = new THREE.Vector3(), rq = new THREE.Quaternion(), rs = new THREE.Vector3();
+                        mesh.matrix.decompose(rp, rq, rs);
+                        mesh.matrix.compose(rp, rq, new THREE.Vector3(1, 1, 1));
                     }
                     mesh.visible = true; // сняли дальнюю обрезку рендера, введённую во время Play
                 }
@@ -4923,7 +4933,10 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
     InstanceMT.__newindex = function(t, k, v)
         local ref = rawget(t, "__ref")
         if type(v) == "table" then
-            if k == "BrickColor" and rawget(v, "Number") ~= nil and rawget(v, "Color") ~= nil then
+            if k == "Size" and type(rawget(v, "X")) == "number" and type(rawget(v, "Z")) == "number" and not __is_gui_ref(ref) then
+                __set_size(ref, v.X, v.Y, v.Z)
+                return
+            elseif k == "BrickColor" and rawget(v, "Number") ~= nil and rawget(v, "Color") ~= nil then
                 return baseNew(t, "Color", v.Color)
             elseif k == "Value" then
                 __tblVals[ref] = v
@@ -5186,6 +5199,32 @@ end
 
 
         // ---- Мост к объектам сцены: только числа/строки/булевы, см. коммент выше ----
+        // part.Size = Vector3.new(x,y,z): в Roblox меш/деталь растягивается на Size / (прежний размер).
+        // Раньше значение просто копилось в «мусорном ящике» свойств и ничего не менялось визуально, а z терялся.
+        function luaSetPartSize(ref, nx, ny, nz) {
+            nx = Math.max(0.001, Number(nx) || 0); ny = Math.max(0.001, Number(ny) || 0); nz = Math.max(0.001, Number(nz) || 0);
+            const old = luaSizeOfRef(ref);
+            const known = old && old.x > 0 && old.y > 0 && old.z > 0;
+            const mesh = sceneObjs[ref];
+            if (mesh && known) {
+                if (mesh.userData.partScale0 === undefined) mesh.userData.partScale0 = mesh.userData.partScale ? mesh.userData.partScale.clone() : null;
+                const cur = mesh.userData.partScale || new THREE.Vector3(1, 1, 1);
+                mesh.userData.partScale = new THREE.Vector3(cur.x * nx / old.x, cur.y * ny / old.y, cur.z * nz / old.z);
+                const p0 = new THREE.Vector3(), q0 = new THREE.Quaternion(), s0 = new THREE.Vector3();
+                mesh.matrix.decompose(p0, q0, s0);
+                mesh.matrix.compose(p0, q0, mesh.userData.partScale);
+                mesh.matrixWorldNeedsUpdate = true;
+            }
+            loadedObjSize[ref] = { x: nx, y: ny, z: nz };
+            const body = physicsBodies[ref];
+            if (body && body.shapes.length && body.shapes[0] instanceof CANNON.Box && !body.__unionTrimesh) {
+                body.shapes[0].halfExtents.set(nx / 2, ny / 2, nz / 2);
+                body.shapes[0].updateConvexPolyhedronRepresentation();
+                body.updateBoundingRadius();
+                body.aabbNeedsUpdate = true;
+            }
+            fireLuaSignal(ref, '__prop_Size', []);
+        }
         function luaSizeOfRef(ref) {
             const p = loadedObjSize[ref];
             if (p && (p.x || p.y || p.z)) return p;
@@ -6739,6 +6778,10 @@ end
                 lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
                 return 3;
             });
+            def('__set_size', function (L2) {
+                luaSetPartSize(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3), lua.lua_tonumber(L2, 4));
+                return 0;
+            });
             def('__get_size', function (L2) {
                 const p = luaSizeOfRef(lua.lua_tonumber(L2, 1));
                 lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
@@ -7938,7 +7981,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-10-a');
+            logLuaOutput('info', 'script.js build: boss-2026-10-10-c');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
