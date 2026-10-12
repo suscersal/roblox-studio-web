@@ -1,3 +1,9 @@
+        // ============ МЕТКА СБОРКИ ============
+        // Меняйте строку при каждой правке — по ней в Output видно, что WebView
+        // загрузил свежий script.js, а не кэш.
+        const BUILD_LABEL = '2026-10-12 · mesh-v7-raw';
+        window.BUILD_LABEL = BUILD_LABEL;
+
         // ============ I18N ============
         const I18N = {
             en: {
@@ -2081,7 +2087,58 @@
             }
             return null;
         }
+        // v7.00, COREMESH версии 1 — НЕСЖАТЫЙ чанк (Draco — версия 2).
+        // Раскладка (подтверждена на реальном файле): "COREMESH"(8) +
+        // u32 версия + u32 размер + u32 numVerts, затем numVerts вершин по 40 байт
+        // (pos f32x3, normal f32x3, uv f32x2, tangent 4 байта, color 4 байта),
+        // затем u32 numFaces и numFaces*3 u32 индексов. Размер чанка =
+        // 4 + numVerts*40 + 4 + numFaces*12. Дальше идёт чанк LODS.
+        function _parseRobloxMeshV7Raw(bodyBytes) {
+            const dv = new DataView(bodyBytes.buffer, bodyBytes.byteOffset, bodyBytes.byteLength);
+            const chunkSize = dv.getUint32(12, true);
+            const numVerts = dv.getUint32(16, true);
+            const vertStart = 20;
+            const facesStart = vertStart + numVerts * 40;
+            if (!numVerts || numVerts > 2_000_000 || facesStart + 4 > bodyBytes.length) {
+                _lastMeshParseFailReason = 'v7 raw: некорректный numVerts=' + numVerts + ' (bufLen=' + bodyBytes.length + ')';
+                return null;
+            }
+            const numFaces = dv.getUint32(facesStart, true);
+            const idxStart = facesStart + 4;
+            if (!numFaces || numFaces > 2_000_000 || idxStart + numFaces * 12 > bodyBytes.length) {
+                _lastMeshParseFailReason = 'v7 raw: некорректный numFaces=' + numFaces + ' (bufLen=' + bodyBytes.length + ')';
+                return null;
+            }
+            const positions = new Float32Array(numVerts * 3);
+            const normals = new Float32Array(numVerts * 3);
+            const uvs = new Float32Array(numVerts * 2);
+            for (let i = 0; i < numVerts; i++) {
+                const o = vertStart + i * 40;
+                positions[i * 3] = dv.getFloat32(o, true);
+                positions[i * 3 + 1] = dv.getFloat32(o + 4, true);
+                positions[i * 3 + 2] = dv.getFloat32(o + 8, true);
+                normals[i * 3] = dv.getFloat32(o + 12, true);
+                normals[i * 3 + 1] = dv.getFloat32(o + 16, true);
+                normals[i * 3 + 2] = dv.getFloat32(o + 20, true);
+                uvs[i * 2] = dv.getFloat32(o + 24, true);
+                // Как в v4/Draco: V у Roblox сверху, у three.js снизу.
+                uvs[i * 2 + 1] = 1 - dv.getFloat32(o + 28, true);
+            }
+            const indices = new Uint32Array(numFaces * 3);
+            for (let i = 0; i < indices.length; i++) {
+                const v = dv.getUint32(idxStart + i * 4, true);
+                if (v >= numVerts) { _lastMeshParseFailReason = 'v7 raw: индекс ' + v + ' >= numVerts ' + numVerts; return null; }
+                indices[i] = v;
+            }
+            const lod0 = _findLod0FaceCount(bodyBytes, 16 + chunkSize, numFaces);
+            const out = (lod0 && lod0 < numFaces) ? indices.subarray(0, lod0 * 3) : indices;
+            return { positions, normals, uvs, indices: out };
+        }
         async function _parseRobloxMeshDraco(bodyBytes) {
+            if (bodyBytes.length >= 20 && new TextDecoder('latin1').decode(bodyBytes.subarray(0, 8)) === 'COREMESH' &&
+                new DataView(bodyBytes.buffer, bodyBytes.byteOffset, bodyBytes.byteLength).getUint32(8, true) === 1) {
+                return _parseRobloxMeshV7Raw(bodyBytes);
+            }
             let decoderModule;
             try {
                 decoderModule = await _loadDracoModule();
@@ -11276,6 +11333,8 @@ end
             initResizers();
 
             refreshCM();
+            console.log('Build: ' + BUILD_LABEL);
+            try { logLuaOutput('info', 'Build: ' + BUILD_LABEL); } catch (e) { /* Output ещё не готов */ }
         });
 
         window.addEventListener('resize', refreshCM);
