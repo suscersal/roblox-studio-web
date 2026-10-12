@@ -2649,6 +2649,7 @@ def _rbx_download_cdn(hash_value):
     raise RuntimeError(last_err or f'Не удалось скачать {hash_value}')
 
 
+@flask_app.route('/api/roblox/avatar3d/status')
 def api_roblox_avatar3d_status():
     """Один быстрый неблокирующий опрос состояния генерации у Roblox —
     вызывается клиентом периодически (см. doDownloadAvatar3d в index.html),
@@ -2799,6 +2800,89 @@ def api_roblox_avatar3d_fetch():
                 for name, data in tex_files
             ]
         return jsonify(response)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
+
+
+@flask_app.route('/api/roblox/me')
+def api_roblox_me():
+    """Ник/ID аккаунта, под которым выполнен вход (кука .ROBLOSECURITY).
+    Нет куки или она протухла — loggedIn=False (клиент тогда рисует
+    стандартного Roblox-«нуба» вместо аватара игрока)."""
+    if _roblox_cookie() is None:
+        return jsonify({'ok': True, 'loggedIn': False})
+    try:
+        d = _rbx_get_json('https://users.roblox.com/v1/users/authenticated')
+        uid = d.get('id') if isinstance(d, dict) else None
+        if not uid:
+            raise RuntimeError('в ответе нет id')
+        return jsonify({'ok': True, 'loggedIn': True, 'userId': uid,
+                        'name': d.get('name') or '',
+                        'displayName': d.get('displayName') or d.get('name') or ''})
+    except Exception as e:
+        # HTTP 401 и т.п. — кука недействительна: считаем, что входа нет
+        return jsonify({'ok': True, 'loggedIn': False, 'error': str(e)})
+
+
+PLAY_AVATAR_TTL = 24 * 3600  # сутки: аватар меняется редко, а генерация у Roblox небыстрая
+
+
+def _play_avatar_cache_path(user_id):
+    return _asset_cache_dir() / f'play_avatar_{user_id}.json'
+
+
+@flask_app.route('/api/roblox/play-avatar')
+def api_roblox_play_avatar():
+    """3D-аватар для персонажа в Play (OBJ+MTL+текстуры одним JSON, без zip).
+    1) userId без bundleUrl — отдаёт кэш с диска, если он свежий, иначе
+       {ok, cached: false} (клиент тогда опрашивает /avatar3d/status и
+       приходит сюда снова уже с bundleUrl);
+    2) userId + bundleUrl — скачивает, кладёт в кэш и отдаёт."""
+    import time as _time
+    user_id = request.args.get('userId', '').strip()
+    if not user_id.isdigit():
+        return jsonify({'ok': False, 'error': 'userId должен быть числом'}), 400
+    cp = _play_avatar_cache_path(user_id)
+    try:
+        if cp.exists() and _time.time() - cp.stat().st_mtime < PLAY_AVATAR_TTL:
+            return Response(cp.read_bytes(), mimetype='application/json')
+    except OSError:
+        pass
+    bundle_url = request.args.get('bundleUrl', '').strip()
+    if not bundle_url:
+        return jsonify({'ok': True, 'cached': False})
+    if not bundle_url.startswith('https://'):
+        return jsonify({'ok': False, 'error': 'bundleUrl некорректен'}), 400
+    if _roblox_cookie() is None:
+        return jsonify({'ok': False, 'error': 'not_logged_in',
+                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+    try:
+        import concurrent.futures as _cf
+        bundle = _rbx_get_json(bundle_url)
+        tex_hashes = bundle.get('textures', [])
+        with _cf.ThreadPoolExecutor(max_workers=max(2, len(tex_hashes) + 2)) as pool:
+            obj_f = pool.submit(_rbx_download_cdn, bundle['obj'])
+            mtl_f = pool.submit(_rbx_download_cdn, bundle['mtl'])
+            tex_f = [pool.submit(_rbx_download_cdn, h) for h in tex_hashes]
+            obj_bytes, mtl_bytes = obj_f.result(), mtl_f.result()
+            tex_files = [(_re.sub(r'[^a-zA-Z0-9._-]+', '_', h) + '.png', f.result())
+                         for h, f in zip(tex_hashes, tex_f)]
+        # как в /avatar3d/fetch: Roblox пишет в .mtl текстуры без расширения
+        mtl_text = mtl_bytes.decode('utf-8', 'replace')
+        for h in tex_hashes:
+            mtl_text = _re.sub(r'(?<![\w.])' + _re.escape(h) + r'(?!\.\w)', h + '.png', mtl_text)
+        payload = {
+            'ok': True, 'cached': True,
+            'obj_text': obj_bytes.decode('utf-8', 'replace'),
+            'mtl_text': mtl_text,
+            'textures': [{'name': n, 'data_url': 'data:image/png;base64,' +
+                          _b64.b64encode(d).decode('ascii')} for n, d in tex_files],
+        }
+        try:
+            cp.write_text(json.dumps(payload), encoding='utf-8')
+        except OSError:
+            pass
+        return jsonify(payload)
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 502
 

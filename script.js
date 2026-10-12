@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-12 · mesh-v7-raw';
+        const BUILD_LABEL = '2026-10-12 · play-avatar';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -19,6 +19,10 @@
                 cam_third: 'Third person',
                 cam_first: 'First person (eyes)',
                 log_draco_lod0: 'Draco: using LOD0 ({n} of {total} faces)',
+                log_play_account: 'Account: {name} (id {id})',
+                log_play_guest: 'No Roblox account — default avatar',
+                log_play_avatar_ok: 'Player avatar loaded',
+                log_play_avatar_fail: 'Could not load player avatar ({msg}) — default avatar',
                 log_mesh_load_failed: 'Mesh {id}: load failed ({msg}), using approximation',
                 log_cloth_loaded: 'Clothing: loaded {n} of {total} layer(s)',
                 asset_fail_reason: 'Asset {id} did not load: {reason}',
@@ -191,6 +195,10 @@
                 cam_third: '3-е лицо',
                 cam_first: '1-е лицо (от глаз)',
                 log_draco_lod0: 'Draco: использую LOD0 ({n} из {total} граней)',
+                log_play_account: 'Аккаунт: {name} (id {id})',
+                log_play_guest: 'Нет входа в Roblox — стандартный аватар',
+                log_play_avatar_ok: 'Аватар игрока загружен',
+                log_play_avatar_fail: 'Не удалось загрузить аватар игрока ({msg}) — стандартный аватар',
                 log_mesh_load_failed: 'Mesh {id}: загрузка не удалась ({msg}), использую приближение',
                 log_cloth_loaded: 'Одежда: загружено слоёв {n} из {total}',
                 asset_fail_reason: 'Ассет {id} не загрузился: {reason}',
@@ -3351,6 +3359,192 @@
             requestAnimationFrame(() => { if (typeof resize === 'function') resize(); });
         }
 
+        // ============ АВАТАР ИГРОКА В PLAY ============
+        // Нет куки Roblox — стандартный «нуб» (рисуется кодом, без сети).
+        // Есть кука — ник аккаунта (/api/roblox/me) и 3D-аватар
+        // (/api/roblox/play-avatar, кэш на диске) вместо куба.
+        // Если аватар смотрит спиной — поставьте PLAY_AVATAR_YAW_OFFSET = Math.PI;
+        // если стоит выше/ниже земли — подправьте PLAY_AVATAR_Y_OFFSET.
+        const PLAY_AVATAR_YAW_OFFSET = 0;
+        const PLAY_AVATAR_Y_OFFSET = 0;
+        let playerAccount = null; // {userId, name, displayName} или null (гость)
+        const _playAvatarTemplates = {};
+
+        function _applyPlayerAccountToLua() {
+            if (!playerAccount || luaPlayerRef === -1 || !luaByRef[luaPlayerRef]) return;
+            luaByRef[luaPlayerRef].name = playerAccount.name;
+            const pr = virtualInstanceProps[luaPlayerRef] || (virtualInstanceProps[luaPlayerRef] = {});
+            pr.UserId = playerAccount.userId;
+            pr.DisplayName = playerAccount.displayName || playerAccount.name;
+        }
+
+        function _disposeObj(o) {
+            if (o.userData && o.userData.shared) return; // общий шаблон аватара — не трогаем
+            o.children.slice().forEach(_disposeObj);
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) {
+                (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => {
+                    if (m.map) m.map.dispose();
+                    m.dispose();
+                });
+            }
+        }
+        function _disposeCharMesh() {
+            if (!charMesh) return;
+            scene.remove(charMesh);
+            _disposeObj(charMesh);
+            charMesh = null;
+        }
+        function _setCharBody(group, body) {
+            const old = group.userData.body;
+            if (old) { group.remove(old); _disposeObj(old); }
+            group.userData.body = body;
+            group.add(body);
+        }
+
+        // Классический R6-«нуб» в студах (5 высотой): жёлтые голова и руки,
+        // синий торс, зелёные ноги. Лицо — на -Z (туда же, куда идёт персонаж).
+        function _buildNoobAvatar() {
+            const g = new THREE.Group();
+            const box = (w, h, d, color, x, y, z, basic) => {
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+                    basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }));
+                m.position.set(x, y, z);
+                g.add(m);
+            };
+            const Y = 0xF5CD30, B = 0x0D69AC, G = 0xA4BD47;
+            box(1, 2, 1, G, -0.5, 1, 0); box(1, 2, 1, G, 0.5, 1, 0);       // ноги
+            box(2, 2, 1, B, 0, 3, 0);                                      // торс
+            box(1, 2, 1, Y, -1.5, 3, 0); box(1, 2, 1, Y, 1.5, 3, 0);       // руки
+            box(2, 1, 1, Y, 0, 4.5, 0);                                    // голова
+            box(0.2, 0.3, 0.02, 0x000000, -0.4, 4.6, -0.51, true);         // глаза
+            box(0.2, 0.3, 0.02, 0x000000, 0.4, 4.6, -0.51, true);
+            box(0.9, 0.1, 0.02, 0x000000, 0, 4.25, -0.51, true);           // рот
+            return _fitToCharHeight(g);
+        }
+
+        // Центрирует объект и масштабирует до высоты куба-персонажа (CHAR_RADIUS*3.2).
+        function _fitToCharHeight(obj) {
+            const box = new THREE.Box3().setFromObject(obj);
+            const c = box.getCenter(new THREE.Vector3());
+            const s = box.getSize(new THREE.Vector3());
+            obj.position.sub(c);
+            const inner = new THREE.Group();
+            inner.add(obj);
+            inner.scale.setScalar((CHAR_RADIUS * 3.2) / Math.max(s.y, 1e-3));
+            const outer = new THREE.Group();
+            outer.add(inner);
+            outer.rotation.y = PLAY_AVATAR_YAW_OFFSET;
+            outer.position.y = PLAY_AVATAR_Y_OFFSET;
+            return outer;
+        }
+
+        function _makeNameTag(text) {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 64;
+            const g = c.getContext('2d');
+            g.font = 'bold 30px sans-serif';
+            g.textAlign = 'center'; g.textBaseline = 'middle';
+            g.lineWidth = 6; g.strokeStyle = 'rgba(0,0,0,.8)';
+            g.strokeText(text, 128, 32);
+            g.fillStyle = '#fff';
+            g.fillText(text, 128, 32);
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
+            sp.scale.set(4, 1, 1);
+            sp.position.y = CHAR_RADIUS * 1.6 + 0.9;
+            sp.renderOrder = 10;
+            return sp;
+        }
+
+        // OBJ+MTL → THREE-объект (те же фиксы Roblox-формата, что в importAvatarIntoScene)
+        async function _buildPlayAvatarFromAssets(data) {
+            await ensureObjMtlLoaders();
+            const fixedObjText = data.obj_text.replace(
+                /^v(\s+-?[\d.eE+-]+\s+-?[\d.eE+-]+\s+-?[\d.eE+-]+)(?:\s+-?[\d.eE+-]+)*\s*$/gm,
+                'v$1'
+            );
+            const texByName = {};
+            (data.textures || []).forEach(x => { texByName[x.name] = x.data_url; });
+            const manager = new THREE.LoadingManager();
+            manager.setURLModifier((url) => texByName[url.split('/').pop()] || url);
+            const mtlLoader = new THREE.MTLLoader(manager);
+            mtlLoader.setMaterialOptions({ invertTrProperty: true });
+            const materials = mtlLoader.parse(data.mtl_text, '');
+            materials.preload();
+            for (const key in materials.materials) {
+                const m = materials.materials[key];
+                m.side = THREE.DoubleSide;
+                m.transparent = false; m.opacity = 1; m.alphaTest = 0;
+                m.needsUpdate = true;
+            }
+            const objLoader = new THREE.OBJLoader(manager);
+            objLoader.setMaterials(materials);
+            const object = objLoader.parse(fixedObjText);
+            let verts = 0;
+            object.traverse(n => {
+                if (!n.isMesh) return;
+                if (n.geometry) { n.geometry.computeVertexNormals(); if (n.geometry.attributes.position) verts += n.geometry.attributes.position.count; }
+                (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => {
+                    if (m && m.map) {
+                        m.map.encoding = THREE.sRGBEncoding;
+                        m.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                        m.map.needsUpdate = true;
+                    }
+                });
+            });
+            if (!verts) throw new Error('пустая геометрия аватара');
+            const fitted = _fitToCharHeight(object);
+            fitted.userData.shared = true; // шаблон общий для всех Play-сессий — не dispose'им
+            return fitted;
+        }
+
+        function _loadPlayAvatarTemplate(userId) {
+            if (_playAvatarTemplates[userId]) return _playAvatarTemplates[userId];
+            const p = (async () => {
+                let r = await api('GET', '/api/roblox/play-avatar?userId=' + userId);
+                if (!r || !r.ok) throw new Error((r && (r.message || r.error)) || 'play-avatar');
+                if (!r.cached) {
+                    let bundleUrl = null;
+                    for (let i = 0; i < 45 && isPlaying; i++) { // Roblox генерирует модель асинхронно
+                        const st = await api('GET', '/api/roblox/avatar3d/status?userId=' + userId);
+                        if (!st || !st.ok) throw new Error((st && (st.message || st.error)) || 'status');
+                        if (st.ready) { bundleUrl = st.bundleUrl; break; }
+                        if (st.state === 'Error') throw new Error('Roblox: ошибка генерации');
+                        await new Promise(res => setTimeout(res, 1500));
+                    }
+                    if (!bundleUrl) throw new Error('таймаут генерации');
+                    r = await api('GET', '/api/roblox/play-avatar?userId=' + userId + '&bundleUrl=' + encodeURIComponent(bundleUrl));
+                    if (!r || !r.ok) throw new Error((r && (r.message || r.error)) || 'play-avatar');
+                }
+                return _buildPlayAvatarFromAssets(r);
+            })();
+            _playAvatarTemplates[userId] = p;
+            p.catch(() => { delete _playAvatarTemplates[userId]; });
+            return p;
+        }
+
+        async function setupPlayerAvatar(group) {
+            let acc = null;
+            try {
+                const r = await api('GET', '/api/roblox/me');
+                if (r && r.ok && r.loggedIn) acc = r;
+            } catch (e) { /* без сети — гость */ }
+            if (charMesh !== group) return; // Play уже остановили
+            if (!acc) { logLuaOutput('info', t('log_play_guest')); return; }
+            playerAccount = { userId: acc.userId, name: acc.name, displayName: acc.displayName };
+            _applyPlayerAccountToLua();
+            group.add(_makeNameTag(acc.displayName || acc.name));
+            logLuaOutput('info', t('log_play_account', { name: acc.name, id: acc.userId }));
+            try {
+                const tpl = await _loadPlayAvatarTemplate(acc.userId);
+                if (charMesh !== group) return;
+                _setCharBody(group, tpl.clone(true));
+                logLuaOutput('info', t('log_play_avatar_ok'));
+            } catch (e) {
+                if (charMesh === group) logLuaOutput('warn', t('log_play_avatar_fail', { msg: e && e.message || e }));
+            }
+        }
+
         async function startPlay() {
             if (typeof CANNON === 'undefined') {
                 notify(t('notify_cannon_not_ready'), 'err');
@@ -3424,13 +3618,12 @@
             physicsWorld.addBody(charBody);
 
             // Куб-персонаж для вида от третьего лица — виден только когда
-            if (charMesh) { scene.remove(charMesh); charMesh.geometry.dispose(); charMesh.material.dispose(); }
-            charMesh = new THREE.Mesh(
-                new THREE.BoxGeometry(CHAR_RADIUS * 1.6, CHAR_RADIUS * 3.2, CHAR_RADIUS * 1.6),
-                new THREE.MeshLambertMaterial({ color: 0x4a90d9 })
-            );
+            _disposeCharMesh();
+            charMesh = new THREE.Group();
+            _setCharBody(charMesh, _buildNoobAvatar()); // сразу — стандартный «нуб»; аватар аккаунта подменит его, когда загрузится
             charMesh.visible = false;
             scene.add(charMesh);
+            setupPlayerAvatar(charMesh);
 
             prevCameraState = {
                 spherical: { ...spherical },
@@ -3508,7 +3701,8 @@
             _promptHoldStart = null;
             const _promptEl = document.getElementById('proximity-prompt');
             if (_promptEl) _promptEl.style.display = 'none';
-            if (charMesh) { scene.remove(charMesh); charMesh.geometry.dispose(); charMesh.material.dispose(); charMesh = null; }
+            _disposeCharMesh();
+            playerAccount = null;
             canJump = false;
             jumpQueued = false;
             if (scene.fog && prevFogFar !== null) scene.fog.far = prevFogFar;
@@ -8048,6 +8242,7 @@ end
             if (playersRef === -1) playersRef = luaCreateVirtualInstance('Players');
             const playerRef = luaCreateVirtualInstance('Player');
             luaByRef[playerRef].name = 'LocalPlayer';
+            if (playerAccount) { luaPlayerRef = playerRef; _applyPlayerAccountToLua(); }
             luaSetParent(playerRef, playersRef);
 
             luaCharacterRef = luaCreateVirtualInstance('Model');
