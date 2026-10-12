@@ -4909,6 +4909,29 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             local rx, ry, rz = cf:ToOrientation()
             return Vector3.new(math.deg(rx), math.deg(ry), math.deg(rz))
         end
+        if k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1" then
+            local rr = __refprop_get(ref, k)
+            if rr ~= nil then
+                if rr < 0 then return nil end
+                return wrap(rr)
+            end
+        end
+        if (k == "Position" or k == "CFrame" or k == "WorldPosition" or k == "WorldCFrame") and __get_class(ref) == "Attachment" then
+            local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = __att_get(ref)
+            if x then
+                if k == "Position" then return Vector3.new(x, y, z) end
+                local cf = CFrame.new(x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22)
+                if k == "CFrame" then return cf end
+                local par = t.Parent
+                local pcf = par and par.CFrame
+                if pcf then
+                    local w = pcf * cf
+                    if k == "WorldCFrame" then return w end
+                    return w.Position
+                end
+                return nil
+            end
+        end
         if k == "Color" and not __is_gui_ref(ref) then
             local r, g, b = __get_color(ref)
             if r then return Color3.new(r, g, b) end
@@ -4932,7 +4955,22 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
     local baseNew = InstanceMT.__newindex
     InstanceMT.__newindex = function(t, k, v)
         local ref = rawget(t, "__ref")
+        if (k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1") and (v == nil or (type(v) == "table" and rawget(v, "__ref") ~= nil)) then
+            local cls0 = __get_class(ref)
+            if cls0 == "RigidConstraint" or cls0 == "WeldConstraint" or cls0 == "Weld" or cls0 == "ManualWeld" or cls0 == "Motor6D" or cls0 == "Motor"
+               or cls0 == "BallSocketConstraint" or cls0 == "NoCollisionConstraint" or cls0 == "AnimationConstraint" then
+                __refprop_set(ref, k, v == nil and -1 or rawget(v, "__ref"))
+                return
+            end
+        end
         if type(v) == "table" then
+            if k == "Position" and rawget(v, "X") ~= nil and __get_class(ref) == "Attachment" then
+                __att_set(ref, v.X, v.Y, v.Z)
+                return
+            elseif k == "CFrame" and rawget(v, "R00") ~= nil and __get_class(ref) == "Attachment" then
+                __att_set_cf(ref, v:GetComponents())
+                return
+            end
             if k == "Size" and type(rawget(v, "X")) == "number" and type(rawget(v, "Z")) == "number" and not __is_gui_ref(ref) then
                 __set_size(ref, v.X, v.Y, v.Z)
                 return
@@ -6146,6 +6184,8 @@ end
         let playSpawnPos = null;   // где персонаж появляется при старте Play и после смерти
         let luaCharDead = false;   // Humanoid.Health дошёл до 0, ждём респавн
         let luaCharSavedMove = null;
+        let luaRefProps = {};   // ref -> {Part0|Part1|Attachment0|Attachment1: ref (-1 = nil)} у сварок и констрейнтов
+        let luaAttCF = {};   // ref вложения (Attachment) -> [x,y,z,R00..R22]: Position/CFrame, в т.ч. записанные скриптами
         let luaInitValues = []; // [{ref, value:{k,v}}] — табличные Value из файла, заливаются в Lua после prelude
         let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
 
@@ -6777,6 +6817,37 @@ end
                 const p = luaPositionOfRef(lua.lua_tonumber(L2, 1));
                 lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
                 return 3;
+            });
+            def('__refprop_get', function (L2) {   // -> ref | -1 (nil) | ничего (свойство не задано)
+                const rp = luaRefProps[lua.lua_tonumber(L2, 1)];
+                const key = lua.lua_tojsstring(L2, 2);
+                if (!rp || !(key in rp)) return 0;
+                lua.lua_pushnumber(L2, rp[key]);
+                return 1;
+            });
+            def('__refprop_set', function (L2) {   // ref детали/вложения или -1
+                const ref = lua.lua_tonumber(L2, 1);
+                (luaRefProps[ref] = luaRefProps[ref] || {})[lua.lua_tojsstring(L2, 2)] = lua.lua_tonumber(L2, 3);
+                return 0;
+            });
+            def('__att_get', function (L2) {      // Attachment.CFrame -> 12 чисел (или ничего)
+                const a = luaAttCF[lua.lua_tonumber(L2, 1)];
+                if (!a) return 0;
+                for (let i = 0; i < 12; i++) lua.lua_pushnumber(L2, a[i]);
+                return 12;
+            });
+            def('__att_set', function (L2) {      // Attachment.Position = Vector3
+                const ref = lua.lua_tonumber(L2, 1);
+                const a = luaAttCF[ref] || (luaAttCF[ref] = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
+                a[0] = lua.lua_tonumber(L2, 2); a[1] = lua.lua_tonumber(L2, 3); a[2] = lua.lua_tonumber(L2, 4);
+                return 0;
+            });
+            def('__att_set_cf', function (L2) {   // Attachment.CFrame = CFrame (12 компонент)
+                const ref = lua.lua_tonumber(L2, 1);
+                const a = [];
+                for (let i = 0; i < 12; i++) a.push(lua.lua_tonumber(L2, 2 + i));
+                luaAttCF[ref] = a;
+                return 0;
             });
             def('__set_size', function (L2) {
                 luaSetPartSize(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3), lua.lua_tonumber(L2, 4));
@@ -7981,7 +8052,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-10-c');
+            logLuaOutput('info', 'script.js build: boss-2026-10-10-e');
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -7997,11 +8068,15 @@ end
             luaChildrenByRef = {};
             luaInitValues = [];
             luaPartXform = {};
+            luaAttCF = {};
+            luaRefProps = {};
             playCamDist = THIRD_PERSON_DIST;
             if (allR && allR.ok && allR.instances) {
                 for (const inst of allR.instances) {
                     luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
                     luaParentByRef[inst.ref] = inst.parent;
+                    if (inst.att) luaAttCF[inst.ref] = inst.att;
+                    if (inst.refs) luaRefProps[inst.ref] = inst.refs;
                     // ValueBase.Value, заданное в самом файле (IntValue = 10, CFrameValue, ...)
                     if (inst.value !== undefined && inst.value !== null) {
                         if (typeof inst.value === 'object') luaInitValues.push({ ref: inst.ref, value: inst.value });

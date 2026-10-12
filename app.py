@@ -1105,6 +1105,30 @@ _VALUE_CLASSES = ('StringValue', 'NumberValue', 'IntValue', 'BoolValue',
                   'Vector3Value', 'CFrameValue', 'Color3Value', 'ObjectValue')
 
 
+_REF_PROP_CLASSES = ('RigidConstraint', 'WeldConstraint', 'Weld', 'ManualWeld', 'Motor6D', 'Motor', 'BallSocketConstraint',
+                    'NoCollisionConstraint', 'AnimationConstraint', 'HingeConstraint', 'SpringConstraint')
+
+
+def _attachment_cf(q):
+    """Attachment.CFrame из свойств файла -> [x, y, z, R00..R22] (row-major, как CFrame:GetComponents())."""
+    import math as _m
+    cf = q.get('CFrame') if isinstance(q.get('CFrame'), dict) else {}
+    pos = cf.get('position') if isinstance(cf.get('position'), dict) else (q.get('Position') if isinstance(q.get('Position'), dict) else {})
+    x, y, z = (float(pos.get(k, 0.0)) for k in ('x', 'y', 'z'))
+    m = cf.get('matrix')
+    if isinstance(m, (list, tuple)) and len(m) == 9:
+        rot = [float(v) for v in m]
+    elif isinstance(cf.get('angles_deg'), (list, tuple)) and len(cf['angles_deg']) == 3:
+        rx, ry, rz = (_m.radians(float(v)) for v in cf['angles_deg'])   # Orientation: порядок Y, X, Z
+        cx, sx, cy, sy, cz, sz = _m.cos(rx), _m.sin(rx), _m.cos(ry), _m.sin(ry), _m.cos(rz), _m.sin(rz)
+        rot = [cy * cz + sy * sx * sz, -cy * sz + sy * sx * cz, sy * cx,
+               cx * sz, cx * cz, -sx,
+               -sy * cz + cy * sx * sz, sy * sz + cy * sx * cz, cy * cx]
+    else:
+        rot = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+    return [x, y, z] + rot
+
+
 def _value_for_client(cls, v):
     # Примитивы отдаём как есть; Vector3/CFrame/Color3/ObjectValue — в виде
     # {'k': вид, 'v': [...]}, фронтенд соберёт из них Lua-значения.
@@ -1190,6 +1214,19 @@ def api_all_instances():
                     if cp.get('Enabled', True):
                         item['pitchOctave'] = cp.get('Octave', 0.0)
                     break
+        elif cls == 'Attachment':
+            item['att'] = _attachment_cf(pr.get(ref, {}))
+        elif cls in _REF_PROP_CLASSES:
+            # Ссылки Part0/Part1/Attachment0/Attachment1 (сварки и констрейнты): скрипты находят по ним, что
+            # к чему прикреплено (например, аксессуар к голове через RigidConstraint).
+            qq = pr.get(ref, {})
+            refs = {}
+            for key in ('Part0', 'Part1', 'Attachment0', 'Attachment1'):
+                if key in qq:
+                    vv = qq.get(key)
+                    refs[key] = vv if (isinstance(vv, int) and not isinstance(vv, bool) and vv in r2c) else -1
+            if refs:
+                item['refs'] = refs
         elif cls in _VALUE_CLASSES:
             # ValueBase.Value, лежащий В ФАЙЛЕ (IntValue/CFrameValue/...) — иначе
             # Lua видит nil, пока скрипт сам что-нибудь не запишет в .Value.
