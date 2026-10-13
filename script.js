@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-13 · weld-outfit-autojump';
+        const BUILD_LABEL = '2026-10-13 · decal-depth';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -2662,6 +2662,10 @@
         }
 
         // ============ ТЕКСТУРЫ ОБЫЧНЫХ ЧАСТЕЙ (Decal/MeshPart/SpecialMesh) ============
+        // Decal лежит НА поверхности детали — часто вплотную к стене/другой детали. polygonOffset сдвигает его
+        // к камере в буфере глубины, чтобы он не мерцал и не пропадал под углом (z-fighting); visible=true
+        // перекрывает visible:false у «невидимой» детали, на которой висит постер.
+        const DECAL_FACE_OPTS = { visible: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 };
         const _partTexCache = {};
         // Раньше THREE.TextureLoader создавался здесь же, на верхнем уровне
         let _partTexLoader = null;
@@ -2879,16 +2883,21 @@
             const matKey = (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' + decalOp.toFixed(1) + '_' +
                 (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx));
             if (!decalList && !matCache[matKey]) {
+                // Прозрачные материалы НЕ пишут глубину, а полностью невидимые (Transparency=1) не рисуются вовсе:
+                // иначе такая деталь (сортировка идёт по центру объекта, а не по поверхности) под одними
+                // углами закрывала Decal и всё остальное позади себя.
                 const baseOpts = {
                     transparent: op < 1.0,
                     opacity: op,
+                    depthWrite: op >= 1.0,
+                    visible: op > 0.01,
                     flatShading: currentQuality === 'low',
                 };
                 if (faceIdx !== null) {
                     // Массив материалов по группам граней BoxGeometry:
                     const plain = new THREE.MeshLambertMaterial({ ...baseOpts, color: o.color || '#a0a0a0' });
                     const textured = new THREE.MeshLambertMaterial({
-                        ...baseOpts, transparent: true, opacity: decalOp,
+                        ...baseOpts, ...DECAL_FACE_OPTS, transparent: true, opacity: decalOp, depthWrite: decalOp >= 0.99,
                         color: '#ffffff', map: getOrLoadPartTexture(texId),
                     });
                     const arr = [plain, plain, plain, plain, plain, plain];
@@ -2918,7 +2927,7 @@
                 const dk = 'decals_' + (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' +
                     decalList.map(d => d.face + ':' + d.tex + ':' + d.op.toFixed(1)).join('|');
                 if (!matCache[dk]) {
-                    const dBase = { transparent: op < 1.0, opacity: op, flatShading: currentQuality === 'low' };
+                    const dBase = { transparent: op < 1.0, opacity: op, depthWrite: op >= 1.0, visible: op > 0.01, flatShading: currentQuality === 'low' };
                     const plainM = new THREE.MeshLambertMaterial({ ...dBase, color: o.color || '#a0a0a0' });
                     const arrM = [plainM, plainM, plainM, plainM, plainM, plainM];
                     const NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'];
@@ -2926,7 +2935,7 @@
                         const g = FACE_TO_BOX_GROUP[typeof d.face === 'number' ? NAMES[d.face] : d.face];
                         if (g === undefined) continue;
                         // свой opacity у Decal (Transparency Decal), а не прозрачность детали — постер на невидимой детали виден
-                        arrM[g] = new THREE.MeshLambertMaterial({ ...dBase, transparent: true, opacity: d.op, color: '#ffffff', map: getOrLoadPartTexture(d.tex) });
+                        arrM[g] = new THREE.MeshLambertMaterial({ ...dBase, ...DECAL_FACE_OPTS, transparent: true, opacity: d.op, depthWrite: d.op >= 0.99, color: '#ffffff', map: getOrLoadPartTexture(d.tex) });
                     }
                     matCache[dk] = arrM;
                 }
