@@ -591,12 +591,58 @@ def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, ref
             child_props = all_props.get(child, {})
             tid = _rbxassetid_num(child_props.get('Texture'))
             if tid:
-                return tid, (child_props.get('Face') or 'Front')
+                # Face — число NormalId; 0 (Right) ложно по `or`, поэтому явная проверка на None
+                _f = child_props.get('Face')
+                return tid, (_f if _f is not None and _f != '' else 'Front')
         elif child_cls == 'SpecialMesh':
             tid = _rbxassetid_num(all_props.get(child, {}).get('TextureId'))
             if tid:
                 return tid, None
     return None, None
+
+
+_NORMAL_ID_NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front']
+
+
+def _normal_id_name(face):
+    """Enum.NormalId (число 0..5 или имя) -> имя грани; неизвестное -> Front."""
+    if isinstance(face, bool):
+        return 'Front'
+    if isinstance(face, (int, float)) and 0 <= int(face) <= 5:
+        return _NORMAL_ID_NAMES[int(face)]
+    if isinstance(face, str):
+        if face.strip().isdigit() and 0 <= int(face) <= 5:
+            return _NORMAL_ID_NAMES[int(face)]
+        if face in _NORMAL_ID_NAMES:
+            return face
+    return 'Front'
+
+
+def _extract_decals(ref, children_by_parent, all_props, referent_to_class):
+    """ВСЕ Decal детали: [{tex, face, op}] — по одной на грань (при нескольких на
+    одной грани побеждает с бОльшим ZIndex, при равенстве — более поздняя).
+    Раньше бралась только первая найденная, и постеры на других гранях пропадали."""
+    by_face = {}
+    for order, child in enumerate(children_by_parent.get(ref, ())):
+        if referent_to_class.get(child) != 'Decal':
+            continue
+        dp = all_props.get(child, {})
+        tid = _rbxassetid_num(dp.get('Texture'))
+        if not tid:
+            continue
+        face = _normal_id_name(dp.get('Face') if dp.get('Face') is not None else 'Front')
+        try:
+            op = max(0.0, min(1.0, 1.0 - float(dp.get('Transparency') or 0)))
+        except (TypeError, ValueError):
+            op = 1.0
+        try:
+            z = int(dp.get('ZIndex') or 1)
+        except (TypeError, ValueError):
+            z = 1
+        key = (z, order)
+        if face not in by_face or key >= by_face[face][0]:
+            by_face[face] = (key, {'tex': tid, 'face': face, 'op': op})
+    return [v[1] for v in by_face.values()]
 
 
 def _extract_real_mesh_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
@@ -807,7 +853,7 @@ def build_all_scene_objects():
         # приём для постеров/вывесок: деталь не видна, а картинка видна. Раньше текстура
         # красилась прозрачностью ДЕТАЛИ, и такие постеры пропадали.
         texture_opacity = None
-        if texture_id and texture_face:
+        if texture_id and texture_face is not None and texture_face != '':
             for _ch in children_by_parent.get(ref, ()):
                 if parsed['referent_to_class'].get(_ch) == 'Decal':
                     _dp = parsed['props'].get(_ch, {})
@@ -817,6 +863,8 @@ def build_all_scene_objects():
                         except (TypeError, ValueError):
                             texture_opacity = 1.0
                         break
+        decals = _extract_decals(ref, children_by_parent, parsed['props'],
+                                 parsed['referent_to_class']) or None
         real_mesh_id = _extract_real_mesh_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
@@ -851,7 +899,8 @@ def build_all_scene_objects():
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
-            'textureFace': texture_face, 'textureOpacity': texture_opacity, 'meshId': real_mesh_id,
+            'textureFace': texture_face, 'textureOpacity': texture_opacity, 'decals': decals,
+            'meshId': real_mesh_id,
             'opacity': opacity,
             'meshScale': mesh_scale, 'meshOffset': mesh_offset, 'cloth': cloth,
             'material': material, 'mvar': mvar,
@@ -2802,6 +2851,198 @@ def api_roblox_avatar3d_fetch():
         return jsonify(response)
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 502
+
+
+def _rgb01(c):
+    """Color3 {'r','g','b'} (0..1) -> [r,g,b] или None."""
+    if isinstance(c, dict) and all(k in c for k in ('r', 'g', 'b')):
+        try:
+            v = [float(c['r']), float(c['g']), float(c['b'])]
+            if max(v) > 1.5:  # на случай 0..255
+                v = [x / 255.0 for x in v]
+            return [round(max(0.0, min(1.0, x)), 4) for x in v]
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _clock_hours(lp):
+    """ClockTime (часы, float) или TimeOfDay 'HH:MM:SS' -> часы 0..24."""
+    ct = lp.get('ClockTime')
+    try:
+        if ct is not None:
+            return float(ct) % 24.0
+    except (TypeError, ValueError):
+        pass
+    tod = lp.get('TimeOfDay')
+    if isinstance(tod, str):
+        try:
+            parts = [float(x) for x in tod.split(':')]
+            parts += [0.0] * (3 - len(parts))
+            return (parts[0] + parts[1] / 60.0 + parts[2] / 3600.0) % 24.0
+        except ValueError:
+            pass
+    return 14.0
+
+
+MAX_MAP_LIGHTS = 400
+
+
+@flask_app.route('/api/lighting')
+def api_lighting():
+    """Настройки Lighting/Atmosphere карты и список PointLight/SpotLight с
+    позициями — клиент строит по ним свет и дешёвое свечение (одним Points)."""
+    parsed = state.get('parsed')
+    if not parsed:
+        return jsonify({'ok': True, 'found': False})
+    r2c, props, pmap = parsed['referent_to_class'], parsed['props'], parsed['parent_map']
+    lref = next((r for r, c in r2c.items() if c == 'Lighting'), None)
+    if lref is None:
+        return jsonify({'ok': True, 'found': False})
+    lp = props.get(lref, {})
+
+    def num(v, d):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return d
+
+    lighting = {
+        'clockTime': _clock_hours(lp),
+        'brightness': num(lp.get('Brightness'), 2.0),
+        'ambient': _rgb01(lp.get('Ambient')),
+        'outdoorAmbient': _rgb01(lp.get('OutdoorAmbient')),
+        'fogColor': _rgb01(lp.get('FogColor')),
+        'fogStart': num(lp.get('FogStart'), 0.0),
+        'fogEnd': num(lp.get('FogEnd'), 100000.0),
+        'latitude': num(lp.get('GeographicLatitude'), 41.7),
+        'exposure': num(lp.get('ExposureCompensation'), 0.0),
+        'globalShadows': bool(lp.get('GlobalShadows', False)),
+    }
+    atmosphere = None
+    for r, c in r2c.items():
+        if c == 'Atmosphere' and pmap.get(r) == lref:
+            ap = props.get(r, {})
+            atmosphere = {'color': _rgb01(ap.get('Color')), 'density': num(ap.get('Density'), 0.0),
+                          'haze': num(ap.get('Haze'), 0.0), 'offset': num(ap.get('Offset'), 0.0)}
+            break
+
+    lights = []
+    for r, c in r2c.items():
+        if c not in ('PointLight', 'SpotLight'):
+            continue
+        lpr = props.get(r, {})
+        if lpr.get('Enabled') is False:
+            continue
+        # позиция — у ближайшего предка с CFrame (Part, либо Attachment внутри Part)
+        anc, pos = pmap.get(r), None
+        for _ in range(4):
+            if anc is None or anc not in props:
+                break
+            cf = props[anc].get('CFrame')
+            if isinstance(cf, dict):
+                pos = get_pos(cf)
+                break
+            anc = pmap.get(anc)
+        if pos is None:
+            continue
+        b = num(lpr.get('Brightness'), 1.0)
+        if b <= 0:
+            continue
+        lights.append({'x': pos[0], 'y': pos[1], 'z': pos[2], 'b': b,
+                       'range': num(lpr.get('Range'), 8.0),
+                       'color': _rgb01(lpr.get('Color')) or [1.0, 1.0, 1.0]})
+        if len(lights) >= MAX_MAP_LIGHTS:
+            break
+    return jsonify({'ok': True, 'found': True, 'lighting': lighting,
+                    'atmosphere': atmosphere, 'lights': lights})
+
+
+_children_cache = {'pid': None, 'map': None}
+
+
+def _children_of(parsed):
+    """parent_map перевёрнутый в ref -> [дети]; кэшируется на распарсенную карту."""
+    pid = id(parsed)
+    if _children_cache['pid'] != pid:
+        m = {}
+        for ch, pa in parsed['parent_map'].items():
+            m.setdefault(pa, []).append(ch)
+        _children_cache.update(pid=pid, map=m)
+    return _children_cache['map']
+
+
+def _cf12(cf):
+    """CFrame -> [x, y, z, r00..r22] (матрица поворота по строкам)."""
+    return [float(v) for v in get_pos(cf)] + [float(v) for v in get_rot_matrix(cf)]
+
+
+@flask_app.route('/api/outfit_item/<int:ref>')
+def api_outfit_item(ref):
+    """Данные Accessory / BodyColors ИЗ ФАЙЛА для отрисовки на персонаже: скрипт карты
+    клонирует их в Character (морф костюма), а клиент по ref оригинала рисует."""
+    parsed = state.get('parsed')
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'карта не открыта'})
+    r2c, props = parsed['referent_to_class'], parsed['props']
+    cls = r2c.get(ref)
+    p = props.get(ref, {})
+    kids = _children_of(parsed)
+    if cls == 'BodyColors':
+        keys = {'Head': 'HeadColor3', 'Torso': 'TorsoColor3', 'LeftArm': 'LeftArmColor3',
+                'RightArm': 'RightArmColor3', 'LeftLeg': 'LeftLegColor3', 'RightLeg': 'RightLegColor3'}
+        cols = {}
+        for limb, pk in keys.items():
+            c = _rgb01(p.get(pk))
+            if c:
+                cols[limb] = '#%02x%02x%02x' % tuple(int(round(v * 255)) for v in c)
+        return jsonify({'ok': True, 'cls': 'BodyColors', 'colors': cols})
+    if cls != 'Accessory':
+        return jsonify({'ok': False, 'error': 'не Accessory/BodyColors'})
+
+    parts = [k for k in kids.get(ref, []) if r2c.get(k) in ('Part', 'MeshPart')]
+    handle = next((k for k in parts if props.get(k, {}).get('Name') == 'Handle'), parts[0] if parts else None)
+    if handle is None:
+        return jsonify({'ok': False, 'error': 'у аксессуара нет Handle'})
+    hp, hkids = props[handle], kids.get(handle, [])
+    sz = hp.get('Size') if isinstance(hp.get('Size'), dict) else {}
+    size = [safe_float(sz.get('x', 1), 1), safe_float(sz.get('y', 1), 1), safe_float(sz.get('z', 1), 1)]
+
+    mesh = {'kind': 'box'}
+    if r2c[handle] == 'MeshPart':
+        mid = _rbxassetid_num(hp.get('MeshId'))
+        if mid:
+            mesh = {'kind': 'meshpart', 'meshId': mid,
+                    'textureId': _rbxassetid_num(hp.get('TextureID') or hp.get('TextureId'))}
+    else:
+        for k in hkids:
+            if r2c.get(k) == 'SpecialMesh':
+                sp = props[k]
+                mid = _rbxassetid_num(sp.get('MeshId'))
+                if mid:
+                    sc, of = sp.get('Scale') or {}, sp.get('Offset') or {}
+                    mesh = {'kind': 'special', 'meshId': mid,
+                            'textureId': _rbxassetid_num(sp.get('TextureId')),
+                            'scale': [safe_float(sc.get('x', 1), 1), safe_float(sc.get('y', 1), 1), safe_float(sc.get('z', 1), 1)],
+                            'offset': [safe_float(of.get('x', 0), 0), safe_float(of.get('y', 0), 0), safe_float(of.get('z', 0), 0)]}
+                break
+
+    weld = None
+    for k in hkids:
+        if r2c.get(k) in ('Weld', 'ManualWeld'):
+            wp = props[k]
+            p0 = wp.get('Part0')
+            weld = {'part0': props.get(p0, {}).get('Name') if p0 in props else None,
+                    'c0': _cf12(wp.get('C0')), 'c1': _cf12(wp.get('C1'))}
+            break
+    att = None
+    for k in hkids:
+        if r2c.get(k) == 'Attachment':
+            ap = props[k]
+            att = {'name': ap.get('Name'), 'cf': _cf12(ap.get('CFrame'))}
+            break
+    return jsonify({'ok': True, 'cls': 'Accessory', 'name': p.get('Name'), 'mesh': mesh, 'size': size,
+                    'color': get_part_color(hp), 'weld': weld, 'attachment': att})
 
 
 @flask_app.route('/api/roblox/me')

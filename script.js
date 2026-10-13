@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-12 · r15-size';
+        const BUILD_LABEL = '2026-10-13 · weld-outfit-autojump';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -23,6 +23,7 @@
                 log_play_guest: 'No Roblox account — default avatar',
                 log_play_avatar_ok: 'Player avatar loaded',
                 log_play_avatar_fail: 'Could not load player avatar ({msg}) — default avatar',
+                log_outfit_applied: 'Costume: {n} item(s) shown on the character',
                 log_mesh_load_failed: 'Mesh {id}: load failed ({msg}), using approximation',
                 log_cloth_loaded: 'Clothing: loaded {n} of {total} layer(s)',
                 asset_fail_reason: 'Asset {id} did not load: {reason}',
@@ -199,6 +200,7 @@
                 log_play_guest: 'Нет входа в Roblox — стандартный аватар',
                 log_play_avatar_ok: 'Аватар игрока загружен',
                 log_play_avatar_fail: 'Не удалось загрузить аватар игрока ({msg}) — стандартный аватар',
+                log_outfit_applied: 'Костюм: на персонаже показано предметов — {n}',
                 log_mesh_load_failed: 'Mesh {id}: загрузка не удалась ({msg}), использую приближение',
                 log_cloth_loaded: 'Одежда: загружено слоёв {n} из {total}',
                 asset_fail_reason: 'Ассет {id} не загрузился: {reason}',
@@ -698,6 +700,7 @@
         }
 
         let currentQuality = 'low';
+        let currentSkyColor = SKY_COLOR; // меняется applyMapLighting() по ClockTime карты
         let qualitySettings = QUALITY_PRESETS.low;
 
         function setQuality(level) {
@@ -713,7 +716,8 @@
             if (scene) {
                 // См. комментарий у инициализации scene.fog — при переключении
                 const far = isPlaying ? STREAM_PRUNE_DIST : (qualitySettings.fog ? 400 : qualitySettings.renderDistance);
-                scene.fog = new THREE.Fog(SKY_COLOR, 50, far);
+                scene.fog = new THREE.Fog(currentSkyColor, 50, far);
+                buildSceneLights(); // свет зависит от пресета (число источников) — пересобираем
             }
             updateHelpers();
             reloadScene();
@@ -1046,6 +1050,178 @@
             return r.json();
         }
 
+        // ============ СВЕТ (дёшево по дизайну) ============
+        // Почему не лагает: НИКАКИХ теневых карт и НИКАКИХ настоящих точечных
+        // источников. MeshLambertMaterial в three r128 считает свет по вершинам,
+        // поэтому PointLight на больших боксах всё равно выглядел бы криво, а
+        // каждый такой источник — это ещё и пересборка шейдеров всех материалов.
+        // Вместо этого: Hemisphere (+Directional «солнце» на medium/high) —
+        // число источников зависит только от пресета и не меняется во время игры;
+        // свет по настройкам карты (ClockTime, Brightness, Ambient) считается ОДИН
+        // раз при загрузке карты, а не каждый кадр; лампы карты (PointLight/SpotLight)
+        // рисуются как свечение — ВСЕ одним THREE.Points (1 draw call).
+        let hemiLight = null, sunLight = null;
+        let mapLighting = null;       // ответ /api/lighting (или null — карта без Lighting)
+        let glowPoints = null, _glowTex = null;
+        let _dayFactor = 1;           // 0 ночь .. 1 день — по ClockTime карты
+
+        function _lerpN(a, b, t) { return a + (b - a) * t; }
+
+        function buildSceneLights() {
+            if (!scene) return;
+            if (hemiLight) scene.remove(hemiLight);
+            if (sunLight) scene.remove(sunLight);
+            hemiLight = new THREE.HemisphereLight(0xffffff, 0x8a8a8a, qualitySettings.ambientLight);
+            scene.add(hemiLight);
+            sunLight = null;
+            if (qualitySettings.dirLight > 0) {
+                sunLight = new THREE.DirectionalLight(0xffffff, qualitySettings.dirLight);
+                sunLight.position.set(20, 40, 20);
+                scene.add(sunLight);
+            }
+            applyMapLighting();
+        }
+
+        function applyMapLighting() {
+            if (!scene || !hemiLight) return;
+            const ml = mapLighting && mapLighting.lighting;
+            const sky = new THREE.Color(SKY_COLOR);
+            const skyCol = new THREE.Color(0xffffff), gndCol = new THREE.Color(0x8a8a8a);
+            const sunCol = new THREE.Color(1, 1, 1);
+            const sunDir = new THREE.Vector3(20, 40, 20).normalize();
+            let bright = 1;
+            _dayFactor = 1;
+            if (ml) {
+                const ang = (ml.clockTime - 6) / 12 * Math.PI;        // 6ч восход, 12ч зенит, 18ч закат
+                const elev = Math.sin(ang);
+                let day = Math.max(0, Math.min(1, (elev + 0.1) / 0.4));
+                day = day * day * (3 - 2 * day);                       // плавный рассвет/закат
+                _dayFactor = day;
+                sunDir.set(-Math.cos(ang), Math.max(elev, 0.05), 0.35).normalize();
+                const warm = Math.max(0, Math.min(1, 1 - elev / 0.45)); // низкое солнце — тёплое
+                sunCol.setRGB(1, _lerpN(1, 0.72, warm), _lerpN(1, 0.5, warm));
+                // Ambient в Roblox тёмный (у него ещё есть свет неба) — подтягиваем к белому,
+                // но не ниже пола, иначе сцена на телефоне станет чёрной.
+                const oa = ml.outdoorAmbient || [0.5, 0.5, 0.5], am = ml.ambient || oa;
+                const floorSky = sunLight ? 0.45 : 0.7, floorGnd = sunLight ? 0.25 : 0.4;
+                skyCol.setRGB(Math.max(floorSky, _lerpN(oa[0], 1, 0.5)), Math.max(floorSky, _lerpN(oa[1], 1, 0.5)), Math.max(floorSky, _lerpN(oa[2], 1, 0.5)));
+                gndCol.setRGB(Math.max(floorGnd, am[0] * 0.9), Math.max(floorGnd, am[1] * 0.9), Math.max(floorGnd, am[2] * 0.9));
+                skyCol.lerp(new THREE.Color(0.22, 0.26, 0.42), (1 - day) * 0.8);   // ночью — синий полумрак
+                gndCol.lerp(new THREE.Color(0.08, 0.09, 0.15), (1 - day) * 0.8);
+                sky.lerp(new THREE.Color(0x0a1030), 1 - day);
+                bright = Math.max(0.4, Math.min(1.6, ml.brightness / 2));
+            }
+            hemiLight.color.copy(skyCol);
+            hemiLight.groundColor.copy(gndCol);
+            hemiLight.intensity = qualitySettings.ambientLight;
+            if (sunLight) {
+                sunLight.color.copy(sunCol);
+                sunLight.position.copy(sunDir).multiplyScalar(100);
+                sunLight.intensity = qualitySettings.dirLight * bright * _dayFactor;
+            }
+            // Небо/туман. Дальность тумана карты применяем только вне Play (в Play fog.far = дальность стриминга).
+            currentSkyColor = sky.getHex();
+            if (scene.background && scene.background.isColor) scene.background.copy(sky);
+            else scene.background = new THREE.Color(sky);
+            if (scene.fog) {
+                scene.fog.color.copy(sky);
+                if (ml && !isPlaying && ml.fogEnd < 50000 && ml.fogEnd > ml.fogStart) {
+                    if (ml.fogColor) scene.fog.color.setRGB(ml.fogColor[0], ml.fogColor[1], ml.fogColor[2]);
+                    scene.fog.near = Math.max(0, ml.fogStart);
+                    scene.fog.far = Math.max(60, ml.fogEnd);
+                }
+            }
+            rebuildMapGlow();
+        }
+
+        // Лампы карты: одно свечение-спрайт на лампу, все в ОДНОМ Points (1 draw call, без шейдерного света).
+        function rebuildMapGlow() {
+            if (glowPoints) {
+                scene.remove(glowPoints);
+                glowPoints.geometry.dispose();
+                glowPoints.material.dispose();
+                glowPoints = null;
+            }
+            const L = mapLighting && mapLighting.lights;
+            if (!L || !L.length || currentQuality === 'low') return;
+            if (!_glowTex) {
+                const c = document.createElement('canvas');
+                c.width = c.height = 64;
+                const g = c.getContext('2d');
+                const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+                grad.addColorStop(0, 'rgba(255,255,255,1)');
+                grad.addColorStop(0.35, 'rgba(255,255,255,0.45)');
+                grad.addColorStop(1, 'rgba(255,255,255,0)');
+                g.fillStyle = grad;
+                g.fillRect(0, 0, 64, 64);
+                _glowTex = new THREE.CanvasTexture(c);
+            }
+            const pos = new Float32Array(L.length * 3), col = new Float32Array(L.length * 3);
+            const vis = 0.45 + 0.55 * (1 - _dayFactor);   // ночью свечение заметнее
+            L.forEach((l, i) => {
+                pos[i * 3] = l.x; pos[i * 3 + 1] = l.y; pos[i * 3 + 2] = l.z;
+                const k = Math.max(0.3, Math.min(1, 0.3 + l.b * 0.07)) * vis;
+                col[i * 3] = l.color[0] * k; col[i * 3 + 1] = l.color[1] * k; col[i * 3 + 2] = l.color[2] * k;
+            });
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+            glowPoints = new THREE.Points(geo, new THREE.PointsMaterial({
+                size: 10, sizeAttenuation: true, map: _glowTex, vertexColors: true,
+                transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+            }));
+            glowPoints.renderOrder = 5;
+            scene.add(glowPoints);
+        }
+
+        async function refreshMapLighting() {
+            let r = null;
+            try { r = await api('GET', '/api/lighting'); } catch (e) { /* без сети/сервера — свет по умолчанию */ }
+            mapLighting = (r && r.ok && r.found) ? r : null;
+            applyMapLighting();
+        }
+
+        // Круглая «тень» под игроком (вид от 3-го лица) — вместо теневых карт: 1 draw call,
+        // 1 луч вниз раз в 2 кадра.
+        let blobShadow = null, _blobFrame = 0;
+        function _makeBlobShadow() {
+            const geo = new THREE.CircleGeometry(1, 24);
+            geo.rotateX(-Math.PI / 2);
+            const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+                color: 0x000000, transparent: true, opacity: 0.38, depthWrite: false, fog: false,
+                polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+            }));
+            m.renderOrder = 2;
+            m.visible = false;
+            return m;
+        }
+        function _disposeBlobShadow() {
+            if (!blobShadow) return;
+            scene.remove(blobShadow);
+            blobShadow.geometry.dispose();
+            blobShadow.material.dispose();
+            blobShadow = null;
+        }
+        function updateBlobShadow() {
+            if (!blobShadow || !charBody || !physicsWorld) return;
+            if (!thirdPerson) { blobShadow.visible = false; return; }
+            const x = charBody.position.x, y = charBody.position.y, z = charBody.position.z;
+            if ((_blobFrame++ & 1) === 0) {
+                const res = new CANNON.RaycastResult();
+                physicsWorld.raycastClosest(new CANNON.Vec3(x, y, z), new CANNON.Vec3(x, y - 60, z),
+                    { collisionFilterMask: 1, skipBackfaces: true }, res);
+                if (res.hasHit) {
+                    const k = Math.max(0.35, 1 - (y - res.hitPointWorld.y) / 25); // выше от земли — меньше и бледнее
+                    blobShadow.position.y = res.hitPointWorld.y + 0.06;
+                    blobShadow.scale.setScalar(CHAR_RADIUS * 1.5 * k);
+                    blobShadow.material.opacity = 0.38 * k;
+                    blobShadow.visible = true;
+                } else blobShadow.visible = false;
+            }
+            blobShadow.position.x = x;
+            blobShadow.position.z = z;
+        }
+
         // ============ THREE.JS INIT ============
         function initThree() {
             const vp = document.getElementById('viewport');
@@ -1073,9 +1249,9 @@
             }
 
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(SKY_COLOR); // голубое небо вместо тёмно-синего/чёрного фона
+            scene.background = new THREE.Color(currentSkyColor); // голубое небо вместо тёмно-синего/чёрного фона
             // qualitySettings.fog отключён на High (fog:false) — это ок для
-            scene.fog = new THREE.Fog(SKY_COLOR, 50, qualitySettings.fog ? 400 : qualitySettings.renderDistance);
+            scene.fog = new THREE.Fog(currentSkyColor, 50, qualitySettings.fog ? 400 : qualitySettings.renderDistance);
 
             camera = new THREE.PerspectiveCamera(60, 1, 0.5, 500);
 
@@ -1087,12 +1263,7 @@
             mouse = new THREE.Vector2();
 
             // Освещение
-            scene.add(new THREE.AmbientLight(0xffffff, qualitySettings.ambientLight));
-            if (qualitySettings.dirLight > 0) {
-                const sun = new THREE.DirectionalLight(0xffffff, qualitySettings.dirLight);
-                sun.position.set(20, 40, 20);
-                scene.add(sun);
-            }
+            buildSceneLights();
 
             updateHelpers();
             window._selBox = null;
@@ -2682,6 +2853,8 @@
             };
             // meshId (реальная кастомная геометрия, см.
             const isBoxShape = !o.meshId && (!o.shape || o.shape === 'block' || o.shape === 'box');
+            // Все Decal детали (o.decals, по одному на грань) — только для боксов и только с текстурами
+            const decalList = (qualitySettings.textures && isBoxShape && Array.isArray(o.decals) && o.decals.length) ? o.decals : null;
             // Decal — своя явная грань (Face), уже вычислена корректно
             let implicitFaceIdx = null;
             if (texId && (o.textureFace === null || o.textureFace === undefined || o.textureFace === '') && isBoxShape) {
@@ -2705,7 +2878,7 @@
             const decalOp = (faceIdx !== null && o.textureFace !== null && o.textureFace !== undefined && typeof o.textureOpacity === 'number') ? o.textureOpacity : op;
             const matKey = (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' + decalOp.toFixed(1) + '_' +
                 (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx));
-            if (!matCache[matKey]) {
+            if (!decalList && !matCache[matKey]) {
                 const baseOpts = {
                     transparent: op < 1.0,
                     opacity: op,
@@ -2741,6 +2914,24 @@
                 }
             }
             let mat = matCache[matKey];
+            if (decalList) {
+                const dk = 'decals_' + (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' +
+                    decalList.map(d => d.face + ':' + d.tex + ':' + d.op.toFixed(1)).join('|');
+                if (!matCache[dk]) {
+                    const dBase = { transparent: op < 1.0, opacity: op, flatShading: currentQuality === 'low' };
+                    const plainM = new THREE.MeshLambertMaterial({ ...dBase, color: o.color || '#a0a0a0' });
+                    const arrM = [plainM, plainM, plainM, plainM, plainM, plainM];
+                    const NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'];
+                    for (const d of decalList) {
+                        const g = FACE_TO_BOX_GROUP[typeof d.face === 'number' ? NAMES[d.face] : d.face];
+                        if (g === undefined) continue;
+                        // свой opacity у Decal (Transparency Decal), а не прозрачность детали — постер на невидимой детали виден
+                        arrM[g] = new THREE.MeshLambertMaterial({ ...dBase, transparent: true, opacity: d.op, color: '#ffffff', map: getOrLoadPartTexture(d.tex) });
+                    }
+                    matCache[dk] = arrM;
+                }
+                mat = matCache[dk];
+            }
             // Особые материалы (металлы, Neon) и MaterialVariant — только для сплошных мешей
             if (!Array.isArray(mat) && !texId && (o.mvar || MATERIAL_STYLE[o.material])) {
                 const mk = 'mat_' + o.material + '_' + (o.mvar ? o.mvar.name : '') + '_' + (o.color || '') + '_' + op.toFixed(1)
@@ -3000,6 +3191,7 @@
         // Глаза (центр головы) — на 4.5 над землёй.
         const R15_HEIGHT = 5.0;
         const R15_EYE_ABOVE_GROUND = 4.5;
+        const R15_HRP_ABOVE_GROUND = 2.35;   // HipHeight 1.35 + половина высоты HRP (1.0): центр HRP в настоящем Roblox
         const CHAR_RADIUS = 1.0;      // половина ширины R15 (2 стада); коллайдер — сфера, центр на CHAR_RADIUS над землёй
         // (было 2.2 — со стандартным Roblox-персонажем шириной ~2 стада
         const CHAR_SPEED = 16;        // стадов/сек — дефолтный Humanoid.WalkSpeed
@@ -3400,6 +3592,7 @@
         }
         function _disposeCharMesh() {
             if (!charMesh) return;
+            _clearOutfit(charMesh);
             scene.remove(charMesh);
             _disposeObj(charMesh);
             charMesh = null;
@@ -3415,17 +3608,18 @@
         // синий торс, зелёные ноги. Лицо — на -Z (туда же, куда идёт персонаж).
         function _buildNoobAvatar() {
             const g = new THREE.Group();
-            const box = (w, h, d, color, x, y, z, basic) => {
+            const box = (w, h, d, color, x, y, z, basic, limb) => {
                 const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
                     basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }));
                 m.position.set(x, y, z);
+                if (limb) { m.userData.limb = limb; m.userData.baseColor = color; } // для BodyColors костюма
                 g.add(m);
             };
             const Y = 0xF5CD30, B = 0x0D69AC, G = 0xA4BD47;
-            box(1, 2, 1, G, -0.5, 1, 0); box(1, 2, 1, G, 0.5, 1, 0);       // ноги
-            box(2, 2, 1, B, 0, 3, 0);                                      // торс
-            box(1, 2, 1, Y, -1.5, 3, 0); box(1, 2, 1, Y, 1.5, 3, 0);       // руки
-            box(2, 1, 1, Y, 0, 4.5, 0);                                    // голова
+            box(1, 2, 1, G, -0.5, 1, 0, false, 'LeftLeg'); box(1, 2, 1, G, 0.5, 1, 0, false, 'RightLeg'); // ноги
+            box(2, 2, 1, B, 0, 3, 0, false, 'Torso');                                                    // торс
+            box(1, 2, 1, Y, -1.5, 3, 0, false, 'LeftArm'); box(1, 2, 1, Y, 1.5, 3, 0, false, 'RightArm'); // руки
+            box(2, 1, 1, Y, 0, 4.5, 0, false, 'Head');                                                   // голова
             box(0.2, 0.3, 0.02, 0x000000, -0.4, 4.6, -0.51, true);         // глаза
             box(0.2, 0.3, 0.02, 0x000000, 0.4, 4.6, -0.51, true);
             box(0.9, 0.1, 0.02, 0x000000, 0, 4.25, -0.51, true);           // рот
@@ -3532,6 +3726,144 @@
             return p;
         }
 
+        // ============ КОСТЮМ ПЕРСОНАЖА (Accessory / BodyColors в Character) ============
+        // Скрипт карты (морф хазмата) клонирует Accessory и BodyColors в Character — раньше
+        // приложение это не рисовало, и надетый костюм был невидим. Теперь по ref ОРИГИНАЛА
+        // (luaCloneOrigin) берём данные с сервера (/api/outfit_item) и рисуем меш аксессуара
+        // на «якоре» тела (R6-раскладка: голова 4.5, торс 3.0 над землёй, спереди -Z; рост 5
+        // у нуба и у аватара одинаков, так что якоря подходят обоим). BodyColors красит
+        // только нуба (у OBJ-аватара цвет кожи — в текстуре). Shirt/Pants пока не рисуются.
+        const OUTFIT_ANCHORS = {
+            'Head': [0, 4.5, 0], 'Torso': [0, 3, 0], 'UpperTorso': [0, 3.2, 0], 'LowerTorso': [0, 2.4, 0],
+            'HumanoidRootPart': [0, 3, 0], 'Left Arm': [-1.5, 3, 0], 'Right Arm': [1.5, 3, 0],
+            'Left Leg': [-0.5, 1, 0], 'Right Leg': [0.5, 1, 0],
+        };
+        const OUTFIT_ATTACH_TO_PART = {
+            HatAttachment: 'Head', HairAttachment: 'Head', FaceFrontAttachment: 'Head', FaceCenterAttachment: 'Head',
+            NeckAttachment: 'Torso', BodyFrontAttachment: 'Torso', BodyBackAttachment: 'Torso',
+            LeftCollarAttachment: 'Torso', RightCollarAttachment: 'Torso', WaistFrontAttachment: 'Torso',
+            WaistBackAttachment: 'Torso', WaistCenterAttachment: 'Torso',
+            LeftShoulderAttachment: 'Left Arm', RightShoulderAttachment: 'Right Arm',
+        };
+        const _outfitInfoCache = {};
+        let _outfitTimer = null;
+
+        function _cf12ToMatrix(a) { // [x,y,z, r00..r22 по строкам] -> Matrix4
+            const m = new THREE.Matrix4();
+            m.set(a[3], a[4], a[5], a[0],
+                  a[6], a[7], a[8], a[1],
+                  a[9], a[10], a[11], a[2],
+                  0, 0, 0, 1);
+            return m;
+        }
+        function _fetchOutfitInfo(originRef) {
+            if (!_outfitInfoCache[originRef]) {
+                _outfitInfoCache[originRef] = api('GET', '/api/outfit_item/' + originRef).catch(() => null);
+            }
+            return _outfitInfoCache[originRef];
+        }
+        function scheduleCharacterOutfit() {
+            if (_outfitTimer) return;
+            _outfitTimer = setTimeout(() => { _outfitTimer = null; refreshCharacterOutfit(); }, 0);
+        }
+        function _clearOutfit(group) {
+            const root = group && group.userData.outfitRoot;
+            if (!root) return;
+            // геометрия и текстуры общие (кэши мешей/текстур) — освобождаем только материалы
+            root.traverse(n => { if (n.material) n.material.dispose(); });
+            group.remove(root);
+            group.userData.outfitRoot = null;
+        }
+        function _applyBodyColors(group, colors) {
+            const body = group.userData.body;
+            if (!body) return;
+            body.traverse(n => {
+                const limb = n.userData && n.userData.limb;
+                if (!limb || !n.material) return;
+                if (colors && colors[limb]) n.material.color.set(colors[limb]);
+                else n.material.color.set(n.userData.baseColor);
+            });
+        }
+
+        async function refreshCharacterOutfit() {
+            const group = charMesh;
+            if (!isPlaying || !group || luaCharacterRef === -1) return;
+            const acc = [], bcs = [];
+            for (const k of (luaChildrenByRef[luaCharacterRef] || [])) {
+                const cls = luaByRef[k] && luaByRef[k].cls;
+                const origin = luaCloneOrigin[k] !== undefined ? luaCloneOrigin[k] : k;
+                if (origin < 0) continue;              // создано скриптом (не из файла) — данных на сервере нет
+                if (cls === 'Accessory') acc.push(origin);
+                else if (cls === 'BodyColors') bcs.push(origin);
+            }
+            const sig = acc.join(',') + '|' + bcs.join(',');
+            if (sig === group.userData.outfitSig) return;
+            group.userData.outfitSig = sig;
+            const token = group.userData.outfitToken = (group.userData.outfitToken || 0) + 1;
+            const [accInfos, bcInfos] = await Promise.all([
+                Promise.all(acc.map(_fetchOutfitInfo)), Promise.all(bcs.map(_fetchOutfitInfo))]);
+            if (charMesh !== group || group.userData.outfitToken !== token) return; // Play остановили / состав уже сменился
+            const bc = bcInfos.find(i => i && i.ok && i.cls === 'BodyColors');
+            _applyBodyColors(group, bc ? bc.colors : null);
+            _clearOutfit(group);
+            const root = new THREE.Group();
+            root.position.y = -CHAR_RADIUS;            // земля: центр сферы-коллайдера на CHAR_RADIUS выше
+            root.rotation.y = PLAY_AVATAR_YAW_OFFSET;
+            group.add(root);
+            group.userData.outfitRoot = root;
+            for (const info of accInfos) {
+                if (!info || !info.ok || info.cls !== 'Accessory') continue;
+                try {
+                    const mesh = await _buildAccessoryMesh(info);
+                    if (charMesh !== group || group.userData.outfitToken !== token) { mesh && mesh.material.dispose(); return; }
+                    if (mesh) root.add(mesh);
+                } catch (e) { logLuaOutput('warn', 'Costume: ' + (info.name || '?') + ' — ' + (e && e.message || e)); }
+            }
+            if (root.children.length) logLuaOutput('info', t('log_outfit_applied', { n: root.children.length }));
+        }
+
+        async function _buildAccessoryMesh(info) {
+            const m = info.mesh || { kind: 'box' };
+            let geo, scale = new THREE.Vector3(1, 1, 1), mat;
+            const off = new THREE.Matrix4();
+            if (m.kind === 'special' || m.kind === 'meshpart') {
+                const res = await loadRealMeshGeometry(m.meshId);
+                if (!res) return null;                   // меш не разобрался — не рисуем кубик вместо шлема
+                geo = res.geometry;
+                if (m.kind === 'special') {
+                    scale.set(m.scale[0], m.scale[1], m.scale[2]);       // родной размер * Scale
+                    off.makeTranslation(m.offset[0], m.offset[1], m.offset[2]);
+                } else {
+                    scale.set(info.size[0] / res.size.x, info.size[1] / res.size.y, info.size[2] / res.size.z);
+                }
+                mat = new THREE.MeshLambertMaterial({
+                    color: m.textureId ? '#ffffff' : (info.color || '#a3a2a5'),
+                    map: m.textureId ? getOrLoadPartTexture(m.textureId) : null,
+                    side: THREE.DoubleSide, alphaTest: m.textureId ? 0.5 : 0,
+                });
+            } else {
+                geo = new THREE.BoxGeometry(info.size[0], info.size[1], info.size[2]);
+                mat = new THREE.MeshLambertMaterial({ color: info.color || '#a3a2a5' });
+            }
+            // Handle = Part0(тело) * C0 * C1^-1 (как AccessoryWeld); нет сварки — по имени Attachment
+            let H;
+            if (info.weld && info.weld.c0 && info.weld.c1) {
+                const a = OUTFIT_ANCHORS[info.weld.part0] || OUTFIT_ANCHORS.Torso;
+                H = new THREE.Matrix4().makeTranslation(a[0], a[1], a[2])
+                    .multiply(_cf12ToMatrix(info.weld.c0)).multiply(_cf12ToMatrix(info.weld.c1).invert());
+            } else {
+                const a = OUTFIT_ANCHORS[OUTFIT_ATTACH_TO_PART[info.attachment && info.attachment.name] || 'Torso'];
+                H = new THREE.Matrix4().makeTranslation(a[0], a[1], a[2]);
+                if (info.attachment && info.attachment.cf) H.multiply(_cf12ToMatrix(info.attachment.cf).invert());
+            }
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.matrixAutoUpdate = false;
+            mesh.matrix.copy(H).multiply(off).multiply(new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z));
+            mesh.matrixWorldNeedsUpdate = true;
+            mesh.userData.shared = true;
+            return mesh;
+        }
+
         async function setupPlayerAvatar(group) {
             let acc = null;
             try {
@@ -3632,6 +3964,9 @@
             _setCharBody(charMesh, _buildNoobAvatar()); // сразу — стандартный «нуб»; аватар аккаунта подменит его, когда загрузится
             charMesh.visible = false;
             scene.add(charMesh);
+            _disposeBlobShadow();
+            blobShadow = _makeBlobShadow();
+            scene.add(blobShadow);
             setupPlayerAvatar(charMesh);
 
             prevCameraState = {
@@ -3711,6 +4046,7 @@
             const _promptEl = document.getElementById('proximity-prompt');
             if (_promptEl) _promptEl.style.display = 'none';
             _disposeCharMesh();
+            _disposeBlobShadow();
             playerAccount = null;
             canJump = false;
             jumpQueued = false;
@@ -5786,6 +6122,73 @@ end
             }
             return m;
         }
+        // ============ СВАРКА (WeldConstraint) ============
+        // Раньше Part0/Part1 только запоминались, и приваренная деталь (уран над головой игрока)
+        // просто падала. Теперь деталь, приваренная СКРИПТОМ, каждый кадр ставится в
+        // CFrame(Part0) * смещение, а смещение запоминается в момент сварки (как в Roblox).
+        // Тело Part1 на это время кинематическое (нет гравитации); снята сварка — снова динамическое.
+        // Сварки из самого файла не трогаем (они у закреплённых деталей и ничего не двигают).
+        function _weldMat(ref, lifted) {
+            const M = (luaIsPartRef(ref) && !luaIsCharRef(ref)) ? luaPartMatrix(ref) : luaGetPivotMatrix(ref);
+            // HumanoidRootPart в приложении — центр сферы-коллайдера (на CHAR_RADIUS над землёй), а в
+            // настоящем R15 он на 2.35 над землёй: приваренное «над головой» должно быть на высоте Roblox.
+            if (lifted && ref === luaHumanoidRootPartRef) M.elements[13] += R15_HRP_ABOVE_GROUND - CHAR_RADIUS;
+            return M;
+        }
+        function _releaseWeldBody(w) {
+            const b = physicsBodies[w.p1];
+            if (!b || !w.prev || typeof CANNON === 'undefined' || b.type !== CANNON.Body.KINEMATIC) return;
+            b.type = CANNON.Body.DYNAMIC;
+            b.mass = w.prev.mass > 0 ? w.prev.mass : 1;
+            b.updateMassProperties();
+            b.velocity.set(0, 0, 0);
+            b.angularVelocity.set(0, 0, 0);
+            b.allowSleep = true;
+            b.aabbNeedsUpdate = true;
+            b.wakeUp();
+            luaPromoteResting(b);
+        }
+        function luaRegisterWeld(weldRef) {
+            const info = luaByRef[weldRef];
+            if (!info || info.cls !== 'WeldConstraint') return;
+            const rp = luaRefProps[weldRef];
+            if (!rp) return;
+            const p0 = rp.Part0, p1 = rp.Part1;
+            const ok = (r) => r !== undefined && r !== -1 && luaByRef[r];
+            if (!ok(p0) || !ok(p1) || p0 === p1 || !luaIsPartRef(p1) || p1 === luaHumanoidRootPartRef) return;
+            const off = _weldMat(p0, false).invert().multiply(_weldMat(p1, false));
+            const old = luaWelds.findIndex(w => w.ref === weldRef);
+            let prev = null;
+            if (old >= 0) {
+                if (luaWelds[old].p1 === p1) prev = luaWelds[old].prev; // тело уже кинематическое — сохраняем исходное состояние
+                else _releaseWeldBody(luaWelds[old]);
+            }
+            const body = physicsBodies[p1];
+            if (!prev && body && typeof CANNON !== 'undefined' && body.type === CANNON.Body.DYNAMIC) {
+                prev = { mass: body.mass };
+                body.type = CANNON.Body.KINEMATIC;
+                body.velocity.set(0, 0, 0);
+                body.angularVelocity.set(0, 0, 0);
+                body.aabbNeedsUpdate = true;
+            }
+            const link = { ref: weldRef, p0, p1, off, prev };
+            if (old >= 0) luaWelds[old] = link; else luaWelds.push(link);
+        }
+        function luaStepWelds() {
+            if (!luaWelds.length) return;
+            for (let i = luaWelds.length - 1; i >= 0; i--) {
+                const w = luaWelds[i];
+                const par = luaParentByRef[w.ref];
+                const rp = luaRefProps[w.ref];
+                const alive = par !== undefined && par !== -1 && luaByRef[w.ref] && luaByRef[w.p0] && luaByRef[w.p1]
+                    && rp && rp.Part0 === w.p0 && rp.Part1 === w.p1;
+                if (!alive) { _releaseWeldBody(w); luaWelds.splice(i, 1); continue; }
+                luaApplyPartMatrix(w.p1, _weldMat(w.p0, true).multiply(w.off));
+                const b = physicsBodies[w.p1];
+                if (b && b.type === CANNON.Body.KINEMATIC) { b.velocity.set(0, 0, 0); b.angularVelocity.set(0, 0, 0); }
+            }
+        }
+
         function luaApplyPartMatrix(ref, M) {
             const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
             M.decompose(pos, q, sc);
@@ -6445,6 +6848,8 @@ end
         let luaCharDead = false;   // Humanoid.Health дошёл до 0, ждём респавн
         let luaCharSavedMove = null;
         let luaRefProps = {};   // ref -> {Part0|Part1|Attachment0|Attachment1: ref (-1 = nil)} у сварок и констрейнтов
+        let luaWelds = [];      // активные WeldConstraint, созданные СКРИПТОМ: {ref, p0, p1, off: Matrix4, prev}
+        let luaCloneOrigin = {}; // ref клона -> ref оригинала из файла (Clone() аксессуаров и т.п.)
         let luaAttCF = {};   // ref вложения (Attachment) -> [x,y,z,R00..R22]: Position/CFrame, в т.ч. записанные скриптами
         let luaInitValues = []; // [{ref, value:{k,v}}] — табличные Value из файла, заливаются в Lua после prelude
         let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
@@ -6794,6 +7199,7 @@ end
             const src = luaByRef[ref];
             const cls = src ? src.cls : 'Instance';
             const newRef = luaCreateVirtualInstance(cls);
+            luaCloneOrigin[newRef] = luaCloneOrigin[ref] !== undefined ? luaCloneOrigin[ref] : ref;
             if (src) luaByRef[newRef].name = src.name;
             if (virtualInstanceProps[ref]) {
                 virtualInstanceProps[newRef] = Object.assign({}, virtualInstanceProps[ref]);
@@ -6887,6 +7293,11 @@ end
                 // Пере-раскладка списка (см.
                 if (oldParent !== undefined) applyUIListLayout(oldParent);
                 if (parentRef !== -1) applyUIListLayout(parentRef);
+            }
+            if (parentRef !== -1 && luaByRef[ref] && luaByRef[ref].cls === 'WeldConstraint') luaRegisterWeld(ref);
+            if (luaCharacterRef !== -1 && (parentRef === luaCharacterRef || oldParent === luaCharacterRef)) {
+                const _oc = luaByRef[ref] && luaByRef[ref].cls;
+                if (_oc === 'Accessory' || _oc === 'BodyColors') scheduleCharacterOutfit();
             }
             // Настоящее, а не заглушечное срабатывание — ChildAdded/ChildRemoved
             if (oldParent !== undefined && oldParent !== -1 && oldParent !== parentRef) {
@@ -7088,6 +7499,7 @@ end
             def('__refprop_set', function (L2) {   // ref детали/вложения или -1
                 const ref = lua.lua_tonumber(L2, 1);
                 (luaRefProps[ref] = luaRefProps[ref] || {})[lua.lua_tojsstring(L2, 2)] = lua.lua_tonumber(L2, 3);
+                luaRegisterWeld(ref); // WeldConstraint с обоими Part0/Part1 — деталь начинает следовать за Part0
                 return 0;
             });
             def('__att_get', function (L2) {      // Attachment.CFrame -> 12 чисел (или ничего)
@@ -8279,6 +8691,7 @@ end
             virtualInstanceProps[luaHumanoidRef].MaxHealth = 100;
             virtualInstanceProps[luaHumanoidRef].JumpHeight = 7.2;
             virtualInstanceProps[luaHumanoidRef].HipHeight = 1.35; // R15 (characterR15.rbxm)
+            virtualInstanceProps[luaHumanoidRef].AutoJumpEnabled = true;
 
             const playerGuiRef = luaCreateVirtualInstance('PlayerGui');
             luaSetParent(playerGuiRef, playerRef);
@@ -8332,6 +8745,8 @@ end
             luaPartXform = {};
             luaAttCF = {};
             luaRefProps = {};
+            luaWelds = [];
+            luaCloneOrigin = {};
             playCamDist = THIRD_PERSON_DIST;
             if (allR && allR.ok && allR.instances) {
                 for (const inst of allR.instances) {
@@ -9272,6 +9687,14 @@ end
 
             if (canJump && (dirX !== 0 || dirZ !== 0)) {
                 tryStepUp(dirX, dirZ);
+                // Авто-прыжок (Humanoid.AutoJumpEnabled): впереди препятствие выше ступеньки, но ниже прыжка
+                if (!jumpQueued && charJumpPower > 0 && _autoJumpEnabled()) {
+                    const nowAJ = performance.now();
+                    if (nowAJ - _lastAutoJumpMs > 350 && needsAutoJump(dirX, dirZ)) {
+                        jumpQueued = true;
+                        _lastAutoJumpMs = nowAJ;
+                    }
+                }
             }
 
             if (charPushT > 0) { // толчок от HumanoidRootPart.AssemblyLinearVelocity
@@ -9301,6 +9724,31 @@ end
         let _bodyCheckT = 0;
 
         // Сфера плохо лезет по отдельным боксам-ступеням:
+        // Авто-прыжок как у Roblox на телефонах. tryStepUp сам берёт низкие бордюры (до STEP_HEIGHT);
+        // сюда доходит то, что выше: прыгаем, если препятствие впереди — СТЕНА (не пологий склон)
+        // и его верх ниже высоты прыжка (JumpHeight 7.2, с запасом на сферу — 6.4 от ступней).
+        const AUTO_JUMP_MAX_H = 6.4;
+        let _lastAutoJumpMs = 0;
+        function _autoJumpEnabled() {
+            const hp = luaHumanoidRef !== -1 ? virtualInstanceProps[luaHumanoidRef] : null;
+            return !hp || hp.AutoJumpEnabled !== false; // по умолчанию включён; скрипт может выключить
+        }
+        function needsAutoJump(dirX, dirZ) {
+            const dist = CHAR_RADIUS + 1.2;
+            const feetY = charBody.position.y - CHAR_RADIUS;
+            const ray = (h, res) => physicsWorld.raycastClosest(
+                new CANNON.Vec3(charBody.position.x, feetY + h, charBody.position.z),
+                new CANNON.Vec3(charBody.position.x + dirX * dist, feetY + h, charBody.position.z + dirZ * dist),
+                { collisionFilterMask: 1, skipBackfaces: true }, res);
+            const low = new CANNON.RaycastResult();
+            ray(STEP_HEIGHT + 0.3, low);                 // выше того, что берёт tryStepUp
+            if (!low.hasHit) return false;               // препятствия выше ступеньки нет
+            if (low.hitNormalWorld && low.hitNormalWorld.y > 0.6) return false; // пологий склон — просто идём
+            const high = new CANNON.RaycastResult();
+            ray(AUTO_JUMP_MAX_H, high);
+            return !high.hasHit;                         // сверху свободно — перепрыгнем
+        }
+
         function tryStepUp(dirX, dirZ) {
             const checkDist = CHAR_RADIUS + 1.0;
             const footY = charBody.position.y - CHAR_RADIUS + 0.15;
@@ -9488,6 +9936,7 @@ end
                 charMesh.position.set(charBody.position.x, charBody.position.y, charBody.position.z);
                 charMesh.rotation.y = spherical.theta; // куб развёрнут туда же, куда смотрит камера
             }
+            updateBlobShadow();
             updateCamera();
         }
 
@@ -9602,6 +10051,7 @@ end
             updateHollowUnionGhosts();
             updateSurfaceGuis();
             if (ticks === 0) return;   // экран быстрее 60 Гц: новых шагов нет, картинка не изменилась
+            luaStepWelds();
 
             if (!_syncP) { _syncP = new THREE.Vector3(); _syncQ = new THREE.Quaternion(); _syncOne = new THREE.Vector3(1, 1, 1); }
             for (const [refStr, body] of Object.entries(physicsBodies)) {
@@ -9632,6 +10082,7 @@ end
             rebuildTreeIndex();
             renderTree();
             reloadScene();
+            refreshMapLighting();
         }
 
         // ref -> node и ref -> parentRef — плоские индексы поверх вложенного
