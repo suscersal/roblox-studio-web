@@ -2394,20 +2394,228 @@ _ASSET_PROXY_CACHE = {}
 _ASSET_PROXY_CACHE_MAX = 64
 
 
+# --- Сжатие дискового кэша -------------------------------------------------
+# Файлы кэша бывают трёх видов (вид определяется по имени/сигнатуре, поэтому ничего
+# не ломается, если в папке лежит смесь):
+#   <имя>        — сырые байты (старый формат, до сжатия);
+#   <имя>.zst    — zstd (если установлен пакет zstandard — он уже нужен для .rbxl);
+#   <имя>.gz     — gzip (запасной вариант без zstandard).
+# Чтение понимает все три, а ещё сырой файл, внутри которого лежит готовый
+# zstd/gzip-поток (определяется по сигнатуре), так что уже сжатые кем-то кэши подхватываются.
+# Запись сжимает только то, что реально ужимается: JPEG/MP3/OGG/WEBP уже сжаты, а
+# сжатая копия оставляется лишь при выигрыше не меньше 10% — иначе лежит сырой файл.
+# Старые несжатые файлы сжимает фоновая задача (cache_compact), один раз на файл.
+import gzip as _cgzip
+import threading as _cthreading
+try:
+    import zstandard as _czstd
+except Exception:  # пакета нет (например, урезанная сборка) — работаем через gzip
+    _czstd = None
+
+_CACHE_ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
+_CACHE_GZIP_MAGIC = b'\x1f\x8b'
+_CACHE_CODEC_SUFFIXES = ('.zst', '.gz')
+_CACHE_SKIP_COMPRESS_CT = {'image/jpeg', 'audio/mpeg', 'audio/ogg', 'image/webp', 'video/mp4'}
+_CACHE_MIN_SIZE = 256        # меньше — смысла нет
+_CACHE_MIN_GAIN = 0.90       # сжатая копия должна быть ≤ 90% оригинала
+_CACHE_SKIP_INDEX = 'compact_skip.json'   # имена, которые уже пробовали и сжать не удалось (не пробуем каждый запуск)
+_cache_compact_started = False
+_cache_compact_lock = _cthreading.Lock()
+
+
+def _cache_compress(raw):
+    """-> (суффикс, байты): zstd, если есть, иначе gzip."""
+    if _czstd is not None:
+        return '.zst', _czstd.ZstdCompressor(level=6).compress(raw)
+    return '.gz', _cgzip.compress(raw, 6, mtime=0)
+
+
+def _cache_decode(data):
+    """Распаковывает zstd/gzip-поток по сигнатуре. Исключение — если распаковать нельзя."""
+    if data[:4] == _CACHE_ZSTD_MAGIC:
+        if _czstd is None:
+            raise RuntimeError('запись сжата zstd, а пакет zstandard не установлен')
+        return _czstd.ZstdDecompressor().decompressobj().decompress(data)
+    if data[:2] == _CACHE_GZIP_MAGIC:
+        return _cgzip.decompress(data)
+    raise ValueError('не сжатый поток')
+
+
+def _cache_read_file(f):
+    """Байты файла кэша с прозрачной распаковкой; None — прочитать/распаковать нельзя (= промах кэша)."""
+    try:
+        data = f.read_bytes()
+    except OSError:
+        return None
+    coded = f.name.endswith(_CACHE_CODEC_SUFFIXES)
+    if coded or data[:4] == _CACHE_ZSTD_MAGIC or data[:2] == _CACHE_GZIP_MAGIC:
+        try:
+            return _cache_decode(data)
+        except Exception:
+            # помеченный .zst/.gz, но битый/нераспаковываемый — промах; сырой файл, который лишь
+            # похож на поток по первым байтам, отдаём как есть
+            return None if coded else data
+    return data
+
+
+def _cache_find(base):
+    """Файл кэша для <base> в любом виде (сжатый предпочтительнее — он новее после сжатия) или None."""
+    for sfx in _CACHE_CODEC_SUFFIXES + ('',):
+        f = base.with_name(base.name + sfx)
+        if f.is_file():
+            return f
+    return None
+
+
+def _cache_store(base, raw, content_type):
+    """Атомарно пишет <base>[.zst|.gz]. Возвращает размер записанного файла или None при ошибке."""
+    data, suffix = raw, ''
+    if content_type not in _CACHE_SKIP_COMPRESS_CT and len(raw) >= _CACHE_MIN_SIZE:
+        try:
+            sfx, comp = _cache_compress(raw)
+            if len(comp) <= len(raw) * _CACHE_MIN_GAIN:
+                data, suffix = comp, sfx
+        except Exception:
+            pass  # сжать не вышло — пишем как есть
+    target = base.with_name(base.name + suffix)
+    tmp = target.with_name(target.name + '.tmp')
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+        return len(data)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _cache_name_ct(name):
+    """'123__image_png.bin(.zst)' -> 'image/png'; для остальных файлов — application/octet-stream."""
+    for sfx in _CACHE_CODEC_SUFFIXES:
+        if name.endswith(sfx):
+            name = name[:-len(sfx)]
+    if name.endswith('.json'):
+        return 'application/json'
+    if '__' in name and name.endswith('.bin'):
+        return name[:-4].split('__', 1)[1].replace('_', '/')
+    return 'application/octet-stream'
+
+
+def cache_stats():
+    """Размеры кэша: сколько файлов/байт сырых и сжатых (и сколько они занимали бы без сжатия — для сжатых
+    берём размер распакованного содержимого из заголовка zstd/gzip недёшево, поэтому показываем фактический)."""
+    d = _asset_cache_dir()
+    st = {'codec': 'zstd' if _czstd is not None else 'gzip', 'raw_files': 0, 'raw_bytes': 0,
+          'compressed_files': 0, 'compressed_bytes': 0, 'total_bytes': 0}
+    for f in d.iterdir():
+        if not f.is_file() or f.name.endswith('.tmp') or f.name == _CACHE_SKIP_INDEX:
+            continue
+        n = f.stat().st_size
+        if f.name.endswith(_CACHE_CODEC_SUFFIXES):
+            st['compressed_files'] += 1
+            st['compressed_bytes'] += n
+        else:
+            st['raw_files'] += 1
+            st['raw_bytes'] += n
+        st['total_bytes'] += n
+    return st
+
+
+def cache_compact():
+    """Сжимает старые несжатые файлы кэша. Безопасно к параллельному чтению: сначала пишется сжатая копия
+    (атомарно), потом удаляется сырой оригинал; дата изменения сохраняется (по ней считается TTL аватаров).
+    -> {'compressed': N, 'saved_bytes': B, 'skipped': M}."""
+    import json as _json
+    d = _asset_cache_dir()
+    idx_path = d / _CACHE_SKIP_INDEX
+    try:
+        skip = _json.loads(idx_path.read_text(encoding='utf-8'))
+    except Exception:
+        skip = {}
+    done, saved, skipped, skip_changed = 0, 0, 0, False
+    for f in list(d.iterdir()):
+        name = f.name
+        if (not f.is_file() or name == _CACHE_SKIP_INDEX or name.endswith('.tmp')
+                or name.endswith(_CACHE_CODEC_SUFFIXES) or not (name.endswith('.bin') or name.endswith('.json'))):
+            continue
+        try:
+            stt = f.stat()
+            if skip.get(name) == stt.st_size or _cache_name_ct(name) in _CACHE_SKIP_COMPRESS_CT:
+                skipped += 1
+                continue
+            raw = f.read_bytes()
+            if raw[:4] == _CACHE_ZSTD_MAGIC or raw[:2] == _CACHE_GZIP_MAGIC:
+                # «уже сжатый» файл под именем .bin — переименовываем под настоящий вид, ничего не пережимая
+                target = f.with_name(name + ('.zst' if raw[:4] == _CACHE_ZSTD_MAGIC else '.gz'))
+                os.replace(f, target)
+                done += 1
+                continue
+            if len(raw) < _CACHE_MIN_SIZE:
+                skip[name] = stt.st_size; skip_changed = True
+                continue
+            sfx, comp = _cache_compress(raw)
+            if len(comp) > len(raw) * _CACHE_MIN_GAIN:
+                skip[name] = stt.st_size; skip_changed = True   # не ужимается — не пробуем снова
+                skipped += 1
+                continue
+            target = f.with_name(name + sfx)
+            tmp = target.with_name(target.name + '.tmp')
+            tmp.write_bytes(comp)
+            os.utime(tmp, (stt.st_atime, stt.st_mtime))
+            os.replace(tmp, target)
+            f.unlink()
+            done += 1
+            saved += len(raw) - len(comp)
+        except Exception:
+            continue  # один проблемный файл не должен останавливать остальные
+    if skip_changed:
+        try:
+            idx_path.write_text(_json.dumps(skip), encoding='utf-8')
+        except OSError:
+            pass
+    return {'compressed': done, 'saved_bytes': saved, 'skipped': skipped}
+
+
+def _start_cache_compaction_once():
+    """Один раз за запуск: фоновая задача сжимает старые файлы кэша (отключается RSW_CACHE_COMPACT=0)."""
+    global _cache_compact_started
+    with _cache_compact_lock:
+        if _cache_compact_started or os.environ.get('RSW_CACHE_COMPACT') == '0':
+            return
+        _cache_compact_started = True
+
+    def _run():
+        import time as _t
+        _t.sleep(10)   # не мешаем старту приложения и первым запросам
+        try:
+            cache_compact()
+        except Exception:
+            pass
+    _cthreading.Thread(target=_run, daemon=True, name='asset-cache-compact').start()
+
+
 def _asset_cache_dir():
     data_dir = os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)
     d = Path(data_dir) / 'asset_cache'
     d.mkdir(parents=True, exist_ok=True)
+    _start_cache_compaction_once()
     return d
 
 
 def _asset_cache_disk_get(asset_id):
     """Ищет ассет на диске — имя файла кодирует content-type, чтобы не
-    городить отдельный файл-метаданные на каждый ассет."""
+    городить отдельный файл-метаданные на каждый ассет. Сжатые записи
+    (.zst/.gz) и сырые читаются одинаково."""
     try:
-        for f in _asset_cache_dir().glob(f'{asset_id}__*.bin'):
-            ct = f.stem.split('__', 1)[1].replace('_', '/')
-            return ct, f.read_bytes()
+        for f in _asset_cache_dir().glob(f'{asset_id}__*'):
+            if f.name.endswith('.tmp'):
+                continue
+            data = _cache_read_file(f)
+            if data is None:
+                continue
+            return _cache_name_ct(f.name), data
     except Exception:
         pass
     return None
@@ -2415,12 +2623,24 @@ def _asset_cache_disk_get(asset_id):
 
 def _asset_cache_disk_put(asset_id, content_type, raw_bytes):
     try:
+        d = _asset_cache_dir()
+        if any(not f.name.endswith('.tmp') for f in d.glob(f'{asset_id}__*')):
+            return  # уже есть (в любом виде)
         safe_ct = content_type.replace('/', '_')
-        f = _asset_cache_dir() / f'{asset_id}__{safe_ct}.bin'
-        if not f.exists():
-            f.write_bytes(raw_bytes)
+        _cache_store(d / f'{asset_id}__{safe_ct}.bin', raw_bytes, content_type)
     except Exception:
         pass  # дисковый кэш — best-effort, не должен ронять сам запрос
+
+
+@flask_app.route('/api/cache/stats')
+def api_cache_stats():
+    return jsonify({'ok': True, **cache_stats()})
+
+
+@flask_app.route('/api/cache/compact', methods=['POST'])
+def api_cache_compact():
+    """Сжать старые файлы кэша сейчас (синхронно) и вернуть итог + новую статистику."""
+    return jsonify({'ok': True, **cache_compact(), 'stats': cache_stats()})
 
 
 @flask_app.route('/api/union_mesh')
@@ -2929,7 +3149,7 @@ def api_lighting():
 
     lights = []
     for r, c in r2c.items():
-        if c not in ('PointLight', 'SpotLight'):
+        if c not in ('PointLight', 'SpotLight', 'SurfaceLight'):
             continue
         lpr = props.get(r, {})
         if lpr.get('Enabled') is False:
@@ -2954,8 +3174,23 @@ def api_lighting():
                        'color': _rgb01(lpr.get('Color')) or [1.0, 1.0, 1.0]})
         if len(lights) >= MAX_MAP_LIGHTS:
             break
-    return jsonify({'ok': True, 'found': True, 'lighting': lighting,
-                    'atmosphere': atmosphere, 'lights': lights})
+    # Скайбокс (шесть граней) и цветокоррекция — только то, что можно применить без пост-обработки
+    sky = None
+    cc = None
+    for r, c in r2c.items():
+        if c == 'Sky' and pmap.get(r) == lref and sky is None:
+            sp = props.get(r, {})
+            faces = {k: _rbxassetid_num(sp.get('Skybox' + k)) for k in ('Bk', 'Dn', 'Ft', 'Lf', 'Rt', 'Up')}
+            if all(faces.values()):
+                sky = faces
+        elif c == 'ColorCorrectionEffect' and pmap.get(r) == lref and cc is None:
+            cp = props.get(r, {})
+            if cp.get('Enabled', True):
+                cc = {'brightness': num(cp.get('Brightness'), 0.0), 'contrast': num(cp.get('Contrast'), 0.0),
+                      'saturation': num(cp.get('Saturation'), 0.0),
+                      'tint': _rgb01(cp.get('TintColor')) or [1.0, 1.0, 1.0]}
+    return jsonify({'ok': True, 'found': True, 'lighting': lighting, 'atmosphere': atmosphere,
+                    'lights': lights, 'sky': sky, 'colorCorrection': cc})
 
 
 _children_cache = {'pid': None, 'map': None}
@@ -3085,8 +3320,11 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': 'userId должен быть числом'}), 400
     cp = _play_avatar_cache_path(user_id)
     try:
-        if cp.exists() and _time.time() - cp.stat().st_mtime < PLAY_AVATAR_TTL:
-            return Response(cp.read_bytes(), mimetype='application/json')
+        cf = _cache_find(cp)
+        if cf is not None and _time.time() - cf.stat().st_mtime < PLAY_AVATAR_TTL:
+            cached_json = _cache_read_file(cf)
+            if cached_json is not None:
+                return Response(cached_json, mimetype='application/json')
     except OSError:
         pass
     bundle_url = request.args.get('bundleUrl', '').strip()
@@ -3120,8 +3358,13 @@ def api_roblox_play_avatar():
                           _b64.b64encode(d).decode('ascii')} for n, d in tex_files],
         }
         try:
-            cp.write_text(json.dumps(payload), encoding='utf-8')
-        except OSError:
+            for sfx in ('',) + _CACHE_CODEC_SUFFIXES:   # старую запись (в любом виде) заменяем новой
+                try:
+                    cp.with_name(cp.name + sfx).unlink()
+                except OSError:
+                    pass
+            _cache_store(cp, json.dumps(payload).encode('utf-8'), 'application/json')
+        except Exception:
             pass
         return jsonify(payload)
     except Exception as e:

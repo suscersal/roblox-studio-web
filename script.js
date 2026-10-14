@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-13 · char-column';
+        const BUILD_LABEL = '2026-10-14 · map-sky-glow';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -24,6 +24,7 @@
                 log_play_avatar_ok: 'Player avatar loaded',
                 log_play_avatar_fail: 'Could not load player avatar ({msg}) — default avatar',
                 log_outfit_applied: 'Costume: {n} item(s) shown on the character',
+                warn_sky_failed: 'Could not load the map skybox — using sky color',
                 log_mesh_load_failed: 'Mesh {id}: load failed ({msg}), using approximation',
                 log_cloth_loaded: 'Clothing: loaded {n} of {total} layer(s)',
                 asset_fail_reason: 'Asset {id} did not load: {reason}',
@@ -201,6 +202,7 @@
                 log_play_avatar_ok: 'Аватар игрока загружен',
                 log_play_avatar_fail: 'Не удалось загрузить аватар игрока ({msg}) — стандартный аватар',
                 log_outfit_applied: 'Костюм: на персонаже показано предметов — {n}',
+                warn_sky_failed: 'Не удалось загрузить скайбокс карты — оставляю цвет неба',
                 log_mesh_load_failed: 'Mesh {id}: загрузка не удалась ({msg}), использую приближение',
                 log_cloth_loaded: 'Одежда: загружено слоёв {n} из {total}',
                 asset_fail_reason: 'Ассет {id} не загрузился: {reason}',
@@ -1062,7 +1064,7 @@
         // рисуются как свечение — ВСЕ одним THREE.Points (1 draw call).
         let hemiLight = null, sunLight = null;
         let mapLighting = null;       // ответ /api/lighting (или null — карта без Lighting)
-        let glowPoints = null, _glowTex = null;
+        let _glowTex = null;
         let _dayFactor = 1;           // 0 ночь .. 1 день — по ClockTime карты
 
         function _lerpN(a, b, t) { return a + (b - a) * t; }
@@ -1080,6 +1082,7 @@
                 scene.add(sunLight);
             }
             applyMapLighting();
+            applyMapSky();   // low — без скайбокса, medium/high — с ним
         }
 
         function applyMapLighting() {
@@ -1111,6 +1114,15 @@
                 sky.lerp(new THREE.Color(0x0a1030), 1 - day);
                 bright = Math.max(0.4, Math.min(1.6, ml.brightness / 2));
             }
+            // ColorCorrectionEffect карты — без пост-обработки (она дорогая на телефоне): тон и яркость
+            // запекаются в цвета света; контраст/насыщенность не воспроизводим.
+            const cc = mapLighting && mapLighting.colorCorrection;
+            if (cc) {
+                const k = Math.max(0.5, 1 + cc.brightness);
+                skyCol.multiply(new THREE.Color(cc.tint[0] * k, cc.tint[1] * k, cc.tint[2] * k));
+                gndCol.multiply(new THREE.Color(cc.tint[0] * k, cc.tint[1] * k, cc.tint[2] * k));
+                sunCol.multiply(new THREE.Color(cc.tint[0], cc.tint[1], cc.tint[2]));
+            }
             hemiLight.color.copy(skyCol);
             hemiLight.groundColor.copy(gndCol);
             hemiLight.intensity = qualitySettings.ambientLight;
@@ -1121,8 +1133,10 @@
             }
             // Небо/туман. Дальность тумана карты применяем только вне Play (в Play fog.far = дальность стриминга).
             currentSkyColor = sky.getHex();
-            if (scene.background && scene.background.isColor) scene.background.copy(sky);
-            else scene.background = new THREE.Color(sky);
+            if (!_skyCube) {   // есть скайбокс карты — фон не трогаем
+                if (scene.background && scene.background.isColor) scene.background.copy(sky);
+                else scene.background = new THREE.Color(sky);
+            }
             if (scene.fog) {
                 scene.fog.color.copy(sky);
                 if (ml && !isPlaying && ml.fogEnd < 50000 && ml.fogEnd > ml.fogStart) {
@@ -1134,14 +1148,12 @@
             rebuildMapGlow();
         }
 
-        // Лампы карты: одно свечение-спрайт на лампу, все в ОДНОМ Points (1 draw call, без шейдерного света).
+        // Лампы карты: свечение-спрайт на лампу. Лампы делятся на три корзины по Range (размер пятна),
+        // каждая корзина — ОДИН THREE.Points: итого не больше 3 draw call при любом числе ламп.
+        let glowObjs = [];
         function rebuildMapGlow() {
-            if (glowPoints) {
-                scene.remove(glowPoints);
-                glowPoints.geometry.dispose();
-                glowPoints.material.dispose();
-                glowPoints = null;
-            }
+            for (const g of glowObjs) { scene.remove(g); g.geometry.dispose(); g.material.dispose(); }
+            glowObjs = [];
             const L = mapLighting && mapLighting.lights;
             if (!L || !L.length || currentQuality === 'low') return;
             if (!_glowTex) {
@@ -1156,22 +1168,48 @@
                 g.fillRect(0, 0, 64, 64);
                 _glowTex = new THREE.CanvasTexture(c);
             }
-            const pos = new Float32Array(L.length * 3), col = new Float32Array(L.length * 3);
             const vis = 0.45 + 0.55 * (1 - _dayFactor);   // ночью свечение заметнее
-            L.forEach((l, i) => {
-                pos[i * 3] = l.x; pos[i * 3 + 1] = l.y; pos[i * 3 + 2] = l.z;
-                const k = Math.max(0.3, Math.min(1, 0.3 + l.b * 0.07)) * vis;
-                col[i * 3] = l.color[0] * k; col[i * 3 + 1] = l.color[1] * k; col[i * 3 + 2] = l.color[2] * k;
-            });
-            const geo = new THREE.BufferGeometry();
-            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-            geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-            glowPoints = new THREE.Points(geo, new THREE.PointsMaterial({
-                size: 10, sizeAttenuation: true, map: _glowTex, vertexColors: true,
-                transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
-            }));
-            glowPoints.renderOrder = 5;
-            scene.add(glowPoints);
+            const buckets = [{ size: 6, items: [] }, { size: 12, items: [] }, { size: 20, items: [] }];
+            for (const l of L) buckets[l.range <= 10 ? 0 : (l.range <= 25 ? 1 : 2)].items.push(l);
+            for (const bk of buckets) {
+                if (!bk.items.length) continue;
+                const pos = new Float32Array(bk.items.length * 3), col = new Float32Array(bk.items.length * 3);
+                bk.items.forEach((l, i) => {
+                    pos[i * 3] = l.x; pos[i * 3 + 1] = l.y; pos[i * 3 + 2] = l.z;
+                    const k = Math.max(0.3, Math.min(1, 0.3 + l.b * 0.07)) * vis;
+                    col[i * 3] = l.color[0] * k; col[i * 3 + 1] = l.color[1] * k; col[i * 3 + 2] = l.color[2] * k;
+                });
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+                const pts = new THREE.Points(geo, new THREE.PointsMaterial({
+                    size: bk.size, sizeAttenuation: true, map: _glowTex, vertexColors: true,
+                    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+                }));
+                pts.renderOrder = 5;
+                scene.add(pts);
+                glowObjs.push(pts);
+            }
+        }
+
+        // Скайбокс карты (Sky): куб из шести граней, грузится один раз при открытии карты — на кадр
+        // не стоит ничего. Только medium/high. Порядок граней three: +X,-X,+Y,-Y,+Z,-Z = Rt,Lf,Up,Dn,Bk,Ft
+        // (в Roblox Front смотрит в -Z, Back — в +Z). Нет сети/не загрузилось — остаётся цвет неба.
+        let _skyCube = null, _skySig = '';
+        function applyMapSky() {
+            const sk = mapLighting && mapLighting.sky;
+            const sig = (sk && currentQuality !== 'low') ? [sk.Rt, sk.Lf, sk.Up, sk.Dn, sk.Bk, sk.Ft].join(',') : '';
+            if (sig === _skySig) return;
+            _skySig = sig;
+            if (_skyCube) { _skyCube.dispose(); _skyCube = null; }
+            if (!sig) { applyMapLighting(); return; }
+            const urls = [sk.Rt, sk.Lf, sk.Up, sk.Dn, sk.Bk, sk.Ft].map(id => '/api/asset-proxy?id=' + id);
+            new THREE.CubeTextureLoader().load(urls, (cube) => {
+                if (_skySig !== sig) { cube.dispose(); return; }  // за время загрузки карту сменили
+                cube.encoding = THREE.sRGBEncoding;
+                _skyCube = cube;
+                scene.background = cube;
+            }, undefined, () => { logLuaOutput('warn', t('warn_sky_failed')); });
         }
 
         async function refreshMapLighting() {
@@ -1179,6 +1217,7 @@
             try { r = await api('GET', '/api/lighting'); } catch (e) { /* без сети/сервера — свет по умолчанию */ }
             mapLighting = (r && r.ok && r.found) ? r : null;
             applyMapLighting();
+            applyMapSky();
         }
 
         // Круглая «тень» под игроком (вид от 3-го лица) — вместо теневых карт: 1 draw call,
