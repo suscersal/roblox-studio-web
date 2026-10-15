@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-14 · map-sky-glow';
+        const BUILD_LABEL = '2026-10-15 · gui-clip';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -2724,6 +2724,19 @@
                 }
             }).catch(e => logLuaOutput('warn', t('asset_fail_reason', { id, reason: e.message })));
         }
+        // Overlay-режим SurfaceAppearance: итог = mix(Color детали, ColorMap.rgb, ColorMap.a). Правим один фрагмент
+        // стандартного шейдера (map_fragment), отдельная программа — по customProgramCacheKey.
+        function _applyOverlayAlpha(mat) {
+            mat.customProgramCacheKey = () => 'overlay-alpha';
+            mat.onBeforeCompile = (shader) => {
+                shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>',
+                    `#ifdef USE_MAP
+                        vec4 texelColor = mapTexelToLinear( texture2D( map, vUv ) );
+                        diffuseColor.rgb = mix( diffuse, texelColor.rgb, texelColor.a );
+                    #endif`);
+            };
+        }
+
         function getOrLoadPartTexture(assetId) {
             if (_partTexCache[assetId]) return _partTexCache[assetId];
             if (!_partTexLoader) _partTexLoader = new THREE.TextureLoader();
@@ -2915,12 +2928,15 @@
                 ? (FACE_TO_BOX_GROUP[_faceName] ?? FACE_TO_BOX_GROUP.Front)
                 : implicitFaceIdx;
 
-            const baseColor = texId && faceIdx === null ? '#ffffff' : (o.color || '#a0a0a0');
+            // SurfaceAppearance с AlphaMode=Overlay (o.alphaMode===0): цвет детали просвечивает там, где альфа текстуры
+            // мала. Раньше такие пиксели вырезались alphaTest'ом (остаются «только линии» на High) или были чёрными.
+            const overlayAlpha = !!(texId && o.meshId && faceIdx === null && o.alphaMode === 0);
+            const baseColor = (texId && faceIdx === null && !overlayAlpha) ? '#ffffff' : (o.color || '#a0a0a0');
             // Decal на грани: свой уровень непрозрачности (см. textureOpacity на сервере), а не
             // прозрачность детали — иначе постер на невидимой детали (Transparency=1) пропадает.
             const decalOp = (faceIdx !== null && o.textureFace !== null && o.textureFace !== undefined && typeof o.textureOpacity === 'number') ? o.textureOpacity : op;
             const matKey = (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' + decalOp.toFixed(1) + '_' +
-                (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx));
+                (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx)) + (overlayAlpha ? '_ovl' : '');
             if (!decalList && !matCache[matKey]) {
                 // Прозрачные материалы НЕ пишут глубину, а полностью невидимые (Transparency=1) не рисуются вовсе:
                 // иначе такая деталь (сортировка идёт по центру объекта, а не по поверхности) под одними
@@ -2957,8 +2973,9 @@
                         // виден сплошной чёрный кусок. Не влияет на полностью
                         // непрозрачные текстуры — alpha=1 везде проходит
                         // проверку тривиально.
-                        alphaTest: (texId && o.meshId) ? 0.5 : 0,
+                        alphaTest: (texId && o.meshId && !overlayAlpha) ? 0.5 : 0,
                     });
+                    if (overlayAlpha) _applyOverlayAlpha(matCache[matKey]);
                 }
             }
             let mat = matCache[matKey];
@@ -4375,6 +4392,60 @@ UDim2.__add = function(a, b) return UDim2.new(a.X.Scale + b.X.Scale, a.X.Offset 
 UDim2.__sub = function(a, b) return UDim2.new(a.X.Scale - b.X.Scale, a.X.Offset - b.X.Offset, a.Y.Scale - b.Y.Scale, a.Y.Offset - b.Y.Offset) end
 UDim2.__tostring = function(u) return "{" .. tostring(u.X) .. "}, {" .. tostring(u.Y) .. "}" end
 
+-- RunService:BindToRenderStep хранит свои подключения здесь (по имени привязки)
+__render_binds = {}
+-- RaycastParams.new() — только контейнер полей (FilterDescendantsInstances/FilterType/...): workspace:Raycast в
+-- приложении пока нет, но скрипты создают параметры до вызова — без глобала падали на RaycastParams.new
+RaycastParams = {}
+function RaycastParams.new()
+    return {FilterDescendantsInstances = {}, FilterType = "Exclude", IgnoreWater = false,
+            RespectCanCollide = false, CollisionGroup = "Default", BruteForceAllSlow = false}
+end
+-- Random — класс Luau: Random.new(seed) + NextNumber/NextInteger/NextUnitVector/Shuffle/Clone.
+-- Свой генератор (xorshift32): один и тот же seed даёт одну и ту же последовательность, как в Roblox.
+-- Целые в fengari 32-битные со знаком, поэтому никаких 64-битных множителей и масок 0xFFFFFFFF:
+-- работаем в знаковом int32 (сдвиги влево сами «обрезаются»), результат берём без знакового бита.
+-- Раньше глобала Random не было вовсе: attempt to index a nil value (global 'Random').
+Random = {}
+Random.__index = Random
+local function __rnd_step(self)
+    local x = self._s
+    x = x ~ (x << 13)
+    x = x ~ (x >> 17)
+    x = x ~ (x << 5)
+    self._s = x
+    return (x & 0x7FFFFFFF) / 2147483648
+end
+function Random.new(seed)
+    seed = math.floor(tonumber(seed) or (os.time() + math.random(0, 999999)))
+    local st = seed % 2147483647
+    if st == 0 then st = 1 end
+    local self = setmetatable({_s = math.tointeger(st) or 1}, Random)
+    for _ = 1, 4 do __rnd_step(self) end   -- прогрев: близкие seed не должны давать близкие первые числа
+    return self
+end
+function Random:NextNumber(min, max)
+    local r = __rnd_step(self)
+    if min == nil then return r end
+    return min + r * (max - min)
+end
+function Random:NextInteger(min, max)
+    return min + math.floor(__rnd_step(self) * (max - min + 1))
+end
+function Random:NextUnitVector()
+    local z = self:NextNumber(-1, 1)
+    local a = self:NextNumber(0, 2 * math.pi)
+    local r = math.sqrt(1 - z * z)
+    return Vector3.new(r * math.cos(a), r * math.sin(a), z)
+end
+function Random:Shuffle(t)
+    for i = #t, 2, -1 do
+        local j = self:NextInteger(1, i)
+        t[i], t[j] = t[j], t[i]
+    end
+end
+function Random:Clone() return setmetatable({_s = self._s}, Random) end
+
 -- Обобщённый for из Luau: "for k, v in tbl do" (без pairs/ipairs).
 -- В Lua 5.3 такая запись пыталась ВЫЗВАТЬ таблицу как итератор —
 -- "attempt to call a table value". Препроцессор (expandGenericFor)
@@ -4883,6 +4954,29 @@ InstanceMT.__index = function(t, k)
             if __get_class(c) == "Camera" then return wrap(c) end
         end
         return nil
+    end
+    -- RunService:BindToRenderStep(name, priority, fn) — вызывать fn(dt) каждый кадр, как RenderStepped (приоритеты
+    -- не различаем); UnbindFromRenderStep(name) снимает привязку. Раньше методов не было: attempt to call a nil value.
+    if __get_class(ref) == "RunService" then
+        if k == "BindToRenderStep" then
+            return function(self, name, priority, fn)
+                local old = __render_binds[name]
+                if old then old:Disconnect() end
+                __render_binds[name] = makeEvent(ref, "RenderStepped"):Connect(fn)
+            end
+        elseif k == "UnbindFromRenderStep" then
+            return function(self, name)
+                local c = __render_binds[name]
+                if c then c:Disconnect(); __render_binds[name] = nil end
+            end
+        end
+    end
+    -- PhysicsService: у приложения нет групп столкновений — вызовы не падают и ничего не делают (честный no-op,
+    -- не «заглушка на будущее»: фильтрация столкновений по группам просто не работает).
+    if __get_class(ref) == "PhysicsService" and (k == "RegisterCollisionGroup" or k == "CreateCollisionGroup"
+        or k == "CollisionGroupSetCollidable" or k == "SetPartCollisionGroup" or k == "RenameCollisionGroup"
+        or k == "RemoveCollisionGroup" or k == "UnregisterCollisionGroup" or k == "CollisionGroupContainsPart") then
+        return function(self, ...) return nil end
     end
     if k == "Position" then
         if __is_gui_ref(ref) then
@@ -8569,8 +8663,125 @@ end
             return rewrite(0, N, false);
         }
 
+        // Luau-литералы, которых нет в Lua 5.3: интерполяция `текст {выражение}` -> ("текст" .. tostring(выражение)),
+        // числа с подчёркиваниями 1_000_000 и двоичные 0b1010. Строки/комментарии не трогаем; число строк сохраняется
+        // (переносы внутри `...` пишутся как \<перевод строки>), поэтому номера строк в ошибках остаются верными.
+        function expandLuauLiterals(src) {
+            if (src.indexOf('`') < 0 && !/\d_|0[bB][01]/.test(src)) return src;   // быстрый путь
+            const n = src.length;
+            const numRe = /0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?[\d_]+)?|\.\d[\d_]*(?:[eE][+-]?[\d_]+)?/y;
+            const identRe = /[A-Za-z_][A-Za-z0-9_]*/y;
+            const longOpen = (k) => {
+                if (src[k] !== '[') return 0;
+                let j = k + 1;
+                while (src[j] === '=') j++;
+                return src[j] === '[' ? j - k + 1 : 0;
+            };
+            const skipLong = (k, openLen) => {
+                const close = ']' + '='.repeat(openLen - 2) + ']';
+                const e = src.indexOf(close, k + openLen);
+                return e < 0 ? n : e + close.length;
+            };
+            const skipQuoted = (k) => {
+                const q = src[k];
+                let j = k + 1;
+                while (j < n && src[j] !== q && src[j] !== '\n') { if (src[j] === '\\') j++; j++; }
+                return Math.min(j + 1, n);
+            };
+            let skipBraces;
+            const skipBacktick = (k) => {            // индекс после закрывающей ` (учитывает вложенные {...})
+                let j = k + 1;
+                while (j < n) {
+                    const c = src[j];
+                    if (c === '\\') { j += 2; continue; }
+                    if (c === '`') return j + 1;
+                    if (c === '{') j = skipBraces(j); else j++;
+                }
+                return n;
+            };
+            skipBraces = (k) => {                     // k — на '{'; индекс после парной '}'
+                let depth = 0, j = k;
+                while (j < n) {
+                    const c = src[j];
+                    if (c === '"' || c === "'") { j = skipQuoted(j); continue; }
+                    if (c === '`') { j = skipBacktick(j); continue; }
+                    if (c === '{') depth++;
+                    else if (c === '}') { depth--; if (depth === 0) return j + 1; }
+                    j++;
+                }
+                return n;
+            };
+            const convertInterp = (k) => {
+                const end = skipBacktick(k);
+                const bodyEnd = (src[end - 1] === '`') ? end - 1 : end;
+                const pieces = [];
+                let cur = '', j = k + 1;
+                const flush = () => { if (cur !== '') { pieces.push('"' + cur + '"'); cur = ''; } };
+                while (j < bodyEnd) {
+                    const c = src[j];
+                    if (c === '\\') {
+                        const d = src[j + 1];
+                        if (d === '`' || d === '{') cur += d;
+                        else if (d === '"') cur += '\\"';
+                        else cur += '\\' + (d === undefined ? '' : d);
+                        j += 2;
+                        continue;
+                    }
+                    if (c === '{') {
+                        const e = skipBraces(j);
+                        flush();
+                        pieces.push('tostring(' + expandLuauLiterals(src.slice(j + 1, e - 1)) + ')');
+                        j = e;
+                        continue;
+                    }
+                    if (c === '"') cur += '\\"';
+                    else if (c === '\n') cur += '\\\n';
+                    else if (c !== '\r') cur += c;
+                    j++;
+                }
+                flush();
+                return { code: '(' + (pieces.length ? pieces.join(' .. ') : '""') + ')', end };
+            };
+            let out = '', i = 0;
+            while (i < n) {
+                const c = src[i];
+                if (c === '-' && src[i + 1] === '-') {                   // комментарий
+                    const lo = (src[i + 2] === '[') ? longOpen(i + 2) : 0;
+                    let e;
+                    if (lo) e = skipLong(i + 2, lo);
+                    else { e = src.indexOf('\n', i); if (e < 0) e = n; }
+                    out += src.slice(i, e); i = e; continue;
+                }
+                if (c === '"' || c === "'") { const e = skipQuoted(i); out += src.slice(i, e); i = e; continue; }
+                if (c === '[') {
+                    const lo = longOpen(i);
+                    if (lo) { const e = skipLong(i, lo); out += src.slice(i, e); i = e; continue; }
+                }
+                if (c === '`') { const r = convertInterp(i); out += r.code; i = r.end; continue; }
+                if (/[A-Za-z_]/.test(c)) {
+                    identRe.lastIndex = i;
+                    const m = identRe.exec(src);
+                    out += m[0]; i += m[0].length; continue;
+                }
+                if (/\d/.test(c) || (c === '.' && /\d/.test(src[i + 1] || '') && src[i - 1] !== '.')) {
+                    numRe.lastIndex = i;
+                    const m = numRe.exec(src);
+                    if (m) {
+                        let tok = m[0];
+                        if (tok.indexOf('_') >= 0 || /^0[bB]/.test(tok)) {
+                            const t2 = tok.replace(/_/g, '');
+                            tok = /^0[bB]/.test(t2) ? String(parseInt(t2.slice(2), 2)) : t2;
+                        }
+                        out += tok; i += m[0].length; continue;
+                    }
+                }
+                out += c; i++;
+            }
+            return out;
+        }
+
         function preprocessLuau(src) {
-            src = expandIfExpressions(stripLuauTypes(src));
+            src = expandIfExpressions(stripLuauTypes(expandLuauLiterals(src)));
             const segs = splitLuaSegments(src);
             for (const seg of segs) if (seg.type === 'code') seg.text = expandCompoundAssign(seg.text);
             expandGenericFor(segs);
@@ -8786,7 +8997,7 @@ end
             if (!r || !r.ok) { logLuaOutput('error', t('lua_scripts_no_reply')); return; }
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
-            logLuaOutput('info', 'script.js build: boss-2026-10-10-e');
+            logLuaOutput('info', 'script.js build: ' + BUILD_LABEL);
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
@@ -8889,10 +9100,23 @@ end
             luaSignalWaits = [];
             luaResetSignals();
 
+            // Script с RunContext=Client (2) — клиентский: идёт вместе с LocalScript-ами (нужен Players.LocalPlayer).
+            // Скрипты из StarterCharacterScripts запускаются ПОСЛЕ создания персонажа, как его дети (script.Parent = Character).
+            const _isClientScript = (scr) => scr.cls === 'LocalScript' || (scr.cls === 'Script' && scr.runContext === 2);
+            const _underCharacterScripts = (ref) => {
+                let cur = luaParentByRef[ref], g = 0;
+                while (cur !== undefined && cur !== -1 && g++ < 50) {
+                    const ii = luaByRef[cur];
+                    if (ii && ii.name === 'StarterCharacterScripts') return true;
+                    cur = luaParentByRef[cur];
+                }
+                return false;
+            };
+
             // Server-скрипты (Script) выполняются как есть — по одному
             // разу, "на сервере", видят реальную (нефильтрованную) карту.
             for (const scr of r.scripts) {
-                if (scr.cls !== 'Script') continue;
+                if (scr.cls !== 'Script' || _isClientScript(scr) || _underCharacterScripts(scr.ref)) continue;
                 try { runLuaScript(scr, luaServerL); }
                 catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, scr.cls); }
             }
@@ -8908,11 +9132,26 @@ end
                 logLuaOutput('error', 'bootstrapClientPlayer упал: ' + e.message + ' — LocalScript-и и GUI не запущены');
             }
             for (const scr of r.scripts) {
-                if (scr.cls !== 'LocalScript') continue;
+                if (!_isClientScript(scr) || _underCharacterScripts(scr.ref)) continue;
                 const clonedRef = refMap[scr.ref];
-                const runAs = clonedRef !== undefined ? Object.assign({}, scr, { ref: clonedRef }) : scr;
+                const runAs = Object.assign({}, scr, { cls: 'LocalScript' }, clonedRef !== undefined ? { ref: clonedRef } : {});
                 try { runLuaScript(runAs, luaClientL); }
-                catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, scr.cls); }
+                catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, 'LocalScript'); }
+            }
+
+            // StarterCharacterScripts: копия скрипта становится ребёнком Character (в Roblox их клонируют в каждого
+            // персонажа), поэтому script.Parent.Humanoid и т.п. находятся.
+            if (luaCharacterRef !== -1) {
+                for (const scr of r.scripts) {
+                    if ((scr.cls !== 'Script' && scr.cls !== 'LocalScript') || !_underCharacterScripts(scr.ref)) continue;
+                    const client = _isClientScript(scr);
+                    const sref = luaCreateVirtualInstance(client ? 'LocalScript' : 'Script');
+                    luaByRef[sref].name = scr.name;
+                    luaSetParent(sref, luaCharacterRef);
+                    const side = client ? 'LocalScript' : 'Script';
+                    try { runLuaScript(Object.assign({}, scr, { ref: sref, cls: side }), client ? luaClientL : luaServerL); }
+                    catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, side); }
+                }
             }
 
             renderGuiOverlayFromClient();
@@ -9067,6 +9306,9 @@ end
                 el.style.display = (props.Visible === false) ? 'none' : 'flex';
             }
 
+            // ClipsDescendants есть у любого GuiObject (CanvasGroup клипует всегда); по умолчанию потомки НЕ обрезаются.
+            // Значение выставляется каждый раз, поэтому выключение флага из Lua тоже снимает обрезку.
+            el.style.overflow = (props.ClipsDescendants || cls === 'CanvasGroup') ? 'hidden' : 'visible';
             if (cls === 'Frame' || cls === 'ScrollingFrame') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
                 // BorderSizePixel = 0 (частый случай: затемняющий Frame) раньше превращался
@@ -9076,7 +9318,6 @@ end
                     ? bsp + 'px solid ' + color3ToCss(props.BorderColor3)
                     : 'none';
                 if (props.BackgroundTransparency >= 1) el.style.background = 'transparent';
-                if (props.ClipsDescendants) el.style.overflow = 'hidden';
                 if (cls === 'ScrollingFrame') {
                     // Раньше ScrollingFrame рендерился 1-в-1 как обычный
                     el.style.overflowY = 'auto';

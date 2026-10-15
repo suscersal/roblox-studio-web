@@ -277,7 +277,11 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: hidden;
+            /* НЕ hidden: в Roblox потомки выходят за рамку родителя, пока не включён ClipsDescendants
+               (его выставляет applyGuiElementStyle). Раньше тут стояло overflow:hidden, и кнопка стрельбы Blaster —
+               её центр лежит на левом краю фрейма Buttons — показывалась только наполовину, как и иконка перезарядки.
+               Экран по-прежнему обрезает #gui-overlay. */
+            overflow: visible;
             white-space: pre-wrap;
             font-family: 'Segoe UI', Roboto, Arial, sans-serif;
             pointer-events: none;
