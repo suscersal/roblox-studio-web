@@ -10,7 +10,7 @@ import traceback
 import json
 from urllib.parse import quote
 from rbxl_parser import parse_rbxl, save_rbxl, publish_place, export_rbxm, import_rbxm
-from rbxl_parser import union_mesh_from_parsed, union_mesh_render_json
+from rbxl_parser import union_mesh_from_parsed as _union_mesh_solid, union_mesh_render_json
 from flask import Flask, request, jsonify, Response, send_from_directory
 from pathlib import Path
 import sys
@@ -315,6 +315,126 @@ def get_rot_matrix(cf):
         ]
     return [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
+
+
+# --- Геометрия юниона из его ИСХОДНЫХ деталей --------------------------------------------------------------
+# Новый формат юниона хранит меш в MeshData2 (сжатые потоки), а старый SolidMeshHolder пуст — тогда union_mesh_from_parsed
+# возвращал None, и юнион рисовался сплошным боксом по Size (стол в fnf.rbxl). Но в ChildData/ChildData2 лежит вложенный
+# rbxm с деталями, из которых юнион собран (ножки, столешница...), в ЛОКАЛЬНОЙ системе юниона. Строим меш из них:
+# реальные операнды вместо сплошного бокса. Ограничения: вычитающие операнды (NegateOperation) пропускаются, а пересечения
+# деталей не склеиваются — внутри остаются лишние грани (на вид не влияет, т.к. они внутри).
+_UNION_CHILD_SHAPES_BOX = {None, 1}   # Part.Shape: 1 = Block (по умолчанию); остальные формы приближаем боксом операнда
+
+
+def _box_triangles(pos, rot, half):
+    """Бокс (центр pos, поворот rot 3x3 по строкам, половинные размеры half) -> (positions, normals, tri_index)."""
+    positions, normals, index = [], [], []
+    axes = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    for ax in axes:
+        k = next(i for i in range(3) if ax[i] != 0)
+        sgn = ax[k]
+        u, v = [i for i in range(3) if i != k]
+        base = len(positions)
+        for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            loc = [0.0, 0.0, 0.0]
+            loc[k] = sgn * half[k]; loc[u] = su * half[u]; loc[v] = sv * half[v]
+            positions.append([pos[i] + sum(rot[i * 3 + j] * loc[j] for j in range(3)) for i in range(3)])
+        nrm = [sum(rot[i * 3 + j] * ax[j] for j in range(3)) for i in range(3)]
+        normals.append(nrm)
+        # порядок обхода зависит от знака и от чётности осей — берём так, чтобы нормаль треугольника совпала с нормалью грани
+        a, b, c, d = base, base + 1, base + 2, base + 3
+        e1 = [positions[b][i] - positions[a][i] for i in range(3)]
+        e2 = [positions[c][i] - positions[a][i] for i in range(3)]
+        cr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]
+        if sum(cr[i] * nrm[i] for i in range(3)) < 0:
+            b, d = d, b
+        index.append((len(normals) - 1, [a, b, c, a, c, d]))
+    return positions, normals, index
+
+
+def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
+    """Рекурсивно собирает (pos, rot, half) операндов юниона ref в его локальной системе. None — данных нет."""
+    import os as _os, tempfile as _tmp
+    from rbxl_parser import parse_rbxl as _parse
+    out = [] if out is None else out
+    ss = parsed.get('shared_strings') or []
+    props = parsed['props'].get(ref, {})
+    idx = props.get('ChildData2')
+    if not isinstance(idx, int):
+        idx = props.get('ChildData')
+    if not isinstance(idx, int) or not (0 <= idx < len(ss)) or not ss[idx][1] or depth > 4:
+        return None
+    cache = parsed.setdefault('_union_child_cache', {})
+    child = cache.get(idx)
+    if child is None:
+        fd, path = _tmp.mkstemp(suffix='.rbxm')
+        try:
+            with _os.fdopen(fd, 'wb') as f:
+                f.write(ss[idx][1])
+            child = _parse(path)
+        except Exception:
+            child = False
+        finally:
+            try:
+                _os.unlink(path)
+            except OSError:
+                pass
+        cache[idx] = child
+    if not child:
+        return None
+    r2c, cp = child['referent_to_class'], child['props']
+    got = False
+    for cref, cls in r2c.items():
+        if cls not in ('Part', 'MeshPart', 'UnionOperation'):
+            continue   # NegateOperation и прочее — не добавляем
+        pr = cp.get(cref, {})
+        sz = pr.get('Size') or pr.get('InitialSize')
+        cf = pr.get('CFrame')
+        if not isinstance(sz, dict) or not isinstance(cf, dict):
+            continue
+        try:
+            pos, rot = get_pos(cf), [float(v) for v in get_rot_matrix(cf)]
+        except Exception:
+            continue
+        if cls == 'UnionOperation':
+            # вложенный юнион: пробуем его собственные операнды (в его локальной системе -> переносим в нашу)
+            sub = _collect_union_child_boxes(child, cref, depth + 1, [])
+            if sub:
+                for spos, srot, shalf in sub:
+                    wp = [pos[i] + sum(rot[i * 3 + j] * spos[j] for j in range(3)) for i in range(3)]
+                    wr = [sum(rot[i * 3 + k] * srot[k * 3 + j] for k in range(3)) for i in range(3) for j in range(3)]
+                    out.append((wp, wr, shalf)); got = True
+                continue
+        out.append((pos, rot, (sz['x'] / 2, sz['y'] / 2, sz['z'] / 2)))
+        got = True
+    return out if got else None
+
+
+def union_mesh_from_parsed(parsed, ref):
+    """Меш юниона: сначала старый формат (SolidMeshHolder), иначе — собранный из исходных деталей (ChildData/ChildData2)."""
+    m = _union_mesh_solid(parsed, ref)
+    if m is not None:
+        return m
+    cache = parsed.setdefault('_union_children_mesh', {})
+    if ref in cache:
+        return cache[ref]
+    boxes = _collect_union_child_boxes(parsed, ref)
+    result = None
+    if boxes:
+        positions, normals, index, normal_index = [], [], [], []
+        for pos, rot, half in boxes:
+            pts, nrms, faces = _box_triangles(pos, rot, half)
+            base = len(positions)
+            nbase = len(normals)
+            positions.extend(pts); normals.extend(nrms)
+            for ni, tri in faces:
+                for t in tri:
+                    index.append(base + t)
+                    normal_index.append(nbase + ni)
+        result = {'positions': positions, 'normals': normals, 'index': index, 'normal_index': normal_index,
+                  'triangles': len(index) // 3}
+    cache[ref] = result
+    return result
 
 def serialize_prop(v):
     if isinstance(v, bytes):
@@ -3395,7 +3515,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-15 · build-check'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-10-16 · union-children'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

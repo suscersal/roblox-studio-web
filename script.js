@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-15 · build-check';
+        const BUILD_LABEL = '2026-10-16 · union-children';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -3638,7 +3638,8 @@
 
         function _applyPlayerAccountToLua() {
             if (!playerAccount || luaPlayerRef === -1 || !luaByRef[luaPlayerRef]) return;
-            luaByRef[luaPlayerRef].name = playerAccount.name;
+            // Внутреннее имя инстанса ОСТАЁТСЯ 'LocalPlayer': по нему скрипты находят Players.LocalPlayer (раньше здесь
+            // стояло переименование в ник — и у всех вошедших в аккаунт LocalPlayer становился nil). Ник отдаёт __get_name.
             const pr = virtualInstanceProps[luaPlayerRef] || (virtualInstanceProps[luaPlayerRef] = {});
             pr.UserId = playerAccount.userId;
             pr.DisplayName = playerAccount.displayName || playerAccount.name;
@@ -4754,12 +4755,24 @@ Vector2.__tostring = function(v) return v.X .. ", " .. v.Y end
 -- синтаксиса), и любое обращение к Enum.* падало "attempt to index a nil
 -- value (global 'Enum')".
 local __enumCache = {}
+-- EnumItem.Value: числа из настоящего Roblox для самых используемых перечислений (раньше .Value не было вовсе:
+-- Enum.RenderPriority.Camera.Value + 2 в CameraRecoiler давало 'arithmetic on a nil value (field Value)').
+-- Для остальных перечислений Value остаётся nil — выдумывать числа нельзя.
+local __ENUM_VALUES = {
+    RenderPriority = { First = 0, Input = 100, Camera = 200, Character = 300, Last = 2000 },
+    MouseBehavior = { Default = 0, LockCenter = 1, LockCurrentPosition = 2 },
+    CameraType = { Fixed = 0, Watch = 1, Attach = 2, Track = 3, Follow = 4, Custom = 5, Scriptable = 6, Orbital = 7 },
+    UserInputType = { MouseButton1 = 0, MouseButton2 = 1, MouseButton3 = 2, MouseWheel = 3, MouseMovement = 4,
+        Touch = 7, Keyboard = 8, Focus = 9, Accelerometer = 10, Gyro = 11, Gamepad1 = 12, Gamepad2 = 13,
+        Gamepad3 = 14, Gamepad4 = 15, Gamepad5 = 16, Gamepad6 = 17, Gamepad7 = 18, Gamepad8 = 19,
+        TextInput = 20, None = 21 },
+}
 Enum = setmetatable({}, { __index = function(t, enumType)
     if not __enumCache[enumType] then
         __enumCache[enumType] = setmetatable({}, { __index = function(t2, name)
             local key = enumType .. "." .. name
             if not __enumCache[key] then
-                __enumCache[key] = setmetatable({ Name = name, EnumType = enumType }, {
+                __enumCache[key] = setmetatable({ Name = name, EnumType = enumType, Value = (__ENUM_VALUES[enumType] or {})[name] }, {
                     __tostring = function(e) return "Enum." .. e.EnumType .. "." .. e.Name end,
                 })
             end
@@ -7636,8 +7649,14 @@ end
                 return 1;
             });
             def('__get_name', function (L2) {
-                const inst = luaByRef[lua.lua_tonumber(L2, 1)];
-                lua.lua_pushstring(L2, inst ? inst.name : ('ref' + lua.lua_tonumber(L2, 1)));
+                const nref = lua.lua_tonumber(L2, 1);
+                const inst = luaByRef[nref];
+                // player.Name / tostring(player) у локального игрока — ник аккаунта Roblox (если вошли), как в настоящем Roblox
+                if (inst && nref === luaPlayerRef && playerAccount && playerAccount.name) {
+                    lua.lua_pushstring(L2, playerAccount.name);
+                    return 1;
+                }
+                lua.lua_pushstring(L2, inst ? inst.name : ('ref' + nref));
                 return 1;
             });
             def('__get_class', function (L2) {
@@ -9006,6 +9025,7 @@ end
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
             logLuaOutput('info', 'script.js build: ' + BUILD_LABEL);
+            checkBuildConsistency(); // запуск Play чистит Output — проверку версий файлов показываем и здесь
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
