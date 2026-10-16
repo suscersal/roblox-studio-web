@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-15 · gui-clip';
+        const BUILD_LABEL = '2026-10-15 · build-check';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -4975,7 +4975,8 @@ InstanceMT.__index = function(t, k)
     -- не «заглушка на будущее»: фильтрация столкновений по группам просто не работает).
     if __get_class(ref) == "PhysicsService" and (k == "RegisterCollisionGroup" or k == "CreateCollisionGroup"
         or k == "CollisionGroupSetCollidable" or k == "SetPartCollisionGroup" or k == "RenameCollisionGroup"
-        or k == "RemoveCollisionGroup" or k == "UnregisterCollisionGroup" or k == "CollisionGroupContainsPart") then
+        or k == "RemoveCollisionGroup" or k == "UnregisterCollisionGroup" or k == "CollisionGroupContainsPart"
+        or k == "IsCollisionGroupRegistered") then
         return function(self, ...) return nil end
     end
     if k == "Position" then
@@ -5192,7 +5193,7 @@ InstanceMT.__index = function(t, k)
     if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseClick" or k == "RightMouseClick"
         or k == "MouseHoverEnter" or k == "MouseHoverLeave" or k == "MouseButton1Click"
         or k == "MouseButton1Down" or k == "MouseButton1Up" or k == "MouseEnter" or k == "MouseLeave"
-        or k == "InputBegan" or k == "InputEnded" or k == "InputChanged"
+        or k == "InputBegan" or k == "InputEnded" or k == "InputChanged" or k == "LastInputTypeChanged"
         or k == "FocusLost" or k == "Focused"
         or k == "ChildAdded" or k == "ChildRemoved" or k == "DescendantAdded" or k == "DescendantRemoving"
         or k == "Touched" or k == "TouchEnded"
@@ -5641,6 +5642,13 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                                       UserInputState = Enum.UserInputState.Begin }
                 end
                 return out
+            end
+        end
+        -- UserInputService:GetLastInputType() — InputCategorizer (Blaster) спрашивает тип последнего ввода при старте
+        if k == "GetLastInputType" and __get_class(ref) == "UserInputService" then
+            return function(self)
+                if __is_touch() then return Enum.UserInputType.Touch end
+                return Enum.UserInputType.Keyboard
             end
         end
         if (k == "TouchEnabled" or k == "KeyboardEnabled" or k == "MouseEnabled" or k == "GamepadEnabled")
@@ -12284,6 +12292,25 @@ end
         };
 
         // ============ ИНИЦИАЛИЗАЦИЯ ============
+        // script.js, app.py и style.css — три файла одной сборки. Если обновили только часть, баги «не исправлены»
+        // (например, прозрачные текстуры на High чинятся парой script.js + app.py) — говорим об этом прямо в Output.
+        async function checkBuildConsistency() {
+            try {
+                const st = await api('GET', '/api/status');
+                const cssBuild = (getComputedStyle(document.documentElement).getPropertyValue('--css-build') || '').trim().replace(/^["']|["']$/g, '');
+                const problems = [];
+                if (!st || st.build === undefined) problems.push('app.py устарел (нет метки сборки)');
+                else if (st.build !== BUILD_LABEL) problems.push('app.py: ' + st.build);
+                if (cssBuild !== BUILD_LABEL) problems.push('style.css: ' + (cssBuild || 'нет метки'));
+                if (problems.length) {
+                    logLuaOutput('warn', 'Файлы разных сборок! script.js: ' + BUILD_LABEL + ' | ' + problems.join(' | ')
+                        + ' — замените ВСЕ три файла (script.js, app.py, style.css) и перезапустите приложение.');
+                } else {
+                    logLuaOutput('info', 'script.js, app.py и style.css одной сборки ✓');
+                }
+            } catch (e) { /* без сервера нечего сравнивать */ }
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             loadLayout();
             initResizers();
@@ -12291,6 +12318,7 @@ end
             refreshCM();
             console.log('Build: ' + BUILD_LABEL);
             try { logLuaOutput('info', 'Build: ' + BUILD_LABEL); } catch (e) { /* Output ещё не готов */ }
+            checkBuildConsistency();
         });
 
         window.addEventListener('resize', refreshCM);

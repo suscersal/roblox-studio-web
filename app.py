@@ -645,6 +645,24 @@ def _extract_decals(ref, children_by_parent, all_props, referent_to_class):
     return [v[1] for v in by_face.values()]
 
 
+def _surface_alpha_mode(ref, cls, children_by_parent, all_props, referent_to_class):
+    """AlphaMode у SurfaceAppearance, из чьего ColorMap взята текстура MeshPart:
+    0 = Overlay (альфа — «насколько текстура перекрывает Color детали»), 1 = Transparency (альфа — прозрачность),
+    2 = TintMask. None — текстура не из SurfaceAppearance (обычный TextureID: альфа = вырез)."""
+    if cls != 'MeshPart':
+        return None
+    for child in children_by_parent.get(ref, ()):
+        if referent_to_class.get(child) == 'SurfaceAppearance':
+            cp = all_props.get(child, {})
+            if not _rbxassetid_num(cp.get('ColorMap')):
+                return None
+            try:
+                return int(cp.get('AlphaMode') or 0)
+            except (TypeError, ValueError):
+                return 0
+    return None
+
+
 def _extract_real_mesh_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
     """MeshId для РЕАЛЬНОЙ геометрии — в отличие от shape-эвристики в
     build_all_scene_objects (которая лишь подбирает ближайший ИЗ ФИКСИРОВАННОГО
@@ -865,6 +883,8 @@ def build_all_scene_objects():
                         break
         decals = _extract_decals(ref, children_by_parent, parsed['props'],
                                  parsed['referent_to_class']) or None
+        alpha_mode = _surface_alpha_mode(ref, cls, children_by_parent, parsed['props'],
+                                         parsed['referent_to_class'])
         real_mesh_id = _extract_real_mesh_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
@@ -899,7 +919,7 @@ def build_all_scene_objects():
             'px': px, 'py': py, 'pz': pz,
             'sx': sx, 'sy': sy, 'sz': sz_,
             'rot': rot_matrix, 'color': color, 'texture': texture_id,
-            'textureFace': texture_face, 'textureOpacity': texture_opacity, 'decals': decals,
+            'textureFace': texture_face, 'textureOpacity': texture_opacity, 'decals': decals, 'alphaMode': alpha_mode,
             'meshId': real_mesh_id,
             'opacity': opacity,
             'meshScale': mesh_scale, 'meshOffset': mesh_offset, 'cloth': cloth,
@@ -1334,7 +1354,11 @@ def api_scripts():
             # SCRIPT_SIDE выше. Фронтенд использует это только для
             # отображения (бейдж в Output/Properties), не для настоящей
             # сетевой изоляции.
-            'side': SCRIPT_SIDE.get(cls, 'server'),
+            'side': ('client' if (cls == 'Script' and props.get('RunContext') == 2)
+                     else SCRIPT_SIDE.get(cls, 'server')),
+            # Script.RunContext: 0 = Legacy (сервер), 1 = Server, 2 = Client — Script с Client
+            # исполняется на клиенте (там есть Players.LocalPlayer), а не на сервере
+            'runContext': props.get('RunContext'),
         })
     return jsonify({'ok': True, 'scripts': out})
 
@@ -3371,11 +3395,15 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
+SERVER_BUILD = '2026-10-15 · build-check'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+
+
 @flask_app.route('/api/status')
 def api_status():
     parsed = state['parsed']
     return jsonify({
         'ok': True,
+        'build': SERVER_BUILD,
         'loaded': parsed is not None,
         'file': state['file_path'],
         'count': len(parsed['referent_to_class']) if parsed else 0,

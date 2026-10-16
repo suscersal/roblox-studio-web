@@ -257,6 +257,9 @@
             display: block
         }
 
+        /* Метка сборки: script.js сверяет её со своей и с app.py (см. checkBuildConsistency) */
+        :root { --css-build: "2026-10-15 · build-check"; }
+
         /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
         #gui-overlay {
             position: absolute;
