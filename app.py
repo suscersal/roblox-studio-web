@@ -193,7 +193,7 @@ GUI_LEAF_CLASSES = {
 # никогда не узнавал о TopLeftRadius/.../Thickness, лежащих в самом
 # .rbxl, и все GUI-плашки в Play всегда рисовались с прямыми углами и
 # без обводки, независимо от того, что реально настроено в файле.
-GUI_DECORATION_CLASSES = {'UICorner', 'UIStroke'}
+GUI_DECORATION_CLASSES = {'UICorner', 'UIStroke', 'UIScale'}   # UIScale: масштаб родителя (см. applyGuiElementStyle)
 GUI_CLASSES = GUI_ROOT_CLASSES | GUI_CONTAINER_CLASSES | GUI_LEAF_CLASSES | GUI_DECORATION_CLASSES
 
 # Свойства, которые реально нужны фронтенду для рисования GUI-оверлея —
@@ -212,6 +212,8 @@ GUI_PROPS = (
     'BottomLeftRadius', 'BottomRightRadius',
     # UIStroke
     'Color', 'Thickness', 'Transparency',
+    # UIScale
+    'Scale',
     # SurfaceGui (интерфейс на грани детали)
     'Face', 'SizingMode', 'PixelsPerStud', 'CanvasSize', 'AlwaysOnTop', 'Brightness',
 )
@@ -3515,7 +3517,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-16 · union-children'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-10-16 · ui-scale'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-16 · union-children';
+        const BUILD_LABEL = '2026-10-16 · ui-scale';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -4239,6 +4239,7 @@ end
 Vector3.__add = function(a, b) return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z) end
 Vector3.__sub = function(a, b) return Vector3.new(a.X - b.X, a.Y - b.Y, a.Z - b.Z) end
 Vector3.__mul = function(a, b)
+    if type(a) == "number" then return Vector3.new(a * b.X, a * b.Y, a * b.Z) end  -- 2 * v (раньше падало на a.X у числа)
     if type(b) == "number" then return Vector3.new(a.X * b, a.Y * b, a.Z * b) end
     return Vector3.new(a.X * b.X, a.Y * b.Y, a.Z * b.Z)
 end
@@ -4255,6 +4256,7 @@ function Vector3.Lerp(a, b, t)
     return Vector3.new(a.X + (b.X-a.X)*t, a.Y + (b.Y-a.Y)*t, a.Z + (b.Z-a.Z)*t)
 end
 Vector3.__div = function(a, b)
+    if type(a) == "number" then return Vector3.new(a / b.X, a / b.Y, a / b.Z) end
     if type(b) == "number" then return Vector3.new(a.X / b, a.Y / b, a.Z / b) end
     return Vector3.new(a.X / b.X, a.Y / b.Y, a.Z / b.Z)
 end
@@ -4741,11 +4743,46 @@ function NumberRange_new(min, max) return { Min = min or 0, Max = max or min or 
 NumberRange = { new = NumberRange_new }
 
 Vector2 = {}
-Vector2.__index = Vector2
+-- Magnitude/Unit — свойства (считаются на лету), остальное — методы из таблицы Vector2.
+-- Раньше был только new/+/-: v:Lerp(...) в CameraRecoiler (Blaster) падал каждый кадр.
+Vector2.__index = function(t, k)
+    if k == "Magnitude" or k == "magnitude" then return math.sqrt(t.X * t.X + t.Y * t.Y) end
+    if k == "Unit" or k == "unit" then
+        local m = math.sqrt(t.X * t.X + t.Y * t.Y)
+        if m == 0 then return Vector2.new(0, 0) end
+        return Vector2.new(t.X / m, t.Y / m)
+    end
+    return rawget(Vector2, k)
+end
 function Vector2.new(x, y) return setmetatable({X = x or 0, Y = y or 0}, Vector2) end
 Vector2.__add = function(a, b) return Vector2.new(a.X + b.X, a.Y + b.Y) end
 Vector2.__sub = function(a, b) return Vector2.new(a.X - b.X, a.Y - b.Y) end
+Vector2.__mul = function(a, b)
+    if type(a) == "number" then return Vector2.new(a * b.X, a * b.Y) end
+    if type(b) == "number" then return Vector2.new(a.X * b, a.Y * b) end
+    return Vector2.new(a.X * b.X, a.Y * b.Y)
+end
+Vector2.__div = function(a, b)
+    if type(a) == "number" then return Vector2.new(a / b.X, a / b.Y) end
+    if type(b) == "number" then return Vector2.new(a.X / b, a.Y / b) end
+    return Vector2.new(a.X / b.X, a.Y / b.Y)
+end
+Vector2.__unm = function(a) return Vector2.new(-a.X, -a.Y) end
+Vector2.__eq = function(a, b) return a.X == b.X and a.Y == b.Y end
 Vector2.__tostring = function(v) return v.X .. ", " .. v.Y end
+function Vector2.Dot(a, b) return a.X * b.X + a.Y * b.Y end
+function Vector2.Cross(a, b) return a.X * b.Y - a.Y * b.X end      -- как в Roblox: скаляр (z-компонента)
+function Vector2.Lerp(a, b, t) return Vector2.new(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t) end
+function Vector2.Max(a, b) return Vector2.new(math.max(a.X, b.X), math.max(a.Y, b.Y)) end
+function Vector2.Min(a, b) return Vector2.new(math.min(a.X, b.X), math.min(a.Y, b.Y)) end
+function Vector2.Abs(a) return Vector2.new(math.abs(a.X), math.abs(a.Y)) end
+function Vector2.Floor(a) return Vector2.new(math.floor(a.X), math.floor(a.Y)) end
+function Vector2.Ceil(a) return Vector2.new(math.ceil(a.X), math.ceil(a.Y)) end
+function Vector2.FuzzyEq(a, b, eps) eps = eps or 1e-5 return math.abs(a.X - b.X) <= eps and math.abs(a.Y - b.Y) <= eps end
+Vector2.zero = Vector2.new(0, 0)
+Vector2.one = Vector2.new(1, 1)
+Vector2.xAxis = Vector2.new(1, 0)
+Vector2.yAxis = Vector2.new(0, 1)
 
 -- Enum.* — ленивый и кэширующий: Enum.UserInputType.MouseButton1 создаётся
 -- один раз при первом обращении и потом отдаётся ИЗ КЭША тем же объектом,
@@ -5953,7 +5990,21 @@ end
 
         // source — имя скрипта-источника (для print/warn/error) или null для
         let luaLogSessionId = null;
+        let _luaOutputRenderTimer = null;
         function logLuaOutput(level, text, source, trace, sideCls) {
+            // Одинаковая ошибка/предупреждение подряд (обработчик события падает КАЖДЫЙ кадр) — не новая строка, а счётчик
+            // «×N»: иначе Output забивается сотнями строк, 200 из них пересобираются через innerHTML на каждый кадр
+            // (это съедало FPS), а на сервер уходил POST /api/log на каждое повторение.
+            const prevLine = luaOutputLines[luaOutputLines.length - 1];
+            if ((level === 'error' || level === 'warn') && prevLine && prevLine.level === level
+                && prevLine.text === text && prevLine.source === (source || null)) {
+                prevLine.count = (prevLine.count || 1) + 1;
+                prevLine.time = luaTimestamp();
+                if (!_luaOutputRenderTimer) {
+                    _luaOutputRenderTimer = setTimeout(() => { _luaOutputRenderTimer = null; renderLuaOutput(); }, 250);
+                }
+                return;
+            }
             luaOutputLines.push({ level, text, source: source || null, trace: trace || null, sideCls: sideCls || null, time: luaTimestamp() });
             if (luaOutputLines.length > 300) luaOutputLines.shift();
             renderLuaOutput();
@@ -5999,8 +6050,9 @@ end
                 const trace = l.trace
                     ? '<div style="color:#9ca3af;padding-left:14px;white-space:pre-wrap;">' + esc(l.trace) + '</div>'
                     : '';
+                const rep = l.count > 1 ? ' <span style="color:#9ca3af">×' + l.count + '</span>' : '';
                 return '<div style="color:' + (colors[l.level] || '#e5e7eb') + ';margin-bottom:2px;">' +
-                    head + esc(l.text) + '</div>' + trace;
+                    head + esc(l.text) + rep + '</div>' + trace;
             }).join('');
             el.scrollTop = el.scrollHeight;
         }
@@ -7344,7 +7396,7 @@ end
             'ScreenGui', 'BillboardGui', 'SurfaceGui', 'Frame', 'ScrollingFrame',
             'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
             'UIListLayout', 'UIGridLayout', 'UIPadding', 'UICorner', 'UIStroke',
-            'UIAspectRatioConstraint', 'UIGradient',
+            'UIAspectRatioConstraint', 'UIGradient', 'UIScale',
         ]);
         function luaCreateVirtualInstance(className) {
             const ref = luaNextVirtualRef--;
@@ -9313,6 +9365,19 @@ end
             const interactive = _GUI_SINK_CLASSES.has(props.cls) || props.Active === true || luaGuiInputRefs.has(ref);
             el.style.pointerEvents = interactive ? 'auto' : 'none';
         }
+        // UIScale — дочерний модификатор: масштабирует ПАРОДИТЕЛЯ вместе со всем содержимым (в т.ч. пиксельные offset'ы).
+        // Раньше не поддерживался вовсе, поэтому скрипт GuiScale (Blaster) менял Scale впустую и интерфейс на маленьком
+        // экране оставался в полный размер.
+        function guiUIScaleOf(ref) {
+            for (const k of (guiChildrenByRef[ref] || [])) {
+                const cp = guiPropsByRef[k];
+                if (cp && cp.cls === 'UIScale') {
+                    const sc = Number(cp.Scale);
+                    return (Number.isFinite(sc) && sc > 0) ? sc : 1;
+                }
+            }
+            return 1;
+        }
         function applyGuiElementStyle(el, props) {
             const cls = props.cls;
             const pos = udim2ToCssPos(props.Position);
@@ -9327,6 +9392,22 @@ end
             // AnchorPoint — раньше вообще не читался:
             const ap = props.AnchorPoint;
             el.style.transform = ap ? `translate(${-(ap.x || 0) * 100}%, ${-(ap.y || 0) * 100}%)` : '';
+            el.style.transformOrigin = '';
+            const uiScale = guiUIScaleOf(Number(el.dataset.ref));
+            if (uiScale !== 1) {
+                if (cls === 'ScreenGui' || cls === 'BillboardGui') {
+                    // Виртуальный экран становится в 1/s раз больше и масштабируется обратно: проценты (Scale) всё так же
+                    // покрывают весь экран, а пиксели (Offset) и размеры внутри — умножаются на s.
+                    el.style.width = 'calc(100% / ' + uiScale + ')';
+                    el.style.height = 'calc(100% / ' + uiScale + ')';
+                    el.style.transform = 'scale(' + uiScale + ')';
+                    el.style.transformOrigin = '0 0';
+                } else {
+                    // Обычный GuiObject масштабируется вокруг своей точки привязки (AnchorPoint), как в Roblox
+                    el.style.transform += ' scale(' + uiScale + ')';
+                    el.style.transformOrigin = ((ap && ap.x || 0) * 100) + '% ' + ((ap && ap.y || 0) * 100) + '%';
+                }
+            }
             // ScreenGui/BillboardGui управляются свойством Enabled (не
             if (cls === 'ScreenGui' || cls === 'BillboardGui') {
                 el.style.display = (props.Enabled === false) ? 'none' : 'flex';
@@ -9475,6 +9556,7 @@ end
             parentEl.appendChild(el);
             for (const childRef of (guiChildrenByRef[ref] || [])) {
                 const childProps = guiPropsByRef[childRef];
+                if (childProps && childProps.cls === 'UIScale') continue; // применяется в applyGuiElementStyle родителя
                 if (childProps && (childProps.cls === 'UICorner' || childProps.cls === 'UIStroke')) {
                     // Модификатор, не отдельный визуальный узел — красим
                     // el (родителя), а не создаём для него DOM-элемент.
@@ -9743,6 +9825,13 @@ end
             const props = guiPropsByRef[ref];
             if (!props) return false;
             props[name] = value;
+            if (props.cls === 'UIScale') {
+                // у UIScale нет своего DOM-узла: пересчитываем стиль родителя (GuiScale меняет Scale на лету)
+                const parentRef = luaParentByRef[ref];
+                const pel = guiDomByRef[parentRef], pprops = guiPropsByRef[parentRef];
+                if (pel && pprops) applyGuiElementStyle(pel, pprops);
+                return true;
+            }
             let el = guiDomByRef[ref];
             if (!el) {
                 // Узла ещё нет — это нормально для ScreenGui/BillboardGui,
