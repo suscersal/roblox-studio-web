@@ -69,7 +69,7 @@
         <div class="sep"></div>
         <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title"
             title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
-        <button onclick="toggleThirdPerson()" title="1st/3rd person">👤 Вид</button>
+        <button onclick="toggleThirdPerson()" data-i18n-title="tb_view_title" title="First / third person"><span data-i18n="tb_view">👤 View</span></button>
         <div class="sep"></div>
         <button onclick="resetCamera()" data-i18n-title="tb_resetcam_title" title="Reset camera"><span
                 data-i18n="tb_resetcam">🏠 Reset</span></button>
@@ -89,7 +89,7 @@
     <div id="main">
         <div id="explorer">
             <div id="explorer-header">
-                <span id="explorer-title">Explorer</span>
+                <span id="explorer-title" data-i18n="ui_explorer">Explorer</span>
                 <div>
                     <button id="multisel-btn" onclick="toggleMultiSelect()" data-i18n-title="exp_multisel_title"
                         title="Multi-select mode">☑</button>
@@ -111,9 +111,9 @@
             <div id="fps-counter">FPS: --</div>
             <div id="speed-indicator">🚀 x1.0</div>
             <div id="quality-selector">
-                <button onclick="setQuality('low')" class="active" id="q-low">Low</button>
-                <button onclick="setQuality('medium')" id="q-medium">Med</button>
-                <button onclick="setQuality('high')" id="q-high">High</button>
+                <button onclick="setQuality('low')" class="active" id="q-low" data-i18n="q_low">Low</button>
+                <button onclick="setQuality('medium')" id="q-medium" data-i18n="q_med">Med</button>
+                <button onclick="setQuality('high')" id="q-high" data-i18n="q_high">High</button>
             </div>
             <!-- Старый плавающий блок Lua Output удалён -->
             <div id="vp-label" data-i18n-html="vp_hint">
@@ -142,8 +142,8 @@
         <div class="resizer" id="resizer-2"></div>
         <div id="rightpanel">
             <div id="tabs">
-                <div class="tab active" onclick="switchTab('props')">Properties</div>
-                <div class="tab" onclick="switchTab('script')">Script</div>
+                <div class="tab active" onclick="switchTab('props')" data-i18n="ui_properties">Properties</div>
+                <div class="tab" onclick="switchTab('script')" data-i18n="ui_script_tab">Script</div>
                 <!-- Вкладка Output удалена, она теперь снизу -->
             </div>
             <div id="tab-props">
@@ -163,13 +163,13 @@
     <div class="resizer-h" id="resizer-h"></div>
     <div id="bottom-panel">
         <div id="output-header">
-            <span>Output</span>
-            <select id="output-filter" onchange="renderLuaOutput()" title="Фильтр по среде выполнения">
-                <option value="all">Все</option>
-                <option value="Script">🖥️ Server</option>
-                <option value="LocalScript">💻 Client</option>
+            <span data-i18n="ui_output">Output</span>
+            <select id="output-filter" onchange="renderLuaOutput()" data-i18n-title="ui_out_filter_title" title="Filter by runtime">
+                <option value="all" data-i18n="ui_out_all">All</option>
+                <option value="Script" data-i18n="ui_out_server">🖥️ Server</option>
+                <option value="LocalScript" data-i18n="ui_out_client">💻 Client</option>
             </select>
-            <button onclick="clearLuaOutput()" title="Clear">🗑</button>
+            <button onclick="clearLuaOutput()" data-i18n-title="ui_out_clear" title="Clear">🗑</button>
         </div>
         <div id="output-content"></div>
     </div>

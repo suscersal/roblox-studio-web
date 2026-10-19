@@ -7,6 +7,56 @@
         // ============ I18N ============
         const I18N = {
             en: {
+                ui_explorer: 'Explorer',
+                ui_properties: 'Properties',
+                ui_script_tab: 'Script',
+                ui_output: 'Output',
+                ui_out_all: 'All',
+                ui_out_server: '🖥️ Server',
+                ui_out_client: '💻 Client',
+                ui_out_filter_title: 'Filter by runtime',
+                ui_out_clear: 'Clear',
+                tb_view: '👤 View',
+                tb_view_title: 'First / third person',
+                q_low: 'Low',
+                q_med: 'Med',
+                q_high: 'High',
+                mv_ghost_n: '📦 {n} objects',
+                mv_failed: 'Could not move',
+                mv_done: 'Moved objects: {n}',
+                mv_skipped: ' (skipped {n})',
+                mv_none: 'Nothing moved',
+                exp_asset_start: 'Exporting {label} {id}…',
+                exp_asset_fail: 'Could not fetch asset {id}: {err}',
+                exp_asset_fail_http: 'Could not fetch asset {id} (HTTP {status})',
+                exp_shared: 'Sent: {name} ({kb} KB)',
+                exp_saved: 'Saved: {name} ({kb} KB)',
+                exp_error: 'Export error: {msg}',
+                exp_generic_err: 'error',
+                exp_longpress: 'long press: export file {id}',
+                mesh_failed_n: 'Unparsed meshes: {n}',
+                mesh_failed_none: 'No unparsed meshes yet (run Play first)',
+                exp_assets_start: 'Exporting {n} assets…',
+                exp_assets_fail: 'Could not fetch assets: {err}',
+                exp_assets_missing: 'Not received: {list}',
+                exp_assets_saved: 'Saved: {name} ({kb} KB, assets: {n})',
+                av_step_status: 'Asking Roblox for the model status',
+                av_step_wait: 'Waiting for Roblox to generate the model',
+                av_step_download: 'Downloading obj/mtl/textures',
+                av_step_add: 'Adding to the scene',
+                av_step_save: 'Choose where to save',
+                av_err_empty_geom: 'The model was parsed but the geometry is empty (0 vertices) — Roblox may have changed the OBJ format',
+                av_err_scene_not_ready: 'The 3D scene is not ready yet, try again in a second',
+                av_err_not_saved: 'The model was added to the viewport only (visually) and was NOT saved as a scene object: no project is open (.rbxl/.rbxlx). Open or create a project file, then import the avatar again.',
+                lp_title: 'Sign in to Roblox',
+                lp_text: 'Sign in to open your experiences, download places and publish changes right from the app.',
+                lp_f1: '📁 All your experiences in one list',
+                lp_f2: '⬇ Download places in one tap',
+                lp_f3: '☁ Publish from the editor',
+                lp_btn: 'Sign in with Roblox',
+                lp_later: 'Not now',
+                lp_never: 'Don\'t show this again',
+                lp_note: 'Your sign-in is stored on this device only.',
                 err_3d: '3D: error',
                 ui_btn_title: 'Text, button and splitter sizes',
                 ui_text: 'Text',
@@ -191,6 +241,56 @@
                 preview_stop: 'Stop',
             },
             ru: {
+                ui_explorer: 'Проводник',
+                ui_properties: 'Свойства',
+                ui_script_tab: 'Скрипт',
+                ui_output: 'Вывод',
+                ui_out_all: 'Все',
+                ui_out_server: '🖥️ Сервер',
+                ui_out_client: '💻 Клиент',
+                ui_out_filter_title: 'Фильтр по среде выполнения',
+                ui_out_clear: 'Очистить',
+                tb_view: '👤 Вид',
+                tb_view_title: 'Вид от 1-го / 3-го лица',
+                q_low: 'Низ.',
+                q_med: 'Сред.',
+                q_high: 'Выс.',
+                mv_ghost_n: '📦 {n} объектов',
+                mv_failed: 'Не удалось перенести',
+                mv_done: 'Перенесено объектов: {n}',
+                mv_skipped: ' (пропущено {n})',
+                mv_none: 'Ничего не перенесено',
+                exp_asset_start: 'Экспорт {label} {id}…',
+                exp_asset_fail: 'Не удалось получить ассет {id}: {err}',
+                exp_asset_fail_http: 'Не удалось получить ассет {id} (HTTP {status})',
+                exp_shared: 'Отправлено: {name} ({kb} КБ)',
+                exp_saved: 'Сохранено: {name} ({kb} КБ)',
+                exp_error: 'Ошибка экспорта: {msg}',
+                exp_generic_err: 'ошибка',
+                exp_longpress: 'долгое нажатие: экспорт файла {id}',
+                mesh_failed_n: 'Неразобранных мешей: {n}',
+                mesh_failed_none: 'Неразобранных мешей пока нет (сначала запусти Play)',
+                exp_assets_start: 'Экспорт {n} ассетов…',
+                exp_assets_fail: 'Не удалось получить ассеты: {err}',
+                exp_assets_missing: 'Не получены: {list}',
+                exp_assets_saved: 'Сохранено: {name} ({kb} КБ, ассетов: {n})',
+                av_step_status: 'Запрашиваю статус модели у Roblox',
+                av_step_wait: 'Жду, пока Roblox сгенерирует модель',
+                av_step_download: 'Скачиваю obj/mtl/текстуры',
+                av_step_add: 'Добавляю на сцену',
+                av_step_save: 'Выберите, куда сохранить',
+                av_err_empty_geom: 'Модель распарсилась, но геометрия пустая (0 вершин) — формат OBJ мог измениться на стороне Roblox',
+                av_err_scene_not_ready: '3D-сцена ещё не готова, попробуйте через секунду',
+                av_err_not_saved: 'Модель добавлена только в вьюпорт (визуально), но НЕ сохранена как объект сцены: нет открытого проекта (.rbxl/.rbxlx). Откройте или создайте файл проекта, затем импортируйте аватар заново.',
+                lp_title: 'Войдите в Roblox',
+                lp_text: 'Войдите, чтобы открывать свои experiences, скачивать плейсы и публиковать изменения прямо из приложения.',
+                lp_f1: '📁 Все твои experiences одним списком',
+                lp_f2: '⬇ Скачивание плейсов в одно касание',
+                lp_f3: '☁ Публикация из редактора',
+                lp_btn: 'Войти через Roblox',
+                lp_later: 'Не сейчас',
+                lp_never: 'Больше не показывать',
+                lp_note: 'Вход хранится только на этом устройстве.',
                 err_3d: '3D: ошибка',
                 ui_btn_title: 'Размер текста, кнопок и разделителей',
                 ui_text: 'Текст',
@@ -10993,7 +11093,7 @@ end
             const ghost = document.createElement('div');
             ghost.id = 'tree-drag-ghost';
             const first = treeByRef[refs[0]];
-            ghost.textContent = (refs.length > 1 ? '📦 ' + refs.length + ' объектов' : '↕ ' + (first ? first.name : ''));
+            ghost.textContent = (refs.length > 1 ? t('mv_ghost_n', { n: refs.length }) : '↕ ' + (first ? first.name : ''));
             document.body.appendChild(ghost);
             d.ghost = ghost;
             d.scrollEl = treeScrollParent(treeEl);
@@ -11064,7 +11164,7 @@ end
         }
         async function treeReparent(refs, targetRef) {
             const r = await api('POST', '/api/reparent', { refs, parent: targetRef });
-            if (!r || !r.ok) { notify((r && r.error) || 'Не удалось перенести', 'err'); return; }
+            if (!r || !r.ok) { notify((r && r.error) || t('mv_failed'), 'err'); return; }
             if (r.moved.length) {
                 expanded.add(targetRef);
                 const tr = await api('GET', '/api/tree');
@@ -11073,9 +11173,9 @@ end
                     rebuildTreeIndex();
                     renderTree();
                 }
-                notify('Перенесено объектов: ' + r.moved.length + (r.skipped.length ? ' (пропущено ' + r.skipped.length + ')' : ''));
+                notify(t('mv_done', { n: r.moved.length }) + (r.skipped.length ? t('mv_skipped', { n: r.skipped.length }) : ''));
             } else {
-                notify('Ничего не перенесено', 'err');
+                notify(t('mv_none'), 'err');
             }
         }
         function initTreeDragDrop() {
@@ -11402,18 +11502,18 @@ end
         const ASSET_PROP_RE = /(mesh\s*id|texture\s*id|sound\s*id|animation\s*id|image|colormap|normalmap|texture)$/i;
         async function exportAssetById(id, label) {
             try {
-                notify('Экспорт ' + label + ' ' + id + '…');
+                notify(t('exp_asset_start', { label: label, id: id }));
                 // Приложение Android: системный диалог «Сохранить как» (сам выбираешь папку) через мост —
                 // та же схема, что у экспорта .rbxl. WebView сам файл скачать/поделиться не умеет.
                 if (window.AndroidBridge && typeof window.AndroidBridge.getDataDir === 'function' &&
                     typeof window.AndroidBridge.exportRbxlFile === 'function') {
                     const er = await api('POST', '/api/asset-export', { id });
-                    if (!er || !er.ok) { notify('Не удалось получить ассет ' + id + ': ' + ((er && er.error) || 'ошибка'), 'warn'); return; }
+                    if (!er || !er.ok) { notify(t('exp_asset_fail', { id: id, err: (er && er.error) || t('exp_generic_err') }), 'warn'); return; }
                     window.AndroidBridge.exportRbxlFile(er.path, er.name);
                     return;
                 }
                 const r = await fetch('/api/asset-proxy?id=' + id);
-                if (!r.ok) { notify('Не удалось получить ассет ' + id + ' (HTTP ' + r.status + ')', 'warn'); return; }
+                if (!r.ok) { notify(t('exp_asset_fail_http', { id: id, status: r.status }), 'warn'); return; }
                 const blob = await r.blob();
                 const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
                 const txt = String.fromCharCode.apply(null, head);
@@ -11425,16 +11525,16 @@ end
                 const name = 'asset_' + id + ext;
                 const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
                 if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    try { await navigator.share({ files: [file], title: name }); notify('Отправлено: ' + name + ' (' + Math.round(blob.size / 1024) + ' КБ)'); return; }
+                    try { await navigator.share({ files: [file], title: name }); notify(t('exp_shared', { name: name, kb: Math.round(blob.size / 1024) })); return; }
                     catch (e) { if (e && e.name === 'AbortError') return; /* иначе — обычное скачивание */ }
                 }
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob); a.download = name;
                 document.body.appendChild(a); a.click(); a.remove();
                 setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-                notify('Сохранено: ' + name + ' (' + Math.round(blob.size / 1024) + ' КБ)');
+                notify(t('exp_saved', { name: name, kb: Math.round(blob.size / 1024) }));
             } catch (e) {
-                notify('Ошибка экспорта: ' + (e && e.message ? e.message : e), 'warn');
+                notify(t('exp_error', { msg: (e && e.message ? e.message : e) }), 'warn');
             }
         }
         function attachAssetExport(row, k, v) {
@@ -11457,7 +11557,7 @@ end
             row.addEventListener('touchend', cancel); row.addEventListener('touchcancel', cancel);
             row.addEventListener('mousedown', start); row.addEventListener('mousemove', move);
             row.addEventListener('mouseup', cancel); row.addEventListener('mouseleave', cancel);
-            row.title = (row.title ? row.title + ' — ' : '') + 'долгое нажатие: экспорт файла ' + m[1];
+            row.title = (row.title ? row.title + ' — ' : '') + t('exp_longpress', { id: m[1] });
         }
 
         function addPropRow(panel, ref, k, v) {
@@ -12341,6 +12441,102 @@ end
             }
         }
 
+
+        // === Панель «Войти в Roblox» при запуске, если аккаунт не подключён
+        function _loginPromptVisible() {
+            const el = document.getElementById('login-prompt');
+            return !!(el && el.classList.contains('show'));
+        }
+
+        function hideLoginPrompt(never) {
+            const el = document.getElementById('login-prompt');
+            if (el) el.classList.remove('show');
+            const cb = document.getElementById('lp-never');
+            if (never || (cb && cb.checked)) {
+                try { localStorage.setItem('rsw-login-never', '1'); } catch (e) { }
+            }
+        }
+
+        function lpLoginAndroid() {
+            try { window.AndroidBridge.loginToRoblox(); } catch (e) { console.error('loginToRoblox:', e); }
+        }
+
+        async function lpSaveCookie() {
+            const el = document.getElementById('lp-cookie');
+            const val = el ? el.value.trim() : '';
+            if (!val) { notify(t('cookie_bad'), 'err'); return; }
+            const r = await api('POST', '/api/roblox/cookie', { cookie: val });
+            if (el) el.value = '';
+            if (r.ok) {
+                hideLoginPrompt();
+                notify(t('cookie_ok', { name: r.name || '' }));
+                if (_startVisible()) _stLoad();
+            } else {
+                notify(r.error || t('cookie_bad'), 'err');
+            }
+        }
+
+        function showLoginPrompt() {
+            if (!document.getElementById('login-prompt-css')) {
+                const st = document.createElement('style');
+                st.id = 'login-prompt-css';
+                st.textContent =
+                    '#login-prompt{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(8,12,24,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}' +
+                    '#login-prompt.show{display:flex;animation:lpfade .25s ease}' +
+                    '@keyframes lpfade{from{opacity:0}to{opacity:1}}' +
+                    '@keyframes lppop{from{transform:translateY(14px) scale(.97);opacity:0}to{transform:none;opacity:1}}' +
+                    '#login-prompt .lp-card{width:100%;max-width:400px;max-height:94vh;overflow-y:auto;border-radius:22px;background:#fff;color:#1b1f2a;box-shadow:0 24px 70px rgba(0,0,0,.45);animation:lppop .3s ease}' +
+                    '#login-prompt .lp-hero{padding:26px 22px 20px;text-align:center;color:#fff;background:linear-gradient(135deg,#2f5bff 0%,#7c3aed 100%);border-radius:22px 22px 0 0}' +
+                    '#login-prompt .lp-logo{width:64px;height:64px;margin:0 auto 12px;border-radius:18px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:34px}' +
+                    '#login-prompt .lp-title{font:800 21px/1.2 sans-serif;margin:0}' +
+                    '#login-prompt .lp-body{padding:18px 22px 20px}' +
+                    '#login-prompt .lp-text{margin:0 0 14px;font:14px/1.45 sans-serif;color:#4a5163}' +
+                    '#login-prompt .lp-feat{display:flex;flex-direction:column;gap:8px;margin:0 0 16px;font:600 14px/1.3 sans-serif}' +
+                    '#login-prompt .lp-feat div{background:#eef1f8;border-radius:12px;padding:9px 12px}' +
+                    '#login-prompt .lp-input{width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:10px;border:1px solid #cdd5e8;border-radius:12px;font:14px sans-serif;background:#f7f8fc;color:#1b1f2a}' +
+                    '#login-prompt .lp-btn{display:block;width:100%;padding:13px;border:none;border-radius:13px;font:700 15px sans-serif;cursor:pointer;background:linear-gradient(135deg,#2f5bff,#7c3aed);color:#fff}' +
+                    '#login-prompt .lp-btn.sec{margin-top:8px;background:transparent;color:#4a5163;font-weight:600}' +
+                    '#login-prompt .lp-never{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font:13px sans-serif;color:#6b7280}' +
+                    '#login-prompt .lp-note{margin-top:12px;text-align:center;font:12px sans-serif;color:#8a90a2}' +
+                    '#login-prompt .lp-help{margin:0 0 10px;font:12px/1.4 sans-serif;color:#6b7280}';
+                document.head.appendChild(st);
+            }
+            let el = document.getElementById('login-prompt');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'login-prompt';
+                el.addEventListener('click', (e) => { if (e.target === el) hideLoginPrompt(); });
+                document.body.appendChild(el);
+            }
+            el.innerHTML =
+                '<div class="lp-card">' +
+                '<div class="lp-hero"><div class="lp-logo">🎮</div><h2 class="lp-title">' + esc(t('lp_title')) + '</h2></div>' +
+                '<div class="lp-body">' +
+                '<p class="lp-text">' + esc(t('lp_text')) + '</p>' +
+                '<div class="lp-feat"><div>' + esc(t('lp_f1')) + '</div><div>' + esc(t('lp_f2')) + '</div><div>' + esc(t('lp_f3')) + '</div></div>' +
+                (IS_ANDROID
+                    ? '<button class="lp-btn" onclick="lpLoginAndroid()">' + esc(t('lp_btn')) + '</button>'
+                    : '<p class="lp-help">' + esc(t('cookie_help')) + '</p>' +
+                      '<input id="lp-cookie" class="lp-input" type="password" autocomplete="off" placeholder="' + _escAttr(t('cookie_ph')) + '" ' +
+                      'onkeydown="if(event.key===\'Enter\')lpSaveCookie()">' +
+                      '<button class="lp-btn" onclick="lpSaveCookie()">' + esc(t('cookie_btn')) + '</button>') +
+                '<button class="lp-btn sec" onclick="hideLoginPrompt()">' + esc(t('lp_later')) + '</button>' +
+                '<label class="lp-never"><input type="checkbox" id="lp-never"> ' + esc(t('lp_never')) + '</label>' +
+                '<div class="lp-note">🔒 ' + esc(t('lp_note')) + '</div>' +
+                '</div></div>';
+            el.classList.add('show');
+        }
+
+        async function _maybeShowLoginPrompt() {
+            try { if (localStorage.getItem('rsw-login-never') === '1') return; } catch (e) { }
+            let ok = false;
+            try {
+                if (IS_ANDROID) ok = !!window.AndroidBridge.isRobloxLoggedIn();
+                else { const st = await api('GET', '/api/roblox/auth-status'); ok = !!(st && st.ok && st.loggedIn); }
+            } catch (e) { return; }
+            if (!ok) showLoginPrompt();
+        }
+
         function showDownloadPlaceDialog() {
             showModal(
                 '<h3>' + t('dl_title') + '</h3>' +
@@ -12491,10 +12687,13 @@ end
 
         // === Скачивание 3D-аватара пользователя по Roblox User ID ===
         window.onRobloxAuthUpdated = function (loggedIn) {
+            const fromPrompt = _loginPromptVisible();
+            hideLoginPrompt();
             closeModal();
             if (loggedIn) {
                 notify(t('acc_login_done'));
-                showAccountDialog();
+                if (_startVisible()) _stLoad();
+                if (!fromPrompt) showAccountDialog();
             } else {
                 notify(t('acc_login_failed'), 'err');
             }
@@ -12527,17 +12726,17 @@ end
             const inp = document.getElementById('acc-asset-id');
             if (!inp) return;
             inp.value = Array.from(failedMeshIds).join(' ');
-            notify(failedMeshIds.size ? ('Неразобранных мешей: ' + failedMeshIds.size) : 'Неразобранных мешей пока нет (сначала запусти Play)');
+            notify(failedMeshIds.size ? t('mesh_failed_n', { n: failedMeshIds.size }) : t('mesh_failed_none'));
         }
         // Несколько ассетов одним ZIP: в приложении — окно «Сохранить как», в браузере — «Поделиться»/скачивание.
         async function exportAssetsZip(ids) {
             try {
-                notify('Экспорт ' + ids.length + ' ассетов…');
+                notify(t('exp_assets_start', { n: ids.length }));
                 const bridge = window.AndroidBridge && typeof window.AndroidBridge.exportRbxlFile === 'function' &&
                     typeof window.AndroidBridge.getDataDir === 'function';
                 const er = await api('POST', '/api/asset-export', { ids, inline: !bridge });
-                if (!er || !er.ok) { notify('Не удалось получить ассеты: ' + ((er && er.error) || 'ошибка'), 'warn'); return; }
-                if (er.missing && er.missing.length) notify('Не получены: ' + er.missing.join(', '), 'warn');
+                if (!er || !er.ok) { notify(t('exp_assets_fail', { err: (er && er.error) || t('exp_generic_err') }), 'warn'); return; }
+                if (er.missing && er.missing.length) notify(t('exp_assets_missing', { list: er.missing.join(', ') }), 'warn');
                 if (bridge) { window.AndroidBridge.exportRbxlFile(er.path, er.name); return; }
                 const blob = _b64ToBlob(er.b64, 'application/zip');
                 const file = new File([blob], er.name, { type: 'application/zip' });
@@ -12546,9 +12745,9 @@ end
                     catch (e) { if (e && e.name === 'AbortError') return; }
                 }
                 _downloadBlob(blob, er.name);
-                notify('Сохранено: ' + er.name + ' (' + Math.round(er.size / 1024) + ' КБ, ассетов: ' + er.got.length + ')');
+                notify(t('exp_assets_saved', { name: er.name, kb: Math.round(er.size / 1024), n: er.got.length }));
             } catch (e) {
-                notify('Ошибка экспорта: ' + (e && e.message ? e.message : e), 'warn');
+                notify(t('exp_error', { msg: (e && e.message ? e.message : e) }), 'warn');
             }
         }
         async function saveRobloxCookie() {
@@ -12775,9 +12974,8 @@ end
             _avatar3dAbort = new AbortController();
             const signal = _avatar3dAbort.signal;
 
-            const steps = mode === 'import'
-                ? ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Добавляю на сцену']
-                : ['Запрашиваю статус модели у Roblox', 'Жду, пока Roblox сгенерирует модель', 'Скачиваю obj/mtl/текстуры', 'Выберите, куда сохранить'];
+            const steps = [t('av_step_status'), t('av_step_wait'), t('av_step_download'),
+                mode === 'import' ? t('av_step_add') : t('av_step_save')];
             let step = 0;
             showModal(_avatarProgressHtml(steps, step));
 
@@ -12935,13 +13133,13 @@ end
             let vertCount = 0;
             object.traverse(n => { if (n.isMesh && n.geometry && n.geometry.attributes.position) vertCount += n.geometry.attributes.position.count; });
             if (vertCount === 0) {
-                throw new Error('Модель распарсилась, но геометрия пустая (0 вершин) — формат OBJ мог измениться на стороне Roblox');
+                throw new Error(t('av_err_empty_geom'));
             }
 
             object.name = 'RobloxAvatar_' + userId;
 
             if (!(typeof scene !== 'undefined' && scene)) {
-                throw new Error('3D-сцена ещё не готова, попробуйте через секунду');
+                throw new Error(t('av_err_scene_not_ready'));
             }
             scene.add(object);
 
@@ -12981,12 +13179,7 @@ end
                     ref = r.ref;
                 } else {
                     // ВАЖНО: PUT /api/instance молча возвращает {ok:false},
-                    throw new Error(
-                        'Модель добавлена только в вьюпорт (визуально), но НЕ ' +
-                        'сохранена как объект сцены: нет открытого проекта ' +
-                        '(.rbxl/.rbxlx). Откройте или создайте файл проекта, ' +
-                        'затем импортируйте аватар заново.'
-                    );
+                    throw new Error(t('av_err_not_saved'));
                 }
                 if (ref !== null) {
                     // КРИТИЧНЫЙ ФИКС #2: /api/scene на сервере (make_scene_objects)
@@ -13133,10 +13326,12 @@ end
             // (обновление страницы посреди работы его не вызывает).
             api('GET', '/api/status').then(st => {
                 if (st && st.ok && !st.loaded) showStartScreen(true);
-            }).catch(() => { /* сервер недоступен — нечего показывать */ });
+            }).catch(() => { /* сервер недоступен — нечего показывать */ })
+                .then(() => _maybeShowLoginPrompt());
         });
 
         document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && _loginPromptVisible()) { hideLoginPrompt(); return; }
             if (e.key === 'Escape' && _startVisible() &&
                 !document.getElementById('modal-overlay').classList.contains('show')) hideStartScreen();
         });
