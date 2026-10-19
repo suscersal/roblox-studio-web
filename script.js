@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-16 · ui-scale';
+        const BUILD_LABEL = '2026-10-18 · start-screen';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -39,7 +39,7 @@
                 lua_instances_no_reply: '/api/all_instances did not respond',
                 notify_editor_unavailable: 'Script editor unavailable (CodeMirror failed to load)',
                 confirm_discard_unsaved: 'The current scene (if unsaved) will be replaced with an empty one. Continue?',
-                notify_new_scene: 'New empty scene created',
+                notify_new_scene: 'New Baseplate scene created',
                 notify_download_cancelled: 'Download cancelled',
                 notify_loading_model: 'Loading model…',
                 notify_import_failed: 'Import failed: ',
@@ -56,7 +56,7 @@
                 av_download_failed: 'Could not download the files',
                 av_import_failed: 'Import failed: ',
                 av_zip_android: 'Saving .zip is only available in the Android app (in desktop mode the file is already written next to app.py: {path})',
-                tb_new: '🆕 New', tb_new_title: 'New empty scene',
+                tb_new: '🆕 New', tb_new_title: 'New scene (Baseplate)',
                 tb_open: '📂 Open', tb_open_title: 'Open file (Ctrl+O)',
                 tb_save: '💾 Save', tb_save_title: 'Save (Ctrl+S)',
                 tb_saveas: '💾 As...', tb_saveas_title: 'Save as',
@@ -71,6 +71,12 @@
                 tb_delete: '🗑 Delete', tb_delete_title: 'Delete (Delete)',
                 tb_refresh: '🔄 Refresh', tb_refresh_title: 'Refresh scene (F5)',
                 tb_publish: '☁ Publish', tb_publish_title: 'Publish',
+                tb_download: '🏠 Start', tb_download_title: 'Start screen: recent files and your Roblox experiences',
+                dl_hint: 'Uses your Roblox sign-in (Account), like Studio. You need edit access to the place or it must be copyable.', cookie_ph: '.ROBLOSECURITY value', cookie_btn: 'Sign in with cookie', cookie_help: 'Desktop sign-in: in your browser, signed in to roblox.com, open DevTools → Application → Cookies → .ROBLOSECURITY and paste the value. Treat it like a password: it gives full account access. It is stored only on this device.', cookie_ok: '✅ Signed in as {name}', cookie_bad: 'Sign-in failed',
+                st_new: 'New Experience', st_recents: 'Recents', st_home: 'Home', st_experiences: 'Experiences', st_templates: 'Templates', st_archive: 'Archive', st_recent_h: 'My Recent Experiences', st_tpl_h: 'Open a Template', st_banner_t: 'Pick up where you left off', st_banner_p: 'Open a file, download one of your experiences from Roblox, or start from a template.', st_modified: 'Modified {d}', st_opened: 'Opened {d}', st_local: 'Local', st_refresh: 'Refresh', st_close: 'Close', st_remove: 'Remove from recents?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Empty scene', st_tpl_sub: 'Template', st_menu: 'Remove from recents',
+                start_title: 'Start', start_welcome: 'Welcome, {name}', start_recent: 'Recent', start_new: 'New scene', start_open: 'Open file…', start_file: 'File', start_roblox: 'Roblox', start_err: 'Could not load your experiences: {err}',
+                exp_title: 'My Experiences', exp_loading: 'Loading experiences…', exp_search: 'Search…', exp_empty: 'Nothing found', exp_login_needed: 'Sign in to Roblox first (Account) to see your experiences.', exp_private: 'Private', exp_public: 'Public', exp_by_id: 'By Place ID…', exp_pick_place: 'This experience has several places. Pick one:', pub_origin: 'Opened from Roblox: {name} (Place {id}). IDs are prefilled.',
+                dl_title: '⬇ Download place', dl_place: 'Place ID', dl_version: 'Version (optional)', dl_btn: 'Download', dl_discard: 'Unsaved changes in the current scene will be lost. Continue?', dl_ok: '✅ Place loaded: {n} objects', dl_loading: 'Downloading the latest version…',
                 tb_account: '👤 Account', tb_account_title: 'Roblox account and Open Cloud API key',
                 tb_play: '▶ Play', tb_play_title: 'Run physics simulation',
                 tb_resetcam: '🏠 Reset', tb_resetcam_title: 'Reset camera',
@@ -217,7 +223,7 @@
                 lua_instances_no_reply: '/api/all_instances не ответил',
                 notify_editor_unavailable: 'Редактор скриптов недоступен (CodeMirror не загрузился)',
                 confirm_discard_unsaved: 'Текущая сцена (если не сохранена) будет заменена пустой. Продолжить?',
-                notify_new_scene: 'Создана новая пустая сцена',
+                notify_new_scene: 'Создана новая сцена Baseplate',
                 notify_download_cancelled: 'Скачивание отменено',
                 notify_loading_model: 'Загружаю модель…',
                 notify_import_failed: 'Не удалось импортировать: ',
@@ -234,7 +240,7 @@
                 av_download_failed: 'Не удалось скачать файлы',
                 av_import_failed: 'Не удалось импортировать: ',
                 av_zip_android: 'Сохранение .zip доступно только в Android-приложении (в десктоп-режиме файл уже записан рядом с app.py: {path})',
-                tb_new: '🆕 Новый', tb_new_title: 'Новая пустая сцена',
+                tb_new: '🆕 Новый', tb_new_title: 'Новая сцена (Baseplate)',
                 tb_open: '📂 Открыть', tb_open_title: 'Открыть файл (Ctrl+O)',
                 tb_save: '💾 Сохранить', tb_save_title: 'Сохранить (Ctrl+S)',
                 tb_saveas: '💾 Как...', tb_saveas_title: 'Сохранить как',
@@ -249,6 +255,12 @@
                 tb_delete: '🗑 Удалить', tb_delete_title: 'Удалить (Delete)',
                 tb_refresh: '🔄 Обновить', tb_refresh_title: 'Обновить сцену (F5)',
                 tb_publish: '☁ Публикация', tb_publish_title: 'Опубликовать',
+                tb_download: '🏠 Старт', tb_download_title: 'Стартовый экран: недавние файлы и твои experiences с Roblox',
+                dl_hint: 'Используется твой вход в Roblox (Account), как в Studio. Нужен доступ на редактирование места или оно должно быть копируемым.', cookie_ph: 'Значение .ROBLOSECURITY', cookie_btn: 'Войти по куке', cookie_help: 'Вход на десктопе: в браузере, где ты вошёл на roblox.com, открой DevTools → Application → Cookies → .ROBLOSECURITY и вставь значение. Относись как к паролю: оно даёт полный доступ к аккаунту. Хранится только на этом устройстве.', cookie_ok: '✅ Вход выполнен: {name}', cookie_bad: 'Вход не выполнен',
+                st_new: 'Новый experience', st_recents: 'Недавние', st_home: 'Главная', st_experiences: 'Experiences', st_templates: 'Шаблоны', st_archive: 'Архив', st_recent_h: 'Мои недавние Experiences', st_tpl_h: 'Открыть шаблон', st_banner_t: 'Продолжи с того же места', st_banner_p: 'Открой файл, скачай одно из своих experiences с Roblox или начни с шаблона.', st_modified: 'Изменено {d}', st_opened: 'Открыто {d}', st_local: 'Локально', st_refresh: 'Обновить', st_close: 'Закрыть', st_remove: 'Убрать из недавних?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Пустая сцена', st_tpl_sub: 'Шаблон', st_menu: 'Убрать из недавних',
+                start_title: 'Старт', start_welcome: 'Привет, {name}', start_recent: 'Недавние', start_new: 'Новая сцена', start_open: 'Открыть файл…', start_file: 'Файл', start_roblox: 'Roblox', start_err: 'Не удалось загрузить experiences: {err}',
+                exp_title: 'Мои Experiences', exp_loading: 'Загружаю список…', exp_search: 'Поиск…', exp_empty: 'Ничего не найдено', exp_login_needed: 'Сначала войди в Roblox (Аккаунт), чтобы увидеть свои experiences.', exp_private: 'Private', exp_public: 'Public', exp_by_id: 'По Place ID…', exp_pick_place: 'В этом experience несколько мест. Выбери:', pub_origin: 'Открыто с Roblox: {name} (Place {id}). ID подставлены.',
+                dl_title: '⬇ Скачать место', dl_place: 'Place ID', dl_version: 'Версия (необязательно)', dl_btn: 'Скачать', dl_discard: 'Несохранённые изменения в текущей сцене пропадут. Продолжить?', dl_ok: '✅ Место загружено: {n} объектов', dl_loading: 'Скачиваю свежую версию…',
                 tb_account: '👤 Аккаунт', tb_account_title: 'Аккаунт Roblox и Open Cloud API-ключ',
                 tb_play: '▶ Play', tb_play_title: 'Запустить симуляцию физики',
                 tb_resetcam: '🏠 Сброс', tb_resetcam_title: 'Сбросить камеру',
@@ -1248,7 +1260,7 @@
             if ((_blobFrame++ & 1) === 0) {
                 const res = new CANNON.RaycastResult();
                 physicsWorld.raycastClosest(new CANNON.Vec3(x, y, z), new CANNON.Vec3(x, y - 60, z),
-                    { collisionFilterMask: 1, skipBackfaces: true }, res);
+                    { collisionFilterMask: _charRayMask(), skipBackfaces: true }, res);
                 if (res.hasHit) {
                     const k = Math.max(0.35, 1 - (y - res.hitPointWorld.y) / 25); // выше от земли — меньше и бледнее
                     blobShadow.position.y = res.hitPointWorld.y + 0.06;
@@ -3303,7 +3315,7 @@
 
         // Раньше спавн искался среди уже подгруженных в редакторе мешей —
         async function findSpawnPoint() {
-            const r = await api('GET', '/api/spawn');
+            const r = await api('GET', '/api/spawn?team=auto');
             if (r && r.ok) {
                 return { x: r.x, y: r.y + CHAR_RADIUS + 1, z: r.z };
             }
@@ -3369,6 +3381,10 @@
             if (!canCollide) {
                 body.collisionFilterGroup = 2;
                 body.collisionFilterMask = 0;
+                body.__noCollide = true;
+            } else {
+                if (luaPartGroup[o.ref]) body.__rbxGroup = luaPartGroup[o.ref];
+                luaApplyGroup(body);
             }
 
             applyUnionTrimesh(body, mesh);
@@ -4395,6 +4411,28 @@ UDim2.__add = function(a, b) return UDim2.new(a.X.Scale + b.X.Scale, a.X.Offset 
 UDim2.__sub = function(a, b) return UDim2.new(a.X.Scale - b.X.Scale, a.X.Offset - b.X.Offset, a.Y.Scale - b.Y.Scale, a.Y.Offset - b.Y.Offset) end
 UDim2.__tostring = function(u) return "{" .. tostring(u.X) .. "}, {" .. tostring(u.Y) .. "}" end
 
+-- typeof(v) — глобальная функция Roblox: Lua-тип для простых значений, а для Roblox-типов — их имя
+-- ("Instance", "Vector3", "CFrame", "EnumItem"...). Раньше её не было вовсе: любой скрипт с typeof() падал
+-- на attempt to call a nil value (global 'typeof').
+function typeof(v)
+    local t = type(v)
+    if t ~= "table" then return t end
+    local mt = getmetatable(v)
+    if mt ~= nil then
+        if mt == Vector3 then return "Vector3" end
+        if mt == Vector2 then return "Vector2" end
+        if mt == CFrame then return "CFrame" end
+        if mt == Color3 then return "Color3" end
+        if mt == UDim2 then return "UDim2" end
+        if mt == UDim then return "UDim" end
+        if mt == BrickColor then return "BrickColor" end
+        if mt == TweenInfo then return "TweenInfo" end
+        if mt == Random then return "Random" end
+    end
+    if rawget(v, "__ref") ~= nil then return "Instance" end
+    if rawget(v, "EnumType") ~= nil then return "EnumItem" end
+    return "table"
+end
 -- RunService:BindToRenderStep хранит свои подключения здесь (по имени привязки)
 __render_binds = {}
 -- RaycastParams.new() — только контейнер полей (FilterDescendantsInstances/FilterType/...): workspace:Raycast в
@@ -5021,13 +5059,64 @@ InstanceMT.__index = function(t, k)
             end
         end
     end
-    -- PhysicsService: у приложения нет групп столкновений — вызовы не падают и ничего не делают (честный no-op,
-    -- не «заглушка на будущее»: фильтрация столкновений по группам просто не работает).
-    if __get_class(ref) == "PhysicsService" and (k == "RegisterCollisionGroup" or k == "CreateCollisionGroup"
-        or k == "CollisionGroupSetCollidable" or k == "SetPartCollisionGroup" or k == "RenameCollisionGroup"
-        or k == "RemoveCollisionGroup" or k == "UnregisterCollisionGroup" or k == "CollisionGroupContainsPart"
-        or k == "IsCollisionGroupRegistered") then
-        return function(self, ...) return nil end
+    -- Команды: Team.TeamColor/AutoAssignable, Player.Team/Neutral/TeamColor, Teams:GetTeams(). Раньше команд не было
+    -- вовсе: RoundGui падал на team.TeamColor, а TDM/Scoring/TeamCollisionFiltering считали игрока нейтральным.
+    do
+        local cls_ = __get_class(ref)
+        if cls_ == "Team" then
+            if k == "TeamColor" then
+                local n = __team_color(ref)
+                if n then return BrickColor.new(n) end
+                return nil
+            elseif k == "AutoAssignable" then
+                return __team_auto(ref)
+            end
+        elseif cls_ == "Player" then
+            if k == "LoadCharacter" then
+                return function(self) __load_character() end
+            end
+            if k == "Team" then
+                local t = __player_team(ref)
+                if t ~= -1 then return wrap(t) end
+                return nil
+            elseif k == "Neutral" then
+                return __player_team(ref) == -1
+            elseif k == "TeamColor" then
+                local n = __team_color(ref)
+                if n then return BrickColor.new(n) end
+                return BrickColor.new(194)
+            end
+        elseif cls_ == "Teams" and k == "GetTeams" then
+            return function(self)
+                local out = {}
+                for i = 1, __child_count(ref) do
+                    local c = __child_at(ref, i - 1)
+                    if __get_class(c) == "Team" then out[#out + 1] = wrap(c) end
+                end
+                return out
+            end
+        end
+    end
+    -- PhysicsService: настоящие группы столкновений. Каждая группа — свой бит cannon-тела; part.CollisionGroup = имя
+    -- переносит тело в группу (так форсфилд команды пропускает своих и держит чужих).
+    if __get_class(ref) == "PhysicsService" then
+        if k == "RegisterCollisionGroup" or k == "CreateCollisionGroup" then
+            return function(self, name) __phys_register(name) end
+        elseif k == "UnregisterCollisionGroup" or k == "RemoveCollisionGroup" then
+            return function(self, name) __phys_unregister(name) end
+        elseif k == "IsCollisionGroupRegistered" then
+            return function(self, name) return __phys_is_registered(name) end
+        elseif k == "CollisionGroupSetCollidable" then
+            return function(self, a, b, v) __phys_set_collidable(a, b, v and true or false) end
+        elseif k == "CollisionGroupsAreCollidable" then
+            return function(self, a, b) return __phys_get_collidable(a, b) end
+        elseif k == "SetPartCollisionGroup" then
+            return function(self, part, name) part.CollisionGroup = name end
+        elseif k == "CollisionGroupContainsPart" then
+            return function(self, name, part) return part.CollisionGroup == name end
+        elseif k == "RenameCollisionGroup" then
+            return function(self, from, to) end
+        end
     end
     if k == "Position" then
         if __is_gui_ref(ref) then
@@ -5060,7 +5149,27 @@ InstanceMT.__index = function(t, k)
         return CFrame.new(__get_cframe(ref))
     end
     if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
-        return function(self, name) return wrap(__find_first_child(ref, name)) end
+        -- Второй аргумент FindFirstChild(name, recursive) раньше игнорировался: ViewModelController искал
+        -- MuzzleAttachment глубоко внутри модели и «не находил» его, хотя в файле он есть.
+        return function(self, name, recursive)
+            local c = __find_first_child(ref, name)
+            if c ~= nil and c ~= -1 then return wrap(c) end
+            if recursive == true and (k == "FindFirstChild" or k == "findFirstChild") then
+                local function search(r)
+                    for i = 1, __child_count(r) do
+                        local ch = __child_at(r, i - 1)
+                        local f = __find_first_child(ch, name)
+                        if f ~= nil and f ~= -1 then return f end
+                        local deeper = search(ch)
+                        if deeper ~= nil then return deeper end
+                    end
+                    return nil
+                end
+                local found = search(ref)
+                if found ~= nil then return wrap(found) end
+            end
+            return wrap(c)
+        end
     end
     -- AbsolutePosition/AbsoluteSize — реальные пиксельные координаты/размер
     -- GUI-элемента НА ЭКРАНЕ (посчитанные из его Position/Size — UDim2 —
@@ -5101,11 +5210,39 @@ InstanceMT.__index = function(t, k)
         end
     end
     if k == "FindFirstChildWhichIsA" or k == "findFirstChildWhichIsA" then
-        return function(self, cls)
-            local n = __child_count(ref)
-            for i = 1, n do
-                local c = __child_at(ref, i - 1)
-                if __get_class(c) == cls then return wrap(c) end
+        -- Через IsA, а не точное совпадение класса: FindFirstChildWhichIsA("BasePart") находит Part/MeshPart
+        return function(self, cls, recursive)
+            local function search(r)
+                for i = 1, __child_count(r) do
+                    local c = __child_at(r, i - 1)
+                    if __get_class(c) == cls or wrap(c):IsA(cls) then return c end
+                end
+                if recursive == true then
+                    for i = 1, __child_count(r) do
+                        local deeper = search(__child_at(r, i - 1))
+                        if deeper ~= nil then return deeper end
+                    end
+                end
+                return nil
+            end
+            local found = search(ref)
+            if found ~= nil then return wrap(found) end
+            return nil
+        end
+    end
+    -- FindFirstAncestor / FindFirstAncestorOfClass / FindFirstAncestorWhichIsA — вверх по Parent
+    if k == "FindFirstAncestor" or k == "FindFirstAncestorOfClass" or k == "FindFirstAncestorWhichIsA" then
+        return function(self, arg)
+            local cur = __get_parent(ref)
+            while cur ~= nil and cur ~= -1 do
+                if k == "FindFirstAncestor" then
+                    if __get_name(cur) == arg then return wrap(cur) end
+                elseif k == "FindFirstAncestorOfClass" then
+                    if __get_class(cur) == arg then return wrap(cur) end
+                else
+                    if __get_class(cur) == arg or wrap(cur):IsA(arg) then return wrap(cur) end
+                end
+                cur = __get_parent(cur)
             end
             return nil
         end
@@ -5244,6 +5381,8 @@ InstanceMT.__index = function(t, k)
         or k == "MouseHoverEnter" or k == "MouseHoverLeave" or k == "MouseButton1Click"
         or k == "MouseButton1Down" or k == "MouseButton1Up" or k == "MouseEnter" or k == "MouseLeave"
         or k == "InputBegan" or k == "InputEnded" or k == "InputChanged" or k == "LastInputTypeChanged"
+        or k == "TouchPan" or k == "TouchPinch" or k == "TouchTap" or k == "TouchTapInWorld" or k == "TouchLongPress"
+        or k == "TouchRotate" or k == "TouchSwipe" or k == "TouchStarted" or k == "TouchMoved" or k == "TouchEnded"
         or k == "FocusLost" or k == "Focused"
         or k == "ChildAdded" or k == "ChildRemoved" or k == "DescendantAdded" or k == "DescendantRemoving"
         or k == "Touched" or k == "TouchEnded"
@@ -5444,6 +5583,10 @@ local TweenMT = { __index = {
 } }
 local TweenServiceObj = setmetatable({}, { __index = {
     Create = function(self, instance, tweenInfo, props)
+        -- как в Roblox: nil вместо инстанса — ошибка ВЫЗЫВАЮЩЕГО скрипта (уровень 2 показывает его строку, а не прелюдию)
+        if type(instance) ~= "table" or rawget(instance, "__ref") == nil then
+            error("TweenService:Create: первый аргумент должен быть Instance, получено " .. typeof(instance), 2)
+        end
         local id = __nextTweenId
         __nextTweenId = __nextTweenId + 1
         local completedKey = -500000 - id -- отдельный диапазон, не пересекается с обычными ref-ами (см. __tween_register)
@@ -6133,6 +6276,36 @@ end
         // Мировая матрица детали БЕЗ масштаба (THREE.Matrix4, column-major).
         let luaAttrs = {};  // ref -> {имя: значение}  (SetAttribute/GetAttribute)
         let luaTags = {};   // ref -> Set<tag>        (CollectionService)
+        // Данные объектов ИЗ ФАЙЛА (с /api/all_instances): атрибуты, теги, команды. luaAttrs/luaTags пересоздаются при
+        // каждом запуске Play (luaResetSignals) и засеваются отсюда — раньше GetAttribute по объектам карты давал nil.
+        let luaFileAttrs = {}, luaFileTags = {}, luaTeamInfo = {}, luaPlayerTeam = -1;
+        // Группы столкновений (PhysicsService): имя -> {bit}; Default = бит 1; бит 2 занят «нет столкновений» (CanCollide=false).
+        // В cannon тела сталкиваются, если (A.group & B.mask) && (B.group & A.mask): у каждой группы свой бит, а маска —
+        // сумма битов групп, с которыми она сталкивается.
+        let luaCollGroups = {}, luaNextGroupBit = 4, luaGroupCollide = {}, luaPartGroup = {};
+        function luaGroupBit(name) { if (!name || name === 'Default') return 1; const g = luaCollGroups[name]; return g ? g.bit : 1; }
+        function luaGroupsCollide(a, b) {
+            a = a || 'Default'; b = b || 'Default';
+            return luaGroupCollide[a < b ? a + '\u0000' + b : b + '\u0000' + a] !== false;
+        }
+        function luaMaskFor(name) {
+            let m = luaGroupsCollide(name, 'Default') ? 1 : 0;
+            for (const n in luaCollGroups) if (luaGroupsCollide(name, n)) m |= luaCollGroups[n].bit;
+            return m;
+        }
+        function luaApplyGroup(body) {
+            if (!body || body.__noCollide) return;
+            const name = body.__rbxGroup || 'Default';
+            body.collisionFilterGroup = luaGroupBit(name);
+            body.collisionFilterMask = luaMaskFor(name);
+        }
+        function luaRefreshAllGroupMasks() {
+            for (const b of Object.values(physicsBodies)) luaApplyGroup(b);
+            if (charBody) luaApplyGroup(charBody);
+        }
+        // Маска лучей персонажа (земля, ступеньки, авто-прыжок, тень): только то, с чем он сталкивается, —
+        // сквозь форсфилд своей команды луч «земли» не должен упираться.
+        function _charRayMask() { return (charBody && charBody.collisionFilterMask) || 1; }
         const _modelPivots = {}; // ref контейнера (Model/Folder) -> THREE.Matrix4 пивота
         // Деталь стала динамической (скрипт сделал Anchored=false — например, полки
         // холодильника). В Roblox всё, что лежало сверху и само не заякорено в файле
@@ -7128,22 +7301,42 @@ end
             const hum = luaHumanoidRef;
             setTimeout(() => {
                 if (!isPlaying || hum !== luaHumanoidRef || !luaCharDead) return;
-                fireLuaSignal(luaPlayerRef, 'CharacterRemoving', [{ __instanceRef: luaCharacterRef }]);
-                if (charBody && playSpawnPos) {
-                    charBody.position.set(playSpawnPos.x, playSpawnPos.y, playSpawnPos.z);
-                    charBody.velocity.set(0, 0, 0);
-                    charBody.wakeUp();
-                }
-                const hp = virtualInstanceProps[hum];
-                hp.Health = hp.MaxHealth != null ? hp.MaxHealth : 100;
-                if (luaCharSavedMove) { charWalkSpeed = luaCharSavedMove.walk; charJumpPower = luaCharSavedMove.jump; }
-                luaCharDead = false;
-                fireLuaSignal(hum, 'HealthChanged', [hp.Health]);
-                fireLuaSignal(luaPlayerRef, 'CharacterAdded', [{ __instanceRef: luaCharacterRef }]);
+                luaRespawnCharacter();
             }, 5000);
+        }
+        // Респавн: CharacterRemoving -> персонаж на точке появления своей команды со здоровьем и скоростью -> CharacterAdded.
+        // Его вызывает и таймер смерти, и Player:LoadCharacter() (раунды Blaster пересоздают персонажей именно так).
+        function luaRespawnCharacter() {
+            if (!isPlaying || luaHumanoidRef === -1) return;
+            const hum = luaHumanoidRef;
+            fireLuaSignal(luaPlayerRef, 'CharacterRemoving', [{ __instanceRef: luaCharacterRef }]);
+            if (charBody && playSpawnPos) {
+                charBody.position.set(playSpawnPos.x, playSpawnPos.y, playSpawnPos.z);
+                charBody.velocity.set(0, 0, 0);
+                charBody.wakeUp();
+            }
+            const hp = virtualInstanceProps[hum];
+            hp.Health = hp.MaxHealth != null ? hp.MaxHealth : 100;
+            if (luaCharSavedMove) { charWalkSpeed = luaCharSavedMove.walk; charJumpPower = luaCharSavedMove.jump; luaCharSavedMove = null; }
+            luaCharDead = false;
+            fireLuaSignal(hum, 'HealthChanged', [hp.Health]);
+            fireLuaSignal(luaPlayerRef, 'CharacterAdded', [{ __instanceRef: luaCharacterRef }]);
+        }
+        // part.CollisionGroup = "Pink": тело получает бит группы (форсфилды команд: свои проходят, чужие нет).
+        // Вызывается ДО ветки virtualInstanceProps — иначе у виртуальных частей персонажа (HumanoidRootPart) значение
+        // просто оседало в словаре и тело игрока оставалось в группе Default.
+        function luaSetCollisionGroup(ref, value) {
+            luaPartGroup[ref] = value;
+            if (virtualInstanceProps[ref]) virtualInstanceProps[ref].CollisionGroup = value;
+            else (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {}).CollisionGroup = value;
+            const body = physicsBodies[ref];
+            if (body) { body.__rbxGroup = value; luaApplyGroup(body); }
+            // часть персонажа -> группа тела игрока (в приложении весь персонаж — один charBody)
+            if (charBody && luaIsCharRef(ref)) { charBody.__rbxGroup = value; luaApplyGroup(charBody); }
         }
         function luaSetGenericProp(ref, name, value) {
             if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
+            if (name === 'CollisionGroup') { luaSetCollisionGroup(ref, value); return; }
             // ValueBase.Value — раньше запись просто клалась в общий
             // "мусорный ящик" свойств и на этом всё: сигнал .Changed
             // никогда не стрелял. Это крайне частый паттерн в реальных
@@ -7272,7 +7465,10 @@ end
             }
             if (name === 'CanCollide') {
                 const body = physicsBodies[ref];
-                if (body) body.collisionFilterMask = value ? 1 : 0;
+                if (body) {
+                    body.__noCollide = !value;
+                    if (value) luaApplyGroup(body); else body.collisionFilterMask = 0;
+                }
                 return;
             }
             (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {})[name] = value;
@@ -7362,6 +7558,8 @@ end
 
         function luaResetSignals() {
             luaAttrs = {}; luaTags = {};
+            for (const r in luaFileAttrs) luaAttrs[r] = Object.assign({}, luaFileAttrs[r]);
+            for (const r in luaFileTags) luaTags[r] = new Set(luaFileTags[r]);
             luaSignalConns = {};
             luaSignalsByKey = {};
             luaNextSignalId = 1;
@@ -7393,7 +7591,7 @@ end
         }
         // Классы, у которых есть визуальное GUI-представление в DOM-оверлее
         const GUI_CLASS_NAMES = new Set([
-            'ScreenGui', 'BillboardGui', 'SurfaceGui', 'Frame', 'ScrollingFrame',
+            'ScreenGui', 'BillboardGui', 'SurfaceGui', 'Frame', 'ScrollingFrame', 'CanvasGroup',
             'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
             'UIListLayout', 'UIGridLayout', 'UIPadding', 'UICorner', 'UIStroke',
             'UIAspectRatioConstraint', 'UIGradient', 'UIScale',
@@ -7817,6 +8015,63 @@ end
                 if (v === null) delete bag[name]; else bag[name] = v;
                 if (old !== v && !(old === undefined && v === null)) fireLuaSignal(ref, '__attr_' + name, []);
                 return 0;
+            });
+            // Команды и группы столкновений (Lua-стороны: Team.TeamColor, Player.Team, PhysicsService)
+            def('__load_character', function (L2) {
+                // Player:LoadCharacter() — асинхронно, как в Roblox (скрипт зовёт его через task.spawn и продолжает работу)
+                setTimeout(() => luaRespawnCharacter(), 0);
+                return 0;
+            });
+            def('__team_color', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                let ti = luaTeamInfo[ref];
+                if (!ti && ref === luaPlayerRef && luaPlayerTeam !== -1) ti = luaTeamInfo[luaPlayerTeam];
+                _pushJsVal(L2, ti && typeof ti.color === 'number' ? ti.color : null);
+                return 1;
+            });
+            def('__team_auto', function (L2) {
+                const ti = luaTeamInfo[lua.lua_tonumber(L2, 1)];
+                lua.lua_pushboolean(L2, ti ? ti.auto : true);
+                return 1;
+            });
+            def('__player_team', function (L2) {
+                lua.lua_pushnumber(L2, lua.lua_tonumber(L2, 1) === luaPlayerRef ? luaPlayerTeam : -1);
+                return 1;
+            });
+            def('__phys_register', function (L2) {
+                const name = lua.lua_tojsstring(L2, 1);
+                if (name && name !== 'Default' && !luaCollGroups[name] && luaNextGroupBit < 0x40000000) {
+                    luaCollGroups[name] = { bit: luaNextGroupBit };
+                    luaNextGroupBit *= 2;
+                    luaRefreshAllGroupMasks();
+                }
+                return 0;
+            });
+            def('__phys_unregister', function (L2) {
+                const name = lua.lua_tojsstring(L2, 1);
+                if (luaCollGroups[name]) {
+                    for (const b of Object.values(physicsBodies)) if (b.__rbxGroup === name) b.__rbxGroup = 'Default';
+                    if (charBody && charBody.__rbxGroup === name) charBody.__rbxGroup = 'Default';
+                    delete luaCollGroups[name];
+                    for (const k of Object.keys(luaGroupCollide)) if (k.split('\u0000').indexOf(name) >= 0) delete luaGroupCollide[k];
+                    luaRefreshAllGroupMasks();
+                }
+                return 0;
+            });
+            def('__phys_is_registered', function (L2) {
+                const name = lua.lua_tojsstring(L2, 1);
+                lua.lua_pushboolean(L2, name === 'Default' || !!luaCollGroups[name]);
+                return 1;
+            });
+            def('__phys_set_collidable', function (L2) {
+                const a = lua.lua_tojsstring(L2, 1), b = lua.lua_tojsstring(L2, 2), v = !!lua.lua_toboolean(L2, 3);
+                luaGroupCollide[a < b ? a + '\u0000' + b : b + '\u0000' + a] = v;
+                luaRefreshAllGroupMasks();
+                return 0;
+            });
+            def('__phys_get_collidable', function (L2) {
+                lua.lua_pushboolean(L2, luaGroupsCollide(lua.lua_tojsstring(L2, 1), lua.lua_tojsstring(L2, 2)));
+                return 1;
             });
             def('__attr_get', function (L2) {
                 const bag = luaAttrs[lua.lua_tonumber(L2, 1)];
@@ -9014,6 +9269,11 @@ end
             luaByRef[playerRef].name = 'LocalPlayer';
             if (playerAccount) { luaPlayerRef = playerRef; _applyPlayerAccountToLua(); }
             luaSetParent(playerRef, playersRef);
+            // Как в Roblox: игрок при входе попадает в AutoAssignable-команду с наименьшим числом игроков (игрок один —
+            // первая по порядку файла). Без этого player.Team == nil и скрипты (TDM, Scoring, TeamCollisionFiltering)
+            // считают игрока нейтральным.
+            const _autoTeams = Object.keys(luaTeamInfo).map(Number).filter(r => luaTeamInfo[r].auto);
+            luaPlayerTeam = _autoTeams.length ? _autoTeams[0] : -1;
 
             luaCharacterRef = luaCreateVirtualInstance('Model');
             luaByRef[luaCharacterRef].name = 'LocalCharacter';
@@ -9097,11 +9357,16 @@ end
             luaRefProps = {};
             luaWelds = [];
             luaCloneOrigin = {};
+            luaFileAttrs = {}; luaFileTags = {}; luaTeamInfo = {}; luaPlayerTeam = -1;
+            luaCollGroups = {}; luaNextGroupBit = 4; luaGroupCollide = {}; luaPartGroup = {};
             playCamDist = THIRD_PERSON_DIST;
             if (allR && allR.ok && allR.instances) {
                 for (const inst of allR.instances) {
                     luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
                     luaParentByRef[inst.ref] = inst.parent;
+                    if (inst.attrs) luaFileAttrs[inst.ref] = inst.attrs;
+                    if (inst.tags) luaFileTags[inst.ref] = inst.tags;
+                    if (inst.cls === 'Team') luaTeamInfo[inst.ref] = { color: inst.teamColor, auto: inst.autoAssignable !== false };
                     if (inst.att) luaAttCF[inst.ref] = inst.att;
                     if (inst.refs) luaRefProps[inst.ref] = inst.refs;
                     // ValueBase.Value, заданное в самом файле (IntValue = 10, CFrameValue, ...)
@@ -9218,6 +9483,19 @@ end
                 try { runLuaScript(runAs, luaClientL); }
                 catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, 'LocalScript'); }
             }
+
+            // Игрок «вошёл»: серверные скрипты уже подписались на Players.PlayerAdded — сообщаем им (раньше событие не
+            // приходило вообще, и Gameplay-скрипты Blaster никогда не видели игрока). Затем, если скрипты не выключили
+            // Players.CharacterAutoLoads, спавнится первый персонаж (CharacterAdded); иначе его создаст LoadCharacter().
+            setTimeout(() => {
+                if (!isPlaying || luaPlayerRef === -1) return;
+                const playersRef = luaFindServiceRef('Players');
+                fireLuaSignal(playersRef, 'PlayerAdded', [{ __instanceRef: luaPlayerRef }]);
+                const auto = (luaGenericPropsByRef[playersRef] || {}).CharacterAutoLoads;
+                if (auto !== false) setTimeout(() => {
+                    if (isPlaying) fireLuaSignal(luaPlayerRef, 'CharacterAdded', [{ __instanceRef: luaCharacterRef }]);
+                }, 0);
+            }, 0);
 
             // StarterCharacterScripts: копия скрипта становится ребёнком Character (в Roblox их клонируют в каждого
             // персонажа), поэтому script.Parent.Humanoid и т.п. находятся.
@@ -9418,7 +9696,9 @@ end
             // ClipsDescendants есть у любого GuiObject (CanvasGroup клипует всегда); по умолчанию потомки НЕ обрезаются.
             // Значение выставляется каждый раз, поэтому выключение флага из Lua тоже снимает обрезку.
             el.style.overflow = (props.ClipsDescendants || cls === 'CanvasGroup') ? 'hidden' : 'visible';
-            if (cls === 'Frame' || cls === 'ScrollingFrame') {
+            // CanvasGroup.GroupTransparency — прозрачность ВСЕЙ группы целиком (CSS opacity как раз группирует содержимое)
+            el.style.opacity = cls === 'CanvasGroup' ? String(1 - Math.max(0, Math.min(1, Number(props.GroupTransparency) || 0))) : '';
+            if (cls === 'Frame' || cls === 'ScrollingFrame' || cls === 'CanvasGroup') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
                 // BorderSizePixel = 0 (частый случай: затемняющий Frame) раньше превращался
                 // в 1 из-за `|| 1` и рисовал рамку вокруг экрана — проверяем на null/undefined.
@@ -10085,7 +10365,7 @@ end
             const from = new CANNON.Vec3(charBody.position.x, charBody.position.y, charBody.position.z);
             const to = new CANNON.Vec3(charBody.position.x, charBody.position.y - CHAR_RADIUS - 0.6, charBody.position.z);
             const result = new CANNON.RaycastResult();
-            physicsWorld.raycastClosest(from, to, { collisionFilterMask: 1, skipBackfaces: true }, result);
+            physicsWorld.raycastClosest(from, to, { collisionFilterMask: _charRayMask(), skipBackfaces: true }, result);
             canJump = result.hasHit;
 
             // Падаем и уже какое-то время не находим опору — скорее всего
@@ -10156,7 +10436,7 @@ end
             const ray = (h, res) => physicsWorld.raycastClosest(
                 new CANNON.Vec3(charBody.position.x, feetY + h, charBody.position.z),
                 new CANNON.Vec3(charBody.position.x + dirX * dist, feetY + h, charBody.position.z + dirZ * dist),
-                { collisionFilterMask: 1, skipBackfaces: true }, res);
+                { collisionFilterMask: _charRayMask(), skipBackfaces: true }, res);
             const low = new CANNON.RaycastResult();
             ray(STEP_HEIGHT + 0.3, low);                 // выше того, что берёт tryStepUp
             if (!low.hasHit) return false;               // препятствия выше ступеньки нет
@@ -10174,13 +10454,13 @@ end
             const footFrom = new CANNON.Vec3(charBody.position.x, footY, charBody.position.z);
             const footTo = new CANNON.Vec3(charBody.position.x + dirX * checkDist, footY, charBody.position.z + dirZ * checkDist);
             const footResult = new CANNON.RaycastResult();
-            physicsWorld.raycastClosest(footFrom, footTo, { collisionFilterMask: 1, skipBackfaces: true }, footResult);
+            physicsWorld.raycastClosest(footFrom, footTo, { collisionFilterMask: _charRayMask(), skipBackfaces: true }, footResult);
             if (!footResult.hasHit) return; // впереди на уровне ног пусто — ступенька не нужна
 
             const kneeFrom = new CANNON.Vec3(charBody.position.x, kneeY, charBody.position.z);
             const kneeTo = new CANNON.Vec3(charBody.position.x + dirX * checkDist, kneeY, charBody.position.z + dirZ * checkDist);
             const kneeResult = new CANNON.RaycastResult();
-            physicsWorld.raycastClosest(kneeFrom, kneeTo, { collisionFilterMask: 1, skipBackfaces: true }, kneeResult);
+            physicsWorld.raycastClosest(kneeFrom, kneeTo, { collisionFilterMask: _charRayMask(), skipBackfaces: true }, kneeResult);
             if (kneeResult.hasHit) return; // и выше препятствие — это стена, а не ступенька
 
             // Низкий порог впереди, сверху свободно — плавно поднимаем,
@@ -11543,6 +11823,9 @@ end
                     .then(data => {
                         document.body.removeChild(fileInput);
                         if (data.ok) {
+                            window._rbxOrigin = null;
+                            window._startMode = false;
+                            hideStartScreen();
                             notify(t('notify_loaded_count', { n: data.count }));
                             loadTree();
                         } else {
@@ -11576,6 +11859,9 @@ end
             }
             const r = await api('POST', '/api/open', { path: path });
             if (r.ok) {
+                window._rbxOrigin = null;
+                window._startMode = false;
+                hideStartScreen();
                 notify(t('notify_loaded_count', { n: r.count }));
                 loadTree();
             } else {
@@ -11589,14 +11875,17 @@ end
             else notify(r.error || t('notify_error'), 'err');
         }
 
-        async function newProject() {
+        async function newProject(template, fromStart) {
             // Создаёт пустую сцену на сервере (набор стандартных сервисов
-            if (!confirm(t('confirm_discard_unsaved'))) return;
-            const r = await api('POST', '/api/new', {});
+            if (!fromStart && !window._startMode && !confirm(t('confirm_discard_unsaved'))) return;
+            const r = await api('POST', '/api/new', { template: (template === 'empty' ? 'empty' : 'baseplate') });
             if (!r.ok) {
                 notify(r.error || t('notify_error'), 'err');
                 return;
             }
+            window._startMode = false;
+            hideStartScreen();
+            window._rbxOrigin = null;
             selectedRef = null;
             selectedRefs = new Set();
             expanded.clear();
@@ -11681,11 +11970,355 @@ end
             }
         }
 
+        // ===== Скачивание мест с Roblox — как стартовый экран Studio =====
+        // Список Experiences аккаунта (карточки), клик → место скачивается и
+        // открывается в редакторе. Нужен вход в аккаунт (Account). Запасной
+        // путь — по Place ID. После правок — ☁ Публикация: Universe/Place ID
+        // подставляются из того, что было открыто.
+        let _experiences = [];
+        window._rbxOrigin = null;
+        window._rbxPendingName = '';
+
+        function _escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
+
+        let _recents = [];
+        window._startMode = false;   // true — стартовый экран при запуске: вопросов «потерять сцену?» нет
+
+        function _confirmDiscardForOpen() {
+            return window._startMode || confirm(t('dl_discard'));
+        }
+
+        function _fmtDate(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            return isNaN(d) ? '' : d.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        // ---- Стартовый экран (как у Studio): слева разделы, справа карточки ----
+        let _stView = 'home', _stQuery = '';
+        let _stExp = { ok: false };          // ответ /api/roblox/experiences
+        let _stArch = null;                  // ответ ...?archived=1 (грузится при первом заходе в Archive)
+        let _stWho = '';
+
+        function _startVisible() {
+            const el = document.getElementById('start-screen');
+            return !!(el && el.classList.contains('show'));
+        }
+
+        function hideStartScreen() {
+            const el = document.getElementById('start-screen');
+            if (el) el.classList.remove('show');
+        }
+
+        function _stTile(icon, glyph, extra) {
+            return icon
+                ? '<img class="st-tile" src="' + _escAttr(icon) + '" loading="lazy" referrerpolicy="no-referrer">'
+                : '<div class="st-tile' + (extra ? ' ' + extra : '') + '">' + glyph + '</div>';
+        }
+
+        function _stCard(onclick, tile, pill, name, sub1, sub2, dotsIdx) {
+            return '<div class="st-card" onclick="' + onclick + '">' + tile +
+                '<div class="st-meta"><span class="st-pill">' + pill + '</span>' +
+                (dotsIdx !== undefined ? '<button class="st-dots" title="' + _escAttr(t('st_menu')) + '" onclick="event.stopPropagation(); removeRecent(' + dotsIdx + ')">⋮</button>' : '') +
+                '</div>' +
+                '<div class="st-name">' + esc(name) + '</div>' +
+                (sub1 ? '<div class="st-sub">' + esc(sub1) + '</div>' : '') +
+                (sub2 ? '<div class="st-sub">' + esc(sub2) + '</div>' : '') + '</div>';
+        }
+
+        function _stMatch(name) {
+            return !_stQuery || String(name).toLowerCase().indexOf(_stQuery) >= 0;
+        }
+
+        function _stExpList() { return (_stExp && _stExp.ok && _stExp.experiences) || []; }
+
+        function _stRecentCards(limit) {
+            let html = '', n = 0;
+            _recents.forEach((x, i) => {
+                if (!_stMatch(x.name) || (limit && n >= limit)) return;
+                n++;
+                const sub1 = x.opened ? t('st_opened', { d: _fmtDate(x.opened) }) : '';
+                if (x.kind === 'roblox') {
+                    const e = _stExpList().find(y => String(y.placeId) === String(x.placeId));
+                    const pill = e ? (e.private ? '🔒 ' + t('exp_private') : '🌐 ' + t('exp_public')) : '🌐 ' + t('start_roblox');
+                    html += _stCard('openRecent(' + i + ')', _stTile(e && e.icon, '🌐'), pill, x.name, sub1, e ? e.owner : '', i);
+                } else {
+                    html += _stCard('openRecent(' + i + ')', _stTile(null, '📄'), '💾 ' + t('st_local'), x.name, sub1, '', i);
+                }
+            });
+            return html;
+        }
+
+        function _stExpCards(list) {
+            let html = '';
+            list.forEach((x, i) => {
+                if (!_stMatch(x.name)) return;
+                html += _stCard('openExperience(' + i + ')', _stTile(x.icon, '🌐'), x.private ? '🔒 ' + t('exp_private') : '🌐 ' + t('exp_public'),
+                    x.name, x.updated ? t('st_modified', { d: _fmtDate(x.updated) }) : '', x.owner);
+            });
+            return html;
+        }
+
+        function _stTemplateCards() {
+            return _stCard("startNew('baseplate')", _stTile(null, '🏠', 'tpl'), '🧩 ' + t('st_tpl_sub'), t('st_tpl_base'), '', '') +
+                _stCard("startNew('empty')", _stTile(null, '⬜'), '🧩 ' + t('st_tpl_sub'), t('st_tpl_empty'), '', '');
+        }
+
+        function _stExpBlock(resp, isArchive) {
+            if (resp && resp.ok) {
+                const list = resp.experiences || [];
+                const cards = isArchive ? _stArchCards() : _stExpCards(list);
+                return cards ? '<div class="st-grid">' + cards + '</div>' : '<p class="st-msg">' + t('exp_empty') + '</p>';
+            }
+            if (resp && resp.needLogin) {
+                return '<p class="st-msg">' + t('exp_login_needed') + '</p>' +
+                    '<button class="st-btn" onclick="showAccountDialog()">' + t('tb_account') + '</button>';
+            }
+            return '<p class="st-msg">' + t('start_err', { err: esc((resp && resp.error) || '—') }) + '</p>';
+        }
+
+        function _stArchCards() {
+            let html = '';
+            ((_stArch && _stArch.experiences) || []).forEach((x, i) => {
+                if (!_stMatch(x.name)) return;
+                html += _stCard('openArchived(' + i + ')', _stTile(x.icon, '🗄'), x.private ? '🔒 ' + t('exp_private') : '🌐 ' + t('exp_public'),
+                    x.name, x.updated ? t('st_modified', { d: _fmtDate(x.updated) }) : '', x.owner);
+            });
+            return html;
+        }
+
+        function _stRenderSide() {
+            const nav = (v, ico, label) => '<button class="st-nav' + (_stView === v ? ' active' : '') + '" onclick="setStartView(\'' + v + '\')">' +
+                '<span class="st-ico">' + ico + '</span><span class="st-lbl">' + label + '</span></button>';
+            document.getElementById('st-side').innerHTML =
+                '<div class="st-logo">Roblox Studio Web</div>' +
+                '<button class="st-nav" onclick="startNew(\'baseplate\')"><span class="st-plus">+</span><span class="st-lbl">' + t('st_new') + '</span></button>' +
+                nav('recents', '🕘', t('st_recents')) + nav('home', '🏠', t('st_home')) +
+                nav('experiences', '📁', t('st_experiences')) + nav('templates', '🗂', t('st_templates')) +
+                nav('archive', '🗄', t('st_archive'));
+        }
+
+        function _stRenderContent() {
+            const c = document.getElementById('st-content');
+            if (!c) return;
+            let h = '';
+            if (_stView === 'home') {
+                h += '<div class="st-h1">' + (_stWho ? t('start_welcome', { name: esc(_stWho) }) : t('start_title')) + '</div>' +
+                    '<div class="st-banner"><h3>' + t('st_banner_t') + '</h3><p>' + t('st_banner_p') + '</p><div class="st-row">' +
+                    '<button class="st-btn" onclick="startOpenFile()">' + t('start_open') + '</button>' +
+                    '<button class="st-btn sec" onclick="showDownloadPlaceDialog()">' + t('exp_by_id') + '</button></div></div>';
+                const rc = _stRecentCards(8);
+                h += '<div class="st-h2">' + t('st_recent_h') + '</div>' + (rc ? '<div class="st-grid">' + rc + '</div>' : '<p class="st-msg">' + t('exp_empty') + '</p>');
+                h += '<div class="st-h2">' + t('st_tpl_h') + '</div><div class="st-grid">' + _stTemplateCards() + '</div>';
+            } else if (_stView === 'recents') {
+                const rc = _stRecentCards(0);
+                h += '<div class="st-h1">' + t('st_recents') + '</div>' + (rc ? '<div class="st-grid">' + rc + '</div>' : '<p class="st-msg">' + t('exp_empty') + '</p>');
+            } else if (_stView === 'experiences') {
+                h += '<div class="st-h1">' + t('st_experiences') + '</div>' + _stExpBlock(_stExp, false);
+            } else if (_stView === 'templates') {
+                h += '<div class="st-h1">' + t('st_templates') + '</div><div class="st-grid">' + _stTemplateCards() + '</div>';
+            } else if (_stView === 'archive') {
+                h += '<div class="st-h1">' + t('st_archive') + '</div>' +
+                    (_stArch ? _stExpBlock(_stArch, true) : '<p class="st-msg">' + t('exp_loading') + '</p>');
+            }
+            c.innerHTML = h;
+        }
+
+        function _stEnsureDom() {
+            let el = document.getElementById('start-screen');
+            if (el) return el;
+            el = document.createElement('div');
+            el.id = 'start-screen';
+            el.innerHTML = '<div class="st-side" id="st-side"></div>' +
+                '<div class="st-main"><div class="st-top">' +
+                '<input class="st-search" id="st-search" placeholder="' + _escAttr(t('exp_search')) + '" oninput="_stQuery = this.value.trim().toLowerCase(); _stRenderContent()">' +
+                '<button class="st-btn sec" title="' + _escAttr(t('st_refresh')) + '" onclick="_stLoad()">↻</button>' +
+                '<button class="st-btn sec" onclick="startOpenFile()">' + t('start_open') + '</button>' +
+                '<button class="st-btn sec" onclick="showDownloadPlaceDialog()">' + t('exp_by_id') + '</button>' +
+                '<button class="st-btn sec" onclick="hideStartScreen()">✕ ' + t('st_close') + '</button>' +
+                '</div><div id="st-content"></div></div>';
+            document.body.appendChild(el);
+            return el;
+        }
+
+        async function _stLoad() {
+            const safe = (p, fallback) => p.catch(() => fallback);
+            const c = document.getElementById('st-content');
+            if (c) c.innerHTML = '<p class="st-msg">' + t('exp_loading') + '</p>';
+            const [rec, exp, me] = await Promise.all([
+                safe(api('GET', '/api/recents'), {}),
+                safe(api('GET', '/api/roblox/experiences'), { ok: false, error: '—' }),
+                safe(api('GET', '/api/roblox/me'), {})
+            ]);
+            _recents = (rec && rec.ok && rec.recents) || [];
+            _stExp = exp || { ok: false };
+            _stWho = (me && me.ok && me.loggedIn) ? (me.displayName || me.name || '') : '';
+            _stArch = null;
+            _stRenderSide();
+            _stRenderContent();
+            if (_stView === 'archive') _stLoadArchive();
+        }
+
+        async function _stLoadArchive() {
+            _stArch = await api('GET', '/api/roblox/experiences?archived=1').catch(() => ({ ok: false, error: '—' }));
+            if (_stView === 'archive') _stRenderContent();
+        }
+
+        function setStartView(v) {
+            _stView = v;
+            _stRenderSide();
+            _stRenderContent();
+            if (v === 'archive' && !_stArch) _stLoadArchive();
+            const m = document.querySelector('#start-screen .st-main');
+            if (m) m.scrollTop = 0;
+        }
+
+        // isStartup=true — показ при запуске (см. DOMContentLoaded внизу).
+        function showStartScreen(isStartup) {
+            window._startMode = !!isStartup;
+            const el = _stEnsureDom();
+            closeModal();
+            _stView = 'home';          // как в Studio: экран всегда открывается на Home
+            _stQuery = '';
+            const si = document.getElementById('st-search');
+            if (si) si.value = '';
+            el.classList.add('show');
+            _stRenderSide();
+            return _stLoad();
+        }
+
+        function startNew(tpl) {
+            if (!_confirmDiscardForOpen()) return;
+            newProject(tpl, true);
+        }
+
+        function startOpenFile() {
+            // выбор файла должен вызываться синхронно из клика; экран скрывается после успешного открытия
+            openFileBrowser('open');
+        }
+
+        async function removeRecent(i) {
+            const x = _recents[i];
+            if (!x || !confirm(t('st_remove'))) return;
+            const r = await api('POST', '/api/recents/remove', x.kind === 'roblox'
+                ? { kind: 'roblox', placeId: x.placeId } : { kind: 'file', path: x.path });
+            if (r.ok) {
+                _recents.splice(i, 1);
+                _stRenderContent();
+            } else {
+                notify(r.error || t('notify_error'), 'err');
+            }
+        }
+
+        function openArchived(i) {
+            const x = _stArch && _stArch.experiences && _stArch.experiences[i];
+            if (!x || !_confirmDiscardForOpen()) return;
+            window._rbxPendingName = x.name;
+            loadPlaceFromRoblox(x.placeId, x.universeId);
+        }
+
+        async function openRecent(i) {
+            const x = _recents[i];
+            if (!x) return;
+            if (!_confirmDiscardForOpen()) return;
+            if (x.kind === 'roblox') {
+                window._rbxPendingName = x.name;
+                loadPlaceFromRoblox(x.placeId, x.universeId || '');   // всегда свежая версия
+                return;
+            }
+            const r = await api('POST', '/api/open', { path: x.path });
+            if (r.ok) {
+                hideStartScreen();
+                window._rbxOrigin = null;
+                window._startMode = false;
+                selectedRef = null;
+                selectedRefs = new Set();
+                expanded.clear();
+                window._avatarMeshCache = {};
+                await loadTree();
+                notify(t('notify_loaded_count', { n: r.count }));
+            } else {
+                notify(r.error || t('notify_error'), 'err');
+            }
+        }
+
+        async function openExperience(i) {
+            const x = _experiences[i];
+            if (!x) return;
+            if (!_confirmDiscardForOpen()) return;
+            window._rbxPendingName = x.name;
+            const pr = await api('GET', '/api/roblox/experience/places?universeId=' + x.universeId + '&rootPlaceId=' + x.placeId);
+            if (pr.ok && pr.places && pr.places.length > 1) {
+                let h = '<h3>' + esc(x.name) + '</h3><p style="opacity:.8">' + t('exp_pick_place') + '</p>' +
+                    '<div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto">';
+                pr.places.forEach((p) => {
+                    h += '<button onclick="loadPlaceFromRoblox(' + Number(p.id) + ',' + Number(x.universeId) + ')" style="text-align:left">' +
+                        (p.root ? '⭐ ' : '') + esc(p.name) + ' <span style="opacity:.6">(' + Number(p.id) + ')</span></button>';
+                });
+                h += '</div><div class="modal-row"><button onclick="closeModal()">←</button>' +
+                    '<button onclick="closeModal()">' + t('btn_cancel') + '</button></div>';
+                showModal(h);
+                return;
+            }
+            loadPlaceFromRoblox(x.placeId, x.universeId);
+        }
+
+        async function loadPlaceFromRoblox(placeId, universeId, version) {
+            closeModal();
+            notify(t('dl_loading'));
+            const r = await api('POST', '/api/open/place', {
+                place_id: placeId, universe_id: universeId || '', version: version || '',
+                name: window._rbxPendingName || ''
+            });
+            if (r.ok) {
+                hideStartScreen();
+                window._startMode = false;
+                window._rbxOrigin = {
+                    placeId: r.place_id,
+                    universeId: r.universe_id || universeId || '',
+                    name: window._rbxPendingName || ''
+                };
+                window._rbxPendingName = '';
+                selectedRef = null;
+                selectedRefs = new Set();
+                expanded.clear();
+                window._avatarMeshCache = {};
+                await loadTree();
+                notify(t('dl_ok', { n: r.count }));
+            } else {
+                notify(r.error || t('notify_error'), 'err');
+            }
+        }
+
+        function showDownloadPlaceDialog() {
+            showModal(
+                '<h3>' + t('dl_title') + '</h3>' +
+                '<p style="opacity:.8; font-size:13px;">' + t('dl_hint') + '</p>' +
+                '<input id="dlp" placeholder="' + t('dl_place') + '" inputmode="numeric">' +
+                '<input id="dlv" placeholder="' + t('dl_version') + '" inputmode="numeric">' +
+                '<div class="modal-row">' +
+                '<button onclick="doDownloadPlace()" style="background:#7c3aed">' + t('dl_btn') + '</button>' +
+                '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
+                '</div>'
+            );
+        }
+
+        function doDownloadPlace() {
+            const placeId = document.getElementById('dlp').value.trim();
+            const version = document.getElementById('dlv').value.trim();
+            if (!/^\d+$/.test(placeId)) { notify(t('notify_error'), 'err'); return; }
+            if (version && !/^\d+$/.test(version)) { notify(t('notify_error'), 'err'); return; }
+            if (!_confirmDiscardForOpen()) return;
+            window._rbxPendingName = '';
+            loadPlaceFromRoblox(placeId, '', version);
+        }
+
         function showPublishDialog() {
             showModal(
                 '<h3>☁ Open Cloud</h3>' +
-                '<input id="pu" placeholder="Universe ID">' +
-                '<input id="pp" placeholder="Place ID">' +
+                (window._rbxOrigin ? '<p style="opacity:.8; font-size:13px;">' + t('pub_origin', { name: esc(window._rbxOrigin.name || '—'), id: esc(window._rbxOrigin.placeId) }) + '</p>' : '') +
+                '<input id="pu" placeholder="Universe ID" value="' + (window._rbxOrigin ? _escAttr(window._rbxOrigin.universeId) : '') + '">' +
+                '<input id="pp" placeholder="Place ID" value="' + (window._rbxOrigin ? _escAttr(window._rbxOrigin.placeId) : '') + '">' +
                 '<input id="pk" placeholder="API Key" type="password">' +
                 '<select id="pv">' +
                 '<option>Published</option>' +
@@ -11867,6 +12500,21 @@ end
                 notify('Ошибка экспорта: ' + (e && e.message ? e.message : e), 'warn');
             }
         }
+        async function saveRobloxCookie() {
+            const el = document.getElementById('rbx-cookie-input');
+            const val = el ? el.value.trim() : '';
+            if (!val) { notify(t('cookie_bad'), 'err'); return; }
+            const r = await api('POST', '/api/roblox/cookie', { cookie: val });
+            if (el) el.value = '';
+            if (r.ok) {
+                notify(t('cookie_ok', { name: r.name || '' }));
+                if (_startVisible()) _stLoad();
+                showAccountDialog();
+            } else {
+                notify(r.error || t('cookie_bad'), 'err');
+            }
+        }
+
         async function showAccountDialog() {
             let loggedIn = false;
             if (IS_ANDROID) {
@@ -11898,7 +12546,9 @@ end
                     '<div class="modal-row">' +
                     (IS_ANDROID
                         ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#7c3aed">' + t('avatar_login_btn') + '</button>'
-                        : '<p style="opacity:.7">' + t('avatar_login_android_only') + '</p>') +
+                        : '<p style="opacity:.7; font-size:13px;">' + t('cookie_help') + '</p>' +
+                          '<input id="rbx-cookie-input" type="password" autocomplete="off" placeholder="' + t('cookie_ph') + '" style="width:100%; padding:6px; box-sizing:border-box;">' +
+                          '<div class="modal-row" style="margin-top:6px;"><button onclick="saveRobloxCookie()" style="background:#7c3aed">' + t('cookie_btn') + '</button></div>') +
                     '</div>' +
                     hr + assetHtml + hr + apiKeyHtml +
                     '<div class="modal-row" style="margin-top:10px">' +
@@ -12428,6 +13078,16 @@ end
             console.log('Build: ' + BUILD_LABEL);
             try { logLuaOutput('info', 'Build: ' + BUILD_LABEL); } catch (e) { /* Output ещё не готов */ }
             checkBuildConsistency();
+            // Стартовый экран при запуске — только если на сервере ещё нет открытой сцены
+            // (обновление страницы посреди работы его не вызывает).
+            api('GET', '/api/status').then(st => {
+                if (st && st.ok && !st.loaded) showStartScreen(true);
+            }).catch(() => { /* сервер недоступен — нечего показывать */ });
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && _startVisible() &&
+                !document.getElementById('modal-overlay').classList.contains('show')) hideStartScreen();
         });
 
         window.addEventListener('resize', refreshCM);

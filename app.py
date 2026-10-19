@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import urllib.error as _urlerr
+import urllib.parse as _urlparse
 import urllib.request as _req
 import re as _re
 import base64 as _b64
@@ -182,7 +183,7 @@ PART_CLASSES = {
 # поверх 3D-вьюпорта в Play (см. index.html, buildGuiOverlay/#gui-overlay),
 # а не как объекты сцены three.js/cannon.js, как PART_CLASSES.
 GUI_ROOT_CLASSES = {'ScreenGui', 'BillboardGui', 'SurfaceGui'}
-GUI_CONTAINER_CLASSES = {'Frame', 'ScrollingFrame'}
+GUI_CONTAINER_CLASSES = {'Frame', 'ScrollingFrame', 'CanvasGroup'}   # CanvasGroup: контейнер с общей прозрачностью (GroupTransparency)
 GUI_LEAF_CLASSES = {
     'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
 }
@@ -214,6 +215,8 @@ GUI_PROPS = (
     'Color', 'Thickness', 'Transparency',
     # UIScale
     'Scale',
+    # CanvasGroup
+    'GroupTransparency',
     # SurfaceGui (интерфейс на грани детали)
     'Face', 'SizingMode', 'PixelsPerStud', 'CanvasSize', 'AlwaysOnTop', 'Brightness',
 )
@@ -1192,6 +1195,107 @@ def serve_icon(fn):
     return '', 404
 
 
+# ============ Недавние (стартовый экран) ============
+# recent_files.json лежит в той же папке данных, что и roblox_auth.json
+# (RSW_DATA_DIR на Android, иначе рядом с app.py). Два вида записей:
+#   {'kind': 'file',   'path', 'name', 'opened'}  — локальный .rbxl/.rbxlx
+#   {'kind': 'roblox', 'placeId', 'universeId', 'name', 'opened'} — место с Roblox
+# Файлы, выбранные через <input type=file>, у сервера без пути на диске, поэтому
+# их копия кладётся в recent_files/ (максимум RECENTS_MAX штук, старые чистятся).
+RECENTS_MAX = 12
+RECENTS_MAX_COPY = 100 * 1024 * 1024
+
+
+def _recents_dir():
+    return Path(os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent))
+
+
+def _recents_copy_dir():
+    return _recents_dir() / 'recent_files'
+
+
+def _recents_load():
+    try:
+        d = json.loads((_recents_dir() / 'recent_files.json').read_text(encoding='utf-8'))
+        return [e for e in d if isinstance(e, dict) and e.get('kind') in ('file', 'roblox')]
+    except Exception:
+        return []
+
+
+def _recents_key(e):
+    return ('file', os.path.normcase(str(e.get('path', '')))) if e.get('kind') == 'file' \
+        else ('roblox', str(e.get('placeId', '')))
+
+
+def _recents_save(items):
+    """Записывает список и чистит копии загрузок, на которые больше нет ссылок."""
+    d = _recents_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / 'recent_files.json.tmp'
+    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding='utf-8')
+    os.replace(tmp, d / 'recent_files.json')
+    cd = _recents_copy_dir()
+    if cd.is_dir():
+        keep = {os.path.normcase(os.path.realpath(e['path'])) for e in items
+                if e.get('kind') == 'file' and e.get('path')}
+        for f in cd.iterdir():
+            if f.is_file() and os.path.normcase(os.path.realpath(f)) not in keep:
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+
+
+def _recents_add(entry):
+    """Не должна ломать основной сценарий: любые ошибки глотаются."""
+    try:
+        import datetime
+        entry['opened'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+        items = [e for e in _recents_load() if _recents_key(e) != _recents_key(entry)]
+        items.insert(0, entry)
+        _recents_save(items[:RECENTS_MAX])
+    except Exception:
+        traceback.print_exc()
+
+
+def _recents_add_file(path, name=None):
+    p = Path(path)
+    if not name:   # повторное открытие: сохраняем прежнее (исходное) имя записи
+        key = ('file', os.path.normcase(str(p)))
+        name = next((e.get('name') for e in _recents_load() if _recents_key(e) == key), None)
+    _recents_add({'kind': 'file', 'path': str(p), 'name': name or p.name})
+
+
+@flask_app.route('/api/recents/remove', methods=['POST'])
+def api_recents_remove():
+    """Убрать запись из «недавних» (пункт ⋮ на карточке). Сам файл не удаляется,
+    кроме внутренней копии загрузки в recent_files/."""
+    body = request.get_json(silent=True) or {}
+    kind = body.get('kind')
+    if kind not in ('file', 'roblox'):
+        return jsonify({'ok': False, 'error': 'kind должен быть file или roblox'}), 400
+    probe = {'kind': kind, 'path': body.get('path', ''), 'placeId': body.get('placeId', '')}
+    key = _recents_key(probe)
+    items = _recents_load()
+    kept = [e for e in items if _recents_key(e) != key]
+    try:
+        _recents_save(kept)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    return jsonify({'ok': True, 'removed': len(items) - len(kept)})
+
+
+@flask_app.route('/api/recents')
+def api_recents():
+    """Недавно открытые: локальные файлы (только существующие) и места с Roblox."""
+    out = []
+    for e in _recents_load():
+        if e['kind'] == 'file' and not (e.get('path') and os.path.isfile(e['path'])):
+            continue
+        out.append(e)
+    return jsonify({'ok': True, 'recents': out})
+
+
 @flask_app.route('/api/open', methods=['POST'])
 def api_open():
     path = (request.json or {}).get('path', '')
@@ -1199,6 +1303,7 @@ def api_open():
         parsed = parse_rbxl(path)
         state['parsed'] = parsed
         state['file_path'] = path
+        _recents_add_file(path)
         return jsonify({'ok': True, 'count': len(parsed['referent_to_class'])})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
@@ -1242,6 +1347,17 @@ def api_open_upload():
         # saveFile() сам открыл "Сохранить как" вместо тихой записи в
         # исчезнувший temp-файл.
         state['file_path'] = None
+        try:   # копия для списка «недавних» (у загрузки нет пути на диске)
+            if os.path.getsize(tmp_path) <= RECENTS_MAX_COPY:
+                import shutil
+                safe = _re.sub(r'[^\w.\- ]', '_', Path(file.filename).name)[:120] or 'place.rbxl'
+                cd = _recents_copy_dir()
+                cd.mkdir(parents=True, exist_ok=True)
+                dst = cd / safe
+                shutil.copyfile(tmp_path, dst)
+                _recents_add_file(dst, name=Path(file.filename).name)
+        except Exception:
+            traceback.print_exc()
         return jsonify({
             'ok': True,
             'count': len(parsed['referent_to_class']),
@@ -1256,9 +1372,1088 @@ def api_open_upload():
             pass
 
 
+def _rbx_get_place_bytes_cookie(place_id, version=None):
+    """Как делает сама Studio: AssetDelivery с сессией аккаунта
+    (.ROBLOSECURITY из входа). Работает для мест, которые аккаунт может
+    редактировать (свои, группы, Team Create) и для копируемых (uncopylocked).
+    Возвращает None, если входа нет."""
+    if _roblox_cookie() is None:
+        return None
+    url = f'https://assetdelivery.roblox.com/v1/asset/?id={int(place_id)}'
+    if version:
+        url += f'&version={int(version)}'
+    r = _req.Request(url, headers=_roblox_headers())
+    with _req.urlopen(r, timeout=120) as resp:   # urllib сам идёт по редиректу на CDN
+        return _rbx_maybe_gunzip(resp.read())
+
+
+def _rbx_get_place_bytes_key(place_id, version=None):
+    """Запасной путь: Open Cloud Asset Delivery с x-api-key (право
+    legacy-asset:manage). Возвращает None, если ключ не задан."""
+    api_key = _roblox_api_key()
+    if not api_key:
+        return None
+    url = f'https://apis.roblox.com/asset-delivery-api/v1/assetId/{int(place_id)}'
+    if version:
+        url += f'/version/{int(version)}'
+    meta_req = _req.Request(
+        url, headers={'x-api-key': api_key, 'Accept': 'application/json',
+                      'Accept-Encoding': 'identity'})
+    with _req.urlopen(meta_req, timeout=30) as resp:
+        meta = json.loads(_rbx_maybe_gunzip(resp.read()).decode('utf-8', 'replace'))
+    location = meta.get('location')
+    if not location:
+        raise RuntimeError(f'Open Cloud ответил без location: {meta}')
+    cdn_req = _req.Request(location, headers={'Accept-Encoding': 'gzip'})
+    with _req.urlopen(cdn_req, timeout=120) as resp:
+        return _rbx_maybe_gunzip(resp.read())
+
+
+def _rbx_get_place_bytes(place_id, version=None):
+    """Скачивает файл места. Порядок: вход в аккаунт (как в Studio) →
+    Open Cloud-ключ. Возвращает (bytes, способ) или (None, None), если
+    не настроено ни то ни другое; если настроено, но всё упало, бросает
+    RuntimeError с причинами по каждому способу (+ .status от HTTPError)."""
+    errors, status = [], None
+    for name, fn in (('вход в аккаунт', _rbx_get_place_bytes_cookie),
+                     ('Open Cloud-ключ', _rbx_get_place_bytes_key)):
+        try:
+            data = fn(place_id, version)
+        except _urlerr.HTTPError as e:
+            status = status or e.code
+            errors.append(f'{name}: HTTP {e.code}')
+            continue
+        except Exception as e:
+            errors.append(f'{name}: {e}')
+            continue
+        if data is not None:
+            return data, name
+    if not errors:
+        return None, None
+    err = RuntimeError('; '.join(errors))
+    err.status = status
+    raise err
+
+
+@flask_app.route('/api/roblox/experiences')
+def api_roblox_experiences():
+    """Список Experiences аккаунта — как стартовый экран Studio (My Recent
+    Experiences). develop.roblox.com/v1/user/universes (нужен вход в
+    аккаунт; ключ Open Cloud для него не подходит) + иконки с
+    thumbnails.roblox.com. Отдаём до 150 штук, свежие изменения сверху.
+    ?archived=1 — раздел Archive (архивированные experiences)."""
+    if _roblox_cookie() is None:
+        return jsonify({'ok': False, 'needLogin': True,
+                        'error': 'Нужен вход в аккаунт Roblox'}), 401
+    archived = 'true' if request.args.get('archived') in ('1', 'true') else 'false'
+    items, cursor = [], None
+    try:
+        for _ in range(3):
+            url = ('https://develop.roblox.com/v1/user/universes'
+                   f'?isArchived={archived}&limit=50&sortOrder=Desc')
+            if cursor:
+                url += '&cursor=' + _urlparse.quote(cursor)
+            d = _rbx_get_json(url)
+            rows = d.get('data', []) if isinstance(d, dict) else (d or [])
+            for u in rows:
+                if not (u.get('id') and u.get('rootPlaceId')):
+                    continue
+                items.append({
+                    'universeId': u['id'], 'placeId': u['rootPlaceId'],
+                    'name': u.get('name') or str(u['id']),
+                    'private': (u.get('privacyType') or 'Private') != 'Public',
+                    'updated': u.get('updated') or u.get('created') or '',
+                    'owner': u.get('creatorName') or '',
+                    'icon': None})
+            cursor = d.get('nextPageCursor') if isinstance(d, dict) else None
+            if not cursor:
+                break
+    except Exception as e:
+        needs = 'HTTP 401' in str(e) or 'HTTP 403' in str(e)
+        return jsonify({'ok': False, 'needLogin': needs, 'error': str(e)}), (401 if needs else 502)
+
+    # иконки (необязательны: при ошибке остаются заглушки)
+    try:
+        for i in range(0, len(items), 50):
+            chunk = items[i:i + 50]
+            ids = ','.join(str(x['universeId']) for x in chunk)
+            d = _rbx_get_json('https://thumbnails.roblox.com/v1/games/icons'
+                              f'?universeIds={ids}&returnPolicy=PlaceHolder'
+                              '&size=256x256&format=Png&isCircular=false')
+            by_id = {r.get('targetId'): r for r in (d.get('data') or [])}
+            for x in chunk:
+                r = by_id.get(x['universeId'])
+                if r and r.get('state') == 'Completed' and r.get('imageUrl'):
+                    x['icon'] = r['imageUrl']
+    except Exception:
+        pass
+    items.sort(key=lambda x: x['updated'], reverse=True)
+    return jsonify({'ok': True, 'experiences': items})
+
+
+@flask_app.route('/api/roblox/experience/places')
+def api_roblox_experience_places():
+    """Места внутри Experience (у многих одно — тогда клиент открывает его сразу)."""
+    um = _re.search(r'\d+', request.args.get('universeId', ''))
+    if not um:
+        return jsonify({'ok': False, 'error': 'universeId должен быть числом'}), 400
+    root = request.args.get('rootPlaceId', '')
+    try:
+        d = _rbx_get_json(f'https://develop.roblox.com/v1/universes/{um.group()}'
+                          '/places?limit=100&sortOrder=Asc')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 502
+    rows = d.get('data', []) if isinstance(d, dict) else (d or [])
+    places = [{'id': r.get('id'), 'name': r.get('name') or str(r.get('id')),
+               'root': str(r.get('id')) == root} for r in rows if r.get('id')]
+    return jsonify({'ok': True, 'places': places})
+
+
+@flask_app.route('/api/open/place', methods=['POST'])
+def api_open_place():
+    """Скачать место с Roblox по Place ID и открыть его в редакторе.
+    Тело: {place_id, version?}. Сначала используется вход в аккаунт
+    (как в Studio), если его нет или он не сработал — Open Cloud-ключ.
+    Результат открывается так же, как /api/open/upload; публикация
+    обратно — обычный /api/publish."""
+    import tempfile
+    body = request.get_json(silent=True) or {}
+    m = _re.search(r'\d+', str(body.get('place_id', '')))
+    if not m:
+        return jsonify({'ok': False, 'error': 'Нужен числовой Place ID'}), 400
+    place_id = int(m.group())
+    vm = _re.search(r'\d+', str(body.get('version', '') or ''))
+    version = int(vm.group()) if vm else None
+
+    try:
+        data, via = _rbx_get_place_bytes(place_id, version)
+    except Exception as e:
+        hints = {
+            401: 'вход не принят или истёк — войди в аккаунт заново',
+            403: 'нет доступа к месту: нужен аккаунт с правом редактирования '
+                 '(владелец, группа, Team Create) или копируемое место',
+            404: 'место или версия не найдены',
+        }
+        st = getattr(e, 'status', None)
+        msg = str(e) + ((' — ' + hints[st]) if st in hints else '')
+        return jsonify({'ok': False, 'status': st, 'error': msg}), 502
+    if data is None:
+        return jsonify({'ok': False,
+                        'error': 'Войди в аккаунт Roblox (кнопка Account) '
+                                 'или сохрани Open Cloud API-ключ'}), 400
+
+    # .rbxl — бинарный ('<roblox!'), .rbxlx — XML ('<roblox ' / '<?xml').
+    # Всё остальное — не файл места (например, JSON с ошибкой): state не трогаем.
+    if data[:8] == b'<roblox!':
+        suffix = '.rbxl'
+    elif data[:7] == b'<roblox' or data[:5] == b'<?xml':
+        suffix = '.rbxlx'
+    else:
+        return jsonify({'ok': False,
+                        'error': f'Ответ не похож на файл места ({len(data)} байт, '
+                                 f'начало: {data[:40]!r})'}), 502
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        parsed = parse_rbxl(tmp_path)
+        state['parsed'] = parsed
+        state['file_path'] = None   # как у upload: Ctrl+S откроет «Сохранить как»
+        universe_id = None
+        um = _re.search(r'\d+', str(body.get('universe_id', '') or ''))
+        if um:
+            universe_id = int(um.group())
+        else:
+            try:   # Place ID -> Universe ID (публичный эндпоинт), нужен для Publish
+                d = _rbx_get_json(f'https://apis.roblox.com/universes/v1/places/{place_id}/universe')
+                if isinstance(d, dict) and d.get('universeId'):
+                    universe_id = int(d['universeId'])
+            except Exception:
+                pass
+        _recents_add({'kind': 'roblox', 'placeId': place_id, 'universeId': universe_id,
+                      'name': (str(body.get('name') or '').strip()[:100] or f'Place {place_id}')})
+        return jsonify({'ok': True, 'count': len(parsed['referent_to_class']),
+                        'place_id': place_id, 'universe_id': universe_id,
+                        'bytes': len(data), 'via': via})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Скачано {len(data)} байт, но не разобралось как .rbxl: {e}'}), 400
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+# ============ Шаблон «Baseplate» для кнопки New ============
+# Встроен в код (base64 от BASEPLATE.rbxl), а не лежит отдельным файлом: так он
+# одинаково доступен на десктопе, в Android-APK и в OTA-обновлениях (там __file__
+# указывает в другую папку, а sync-android-python.sh копирует только список файлов).
+# Хочешь свой шаблон без правки кода — положи templates/Baseplate.rbxl рядом с app.py:
+# если файл есть, берётся он.
+_BASEPLATE_B64 = (
+    "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"
+    "BwAAAEVuYWJsZWQCAVBST1AdAAAAIgAAAAAAAAD2BAMAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AYAAAAFgAAAAAAAADw"
+    "BwMAAAAJAAAASW50ZW5zaXR5BH8AAABQUk9QGAAAABYAAAAAAAAA8AcDAAAABAAAAE5hbWUBBQAAAEJsb29tUFJPUBMAAAARAAAA"
+    "AAAAAPACAwAAAAQAAABTaXplBIOAAABQUk9QIAAAAB4AAAAAAAAA8A8DAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9Q"
+    "EwAAABEAAAAAAAAA8AIDAAAABAAAAFRhZ3McAAAAAFBST1AYAAAAFgAAAAAAAADwBwMAAAAJAAAAVGhyZXNob2xkBIAAAABQUk9Q"
+    "IwAAACEAAAAAAAAA8BIDAAAACAAAAFVuaXF1ZUlkHwAAA/IKzaP3L0NehuZWXFpQUk9QKgAAACgAAAAAAAAA8BkEAAAACwAAAEFk"
+    "b3JuZWVOYW1lARAAAABIdW1hbm9pZFJvb3RQYXJ0UFJPUCIAAAAgAAAAAAAAAPARBAAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXpl"
+    "AQAAAABQUk9QJwAAACUAAAAAAAAA8BYEAAAAEAAAAEJhY2tncm91bmRDb2xvcjMMfvX19n719fZ+9fX2UFJPUCkAAAAnAAAAAAAA"
+    "APAYBAAAABYAAABCYWNrZ3JvdW5kVHJhbnNwYXJlbmN5BZqZmZmZmbk/UFJPUB0AAAAbAAAAAAAAAPAMBAAAAA4AAABCdWJibGVE"
+    "dXJhdGlvbgSC4AAAUFJPUB0AAAAbAAAAAAAAAPAMBAAAAA4AAABCdWJibGVzU3BhY2luZwSBgAAAUFJPUB8AAAAdAAAAAAAAAPAO"
+    "BAAAAAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A4EAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMC"
+    "AFBST1ATAAAAEQAAAAAAAADwAgQAAAAHAAAARW5hYmxlZAIBUFJPUBEAAAARAAAAAAAAAEAEAAAABACQRm9udBIAAAAvUFJPUFcA"
+    "AABtAAAAAAAAAP80BAAAAAgAAABGb250RmFjZSAqAAAAcmJ4YXNzZXQ6Ly9mb250cy9mYW1pbGllcy9CdWlsZGVyU2Fucy5qc29u"
+    "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"
+    "AAAAIAAAAAAAAADwEQcAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUCcAAAAlAAAAAAAAAPAWBwAAABAAAABCYWNr"
+    "Z3JvdW5kQ29sb3IzDHuRkZJ7sbGye9HR0lBST1ApAAAAJwAAAAAAAADwGAcAAAAWAAAAQmFja2dyb3VuZFRyYW5zcGFyZW5jeQUA"
+    "AAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDgcAAAAMAAAAQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAOBwAA"
+    "ABMAAABEZWZpbmVzQ2FwYWJpbGl0aWVzAgBQUk9QEQAAABEAAAAAAAAAQAcAAAAEAJBFbmFibGVkAgBQUk9QVQAAAGsAAAAAAAAA"
+    "/zQHAAAACAAAAEZvbnRGYWNlICoAAAByYnhhc3NldDovL2ZvbnRzL2ZhbWlsaWVzL0J1aWxkZXJTYW5zLmpzb268AgAlMQABBygA"
+    "kC1Cb2xkLm90ZlBST1AdAAAAIgAAAAAAAAD2BAcAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AsAAAAKgAAAAAAAADwGwcA"
+    "AAAVAAAASG92ZXJCYWNrZ3JvdW5kQ29sb3IzDH319fZ99fX2ffX19lBST1ArAAAAKQAAAAAAAADwGgcAAAAEAAAATmFtZQEYAAAA"
+    "Q2hhbm5lbFRhYnNDb25maWd1cmF0aW9uUFJPUCwAAAAqAAAAAAAAAPAbBwAAABUAAABTZWxlY3RlZFRhYlRleHRDb2xvcjMMfwAA"
+    "AH8AAAB/AAAAUFJPUCAAAAAeAAAAAAAAAPAPBwAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAAAAABUFJPUBMAAAARAAAAAAAAAPAC"
+    "BwAAAAQAAABUYWdzHAAAAABQUk9QIQAAAB8AAAAAAAAA8BAHAAAACgAAAFRleHRDb2xvcjMMfl9fYH5fX2B+X19gUFJPUBsAAAAZ"
+    "AAAAAAAAAPAKBwAAAAgAAABUZXh0U2l6ZRsAAAAAAAAAJFBST1AnAAAAJQAAAAAAAADwFgcAAAAQAAAAVGV4dFN0cm9rZUNvbG9y"
+    "MwwAAAAAAAAAAAAAAABQUk9QKQAAACcAAAAAAAAA8BgHAAAAFgAAAFRleHRTdHJva2VUcmFuc3BhcmVuY3kFAAAAAAAA8D9QUk9Q"
+    "IwAAACEAAAAAAAAA8BIHAAAACAAAAFVuaXF1ZUlkHwAAA/sKzaP3L0NehuZWXFpQUk9QIgAAACAAAAAAAAAA8BEIAAAAEwAAAEF0"
+    "dHJpYnV0ZXNTZXJpYWxpemUBAAAAAFBST1AdAAAAGwAAAAAAAADwDAgAAAARAAAAQnViYmxlQ2hhdEVuYWJsZWQCAVBST1AfAAAA"
+    "HQAAAAAAAADwDggAAAAMAAAAQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAOCAAAABMAAABEZWZpbmVzQ2Fw"
+    "YWJpbGl0aWVzAgBQUk9QHQAAACIAAAAAAAAA9gQIAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QGgAAABgAAAAAAAAA8AkI"
+    "AAAADgAAAElzQXV0b01pZ3JhdGVkAgBQUk9QGwAAABkAAAAAAAAA8AoIAAAADwAAAExvYWREZWZhdWx0Q2hhdAIBUFJPUBcAAAAV"
+    "AAAAAAAAAPAGCAAAAAQAAABOYW1lAQQAAABDaGF0UFJPUCAAAAAeAAAAAAAAAPAPCAAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAA"
+    "AAABUFJPUBMAAAARAAAAAAAAAPACCAAAAAQAAABUYWdzHAAAAABQUk9QIgAAACEAAAAAAAAAQAgAAAAEAPAKVW5pcXVlSWQfAAAD"
+    "fQrNo/cvQ16G5lZcWlBST1AiAAAAIAAAAAAAAADwEQkAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAdAAAA"
+    "AAAAAPAOCQAAABMAAABBdXRvY29tcGxldGVFbmFibGVkAgFQUk9QJwAAACUAAAAAAAAA8BYJAAAAEAAAAEJhY2tncm91bmRDb2xv"
+    "cjMMe5GRknuxsbJ70dHSUFJPUCkAAAAnAAAAAAAAAPAYCQAAABYAAABCYWNrZ3JvdW5kVHJhbnNwYXJlbmN5BZqZmZmZmck/UFJP"
+    "UB8AAAAdAAAAAAAAAPAOCQAAAAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A4JAAAAEwAAAERlZmlu"
+    "ZXNDYXBhYmlsaXRpZXMCAFBST1ATAAAAEQAAAAAAAADwAgkAAAAHAAAARW5hYmxlZAIBUFJPUFcAAABtAAAAAAAAAP80CQAAAAgA"
+    "AABGb250RmFjZSAqAAAAcmJ4YXNzZXQ6Ly9mb250cy9mYW1pbGllcy9CdWlsZGVyU2Fucy5qc29u9AEAJzEAAQcoALAtTWVkaXVt"
+    "Lm90ZlBST1AbAAAAIgAAAAAAAABACQAAAAQAtkhpc3RvcnlJZB8AAQBQAAAAAABQUk9QHgAAABwAAAAAAAAA8A0JAAAADwAAAEtl"
+    "eWJvYXJkS2V5Q29kZRIAAAAvUFJPUCwAAAAqAAAAAAAAAPAbCQAAAAQAAABOYW1lARkAAABDaGF0SW5wdXRCYXJDb25maWd1cmF0"
+    "aW9uUFJPUCgAAAAmAAAAAAAAAPAXCQAAABEAAABQbGFjZWhvbGRlckNvbG9yMwx+ZWVmfmVlZn5lZWZQUk9QIAAAAB4AAAAAAAAA"
+    "8A8JAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AIJAAAABAAAAFRhZ3McAAAAAFBST1AgAAAA"
+    "HgAAAAAAAADwDwkAAAARAAAAVGFyZ2V0VGV4dENoYW5uZWwTAAAAAVBST1AhAAAAHwAAAAAAAADwEAkAAAAKAAAAVGV4dENvbG9y"
+    "Mwx/AAAAfwAAAH8AAABQUk9QGwAAABkAAAAAAAAA8AoJAAAACAAAAFRleHRTaXplGwAAAAAAAAAkUFJPUCcAAAAlAAAAAAAAAPAW"
+    "CQAAABAAAABUZXh0U3Ryb2tlQ29sb3IzDAAAAAAAAAAAAAAAAFBST1ApAAAAJwAAAAAAAADwGAkAAAAWAAAAVGV4dFN0cm9rZVRy"
+    "YW5zcGFyZW5jeQUAAAAAAADgP1BST1AjAAAAIQAAAAAAAADwEgkAAAAIAAAAVW5pcXVlSWQfAAAD9QrNo/cvQ16G5lZcWlBST1Ai"
+    "AAAAIAAAAAAAAADwEQoAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUCcAAAAlAAAAAAAAAPAWCgAAABAAAABCYWNr"
+    "Z3JvdW5kQ29sb3IzDHuRkZJ7sbGye9HR0lBST1ApAAAAJwAAAAAAAADwGAoAAAAWAAAAQmFja2dyb3VuZFRyYW5zcGFyZW5jeQUz"
+    "MzMzMzPTP1BST1AfAAAAHQAAAAAAAADwDgoAAAAMAAAAQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAOCgAA"
+    "ABMAAABEZWZpbmVzQ2FwYWJpbGl0aWVzAgBQUk9QEwAAABEAAAAAAAAA8AIKAAAABwAAAEVuYWJsZWQCAVBST1BXAAAAbQAAAAAA"
+    "AAD/NAoAAAAIAAAARm9udEZhY2UgKgAAAHJieGFzc2V0Oi8vZm9udHMvZmFtaWxpZXMvQnVpbGRlclNhbnMuanNvbvQBACcxAAEH"
+    "KACwLU1lZGl1bS5vdGZQUk9QGgAAABgAAAAAAAAA8AkKAAAACwAAAEhlaWdodFNjYWxlBH8AAABQUk9QHQAAACIAAAAAAAAA9gQK"
+    "AAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QIgAAACAAAAAAAAAA8BEKAAAAEwAAAEhvcml6b250YWxBbGlnbm1lbnQSAAAA"
+    "AVBST1AqAAAAKAAAAAAAAADwGQoAAAAEAAAATmFtZQEXAAAAQ2hhdFdpbmRvd0NvbmZpZ3VyYXRpb25QUk9QIAAAAB4AAAAAAAAA"
+    "8A8KAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AIKAAAABAAAAFRhZ3McAAAAAFBST1AlAAAA"
+    "IwAAAAAAAADwFAoAAAAWAAAAVGV4dENoYW5uZWxEaXNwbGF5TW9kZRIAAAAAUFJPUCAAAAAfAAAAAAAAAEAKAAAABADwCFRleHRD"
+    "b2xvcjMMfwAAAH8AAAB/AAAAUFJPUBsAAAAZAAAAAAAAAPAKCgAAAAgAAABUZXh0U2l6ZRsAAAAAAAAAJFBST1AnAAAAJQAAAAAA"
+    "AADwFgoAAAAQAAAAVGV4dFN0cm9rZUNvbG9yMwwAAAAAAAAAAAAAAABQUk9QKQAAACcAAAAAAAAA8BgKAAAAFgAAAFRleHRTdHJv"
+    "a2VUcmFuc3BhcmVuY3kFAAAAAAAA4D9QUk9QIwAAACEAAAAAAAAA8BIKAAAACAAAAFVuaXF1ZUlkHwAAA/QKzaP3L0NehuZWXFpQ"
+    "Uk9QIAAAAB4AAAAAAAAA8A8KAAAAEQAAAFZlcnRpY2FsQWxpZ25tZW50EgAAAAFQUk9QGAAAABcAAAAAAAAAQAoAAAAEAPAAV2lk"
+    "dGhTY2FsZQR/AAAAUFJPUCIAAAAgAAAAAAAAAPARCwAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAAAB0AAAAA"
+    "AAAA8A4LAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDgsAAAATAAAARGVmaW5lc0NhcGFiaWxp"
+    "dGllcwIAUFJPUB0AAAAiAAAAAAAAAPYECwAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUCQAAAAiAAAAAAAAAPATCwAAAAQA"
+    "AABOYW1lAREAAABDb2xsZWN0aW9uU2VydmljZVBST1AgAAAAHgAAAAAAAADwDwsAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAA"
+    "AVBST1ATAAAAEQAAAAAAAADwAgsAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASCwAAAAgAAABVbmlxdWVJZB8AAANo"
+    "Cs2j9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARDAAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHgAAAB0AAAAA"
+    "AAAAQAwAAAAEAPAGQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAODAAAABMAAABEZWZpbmVzQ2FwYWJpbGl0"
+    "aWVzAgBQUk9QHQAAACIAAAAAAAAA9gQMAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QJwAAACUAAAAAAAAA8BYMAAAABAAA"
+    "AE5hbWUBFAAAAENvbnRleHRBY3Rpb25TZXJ2aWNlUFJPUCAAAAAeAAAAAAAAAPAPDAAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAA"
+    "AAABUFJPUBMAAAARAAAAAAAAAPACDAAAAAQAAABUYWdzHAAAAABQUk9QIwAAACEAAAAAAAAA8BIMAAAACAAAAFVuaXF1ZUlkHwAA"
+    "A6QKzaP3L0NehuZWXFpQUk9QIgAAACAAAAAAAAAA8BENAAAAEwAAAEF0dHJpYnV0ZXNTZXJpYWxpemUBAAAAAFBST1AfAAAAHQAA"
+    "AAAAAADwDg0AAAAMAAAAQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAODQAAABMAAABEZWZpbmVzQ2FwYWJp"
+    "bGl0aWVzAgBQUk9QHQAAACIAAAAAAAAA9gQNAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QIQAAAB8AAAAAAAAA8BANAAAA"
+    "BAAAAE5hbWUBDgAAAENvb2tpZXNTZXJ2aWNlUFJPUB8AAAAeAAAAAAAAAEANAAAABADwB1NvdXJjZUFzc2V0SWQbAAAAAAAAAAFQ"
+    "Uk9QEwAAABEAAAAAAAAA8AINAAAABAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEg0AAAAIAAAAVW5pcXVlSWQfAAADngrN"
+    "o/cvQ16G5lZcWlBST1AiAAAAIAAAAAAAAADwEQ4AAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUBkAAAAYAAAAAAAA"
+    "AEAOAAAABADwAUF1dG9tYXRpY1JldHJ5AgFQUk9QHwAAAB0AAAAAAAAA8A4OAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBS"
+    "T1AfAAAAHQAAAAAAAADwDg4AAAATAAAARGVmaW5lc0NhcGFiaWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEDgAAAAkAAABIaXN0"
+    "b3J5SWQfAAEAUAAAAAAAUFJPUB4AAAAcAAAAAAAAAPANDgAAABIAAABMZWdhY3lOYW1pbmdTY2hlbWUCAFBST1AjAAAAIQAAAAAA"
+    "AADwEg4AAAAEAAAATmFtZQEQAAAARGF0YVN0b3JlU2VydmljZVBST1AgAAAAHgAAAAAAAADwDw4AAAANAAAAU291cmNlQXNzZXRJ"
+    "ZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAg4AAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASDgAAAAgAAABVbmlx"
+    "dWVJZB8AAAPcCs2j9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARDwAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9Q"
+    "HwAAAB0AAAAAAAAA8A4PAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDg8AAAATAAAARGVmaW5l"
+    "c0NhcGFiaWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEDwAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUBcAAAAVAAAAAAAA"
+    "APAGDwAAAAgAAABNYXhJdGVtcwMAAAfQUFJPUBkAAAAXAAAAAAAAAPAIDwAAAAQAAABOYW1lAQYAAABEZWJyaXNQUk9QIAAAAB4A"
+    "AAAAAAAA8A8PAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AIPAAAABAAAAFRhZ3McAAAAAFBS"
+    "T1AjAAAAIQAAAAAAAADwEg8AAAAIAAAAVW5pcXVlSWQfAAADnQrNo/cvQ16G5lZcWlBST1AiAAAAIAAAAAAAAADwERAAAAATAAAA"
+    "QXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUBgAAAAWAAAAAAAAAPAHEAAAAAwAAABBdXRvTG9jYWxpemUCAVBST1AfAAAAHQAA"
+    "AAAAAADwDhAAAAAMAAAAQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB0AAAAbAAAAAAAAAPAMEAAAAAYAAABDb2xvcjMMfwAAAH8A"
+    "AAB/AAAAUFJPUB8AAAAdAAAAAAAAAPAOEAAAABMAAABEZWZpbmVzQ2FwYWJpbGl0aWVzAgBQUk9QJwAAACwAAAAAAAAA9g4QAAAA"
+    "EwAAAEVtaXNzaXZlTWFza0NvbnRlbnQiAAEAUAAAAAAAUFJPUB4AAAAdAAAAAAAAAEAQAAAABADwBkVtaXNzaXZlU3RyZW5ndGgE"
+    "fwAAAFBST1AjAAAAIQAAAAAAAADwEhAAAAAMAAAARW1pc3NpdmVUaW50DH8AAAB/AAAAfwAAAFBST1ATAAAAEQAAAAAAAADwAhAA"
+    "AAAEAAAARmFjZRIAAAABUFJPUB0AAAAiAAAAAAAAAPYEEAAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUBsAAAAZAAAAAAAA"
+    "APAKEAAAAAwAAABNZXRhbG5lc3NNYXABAAAAAFBST1AYAAAAFgAAAAAAAADwBxAAAAAEAAAATmFtZQEFAAAARGVjYWxQUk9QGAAA"
+    "ABYAAAAAAAAA8AcQAAAACQAAAE5vcm1hbE1hcAEAAAAAUFJPUBcAAAAVAAAAAAAAAPAGEAAAAAgAAABSb3RhdGlvbgQAAAAAUFJP"
+    "UBsAAAAZAAAAAAAAAPAKEAAAAAwAAABSb3VnaG5lc3NNYXABAAAAAFBST1AgAAAAHgAAAAAAAADwDxAAAAANAAAAU291cmNlQXNz"
+    "ZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAhAAAAAEAAAAVGFncxwAAAAAUFJPUDkAAAA5AAAAAAAAAPIREAAAAAcAAABU"
+    "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"
+    "ZWxlY3Rpb25CZWhhdmlvckRvd24SAAAAAFBST1AjAAAAIgAAAAAAAABAFQAAAAQA8AtTZWxlY3Rpb25CZWhhdmlvckxlZnQSAAAA"
+    "AFBST1AlAAAAIwAAAAAAAADwFBUAAAAWAAAAU2VsZWN0aW9uQmVoYXZpb3JSaWdodBIAAAAAUFJPUCIAAAAgAAAAAAAAAPARFQAA"
+    "ABMAAABTZWxlY3Rpb25CZWhhdmlvclVwEgAAAABQUk9QGgAAABgAAAAAAAAA8AkVAAAADgAAAFNlbGVjdGlvbkdyb3VwAgBQUk9Q"
+    "IwAAACEAAAAAAAAA8BIVAAAAFAAAAFNlbGVjdGlvbkltYWdlT2JqZWN0EwAAAAFQUk9QHQAAABsAAAAAAAAA8AwVAAAADgAAAFNl"
+    "bGVjdGlvbk9yZGVyAwAAAABQUk9QEwAAABEAAAAAAAAA8AIVAAAABAAAAFNpbmsSAAAAAFBST1AXAAAAHQAAAAAAAADmFQAAAAQA"
+    "AABTaXplBwABAFDIAAAAyFBST1AdAAAAGwAAAAAAAADwDBUAAAAOAAAAU2l6ZUNvbnN0cmFpbnQSAAAAAFBST1AfAAAAJAAAAAAA"
+    "AAD2BhUAAAALAAAAU2xpY2VDZW50ZXIYAAEAUAAAAAAAUFJPUBkAAAAXAAAAAAAAAPAIFQAAAAoAAABTbGljZVNjYWxlBH8AAABQ"
+    "Uk9QIAAAAB4AAAAAAAAA8A8VAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AIVAAAABAAAAFRh"
+    "Z3McAAAAAFBST1AiAAAAIQAAAAAAAADwBhUAAAAIAAAAVGlsZVNpemUHfwAAAAQAgAAAAAAAAAAAUFJPUCMAAAAhAAAAAAAAAPAS"
+    "FQAAAAgAAABVbmlxdWVJZB8AAAP4Cs2j9y9DXobmVlxaUFJPUBMAAAARAAAAAAAAAPACFQAAAAcAAABWaXNpYmxlAgFQUk9QFQAA"
+    "ABMAAAAAAAAA8AQVAAAABgAAAFpJbmRleAMAAAACUFJPUCEAAAAfAAAAAAAAAPAQFgAAABUAAABBbGxvd0luc2VydEZyZWVNb2Rl"
+    "bHMCAFBST1AiAAAAIAAAAAAAAADwERYAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAdAAAAAAAAAPAOFgAA"
+    "AAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A4WAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBS"
+    "T1AdAAAAIgAAAAAAAAD2BBYAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AgAAAAHgAAAAAAAADwDxYAAAAEAAAATmFtZQEN"
+    "AAAASW5zZXJ0U2VydmljZVBST1AgAAAAHgAAAAAAAADwDxYAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAA"
+    "AAAAAADwAhYAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASFgAAAAgAAABVbmlxdWVJZB8AAAObCs2j9y9DXobmVlxa"
+    "UFJPUCcAAAAsAAAAAAAAAPYOFwAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQABAFAAAAAAAFBST1AhAAAANQAAAAAAAAD/BxcA"
+    "AAAMAAAAQ2FwYWJpbGl0aWVzIQABAAdQAAAAAABQUk9QIgAAACAAAAAAAAAA8BEXAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMC"
+    "AAAAAFBST1AeAAAAUgAAAAAAAAD/BBcAAAAJAAAASGlzdG9yeUlkHwABACdQAAAAAABQUk9QLQAAAGEAAAAAAAAA/xMXAAAABAAA"
+    "AE5hbWUBEQAAAEZpbHRlcmVkU2VsZWN0aW9uFQAnUGN0aW9uUFJPUCIAAAA2AAAAAAAAAP8IFwAAAA0AAABTb3VyY2VBc3NldElk"
+    "GwABAAdQAAEBAQFQUk9QFwAAAB0AAAAAAAAA5hcAAAAEAAAAVGFncxwAAQBQAAAAAABQUk9QUAAAAFEAAAAAAAAA8wMXAAAACAAA"
+    "AFVuaXF1ZUlkHwABAPApBAQEBEJDREUKCgoKzc3NzaOjo6P39/f3Ly8vL0NDQ0NeXl5ehoaGhubm5uZWVlZWXFxcXFpaWlpQUk9Q"
+    "HgAAABwAAAAAAAAA8A0YAAAABwAAAEFtYmllbnQMfRkZGn0ZGRp9GRkaUFJPUHEAAAB5AAAAAAAAAPNCGAAAABMAAABBdHRyaWJ1"
+    "dGVzU2VyaWFsaXplAVkAAAACAAAAJgAAAFJCWF9MaWdodGluZ1RlY2hub2xvZ3lVbmlmaWVkTWlncmF0aW9uAwEgLACGT3JpZ2lu"
+    "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"
+    "ABAAAABDZXJhbWljVGlsZXNOYW1lAQwVAFBUaWxlc1BST1AlAAAAKwAAAAAAAAD3DBwAAAARAAAAQ2xheVJvb2ZUaWxlc05hbWUB"
+    "DRYAUFRpbGVzUFJPUCMAAAAnAAAAAAAAAPUKHAAAAA8AAABDb2JibGVzdG9uZU5hbWUBCxQAUHN0b25lUFJPUCMAAAAhAAAAAAAA"
+    "APASHAAAAAwAAABDb25jcmV0ZU5hbWUBCAAAAENvbmNyZXRlUFJPUCUAAAArAAAAAAAAAPcMHAAAABEAAABDb3Jyb2RlZE1ldGFs"
+    "TmFtZQENFgBQTWV0YWxQUk9QIwAAACcAAAAAAAAA9QocAAAADwAAAENyYWNrZWRMYXZhTmFtZQELFABQZExhdmFQUk9QHwAAAB0A"
+    "AAAAAAAA8A4cAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBST1AkAAAAKQAAAAAAAAD2CxwAAAAQAAAARGlhbW9uZFBsYXRl"
+    "TmFtZQEMFQBQUGxhdGVQUk9QHwAAAB0AAAAAAAAA8A4cAAAACgAAAEZhYnJpY05hbWUBBgAAAEZhYnJpY1BST1AbAAAAGQAAAAAA"
+    "AADwChwAAAAIAAAARm9pbE5hbWUBBAAAAEZvaWxQUk9QIQAAAB8AAAAAAAAA8BAcAAAACwAAAEdsYWNpZXJOYW1lAQcAAABHbGFj"
+    "aWVyUFJPUCEAAAAfAAAAAAAAAPAQHAAAAAsAAABHcmFuaXRlTmFtZQEHAAAAR3Jhbml0ZVBST1AdAAAAGwAAAAAAAADwDBwAAAAJ"
+    "AAAAR3Jhc3NOYW1lAQUAAABHcmFzc1BST1AfAAAAHQAAAAAAAADwDhwAAAAKAAAAR3JvdW5kTmFtZQEGAAAAR3JvdW5kUFJPUB0A"
+    "AAAiAAAAAAAAAPYEHAAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUBkAAAAXAAAAAAAAAPAIHAAAAAcAAABJY2VOYW1lAQMA"
+    "AABJY2VQUk9QIgAAACUAAAAAAAAA9AkcAAAADgAAAExlYWZ5R3Jhc3NOYW1lAQoTAFBHcmFzc1BST1AhAAAAHwAAAAAAAADwEBwA"
+    "AAALAAAATGVhdGhlck5hbWUBBwAAAExlYXRoZXJQUk9QIQAAACMAAAAAAAAA8wgcAAAADQAAAExpbWVzdG9uZU5hbWUBCRIAUHN0"
+    "b25lUFJPUB8AAAAdAAAAAAAAAPAOHAAAAAoAAABNYXJibGVOYW1lAQYAAABNYXJibGVQUk9QHQAAABsAAAAAAAAA8AwcAAAACQAA"
+    "AE1ldGFsTmFtZQEFAAAATWV0YWxQUk9QGQAAABcAAAAAAAAA8AgcAAAABwAAAE11ZE5hbWUBAwAAAE11ZFBST1AiAAAAIAAAAAAA"
+    "AADwERwAAAAEAAAATmFtZQEPAAAATWF0ZXJpYWxTZXJ2aWNlUFJPUCMAAAAhAAAAAAAAAPASHAAAAAwAAABQYXZlbWVudE5hbWUB"
+    "CAAAAFBhdmVtZW50UFJPUB8AAAAdAAAAAAAAAPAOHAAAAAoAAABQZWJibGVOYW1lAQYAAABQZWJibGVQUk9QIQAAAB8AAAAAAAAA"
+    "8BAcAAAACwAAAFBsYXN0ZXJOYW1lAQcAAABQbGFzdGVyUFJPUCEAAAAfAAAAAAAAAPAQHAAAAAsAAABQbGFzdGljTmFtZQEHAAAA"
+    "UGxhc3RpY1BST1AbAAAAGQAAAAAAAADwChwAAAAIAAAAUm9ja05hbWUBBAAAAFJvY2tQUk9QJAAAACkAAAAAAAAA9gscAAAAEAAA"
+    "AFJvb2ZTaGluZ2xlc05hbWUBDBUAUG5nbGVzUFJPUB8AAAAdAAAAAAAAAPAOHAAAAAoAAABSdWJiZXJOYW1lAQYAAABSdWJiZXJQ"
+    "Uk9QGwAAABkAAAAAAAAA8AocAAAACAAAAFNhbHROYW1lAQQAAABTYWx0UFJPUBsAAAAZAAAAAAAAAPAKHAAAAAgAAABTYW5kTmFt"
+    "ZQEEAAAAU2FuZFBST1AhAAAAIwAAAAAAAADzCBwAAAANAAAAU2FuZHN0b25lTmFtZQEJEgBQc3RvbmVQUk9QHQAAABsAAAAAAAAA"
+    "8AwcAAAACQAAAFNsYXRlTmFtZQEFAAAAU2xhdGVQUk9QJQAAACsAAAAAAAAA9wwcAAAAEQAAAFNtb290aFBsYXN0aWNOYW1lAQ0W"
+    "AFBhc3RpY1BST1AbAAAAGQAAAAAAAADwChwAAAAIAAAAU25vd05hbWUBBAAAAFNub3dQUk9QIAAAAB4AAAAAAAAA8A8cAAAADQAA"
+    "AFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AIcAAAABAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADw"
+    "EhwAAAAIAAAAVW5pcXVlSWQfAAADhQrNo/cvQ16G5lZcWlBST1AfAAAAHQAAAAAAAADwDhwAAAATAAAAVXNlMjAyMk1hdGVyaWFs"
+    "c1htbAIBUFJPUBsAAAAZAAAAAAAAAPAKHAAAAAgAAABXb29kTmFtZQEEAAAAV29vZFBST1AiAAAAJQAAAAAAAAD0CRwAAAAOAAAA"
+    "V29vZFBsYW5rc05hbWUBChMAUGxhbmtzUFJPUCIAAAAgAAAAAAAAAPARHQAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQ"
+    "Uk9QHwAAAB0AAAAAAAAA8A4dAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDh0AAAATAAAARGVm"
+    "aW5lc0NhcGFiaWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEHQAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUDMAAAAyAAAA"
+    "AAAAAOAdAAAABAAAAE5hbWUBIQkA8BFvblJlcGxpY2F0ZWRDU0dEaWN0aW9uYXJ5U2VydmljZVBST1AgAAAAHgAAAAAAAADwDx0A"
+    "AAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAh0AAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAA"
+    "AAAAAPASHQAAAAgAAABVbmlxdWVJZB8AAAN2Cs2j9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARHgAAABMAAABBdHRyaWJ1dGVz"
+    "U2VyaWFsaXplAQAAAABQUk9QHwAAAB0AAAAAAAAA8A4eAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAA"
+    "AADwDh4AAAATAAAARGVmaW5lc0NhcGFiaWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEHgAAAAkAAABIaXN0b3J5SWQfAAEAUAAA"
+    "AAAAUFJPUBgAAAAWAAAAAAAAAPAHHgAAAAwAAABJc0RlaHlkcmF0ZWQCAFBST1AbAAAAGQAAAAAAAADwCh4AAAAEAAAATmFtZQEI"
+    "AAAAUGFja2FnZXNQUk9QIQAAAB8AAAAAAAAA8BAeAAAAEgAAAFNoZWxsUGFja2FnZXNDb3VudAMAAAAAUFJPUCQAAAAiAAAAAAAA"
+    "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"
+    "AAAAAAAA8BEiAAAAEwAAAEVtdWxhdGVkQ291bnRyeUNvZGUBAAAAAFBST1AhAAAAHwAAAAAAAADwECIAAAASAAAARW11bGF0ZWRH"
+    "YW1lTG9jYWxlAQAAAABQUk9QHQAAACIAAAAAAAAA9gQiAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QKAAAACYAAAAAAAAA"
+    "8BciAAAABAAAAE5hbWUBFQAAAFBsYXllckVtdWxhdG9yU2VydmljZVBST1AiAAAAIAAAAAAAAADwESIAAAAWAAAAUGxheWVyRW11"
+    "bGF0aW9uRW5hYmxlZAIAUFJPUCUAAAAjAAAAAAAAAPAUIgAAABkAAABQc2V1ZG9sb2NhbGl6YXRpb25FbmFibGVkAgBQUk9QKwAA"
+    "ACkAAAAAAAAA8BoiAAAAHAAAAFNlcmlhbGl6ZWRFbXVsYXRlZFBvbGljeUluZm8BAAAAAFBST1AgAAAAHgAAAAAAAADwDyIAAAAN"
+    "AAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAiIAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAA"
+    "APASIgAAABQAAABUZXh0RWxvbmdhdGlvbkZhY3RvcgMAAAAAUFJPUCMAAAAhAAAAAAAAAPASIgAAAAgAAABVbmlxdWVJZB8AAAOJ"
+    "Cs2j9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARIwAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QGgAAABgAAAAA"
+    "AAAA8AkjAAAADgAAAEJhbm5pbmdFbmFibGVkAgFQUk9QHwAAAB0AAAAAAAAA8A4jAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAA"
+    "AFBST1AeAAAAHAAAAAAAAADwDSMAAAASAAAAQ2hhcmFjdGVyQXV0b0xvYWRzAgFQUk9QHwAAAB0AAAAAAAAA8A4jAAAAEwAAAERl"
+    "ZmluZXNDYXBhYmlsaXRpZXMCAFBST1AdAAAAIgAAAAAAAAD2BCMAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AhAAAAHwAA"
+    "AAAAAADwECMAAAASAAAATWF4UGxheWVyc0ludGVybmFsAwAAADxQUk9QGgAAABgAAAAAAAAA8AkjAAAABAAAAE5hbWUBBwAAAFBs"
+    "YXllcnNQUk9QJwAAACUAAAAAAAAA8BYjAAAAGAAAAFByZWZlcnJlZFBsYXllcnNJbnRlcm5hbAMAAAA8UFJPUBoAAAAYAAAAAAAA"
+    "APAJIwAAAAsAAABSZXNwYXduVGltZQSAgAAAUFJPUCAAAAAeAAAAAAAAAPAPIwAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAAAAAB"
+    "UFJPUBMAAAARAAAAAAAAAPACIwAAAAQAAABUYWdzHAAAAABQUk9QIwAAACEAAAAAAAAA8BIjAAAACAAAAFVuaXF1ZUlkHwAAA38K"
+    "zaP3L0NehuZWXFpQUk9QIQAAAB8AAAAAAAAA8BAjAAAAFQAAAFVzZVN0cmFmaW5nQW5pbWF0aW9ucwIAUFJPUCIAAAAgAAAAAAAA"
+    "APARJAAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAAAB0AAAAAAAAA8A4kAAAADAAAAENhcGFiaWxpdGllcyEA"
+    "AAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDiQAAAATAAAARGVmaW5lc0NhcGFiaWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEJAAA"
+    "AAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUDAAAAAuAAAAAAAAAPAfJAAAAAQAAABOYW1lAR0AAABQcm9jZXNzSW5zdGFuY2VQ"
+    "aHlzaWNzU2VydmljZVBST1AgAAAAHgAAAAAAAADwDyQAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAA"
+    "AADwAiQAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASJAAAAAgAAABVbmlxdWVJZB8AAAO7Cs2j9y9DXobmVlxaUFJP"
+    "UCIAAAAgAAAAAAAAAPARJQAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAAAB0AAAAAAAAA8A4lAAAADAAAAENh"
+    "cGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDiUAAAATAAAARGVmaW5lc0NhcGFiaWxpdGllcwIAUFJPUBMAAAAR"
+    "AAAAAAAAAPACJQAAAAcAAABFbmFibGVkAgFQUk9QHQAAACIAAAAAAAAA9gQlAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9Q"
+    "IwAAACEAAAAAAAAA8BIlAAAAFAAAAE1heEluZGljYXRvcnNWaXNpYmxlAwAAACBQUk9QIAAAAB4AAAAAAAAA8A8lAAAAEQAAAE1h"
+    "eFByb21wdHNWaXNpYmxlAwAAACBQUk9QKQAAACcAAAAAAAAA8BglAAAABAAAAE5hbWUBFgAAAFByb3hpbWl0eVByb21wdFNlcnZp"
+    "Y2VQUk9QIAAAAB4AAAAAAAAA8A8lAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AIlAAAABAAA"
+    "AFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEiUAAAAIAAAAVW5pcXVlSWQfAAAD3wrNo/cvQ16G5lZcWlBST1AiAAAAIAAAAAAA"
+    "AADwESYAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAdAAAAAAAAAPAOJgAAAAwAAABDYXBhYmlsaXRpZXMh"
+    "AAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A4mAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBST1AdAAAAIgAAAAAAAAD2BCYA"
+    "AAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AiAAAAIAAAAAAAAADwESYAAAAEAAAATmFtZQEPAAAAUmVwbGljYXRlZEZpcnN0"
+    "UFJPUCAAAAAeAAAAAAAAAPAPJgAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAAAAABUFJPUBMAAAARAAAAAAAAAPACJgAAAAQAAABU"
+    "YWdzHAAAAABQUk9QIwAAACEAAAAAAAAA8BImAAAACAAAAFVuaXF1ZUlkHwAAA4IKzaP3L0NehuZWXFpQUk9QRAAAAEIAAAAAAAAA"
+    "8DMnAAAAEwAAAEF0dHJpYnV0ZXNTZXJpYWxpemUBIgAAAAEAAAARAAAARW1pdHRlcjJEX1ZlcnNpb24GKVyPwvUo9D9QUk9QHwAA"
+    "AB0AAAAAAAAA8A4nAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDicAAAATAAAARGVmaW5lc0Nh"
+    "cGFiaWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEJwAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUCQAAAAiAAAAAAAAAPAT"
+    "JwAAAAQAAABOYW1lAREAAABSZXBsaWNhdGVkU3RvcmFnZVBST1AgAAAAHgAAAAAAAADwDycAAAANAAAAU291cmNlQXNzZXRJZBsA"
+    "AAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAicAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASJwAAAAgAAABVbmlxdWVJ"
+    "ZB8AAAO8Cs2j9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARKAAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAA"
+    "AB0AAAAAAAAA8A4oAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDigAAAATAAAARGVmaW5lc0Nh"
+    "cGFiaWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEKAAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUBsAAAAZAAAAAAAAAPAK"
+    "KAAAAAQAAABOYW1lAQgAAABJbnN0YW5jZVBST1AgAAAAHgAAAAAAAADwDygAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBS"
+    "T1ATAAAAEQAAAAAAAADwAigAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASKAAAAAgAAABVbmlxdWVJZB8AAAOlCs2j"
+    "9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARKQAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAAAB0AAAAAAAAA"
+    "8A4pAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDikAAAATAAAARGVmaW5lc0NhcGFiaWxpdGll"
+    "cwIAUFJPUB0AAAAiAAAAAAAAAPYEKQAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUBwAAAAaAAAAAAAAAPALKQAAAAQAAABO"
+    "YW1lAQkAAABTZWxlY3Rpb25QUk9QIAAAAB4AAAAAAAAA8A8pAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEA"
+    "AAAAAAAA8AIpAAAABAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEikAAAAIAAAAVW5pcXVlSWQfAAADnwrNo/cvQ16G5lZc"
+    "WlBST1AiAAAAIAAAAAAAAADwESoAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAdAAAAAAAAAPAOKgAAAAwA"
+    "AABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A4qAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBST1Ad"
+    "AAAAIgAAAAAAAAD2BCoAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AnAAAAJQAAAAAAAADwFioAAAAEAAAATmFtZQEUAAAA"
+    "U2VyaWFsaXphdGlvblNlcnZpY2VQUk9QIAAAAB4AAAAAAAAA8A8qAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAA"
+    "ABEAAAAAAAAA8AIqAAAABAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEioAAAAIAAAAVW5pcXVlSWQfAAAEZQrNo/cvQ16G"
+    "5lZcWlBST1AiAAAAIAAAAAAAAADwESsAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAdAAAAAAAAAPAOKwAA"
+    "AAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A4rAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBS"
+    "T1AdAAAAIgAAAAAAAAD2BCsAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AdAAAAGwAAAAAAAADwDCsAAAARAAAATG9hZFN0"
+    "cmluZ0VuYWJsZWQCAFBST1AmAAAAJAAAAAAAAADwFSsAAAAEAAAATmFtZQETAAAAU2VydmVyU2NyaXB0U2VydmljZVBST1AgAAAA"
+    "HgAAAAAAAADwDysAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAisAAAAEAAAAVGFncxwAAAAA"
+    "UFJPUCMAAAAhAAAAAAAAAPASKwAAAAgAAABVbmlxdWVJZB8AAAO9Cs2j9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARLAAAABMA"
+    "AABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAAAB0AAAAAAAAA8A4sAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBS"
+    "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"
+    "AAAAUFJPUCMAAAAhAAAAAAAAAPASLgAAAAgAAABVbmlxdWVJZB8AAAPvCs2j9y9DXobmVlxaUFJPUCUAAAAjAAAAAAAAAPAULwAA"
+    "ABkAAABBY291c3RpY1NpbXVsYXRpb25FbmFibGVkAgBQUk9QHAAAABoAAAAAAAAA8AsvAAAADQAAAEFtYmllbnRSZXZlcmISAAAA"
+    "AFBST1AiAAAAIAAAAAAAAADwES8AAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUCAAAAAeAAAAAAAAAPAPLwAAABEA"
+    "AABBdWRpb0FwaUJ5RGVmYXVsdBIAAAAAUFJPUB8AAAAdAAAAAAAAAPAOLwAAAAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9Q"
+    "JwAAACUAAAAAAAAA8BYvAAAAGAAAAENoYXJhY3RlclNvdW5kc1VzZU5ld0FwaRIAAAAAUFJPUCYAAAAkAAAAAAAAAPAVLwAAABcA"
+    "AABEZWZhdWx0TGlzdGVuZXJMb2NhdGlvbhIAAAADUFJPUB8AAAAdAAAAAAAAAPAOLwAAABMAAABEZWZpbmVzQ2FwYWJpbGl0aWVz"
+    "AgBQUk9QHgAAABwAAAAAAAAA8A0vAAAAEgAAAERpZmZyYWN0aW9uRW5hYmxlZAIBUFJPUB0AAAAbAAAAAAAAAPAMLwAAAA4AAABE"
+    "aXN0YW5jZUZhY3RvcgSAqj1wUFJPUBsAAAAZAAAAAAAAAPAKLwAAAAwAAABEb3BwbGVyU2NhbGUEfwAAAFBST1AdAAAAIgAAAAAA"
+    "AAD2BC8AAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AoAAAAJgAAAAAAAADwFy8AAAAcAAAASXNOZXdFeHBGb3JBdWRpb0Fw"
+    "aUJ5RGVmYXVsdAIAUFJPUCYAAAAkAAAAAAAAAPAVLwAAAA4AAABMaXN0ZW5lckNGcmFtZRACAAAAAAAAAAAAAAAAUFJPUB0AAAAb"
+    "AAAAAAAAAPAMLwAAAA4AAABMaXN0ZW5lck9iamVjdBMAAAABUFJPUBsAAAAZAAAAAAAAAPAKLwAAAAwAAABMaXN0ZW5lclR5cGUS"
+    "AAAAAFBST1AfAAAAHQAAAAAAAADwDi8AAAAEAAAATmFtZQEMAAAAU291bmRTZXJ2aWNlUFJPUBwAAAAaAAAAAAAAAPALLwAAABAA"
+    "AABPY2NsdXNpb25FbmFibGVkAgFQUk9QIwAAACEAAAAAAAAA8BIvAAAAFwAAAFJlc3BlY3RGaWx0ZXJpbmdFbmFibGVkAgFQUk9Q"
+    "GQAAABcAAAAAAAAA8AgvAAAADQAAAFJldmVyYkVuYWJsZWQCAVBST1AbAAAAGQAAAAAAAADwCi8AAAAMAAAAUm9sbG9mZlNjYWxl"
+    "BH8AAABQUk9QIAAAAB4AAAAAAAAA8A8vAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AIvAAAA"
+    "BAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEi8AAAAIAAAAVW5pcXVlSWQfAAADaQrNo/cvQ16G5lZcWlBST1AeAAAAHAAA"
+    "AAAAAADwDS8AAAAPAAAAVm9sdW1ldHJpY0F1ZGlvEgAAAAFQUk9QIgAAACAAAAAAAAAA8BEwAAAAFgAAAEFsbG93VGVhbUNoYW5n"
+    "ZU9uVG91Y2gCAFBST1AUAAAAEgAAAAAAAADwAzAAAAAIAAAAQW5jaG9yZWQCAVBST1AiAAAAIAAAAAAAAADwETAAAAATAAAAQXR0"
+    "cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUBsAAAAZAAAAAAAAAPAKMAAAAA8AAABBdWRpb0NhbkNvbGxpZGUCAVBST1AZAAAAFwAA"
+    "AAAAAADwCDAAAAAKAAAAQmFja1BhcmFtQQR+AAABUFJPUBkAAAAXAAAAAAAAAPAIMAAAAAoAAABCYWNrUGFyYW1CBH4AAABQUk9Q"
+    "GgAAABgAAAAAAAAA8AkwAAAACwAAAEJhY2tTdXJmYWNlEgAAAABQUk9QHwAAAB0AAAAAAAAA8A4wAAAAEAAAAEJhY2tTdXJmYWNl"
+    "SW5wdXQSAAAAAFBST1AbAAAAGQAAAAAAAADwCjAAAAAMAAAAQm90dG9tUGFyYW1BBH4AAAFQUk9QGwAAABkAAAAAAAAA8AowAAAA"
+    "DAAAAEJvdHRvbVBhcmFtQgR+AAAAUFJPUBwAAAAaAAAAAAAAAPALMAAAAA0AAABCb3R0b21TdXJmYWNlEgAAAABQUk9QIQAAAB8A"
+    "AAAAAAAA8BAwAAAAEgAAAEJvdHRvbVN1cmZhY2VJbnB1dBIAAAAAUFJPUB4AAAAcAAAAAAAAAPANMAAAAAYAAABDRnJhbWUQAgAA"
+    "AAB+AAAAAAAAAFBST1AWAAAAFAAAAAAAAADwBTAAAAAKAAAAQ2FuQ29sbGlkZQIBUFJPUBQAAAASAAAAAAAAAPADMAAAAAgAAABD"
+    "YW5RdWVyeQIBUFJPUBQAAAASAAAAAAAAAPADMAAAAAgAAABDYW5Ub3VjaAIBUFJPUB8AAAAdAAAAAAAAAPAOMAAAAAwAAABDYXBh"
+    "YmlsaXRpZXMhAAAAAAAAAABQUk9QFgAAABQAAAAAAAAA8AUwAAAACgAAAENhc3RTaGFkb3cCAVBST1AkAAAAIgAAAAAAAADwEzAA"
+    "AAAOAAAAQ29sbGlzaW9uR3JvdXABBwAAAERlZmF1bHRQUk9QHwAAAB0AAAAAAAAA8A4wAAAAEAAAAENvbGxpc2lvbkdyb3VwSWQD"
+    "AAAAAFBST1AZAAAAFwAAAAAAAADwCDAAAAALAAAAQ29sb3IzdWludDgao6KlUFJPUCQAAAAiAAAAAAAAAPATMAAAABgAAABDdXN0"
+    "b21QaHlzaWNhbFByb3BlcnRpZXMZAlBST1AfAAAAHQAAAAAAAADwDjAAAAATAAAARGVmaW5lc0NhcGFiaWxpdGllcwIAUFJPUBcA"
+    "AAAVAAAAAAAAAPAGMAAAAAgAAABEdXJhdGlvbgMAAAAAUFJPUB0AAAAbAAAAAAAAAPAMMAAAABEAAABFbmFibGVGbHVpZEZvcmNl"
+    "cwIBUFJPUBMAAAARAAAAAAAAAPACMAAAAAcAAABFbmFibGVkAgFQUk9QGgAAABgAAAAAAAAA8AkwAAAACwAAAEZyb250UGFyYW1B"
+    "BH4AAAFQUk9QGgAAABgAAAAAAAAA8AkwAAAACwAAAEZyb250UGFyYW1CBH4AAABQUk9QGwAAABkAAAAAAAAA8AowAAAADAAAAEZy"
+    "b250U3VyZmFjZRIAAAAAUFJPUCAAAAAeAAAAAAAAAPAPMAAAABEAAABGcm9udFN1cmZhY2VJbnB1dBIAAAAAUFJPUB0AAAAiAAAA"
+    "AAAAAPYEMAAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUBkAAAAXAAAAAAAAAPAIMAAAAAoAAABMZWZ0UGFyYW1BBH4AAAFQ"
+    "Uk9QGQAAABcAAAAAAAAA8AgwAAAACgAAAExlZnRQYXJhbUIEfgAAAFBST1AaAAAAGAAAAAAAAADwCTAAAAALAAAATGVmdFN1cmZh"
+    "Y2USAAAAAFBST1AfAAAAHQAAAAAAAADwDjAAAAAQAAAATGVmdFN1cmZhY2VJbnB1dBIAAAAAUFJPUBIAAAAQAAAAAAAAAPABMAAA"
+    "AAYAAABMb2NrZWQCAFBST1AUAAAAEgAAAAAAAADwAzAAAAAIAAAATWFzc2xlc3MCAFBST1AXAAAAFQAAAAAAAADwBjAAAAAIAAAA"
+    "TWF0ZXJpYWwSAAABAFBST1AmAAAAJgAAAAAAAADxCTAAAAAZAAAATWF0ZXJpYWxWYXJpYW50Uw0AkGl6ZWQBAAAAAFBST1AgAAAA"
+    "HgAAAAAAAADwDzAAAAAEAAAATmFtZQENAAAAU3Bhd25Mb2NhdGlvblBST1ATAAAAEQAAAAAAAADwAjAAAAAHAAAATmV1dHJhbAIB"
+    "UFJPUCMAAAAhAAAAAAAAAPASMAAAAAsAAABQaXZvdE9mZnNldBACAAAAAAAAAAAAAAAAUFJPUBoAAAAYAAAAAAAAAPAJMAAAAAsA"
+    "AABSZWZsZWN0YW5jZQQAAAAAUFJPUBoAAAAYAAAAAAAAAPAJMAAAAAsAAABSaWdodFBhcmFtQQR+AAABUFJPUBoAAAAYAAAAAAAA"
+    "APAJMAAAAAsAAABSaWdodFBhcmFtQgR+AAAAUFJPUBsAAAAZAAAAAAAAAPAKMAAAAAwAAABSaWdodFN1cmZhY2USAAAAAFBST1Ag"
+    "AAAAHgAAAAAAAADwDzAAAAARAAAAUmlnaHRTdXJmYWNlSW5wdXQSAAAAAFBST1AbAAAAGQAAAAAAAADwCjAAAAAMAAAAUm9vdFBy"
+    "aW9yaXR5AwAAAABQUk9QIgAAACAAAAAAAAAA8BEwAAAACwAAAFJvdFZlbG9jaXR5DgAAAAAAAAAAAAAAAFBST1AgAAAAHgAAAAAA"
+    "AADwDzAAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAjAAAAAEAAAAVGFncxwAAAAAUFJPUBgA"
+    "AAAWAAAAAAAAAPAHMAAAAAkAAABUZWFtQ29sb3ILAAAAwlBST1AYAAAAFgAAAAAAAADwBzAAAAAJAAAAVG9wUGFyYW1BBH4AAAFQ"
+    "Uk9QGAAAABYAAAAAAAAA8AcwAAAACQAAAFRvcFBhcmFtQgR+AAAAUFJPUBkAAAAXAAAAAAAAAPAIMAAAAAoAAABUb3BTdXJmYWNl"
+    "EgAAAABQUk9QHgAAABwAAAAAAAAA8A0wAAAADwAAAFRvcFN1cmZhY2VJbnB1dBIAAAAAUFJPUBsAAAAZAAAAAAAAAPAKMAAAAAwA"
+    "AABUcmFuc3BhcmVuY3kEAAAAAFBST1AjAAAAIQAAAAAAAADwEjAAAAAIAAAAVW5pcXVlSWQfAAAD6QrNo/cvQ16G5lZcWlBST1Af"
+    "AAAAHQAAAAAAAADwDjAAAAAIAAAAVmVsb2NpdHkOAAAAAAAAAAAAAAAAUFJPUBwAAAAaAAAAAAAAAPALMAAAAA0AAABmb3JtRmFj"
+    "dG9yUmF3EgAAAAFQUk9QFAAAABIAAAAAAAAA8AMwAAAABQAAAHNoYXBlEgAAAAFQUk9QGwAAABkAAAAAAAAA8AowAAAABAAAAHNp"
+    "emUOgoAAAH8AAACCgAAAUFJPUCIAAAAgAAAAAAAAAPARMQAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAAAB0A"
+    "AAAAAAAA8A4xAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDjEAAAATAAAARGVmaW5lc0NhcGFi"
+    "aWxpdGllcwIAUFJPUB0AAAAiAAAAAAAAAPYEMQAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUCoAAAAoAAAAAAAAAPAZMQAA"
+    "AAQAAABOYW1lARcAAABTdGFydGVyQ2hhcmFjdGVyU2NyaXB0c1BST1AgAAAAHgAAAAAAAADwDzEAAAANAAAAU291cmNlQXNzZXRJ"
+    "ZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAjEAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASMQAAAAgAAABVbmlx"
+    "dWVJZB8AAAPtCs2j9y9DXobmVlxaUFJPUCIAAAAgAAAAAAAAAPARMgAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9Q"
+    "HwAAAB0AAAAAAAAA8A4yAAAADAAAAENhcGFiaWxpdGllcyEAAAAAAAAAAFBST1AvAAAALQAAAAAAAADwHjIAAAAgAAAAQ2xpcHNE"
+    "ZXNjZW5kYW50c1N1cHBvcnRzUm90YXRpb24SAAAAAFBST1AfAAAAHQAAAAAAAADwDjIAAAATAAAARGVmaW5lc0NhcGFiaWxpdGll"
+    "cwIAUFJPUB0AAAAiAAAAAAAAAPYEMgAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUB0AAAAbAAAAAAAAAPAMMgAAAAQAAABO"
+    "YW1lAQoAAABTdGFydGVyR3VpUFJPUCEAAAAfAAAAAAAAAPAQMgAAABUAAABSZXNldFBsYXllckd1aU9uU3Bhd24CAVBST1AdAAAA"
+    "GwAAAAAAAADwDDIAAAAOAAAAUnRsVGV4dFN1cHBvcnQSAAAAAFBST1AgAAAAHgAAAAAAAADwDzIAAAARAAAAU2NyZWVuT3JpZW50"
+    "YXRpb24SAAAABFBST1AeAAAAHAAAAAAAAADwDTIAAAASAAAAU2hvd0RldmVsb3BtZW50R3VpAgFQUk9QIAAAAB4AAAAAAAAA8A8y"
+    "AAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QJgAAACQAAAAAAAAA8BUyAAAAFwAAAFN0dWRpb0RlZmF1bHRTdHlsZVNo"
+    "ZWV0EwAAAAFQUk9QQAAAAD8AAAAAAAAAQDIAAAAEAPAoU3R1ZGlvSW5zZXJ0V2lkZ2V0TGF5ZXJDb2xsZWN0b3JBdXRvTGlua1N0"
+    "eWxlU2hlZXQTAAAAAVBST1ATAAAAEQAAAAAAAADwAjIAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASMgAAAAgAAABV"
+    "bmlxdWVJZB8AAAOQCs2j9y9DXobmVlxaUFJPUCAAAAAeAAAAAAAAAPAPMgAAABEAAABWaXJ0dWFsQ3Vyc29yTW9kZRIAAAAAUFJP"
+    "UCIAAAAgAAAAAAAAAPARMwAAABMAAABBdHRyaWJ1dGVzU2VyaWFsaXplAQAAAABQUk9QHwAAAB0AAAAAAAAA8A4zAAAADAAAAENh"
+    "cGFiaWxpdGllcyEAAAAAAAAAAFBST1AfAAAAHQAAAAAAAADwDjMAAAATAAAARGVmaW5lc0NhcGFiaWxpdGllcwIAUFJPUB0AAAAi"
+    "AAAAAAAAAPYEMwAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUB4AAAAcAAAAAAAAAPANMwAAAAQAAABOYW1lAQsAAABTdGFy"
+    "dGVyUGFja1BST1AgAAAAHgAAAAAAAADwDzMAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1ATAAAAEQAAAAAAAADwAjMA"
+    "AAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASMwAAAAgAAABVbmlxdWVJZB8AAAOPCs2j9y9DXobmVlxaUFJPUCEAAAAf"
+    "AAAAAAAAAPAQNAAAABUAAABBbGxvd0N1c3RvbUFuaW1hdGlvbnMCAVBST1AiAAAAIAAAAAAAAADwETQAAAATAAAAQXR0cmlidXRl"
+    "c1NlcmlhbGl6ZQEAAAAAUFJPUBsAAAAZAAAAAAAAAPAKNAAAAA8AAABBdXRvSnVtcEVuYWJsZWQCAVBST1AzAAAAMQAAAAAAAADw"
+    "IjQAAAAkAAAAQXZhdGFySm9pbnRVcGdyYWRlX1NlcmlhbGl6ZWRSb2xsb3V0EgAAAAJQUk9QJAAAACIAAAAAAAAA8BM0AAAAFQAA"
+    "AENhbWVyYU1heFpvb21EaXN0YW5jZQSGAAAAUFJPUCQAAAAiAAAAAAAAAPATNAAAABUAAABDYW1lcmFNaW5ab29tRGlzdGFuY2UE"
+    "fgAAAFBST1AZAAAAFwAAAAAAAADwCDQAAAAKAAAAQ2FtZXJhTW9kZRIAAAAAUFJPUB8AAAAdAAAAAAAAAPAONAAAAAwAAABDYXBh"
+    "YmlsaXRpZXMhAAAAAAAAAABQUk9QJwAAACUAAAAAAAAA8BY0AAAAGwAAAENoYXJhY3RlckJyZWFrSm9pbnRzT25EZWF0aAIAUFJP"
+    "UCIAAAAgAAAAAAAAAPARNAAAABMAAABDaGFyYWN0ZXJKdW1wSGVpZ2h0BIHMzMxQUk9QIQAAAB8AAAAAAAAA8BA0AAAAEgAAAENo"
+    "YXJhY3Rlckp1bXBQb3dlcgSEkAAAUFJPUCUAAAAjAAAAAAAAAPAUNAAAABYAAABDaGFyYWN0ZXJNYXhTbG9wZUFuZ2xlBIVkAABQ"
+    "Uk9QIQAAAB8AAAAAAAAA8BA0AAAAFQAAAENoYXJhY3RlclVzZUp1bXBQb3dlcgIAUFJPUCEAAAAfAAAAAAAAAPAQNAAAABIAAABD"
+    "aGFyYWN0ZXJXYWxrU3BlZWQEgwAAAFBST1AYAAAAFgAAAAAAAADwBzQAAAAMAAAAQ2xhc3NpY0RlYXRoAgFQUk9QJQAAACMAAAAA"
+    "AAAA8BQ0AAAAGQAAAENyZWF0ZURlZmF1bHRQbGF5ZXJNb2R1bGUCAVBST1AfAAAAHQAAAAAAAADwDjQAAAATAAAARGVmaW5lc0Nh"
+    "cGFiaWxpdGllcwIAUFJPUCUAAAAjAAAAAAAAAPAUNAAAABYAAABEZXZDYW1lcmFPY2NsdXNpb25Nb2RlEgAAAABQUk9QLAAAACoA"
+    "AAAAAAAA8Bs0AAAAHQAAAERldkNvbXB1dGVyQ2FtZXJhTW92ZW1lbnRNb2RlEgAAAABQUk9QJgAAACQAAAAAAAAA8BU0AAAAFwAA"
+    "AERldkNvbXB1dGVyTW92ZW1lbnRNb2RlEgAAAABQUk9QKQAAACcAAAAAAAAA8Bg0AAAAGgAAAERldlRvdWNoQ2FtZXJhTW92ZW1l"
+    "bnRNb2RlEgAAAABQUk9QIwAAACEAAAAAAAAA8BI0AAAAFAAAAERldlRvdWNoTW92ZW1lbnRNb2RlEgAAAABQUk9QIQAAAB8AAAAA"
+    "AAAA8BA0AAAAEgAAAEVuYWJsZUR5bmFtaWNIZWFkcxIAAAAAUFJPUCEAAAAfAAAAAAAAAPAQNAAAABUAAABFbmFibGVNb3VzZUxv"
+    "Y2tPcHRpb24CAVBST1AqAAAAKAAAAAAAAADwGTQAAAAXAAAAR2FtZVNldHRpbmdzQXNzZXRJREZhY2UbAAAAAAAAAABQUk9QKgAA"
+    "ACgAAAAAAAAA8Bk0AAAAFwAAAEdhbWVTZXR0aW5nc0Fzc2V0SURIZWFkGwAAAAAAAAAAUFJPUC0AAAArAAAAAAAAAPAcNAAAABoA"
+    "AABHYW1lU2V0dGluZ3NBc3NldElETGVmdEFybRsAAAAAAAAAAFBST1AtAAAAKwAAAAAAAADwHDQAAAAaAAAAR2FtZVNldHRpbmdz"
+    "QXNzZXRJRExlZnRMZWcbAAAAAAAAAABQUk9QKwAAACkAAAAAAAAA8Bo0AAAAGAAAAEdhbWVTZXR0aW5nc0Fzc2V0SURQYW50cxsA"
+    "AAAAAAAAAFBST1AuAAAALAAAAAAAAADwHTQAAAAbAAAAR2FtZVNldHRpbmdzQXNzZXRJRFJpZ2h0QXJtGwAAAAAAAAAAUFJPUC4A"
+    "AAAsAAAAAAAAAPAdNAAAABsAAABHYW1lU2V0dGluZ3NBc3NldElEUmlnaHRMZWcbAAAAAAAAAABQUk9QKwAAACkAAAAAAAAA8Bo0"
+    "AAAAGAAAAEdhbWVTZXR0aW5nc0Fzc2V0SURTaGlydBsAAAAAAAAAAFBST1AuAAAALAAAAAAAAADwHTQAAAAbAAAAR2FtZVNldHRp"
+    "bmdzQXNzZXRJRFRlZVNoaXJ0GwAAAAAAAAAAUFJPUCsAAAApAAAAAAAAAPAaNAAAABgAAABHYW1lU2V0dGluZ3NBc3NldElEVG9y"
+    "c28bAAAAAAAAAABQUk9QIQAAAB8AAAAAAAAA8BA0AAAAEgAAAEdhbWVTZXR0aW5nc0F2YXRhchIAAAABUFJPUCcAAAAlAAAAAAAA"
+    "APAWNAAAABgAAABHYW1lU2V0dGluZ3NSMTVDb2xsaXNpb24SAAAAAFBST1AxAAAALwAAAAAAAADwIDQAAAAeAAAAR2FtZVNldHRp"
+    "bmdzU2NhbGVSYW5nZUJvZHlUeXBlFwAAAAAAAIA/UFJPUC0AAAArAAAAAAAAAPAcNAAAABoAAABHYW1lU2V0dGluZ3NTY2FsZVJh"
+    "bmdlSGVhZBczM3M/AACAP1BST1AvAAAALQAAAAAAAADwHjQAAAAcAAAAR2FtZVNldHRpbmdzU2NhbGVSYW5nZUhlaWdodBdmZmY/"
+    "ZmaGP1BST1AzAAAAMQAAAAAAAADwIjQAAAAgAAAAR2FtZVNldHRpbmdzU2NhbGVSYW5nZVByb3BvcnRpb24XAAAAAAAAgD9QUk9Q"
+    "LgAAACwAAAAAAAAA8B00AAAAGwAAAEdhbWVTZXR0aW5nc1NjYWxlUmFuZ2VXaWR0aBczMzM/AACAP1BST1AkAAAAIgAAAAAAAADw"
+    "EzQAAAAVAAAASGVhbHRoRGlzcGxheURpc3RhbmNlBIWQAABQUk9QHQAAACIAAAAAAAAA9gQ0AAAACQAAAEhpc3RvcnlJZB8AAQBQ"
+    "AAAAAABQUk9QIwAAACEAAAAAAAAA8BI0AAAAFwAAAExvYWRDaGFyYWN0ZXJBcHBlYXJhbmNlAgFQUk9QKwAAACkAAAAAAAAA8Bo0"
+    "AAAAHAAAAExvYWRDaGFyYWN0ZXJMYXllcmVkQ2xvdGhpbmcSAAAAAFBST1AlAAAAIwAAAAAAAADwFDQAAAAWAAAATHVhQ2hhcmFj"
+    "dGVyQ29udHJvbGxlchIAAAAAUFJPUCAAAAAeAAAAAAAAAPAPNAAAAAQAAABOYW1lAQ0AAABTdGFydGVyUGxheWVyUFJPUCIAAAAg"
+    "AAAAAAAAAPARNAAAABMAAABOYW1lRGlzcGxheURpc3RhbmNlBIWQAABQUk9QHwAAAB0AAAAAAAAA8A40AAAAEAAAAFBsYWNlQXZh"
+    "dGFyUnVsZXMTAAAAAVBST1AhAAAAHwAAAAAAAADwEDQAAAASAAAAUGxheWVyTW9kdWxlU3RhdHVzAwAAAABQUk9QIAAAAB4AAAAA"
+    "AAAA8A80AAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AI0AAAABAAAAFRhZ3McAAAAAFBST1Aj"
+    "AAAAIQAAAAAAAADwEjQAAAAIAAAAVW5pcXVlSWQfAAADjgrNo/cvQ16G5lZcWlBST1AdAAAAGwAAAAAAAADwDDQAAAARAAAAVXNl"
+    "ckVtb3Rlc0VuYWJsZWQCAVBST1AiAAAAIAAAAAAAAADwETUAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAd"
+    "AAAAAAAAAPAONQAAAAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A41AAAAEwAAAERlZmluZXNDYXBh"
+    "YmlsaXRpZXMCAFBST1AdAAAAIgAAAAAAAAD2BDUAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AnAAAAJQAAAAAAAADwFjUA"
+    "AAAEAAAATmFtZQEUAAAAU3RhcnRlclBsYXllclNjcmlwdHNQUk9QIAAAAB4AAAAAAAAA8A81AAAADQAAAFNvdXJjZUFzc2V0SWQb"
+    "AAAAAAAAAAFQUk9QEwAAABEAAAAAAAAA8AI1AAAABAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEjUAAAAIAAAAVW5pcXVl"
+    "SWQfAAAD7ArNo/cvQ16G5lZcWlBST1AiAAAAIAAAAAAAAADwETYAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8A"
+    "AAAdAAAAAAAAAPAONgAAAAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A42AAAAEwAAAERlZmluZXND"
+    "YXBhYmlsaXRpZXMCAFBST1AdAAAAIgAAAAAAAAD2BDYAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AgAAAAHgAAAAAAAADw"
+    "DzYAAAAEAAAATmFtZQENAAAASW5zZXJ0aW9uSGFzaFBST1AgAAAAHgAAAAAAAADwDzYAAAANAAAAU291cmNlQXNzZXRJZBsAAAAA"
+    "AAAAAVBST1ATAAAAEQAAAAAAAADwAjYAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASNgAAAAgAAABVbmlxdWVJZB8A"
+    "AAPuCs2j9y9DXobmVlxaUFJPUDoAAAA4AAAAAAAAAPApNgAAAAUAAABWYWx1ZQEmAAAAezRFOTNCMkI5LTM5MUYtNEJCNC04Njk4"
+    "LThBOERFMDk4RDExM31QUk9QIgAAACAAAAAAAAAA8BE3AAAAEwAAAEF0dHJpYnV0ZXNTZXJpYWxpemUBAAAAAFBST1AfAAAAHQAA"
+    "AAAAAADwDjcAAAAMAAAAQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAONwAAABMAAABEZWZpbmVzQ2FwYWJp"
+    "bGl0aWVzAgBQUk9QLQAAACsAAAAAAAAA8Bw3AAAAIQAAAEVuYWJsZVNjcmlwdENvbGxhYkJ5RGVmYXVsdE9uTG9hZAIAUFJPUB0A"
+    "AAAiAAAAAAAAAPYENwAAAAkAAABIaXN0b3J5SWQfAAEAUAAAAAAAUFJPUB0AAAAbAAAAAAAAAPAMNwAAAAQAAABOYW1lAQoAAABT"
+    "dHVkaW9EYXRhUFJPUCAAAAAeAAAAAAAAAPAPNwAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAAAAABUFJPUBMAAAARAAAAAAAAAPAC"
+    "NwAAAAQAAABUYWdzHAAAAABQUk9QIwAAACEAAAAAAAAA8BI3AAAACAAAAFVuaXF1ZUlkHwAAA4wKzaP3L0NehuZWXFpQUk9QIgAA"
+    "ACAAAAAAAAAA8BE4AAAAEwAAAEF0dHJpYnV0ZXNTZXJpYWxpemUBAAAAAFBST1AfAAAAHQAAAAAAAADwDjgAAAAMAAAAQ2FwYWJp"
+    "bGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAOOAAAABMAAABEZWZpbmVzQ2FwYWJpbGl0aWVzAgBQUk9QEwAAABEAAAAA"
+    "AAAA8AI4AAAABwAAAEVuYWJsZWQCAVBST1AdAAAAIgAAAAAAAAD2BDgAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AYAAAA"
+    "FgAAAAAAAADwBzgAAAAJAAAASW50ZW5zaXR5BHhHrhRQUk9QGgAAABgAAAAAAAAA8Ak4AAAABAAAAE5hbWUBBwAAAFN1blJheXNQ"
+    "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"
+    "dGVTZWNvbmRzTGFnBQAAAAAAAAAAUFJPUCAAAAAeAAAAAAAAAPAPPAAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAAAAABUFJPUBMA"
+    "AAARAAAAAAAAAPACPAAAAAQAAABUYWdzHAAAAABQUk9QJQAAACMAAAAAAAAA8BQ8AAAAGQAAAFRocm90dGxlUGh5c2ljc1RvUmVh"
+    "bHRpbWUCAVBST1AaAAAAGAAAAAAAAADwCTwAAAAHAAAAVGltZW91dAUAAAAAAAAkQFBST1AjAAAAIQAAAAAAAADwEjwAAAAIAAAA"
+    "VW5pcXVlSWQfAAAD4QrNo/cvQ16G5lZcWlBST1AiAAAAIAAAAAAAAADwET0AAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAA"
+    "UFJPUB8AAAAdAAAAAAAAAPAOPQAAAAwAAABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QJAAAACIAAAAAAAAA8BM9AAAAGAAAAENo"
+    "YXRUcmFuc2xhdGlvbkZUVVhTaG93bgIBUFJPUCgAAAAmAAAAAAAAAPAXPQAAABwAAABDaGF0VHJhbnNsYXRpb25Ub2dnbGVFbmFi"
+    "bGVkAgBQUk9QGgAAABgAAAAAAAAA8Ak9AAAACwAAAENoYXRWZXJzaW9uEgAAAAFQUk9QIQAAAB8AAAAAAAAA8BA9AAAAFQAAAENy"
+    "ZWF0ZURlZmF1bHRDb21tYW5kcwIBUFJPUCUAAAAjAAAAAAAAAPAUPQAAABkAAABDcmVhdGVEZWZhdWx0VGV4dENoYW5uZWxzAgFQ"
+    "Uk9QHwAAAB0AAAAAAAAA8A49AAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBST1AkAAAAIgAAAAAAAADwEz0AAAAYAAAASGFz"
+    "U2VlbkRlcHJlY2F0aW9uRGlhbG9nAgBQUk9QHQAAACIAAAAAAAAA9gQ9AAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QIAAA"
+    "AB4AAAAAAAAA8A89AAAAFAAAAElzTGVnYWN5Q2hhdERpc2FibGVkAgFQUk9QIgAAACAAAAAAAAAA8BE9AAAABAAAAE5hbWUBDwAA"
+    "AFRleHRDaGF0U2VydmljZVBST1AlAAAAIwAAAAAAAADwFD0AAAAWAAAAUGxhdGZvcm1JbnRlZ3JhdGVkQ2hhdBIAAAAAUFJPUCAA"
+    "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"
+    "Q2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAORwAAABMAAABEZWZpbmVzQ2FwYWJpbGl0aWVzAgBQUk9QHQAA"
+    "ACIAAAAAAAAA9gRHAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QJgAAACQAAAAAAAAA8BVHAAAABAAAAE5hbWUBEwAAAFZp"
+    "ZGVvQ2FwdHVyZVNlcnZpY2VQUk9QIAAAAB4AAAAAAAAA8A9HAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEA"
+    "AAAAAAAA8AJHAAAABAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEkcAAAAIAAAAVW5pcXVlSWQfAAADdQrNo/cvQ16G5lZc"
+    "WlBST1AiAAAAIAAAAAAAAADwEUgAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAdAAAAAAAAAPAOSAAAAAwA"
+    "AABDYXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QHwAAAB0AAAAAAAAA8A5IAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBST1Ad"
+    "AAAAIgAAAAAAAAD2BEgAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AfAAAAHQAAAAAAAADwDkgAAAAEAAAATmFtZQEMAAAA"
+    "VmlkZW9TZXJ2aWNlUFJPUCAAAAAeAAAAAAAAAPAPSAAAAA0AAABTb3VyY2VBc3NldElkGwAAAAAAAAABUFJPUBMAAAARAAAAAAAA"
+    "APACSAAAAAQAAABUYWdzHAAAAABQUk9QIwAAACEAAAAAAAAA8BJIAAAACAAAAFVuaXF1ZUlkHwAABA8KzaP3L0NehuZWXFpQUk9Q"
+    "IgAAACAAAAAAAAAA8BFJAAAAEwAAAEF0dHJpYnV0ZXNTZXJpYWxpemUBAAAAAFBST1AfAAAAHQAAAAAAAADwDkkAAAAMAAAAQ2Fw"
+    "YWJpbGl0aWVzIQAAAAAAAAAAUFJPUB8AAAAdAAAAAAAAAPAOSQAAABMAAABEZWZpbmVzQ2FwYWJpbGl0aWVzAgBQUk9QHQAAACIA"
+    "AAAAAAAA9gRJAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QJgAAACQAAAAAAAAA8BVJAAAABAAAAE5hbWUBEwAAAFZpcnR1"
+    "YWxJbnB1dE1hbmFnZXJQUk9QIAAAAB4AAAAAAAAA8A9JAAAADQAAAFNvdXJjZUFzc2V0SWQbAAAAAAAAAAFQUk9QEwAAABEAAAAA"
+    "AAAA8AJJAAAABAAAAFRhZ3McAAAAAFBST1AjAAAAIQAAAAAAAADwEkkAAAAIAAAAVW5pcXVlSWQfAAAD4wrNo/cvQ16G5lZcWlBS"
+    "T1AiAAAAIAAAAAAAAADwEUoAAAATAAAAQXR0cmlidXRlc1NlcmlhbGl6ZQEAAAAAUFJPUB8AAAAdAAAAAAAAAPAOSgAAAAwAAABD"
+    "YXBhYmlsaXRpZXMhAAAAAAAAAABQUk9QKQAAACcAAAAAAAAA8BhKAAAAGgAAAERlZmF1bHREaXN0YW5jZUF0dGVudWF0aW9uEgAA"
+    "AABQUk9QHwAAAB0AAAAAAAAA8A5KAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBST1AeAAAAHAAAAAAAAADwDUoAAAASAAAA"
+    "RW5hYmxlRGVmYXVsdFZvaWNlAgFQUk9QKAAAACYAAAAAAAAA8BdKAAAAGQAAAEVuYWJsZVZvaWNlVm9sdW1lQ29udHJvbHMSAAAA"
+    "AFBST1AdAAAAIgAAAAAAAAD2BEoAAAAJAAAASGlzdG9yeUlkHwABAFAAAAAAAFBST1AjAAAAIQAAAAAAAADwEkoAAAAEAAAATmFt"
+    "ZQEQAAAAVm9pY2VDaGF0U2VydmljZVBST1AgAAAAHgAAAAAAAADwD0oAAAANAAAAU291cmNlQXNzZXRJZBsAAAAAAAAAAVBST1AT"
+    "AAAAEQAAAAAAAADwAkoAAAAEAAAAVGFncxwAAAAAUFJPUCMAAAAhAAAAAAAAAPASSgAAAAgAAABVbmlxdWVJZB8AAAPkCs2j9y9D"
+    "XobmVlxaUFJPUBoAAAAYAAAAAAAAAPAJSgAAAAsAAABVc2VBdWRpb0FwaRIAAAACUFJPUBkAAAAXAAAAAAAAAPAISwAAAAoAAABB"
+    "aXJEZW5zaXR5BHU6kqRQUk9QJQAAACMAAAAAAAAA8BRLAAAAFgAAAEFpclR1cmJ1bGVuY2VJbnRlbnNpdHkEAAAAAFBST1AgAAAA"
+    "HgAAAAAAAADwD0sAAAAUAAAAQWxsb3dUaGlyZFBhcnR5U2FsZXMCAFBST1AiAAAAIAAAAAAAAADwEUsAAAATAAAAQXR0cmlidXRl"
+    "c1NlcmlhbGl6ZQEAAAAAUFJPUBwAAAAaAAAAAAAAAPALSwAAAA0AAABBdXRob3JpdHlNb2RlEgAAAAFQUk9QGAAAABYAAAAAAAAA"
+    "8AdLAAAADAAAAEF1dG9TaW11bGF0ZQIBUFJPUCQAAAAiAAAAAAAAAPATSwAAABUAAABBdmF0YXJVbmlmaWNhdGlvbk1vZGUSAAAA"
+    "AFBST1AfAAAAHQAAAAAAAADwDksAAAAMAAAAQ2FwYWJpbGl0aWVzIQAAAAAAAAAAUFJPUCcAAAAlAAAAAAAAAPAWSwAAABgAAABD"
+    "bGllbnRBbmltYXRvclRocm90dGxpbmcSAAAAAFBST1AxAAAALwAAAAAAAADwIEsAAAASAAAAQ29sbGlzaW9uR3JvdXBEYXRhARAA"
+    "AAABAQAE/////wdEZWZhdWx0UFJPUBwAAAAaAAAAAAAAAPALSwAAAA0AAABDdXJyZW50Q2FtZXJhEwAAAAJQUk9QHwAAAB0AAAAA"
+    "AAAA8A5LAAAAEwAAAERlZmluZXNDYXBhYmlsaXRpZXMCAFBST1AmAAAAJAAAAAAAAADwFUsAAAATAAAARGlzdHJpYnV0ZWRHYW1l"
+    "VGltZQUAAAAAAAAAAFBST1AgAAAAHgAAAAAAAADwD0sAAAARAAAARW5hYmxlU0xJTUF2YXRhcnMSAAAAAFBST1AeAAAAHAAAAAAA"
+    "AADwDUsAAAAPAAAARXhwYW5kZWRUZXJyYWluEgAAAABQUk9QHgAAABwAAAAAAAAA8A1LAAAAEgAAAEV4cGxpY2l0QXV0b0pvaW50"
+    "cwIBUFJPUB0AAAAbAAAAAAAAAPAMSwAAABEAAABGYWxsSGVpZ2h0RW5hYmxlZAIBUFJPUCcAAAAlAAAAAAAAAPAWSwAAABgAAABG"
+    "YWxsZW5QYXJ0c0Rlc3Ryb3lIZWlnaHQEh/QAAVBST1AaAAAAGAAAAAAAAADwCUsAAAALAAAARmx1aWRGb3JjZXMSAAAAAFBST1Ah"
+    "AAAAHwAAAAAAAADwEEsAAAAKAAAAR2xvYmFsV2luZA4AAAAAAAAAAAAAAABQUk9QFgAAABQAAAAAAAAA8AVLAAAABwAAAEdyYXZp"
+    "dHkEhohmZlBST1AnAAAAJQAAAAAAAADwFksAAAAQAAAAR3Jhdml0eURpcmVjdGlvbg4AAAAAfwAAAQAAAABQUk9QHQAAACIAAAAA"
+    "AAAA9gRLAAAACQAAAEhpc3RvcnlJZB8AAQBQAAAAAABQUk9QKQAAACcAAAAAAAAA8BhLAAAAGgAAAElLQ29udHJvbENvbnN0cmFp"
+    "bnRTdXBwb3J0EgAAAABQUk9QKgAAACgAAAAAAAAA8BlLAAAAGwAAAEltcHJvdmVkQW5pbWF0aW9uQ29uc3RyYWludBIAAAAAUFJP"
+    "UCkAAAAnAAAAAAAAAPAYSwAAABoAAABJbXByb3ZlZFBoeXNpY3NSZXBsaWNhdGlvbhIAAAAAUFJPUDAAAAAuAAAAAAAAAPAfSwAA"
+    "ACEAAABMYXllcmVkQ2xvdGhpbmdDYWNoZU9wdGltaXphdGlvbnMSAAAAAFBST1AcAAAAGgAAAAAAAADwC0sAAAANAAAATGV2ZWxP"
+    "ZkRldGFpbBIAAAAAUFJPUCAAAAAeAAAAAAAAAPAPSwAAABEAAABMdWF1VHlwZUNoZWNrTW9kZRIAAAAAUFJPUCsAAAApAAAAAAAA"
+    "APAaSwAAABwAAABNYXBUVlJlbW90ZVRvR2FtZXBhZEtleWNvZGVzEgAAAABQUk9QKgAAACgAAAAAAAAA8BlLAAAAGwAAAE1lc2hQ"
+    "YXJ0SGVhZHNBbmRBY2Nlc3NvcmllcxIAAAAAUFJPUCsAAAApAAAAAAAAAPAaSwAAABwAAABNZXNoU3RyZWFtaW5nQW5kSW1wcm92"
+    "ZWRMb2RzEgAAAABQUk9QJwAAACUAAAAAAAAA8BZLAAAADwAAAE1vZGVsTWVzaENGcmFtZRACAAAAAAAAAAAAAAAAUFJPUBwAAAAa"
+    "AAAAAAAAAPALSwAAAA0AAABNb2RlbE1lc2hEYXRhHAAAAABQUk9QJAAAACIAAAAAAAAA8BNLAAAADQAAAE1vZGVsTWVzaFNpemUO"
+    "AAAAAAAAAAAAAAAAUFJPUCUAAAAjAAAAAAAAAPAUSwAAABYAAABNb2RlbFN0cmVhbWluZ0JlaGF2aW9yEgAAAABQUk9QIQAAAB8A"
+    "AAAAAAAA8BBLAAAAEgAAAE1vZGVsU3RyZWFtaW5nTW9kZRIAAAAAUFJPUBwAAAAaAAAAAAAAAPALSwAAAAQAAABOYW1lAQkAAABX"
+    "b3Jrc3BhY2VQUk9QHwAAAB0AAAAAAAAA8A5LAAAAEwAAAE5lZWRzUGl2b3RNaWdyYXRpb24CAFBST1AoAAAAJgAAAAAAAADwF0sA"
+    "AAAZAAAATmV4dEdlbmVyYXRpb25SZXBsaWNhdGlvbhIAAAAAUFJPUCsAAAApAAAAAAAAAPAaSwAAABwAAABQYXRoZmluZGluZ1Vz"
+    "ZUltcHJvdmVkU2VhcmNoEgAAAABQUk9QJAAAACIAAAAAAAAA8BNLAAAAFQAAAFBoeXNpY3NTdGVwcGluZ01ldGhvZBIAAAAAUFJP"
+    "UC0AAAArAAAAAAAAAPAcSwAAAB4AAABQbGF5ZXJDaGFyYWN0ZXJEZXN0cm95QmVoYXZpb3ISAAAAAlBST1AwAAAALgAAAAAAAADw"
+    "H0sAAAAhAAAAUGxheWVyU2NyaXB0c1VzZUlucHV0QWN0aW9uU3lzdGVtEgAAAAJQUk9QJgAAACQAAAAAAAAA8BVLAAAAFwAAAFBy"
+    "ZWRpY3RpdmVTdHJlYW1pbmdNb2RlEgAAAABQUk9QIgAAACAAAAAAAAAA8BFLAAAAEwAAAFByaW1hbFBoeXNpY3NTb2x2ZXISAAAA"
+    "AFBST1AaAAAAGAAAAAAAAADwCUsAAAALAAAAUHJpbWFyeVBhcnQTAAAAAVBST1AnAAAAJQAAAAAAAADwFksAAAAYAAAAUmVqZWN0"
+    "Q2hhcmFjdGVyRGVsZXRpb25zEgAAAABQUk9QKgAAACgAAAAAAAAA8BlLAAAAGwAAAFJlbmRlcmluZ0NhY2hlT3B0aW1pemF0aW9u"
+    "cxIAAAAAUFJPUC4AAAAsAAAAAAAAAPAdSwAAAB8AAABSZXBsaWNhdGVJbnN0YW5jZURlc3Ryb3lTZXR0aW5nEgAAAABQUk9QGgAA"
+    "ABgAAAAAAAAA8AlLAAAACwAAAFJldGFyZ2V0aW5nEgAAAABQUk9QJAAAACIAAAAAAAAA8BNLAAAAFQAAAFNhbmRib3hlZEluc3Rh"
+    "bmNlTW9kZRIAAAAAUFJPUBoAAAAYAAAAAAAAAPAJSwAAAAsAAABTY2FsZUZhY3RvcgR/AAAAUFJPUB4AAAAcAAAAAAAAAPANSwAA"
+    "AA8AAABTaWduYWxCZWhhdmlvcjISAAAAAlBST1AdAAAAGwAAAAAAAADwDEsAAAAOAAAAU2ltdWxhdGlvblJhdGUEfwAAAFBST1AX"
+    "AAAAFQAAAAAAAADwBksAAAAIAAAAU2xpbUhhc2gcAAAAAFBST1AgAAAAHgAAAAAAAADwD0sAAAANAAAAU291cmNlQXNzZXRJZBsA"
+    "AAAAAAAAAVBST1AgAAAAHgAAAAAAAADwD0sAAAARAAAAU3RyZWFtT3V0QmVoYXZpb3ISAAAAAlBST1AjAAAAIQAAAAAAAADwEksA"
+    "AAAXAAAAU3RyZWFtaW5nQWRhcHRpdmVSYWRpdXMCAFBST1AcAAAAGgAAAAAAAADwC0sAAAAQAAAAU3RyZWFtaW5nRW5hYmxlZAIB"
+    "UFJPUCUAAAAjAAAAAAAAAPAUSwAAABYAAABTdHJlYW1pbmdJbnRlZ3JpdHlNb2RlEgAAAANQUk9QIQAAAB8AAAAAAAAA8BBLAAAA"
+    "EgAAAFN0cmVhbWluZ01pblJhZGl1cwMAAACAUFJPUCQAAAAiAAAAAAAAAPATSwAAABUAAABTdHJlYW1pbmdUYXJnZXRSYWRpdXMD"
+    "AAAIAFBST1ATAAAAEQAAAAAAAADwAksAAAAEAAAAVGFncxwAAAAAUFJPUB0AAAAbAAAAAAAAAPAMSwAAABEAAABUZXJyYWluV2Vs"
+    "ZHNGaXhlZAIBUFJPUCwAAAAqAAAAAAAAAPAbSwAAAB0AAABUb3VjaEV2ZW50c1VzZUNvbGxpc2lvbkdyb3VwcxIAAAAAUFJPUCUA"
+    "AAAjAAAAAAAAAPAUSwAAABkAAABUb3VjaGVzVXNlQ29sbGlzaW9uR3JvdXBzAgBQUk9QIwAAACEAAAAAAAAA8BJLAAAACAAAAFVu"
+    "aXF1ZUlkHwAAAAIKzaP3L0NehuZWXFpQUk9QIQAAAB8AAAAAAAAA8BBLAAAAEgAAAFVzZUZpeGVkU2ltdWxhdGlvbhIAAAAAUFJP"
+    "UBsAAAAZAAAAAAAAAPAKSwAAAAwAAABVc2VJbnB1dFNpbmsSAAAAAFBST1AjAAAAIQAAAAAAAADwEksAAAAUAAAAVXNlTmV3THVh"
+    "dVR5cGVTb2x2ZXISAAAAAlBST1AtAAAAKwAAAAAAAADwHEsAAAAeAAAAVmFsaWRhdGVFbmFibGVkUHJveGltaXR5UHJvbXB0EgAA"
+    "AABQUk9QEwAAABEAAAAAAAAA8AJLAAAABAAAAFdpbmQEAAAAAFBST1AkAAAAIgAAAAAAAADwE0sAAAANAAAAV2luZERpcmVjdGlv"
+    "bg4AAAAAAAAAAAAAAABQUk9QJAAAACcAAAAAAAAA9AtLAAAADgAAAFdvcmxkUGl2b3REYXRhHhACAAEAUAAAAAIBUFJOVG8AAAB9"
+    "AgAAAAAAAD8ATwABANyVAgQBBAQBCQ4CAQCgBAIEAgICBwoPEgwAIAMGGQAgBAEUAAwCAAEUACgJDBcADz4B22cEAwAKCQH0APEA"
+    "JgAGAAAABQAlAAAAPgA9GgAhTk0HAAsCABB6EAAQeQUAkAAAAAAAAAAAAEVORAAAAAAACQAAAAAAAAA8L3JvYmxveD4="
+)
+
+
+def _baseplate_bytes():
+    ext = Path(__file__).parent / 'templates' / 'Baseplate.rbxl'
+    if ext.is_file():
+        return ext.read_bytes()
+    return base64.b64decode(_BASEPLATE_B64)
+
+
+def _load_baseplate_into_state():
+    """Открывает шаблон Baseplate как свежую несохранённую сцену. Возвращает
+    число объектов; при любой ошибке бросает исключение (api_new откатится на
+    пустую сцену)."""
+    import tempfile
+    tmp_path = None
+    try:
+        data = _baseplate_bytes()
+        # parse_rbxl на мусоре не падает, а отдаёт пустую сцену — проверяем сами
+        if data[:8] != b'<roblox!':
+            raise RuntimeError('шаблон Baseplate — не бинарный .rbxl')
+        with tempfile.NamedTemporaryFile(suffix='.rbxl', delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        parsed = parse_rbxl(tmp_path)
+        if 'Workspace' not in parsed['referent_to_class'].values():
+            raise RuntimeError('в шаблоне Baseplate нет Workspace')
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+    state['parsed'] = parsed
+    state['file_path'] = None   # Ctrl+S откроет «Сохранить как», шаблон не перезаписывается
+    return len(parsed['referent_to_class'])
+
+
 @flask_app.route('/api/new', methods=['POST'])
 def api_new():
-    """Создаёт пустую сцену в памяти сервера (без файла на диске) — набор
+    """Новая сцена = шаблон Baseplate (см. _load_baseplate_into_state); если
+    он по какой-то причине не загрузился — пустая сцена, как раньше:
+    создаёт её в памяти сервера (без файла на диске) — набор
     стандартных сервисов Roblox верхнего уровня, как в новом плейсе.
     Нужно, чтобы фичи вроде импорта Instance (например, 3D-аватара)
     работали даже без предварительно открытого .rbxl — раньше PUT
@@ -1268,6 +2463,12 @@ def api_new():
     полностью пересобрать бинарник даже без _raw_chunks/_raw_data
     (см. ветку "с нуля" в save_rbxl), так что Save/Save As после этого
     работает как обычно — путь просто нужно будет выбрать при сохранении."""
+    want_empty = ((request.get_json(silent=True) or {}).get('template') == 'empty')
+    if not want_empty:
+        try:
+            return jsonify({'ok': True, 'count': _load_baseplate_into_state(), 'template': 'Baseplate'})
+        except Exception:
+            traceback.print_exc()   # шаблон не загрузился — делаем пустую сцену, как раньше
     services = [
         'Workspace', 'Lighting', 'ReplicatedStorage', 'ReplicatedFirst',
         'ServerScriptService', 'ServerStorage', 'StarterGui', 'StarterPack',
@@ -1354,6 +2555,59 @@ def _value_for_client(cls, v):
     return None
 
 
+def _decode_attributes(data):
+    """AttributesSerialize (бинарный формат атрибутов Roblox) -> {имя: значение} для string/bool/number.
+    Остальные типы (Color3, Vector, UDim...) пропускаются, но читаются до конца, чтобы не сбить следующие атрибуты.
+    Формат: u32 число атрибутов; для каждого: u32 длина имени, имя, u8 тип, значение (string: u32 длина + байты;
+    bool: 1; int32: 4; float: 4; double: 8; UDim 8; UDim2 16; BrickColor 4; Color3/Vector3 12; Vector2 8).
+    Сверено на реальных данных карты (30 инстансов, типы 0x02/0x03/0x06/0x0F/0x10, декодер доходит до конца)."""
+    import struct
+    out = {}
+    try:
+        n = struct.unpack_from('<I', data, 0)[0]
+        o = 4
+        for _ in range(n):
+            ln = struct.unpack_from('<I', data, o)[0]; o += 4
+            name = data[o:o + ln].decode('utf-8', 'replace'); o += ln
+            t = data[o]; o += 1
+            if t == 0x02:
+                l2 = struct.unpack_from('<I', data, o)[0]; o += 4
+                out[name] = data[o:o + l2].decode('utf-8', 'replace'); o += l2
+            elif t == 0x03:
+                out[name] = bool(data[o]); o += 1
+            elif t == 0x04:
+                out[name] = struct.unpack_from('<i', data, o)[0]; o += 4
+            elif t == 0x05:
+                out[name] = struct.unpack_from('<f', data, o)[0]; o += 4
+            elif t == 0x06:
+                out[name] = struct.unpack_from('<d', data, o)[0]; o += 8
+            elif t == 0x09 or t == 0x10:
+                o += 8
+            elif t == 0x0A:
+                o += 16
+            elif t == 0x0E:
+                o += 4
+            elif t == 0x0F or t == 0x11:
+                o += 12
+            else:
+                break    # неизвестный тип — размер неизвестен, дальше читать нельзя
+    except Exception:
+        pass
+    return out
+
+
+def _decode_tags(value, shared_strings):
+    """Свойство Tags (CollectionService) хранится как SharedString: строка тегов через \0."""
+    raw = None
+    if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < len(shared_strings):
+        raw = shared_strings[value][1]
+    elif isinstance(value, (bytes, bytearray)):
+        raw = value
+    if not raw:
+        return []
+    return [t for t in bytes(raw).decode('utf-8', 'replace').split('\0') if t]
+
+
 @flask_app.route('/api/all_instances')
 def api_all_instances():
     # Плоский СЫРОЙ список ВСЕХ инстансов карты — ref/class/name/parent, без
@@ -1380,6 +2634,20 @@ def api_all_instances():
     for ref, cls in r2c.items():
         name = pr.get(ref, {}).get('Name', cls)
         item = {'ref': ref, 'cls': cls, 'name': name, 'parent': pm.get(ref, -1)}
+        # Атрибуты и теги объекта из файла (Tool: viewModel/damage/..., форсфилды: теги PinkForcefield и т.д.) —
+        # раньше не читались вообще, поэтому GetAttribute/GetTagged по объектам карты всегда возвращали nil/пусто.
+        _pp = pr.get(ref, {})
+        _ab = _pp.get('AttributesSerialize')
+        if isinstance(_ab, (bytes, bytearray)) and _ab:
+            _attrs = _decode_attributes(bytes(_ab))
+            if _attrs:
+                item['attrs'] = _attrs
+        _tg = _decode_tags(_pp.get('Tags'), parsed.get('shared_strings') or [])
+        if _tg:
+            item['tags'] = _tg
+        if cls == 'Team':
+            item['teamColor'] = _pp.get('TeamColor')
+            item['autoAssignable'] = _pp.get('AutoAssignable', True)
         if cls == 'Sound':
             # SoundId/Volume/Looped — заданные ПРЯМО В ФАЙЛЕ (а не через
             # Instance.new(...).SoundId = ... из Lua) звуки. Раньше сюда
@@ -1725,13 +2993,33 @@ def api_spawn_point():
         anchored = props.get('Anchored', False)
         if isinstance(anchored, str):
             anchored = anchored.lower() in ('true', '1')
-        candidates.append((bool(anchored), px, py + sy * 0.5, pz))
+        neutral = props.get('Neutral', True)
+        if isinstance(neutral, str):
+            neutral = neutral.lower() in ('true', '1')
+        candidates.append((bool(anchored), px, py + sy * 0.5, pz, props.get('TeamColor'), bool(neutral)))
 
     if not candidates:
         return jsonify({'ok': False, 'error': 'no SpawnLocation in scene'})
 
+    # team=auto: как в Roblox, игрок при входе попадает в первую AutoAssignable-команду и появляется на SpawnLocation
+    # СВОЕЙ команды (TeamColor совпал, Neutral=false); нет такого — на нейтральном. Раньше брался просто первый спавн,
+    # и Pink-игрок оказывался в зелёной зоне, по ту сторону чужого форсфилда.
+    if request.args.get('team') == 'auto':
+        team_color = None
+        for ref, cls in parsed['referent_to_class'].items():
+            if cls == 'Team' and parsed['props'].get(ref, {}).get('AutoAssignable', True):
+                team_color = parsed['props'].get(ref, {}).get('TeamColor')
+                break
+        if team_color is not None:
+            exact = [c for c in candidates if c[4] == team_color and not c[5]]
+            neutral_c = [c for c in candidates if c[5]]
+            if exact:
+                candidates = exact
+            elif neutral_c:
+                candidates = neutral_c
+
     candidates.sort(key=lambda c: not c[0])  # anchored=True первыми
-    _, x, y, z = candidates[0]
+    x, y, z = candidates[0][1], candidates[0][2], candidates[0][3]
     return jsonify({'ok': True, 'x': x, 'y': y, 'z': z, 'anchored': candidates[0][0]})
 
 
@@ -2010,6 +3298,7 @@ def api_save():
         if ext in ('.rbxl', '.rbxlx'):
             save_rbxl(parsed, str(p))
             state['file_path'] = str(p)
+            _recents_add_file(p)
             return jsonify({'ok': True, 'path': str(p)})
         else:
             out = {}
@@ -2279,6 +3568,46 @@ def _roblox_headers():
 @flask_app.route('/api/roblox/auth-status')
 def api_roblox_auth_status():
     return jsonify({'ok': True, 'loggedIn': _roblox_cookie() is not None})
+
+
+@flask_app.route('/api/roblox/cookie', methods=['POST'])
+def api_roblox_cookie_save():
+    """Вход на десктопе (в Android входит WebView, см. RobloxLoginActivity).
+    Тело: {cookie}: значение .ROBLOSECURITY (с префиксом или без). Кука
+    проверяется запросом к Roblox и сохраняется в roblox_auth.json (0600);
+    в ответ она НЕ возвращается. Только с локальной машины: кука даёт
+    полный доступ к аккаунту, а сервер слушает 0.0.0.0."""
+    if request.remote_addr not in ('127.0.0.1', '::1'):
+        return jsonify({'ok': False, 'error': 'Только с локального устройства'}), 403
+    body = request.get_json(silent=True) or {}
+    val = str(body.get('cookie') or '').strip().strip('"\'')
+    if val.upper().startswith('.ROBLOSECURITY='):
+        val = val.split('=', 1)[1].strip().strip('"\'')
+    if len(val) < 100 or any(c in val for c in ' ;\r\n'):
+        return jsonify({'ok': False, 'error': 'Не похоже на значение .ROBLOSECURITY'}), 400
+
+    p = _roblox_auth_file()
+    old = p.read_text(encoding='utf-8') if p.exists() else None
+    try:
+        p.write_text(json.dumps({'cookie': '.ROBLOSECURITY=' + val}), encoding='utf-8')
+        try:
+            os.chmod(p, 0o600)
+        except Exception:
+            pass
+        d = _rbx_get_json('https://users.roblox.com/v1/users/authenticated')
+        if not (isinstance(d, dict) and d.get('id')):
+            raise RuntimeError('в ответе нет id')
+    except Exception as e:
+        # не прошла проверка — возвращаем прежнее состояние
+        try:
+            if old is None:
+                p.unlink()
+            else:
+                p.write_text(old, encoding='utf-8')
+        except Exception:
+            pass
+        return jsonify({'ok': False, 'error': f'Roblox не принял куку: {e}'}), 400
+    return jsonify({'ok': True, 'name': d.get('name') or '', 'userId': d.get('id')})
 
 
 @flask_app.route('/api/roblox/logout', methods=['POST'])
@@ -3517,7 +4846,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-16 · ui-scale'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-10-18 · start-screen'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

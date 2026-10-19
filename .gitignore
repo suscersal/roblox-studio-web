@@ -9,3 +9,6 @@ fnf.rbxl
 *.7z
 *.log
 roblox_apikey.json
+roblox_auth.json
+recent_files.json
+recent_files/
