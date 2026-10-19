@@ -1491,6 +1491,56 @@ def api_roblox_experiences():
     return jsonify({'ok': True, 'experiences': items})
 
 
+_DOH_CACHE = {}
+
+
+def _doh_resolve(host):
+    """A-запись через DNS-over-HTTPS (обходит сломанный системный DNS)."""
+    if host in _DOH_CACHE:
+        return _DOH_CACHE[host]
+    last = None
+    for url in ('https://1.1.1.1/dns-query?name=%s&type=A' % host,
+                'https://8.8.8.8/resolve?name=%s&type=A' % host,
+                'https://dns.google/resolve?name=%s&type=A' % host):
+        try:
+            rq = _req.Request(url, headers={'Accept': 'application/dns-json'})
+            with _req.urlopen(rq, timeout=8) as resp:
+                d = json.loads(resp.read().decode('utf-8', 'replace'))
+            ips = [a['data'] for a in d.get('Answer', []) if a.get('type') == 1]
+            if ips:
+                _DOH_CACHE[host] = ips
+                return ips
+            last = 'нет A-записей'
+        except Exception as e:
+            last = repr(e)
+    raise RuntimeError('DoH не сработал: ' + str(last))
+
+
+def _fetch_via_doh(pu, hdr):
+    import socket as _sock, ssl as _ssl, http.client as _hc
+    host = pu.hostname
+    path = (pu.path or '/') + ('?' + pu.query if pu.query else '')
+    err = None
+    for ip in _doh_resolve(host):
+        try:
+            class _IPConn(_hc.HTTPSConnection):
+                def connect(self_):
+                    sk = _sock.create_connection((ip, 443), 15)
+                    self_.sock = self_._context.wrap_socket(sk, server_hostname=host)
+            conn = _IPConn(host, timeout=15, context=_ssl.create_default_context())
+            h = dict(hdr)
+            h['Host'] = host
+            conn.request('GET', path, headers=h)
+            r = conn.getresponse()
+            data = r.read()
+            if r.status != 200:
+                raise RuntimeError('HTTP %d' % r.status)
+            return r.getheader('Content-Type', 'image/png'), data
+        except Exception as e:
+            err = e
+    raise RuntimeError(repr(err))
+
+
 _THUMB_CACHE = {}
 _THUMB_CACHE_MAX = 400
 
@@ -1513,18 +1563,23 @@ def api_roblox_thumb():
     if hit:
         ct, data = hit
     else:
+        hdr = dict(ROBLOX_HEADERS_BASE)       # без куки: CDN она не нужна
+        hdr['Referer'] = 'https://www.roblox.com/'
+        hdr['Accept'] = 'image/avif,image/webp,image/png,image/*;q=0.8'
+        hdr.pop('Accept-Encoding', None)      # отдаём картинку как есть, без gzip
         try:
-            hdr = dict(ROBLOX_HEADERS_BASE)       # без куки: CDN она не нужна
-            hdr['Referer'] = 'https://www.roblox.com/'
-            hdr['Accept'] = 'image/avif,image/webp,image/png,image/*;q=0.8'
-            hdr.pop('Accept-Encoding', None)      # отдаём картинку как есть, без gzip
             r = _req.Request(u, headers=hdr)
             with _req.urlopen(r, timeout=15) as resp:
                 data = resp.read()
                 ct = resp.headers.get('Content-Type', 'image/png')
-        except Exception as e:
-            print('[thumb] FAIL', u, '->', repr(e))
-            return Response('thumb fetch failed: ' + repr(e), status=502)
+        except Exception as e1:
+            # Часто rbxcdn.com не резолвится системным DNS (gaierror) —
+            # тогда резолвим сами через DNS-over-HTTPS и ходим по IP.
+            try:
+                ct, data = _fetch_via_doh(pu, hdr)
+            except Exception as e2:
+                print('[thumb] FAIL', u, '->', repr(e1), '| DoH:', repr(e2))
+                return Response('thumb fetch failed: ' + repr(e1) + ' | DoH: ' + repr(e2), status=502)
         if len(_THUMB_CACHE) >= _THUMB_CACHE_MAX:
             _THUMB_CACHE.pop(next(iter(_THUMB_CACHE)))
         _THUMB_CACHE[u] = (ct, data)
