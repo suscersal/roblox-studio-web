@@ -12011,7 +12011,12 @@ end
         }
 
         function _stTileFail(img) {
-            console.warn('Иконка не загрузилась: ' + img.getAttribute('data-src'));
+            if (!window._stThumbDiag) {   // причина — один раз, не на каждую карточку
+                window._stThumbDiag = true;
+                fetch(img.src).then(r => r.text().then(tx =>
+                    console.error('thumb HTTP ' + r.status + ': ' + tx.slice(0, 300))))
+                    .catch(e => console.error('thumb fetch: ' + e));
+            }
             const d = document.createElement('div');
             d.className = 'st-tile';
             d.textContent = img.getAttribute('data-glyph') || '🌐';

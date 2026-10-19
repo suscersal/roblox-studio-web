@@ -1514,12 +1514,17 @@ def api_roblox_thumb():
         ct, data = hit
     else:
         try:
-            r = _req.Request(u, headers={'User-Agent': ROBLOX_HEADERS_BASE.get('User-Agent', 'Mozilla/5.0')})
+            hdr = dict(ROBLOX_HEADERS_BASE)       # без куки: CDN она не нужна
+            hdr['Referer'] = 'https://www.roblox.com/'
+            hdr['Accept'] = 'image/avif,image/webp,image/png,image/*;q=0.8'
+            hdr.pop('Accept-Encoding', None)      # отдаём картинку как есть, без gzip
+            r = _req.Request(u, headers=hdr)
             with _req.urlopen(r, timeout=15) as resp:
                 data = resp.read()
                 ct = resp.headers.get('Content-Type', 'image/png')
         except Exception as e:
-            return Response('thumb fetch failed: ' + str(e), status=502)
+            print('[thumb] FAIL', u, '->', repr(e))
+            return Response('thumb fetch failed: ' + repr(e), status=502)
         if len(_THUMB_CACHE) >= _THUMB_CACHE_MAX:
             _THUMB_CACHE.pop(next(iter(_THUMB_CACHE)))
         _THUMB_CACHE[u] = (ct, data)
