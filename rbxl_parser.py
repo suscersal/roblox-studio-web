@@ -477,6 +477,24 @@ def t_cframe(buf, count):
         e['position'] = p
     return entries
 
+def t_optionalcframe(buf, count):
+    """OptionalCFrame (0x1e, напр. Model.WorldPivotData): внутри лежат подряд
+    CFrame-массив (с собственным байтом типа 0x10) и Bool-массив (0x02)
+    «значение задано». None — значение не задано."""
+    if not buf or buf[0] != 0x10:
+        raise ValueError('OptionalCFrame: ожидался вложенный тип 0x10')
+    pos = 1
+    for _ in range(count):
+        cid = buf[pos]; pos += 1
+        if cid == 0x00:
+            pos += 36
+    pos += 12 * count
+    cfs = t_cframe(buf[1:pos], count)
+    if pos >= len(buf) or buf[pos] != 0x02:
+        raise ValueError('OptionalCFrame: ожидался вложенный тип 0x02')
+    flags = t_bool(buf[pos + 1:], count)
+    return [cf if (i < len(flags) and flags[i]) else None for i, cf in enumerate(cfs)]
+
 def t_enum(buf, count):
     return read_interleaved_u32_array(buf, count)
 
@@ -744,6 +762,12 @@ def s_cframe(vals):
     buf.extend(s_vector3(positions))
     return bytes(buf)
 
+def s_optionalcframe(vals):
+    ident = {'special_id': 0x02, 'position': {'x': 0.0, 'y': 0.0, 'z': 0.0}}
+    cfs = [v if isinstance(v, dict) else ident for v in vals]
+    flags = [isinstance(v, dict) for v in vals]
+    return bytes([0x10]) + s_cframe(cfs) + bytes([0x02]) + s_bool(flags)
+
 def s_enum(vals):
     return write_interleaved_u32_array([int(v) if v is not None else 0 for v in vals])
 
@@ -905,7 +929,7 @@ TYPE_DECODERS = {
     0x16: t_colorsequence, 0x17: t_numberrange, 0x18: t_rect,
     0x19: t_physicalproperties, 0x1a: t_color3uint8, 0x1b: t_int64,
     0x1c: t_sharedstring, 0x1d: t_string, 0x1f: t_uniqueid, 0x20: t_font,
-    0x21: t_capabilities,
+    0x1e: t_optionalcframe, 0x21: t_capabilities,
 }
 
 TYPE_SERIALIZERS = {
@@ -917,7 +941,7 @@ TYPE_SERIALIZERS = {
     0x16: s_colorsequence, 0x17: s_numberrange, 0x18: s_rect,
     0x19: s_physicalproperties, 0x1a: s_color3uint8, 0x1b: s_int64,
     0x1c: s_sharedstring, 0x1d: s_string, 0x1f: s_uniqueid, 0x20: s_font,
-    0x21: s_capabilities,
+    0x1e: s_optionalcframe, 0x21: s_capabilities,
 }
 
 
