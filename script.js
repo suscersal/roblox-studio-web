@@ -12273,30 +12273,66 @@ end
             loadPlaceFromRoblox(x.placeId, x.universeId);
         }
 
+        // === Крутилка на время загрузки плейса/файла
+        function showLoading(text) {
+            if (!document.getElementById('rsw-loading-css')) {
+                const st = document.createElement('style');
+                st.id = 'rsw-loading-css';
+                st.textContent =
+                    '#rsw-loading{position:fixed;inset:0;z-index:5000;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:rgba(10,14,26,.72);color:#fff;font:600 15px/1.3 sans-serif;text-align:center;padding:20px;touch-action:none}' +
+                    '#rsw-loading.show{display:flex}#rsw-loading .rsw-load-text{white-space:pre-line}' +
+                    '#rsw-loading .rsw-spin{width:54px;height:54px;border-radius:50%;border:5px solid rgba(255,255,255,.25);border-top-color:#fff;animation:rswspin .8s linear infinite}' +
+                    '@keyframes rswspin{to{transform:rotate(360deg)}}';
+                document.head.appendChild(st);
+            }
+            let el = document.getElementById('rsw-loading');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'rsw-loading';
+                el.innerHTML = '<div class="rsw-spin"></div><div class="rsw-load-text"></div>';
+                document.body.appendChild(el);
+            }
+            el.querySelector('.rsw-load-text').textContent = text || '';
+            el.classList.add('show');
+        }
+
+        function hideLoading() {
+            const el = document.getElementById('rsw-loading');
+            if (el) el.classList.remove('show');
+        }
+
         async function loadPlaceFromRoblox(placeId, universeId, version) {
             closeModal();
-            notify(t('dl_loading'));
-            const r = await api('POST', '/api/open/place', {
-                place_id: placeId, universe_id: universeId || '', version: version || '',
-                name: window._rbxPendingName || ''
-            });
-            if (r.ok) {
-                hideStartScreen();
-                window._startMode = false;
-                window._rbxOrigin = {
-                    placeId: r.place_id,
-                    universeId: r.universe_id || universeId || '',
-                    name: window._rbxPendingName || ''
-                };
-                window._rbxPendingName = '';
-                selectedRef = null;
-                selectedRefs = new Set();
-                expanded.clear();
-                window._avatarMeshCache = {};
-                await loadTree();
-                notify(t('dl_ok', { n: r.count }));
-            } else {
-                notify(r.error || t('notify_error'), 'err');
+            const _nm = window._rbxPendingName || '';
+            showLoading(t('dl_loading') + (_nm ? '\n' + _nm : ''));
+            try {
+                const r = await api('POST', '/api/open/place', {
+                    place_id: placeId, universe_id: universeId || '', version: version || '',
+                    name: _nm
+                });
+                if (r.ok) {
+                    hideStartScreen();
+                    window._startMode = false;
+                    window._rbxOrigin = {
+                        placeId: r.place_id,
+                        universeId: r.universe_id || universeId || '',
+                        name: window._rbxPendingName || ''
+                    };
+                    window._rbxPendingName = '';
+                    selectedRef = null;
+                    selectedRefs = new Set();
+                    expanded.clear();
+                    window._avatarMeshCache = {};
+                    await loadTree();
+                    notify(t('dl_ok', { n: r.count }));
+                } else {
+                    notify(r.error || t('notify_error'), 'err');
+                }
+            } catch (e) {
+                console.error('loadPlaceFromRoblox:', e);
+                notify(String(e), 'err');
+            } finally {
+                hideLoading();
             }
         }
 
