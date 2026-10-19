@@ -187,6 +187,268 @@
          <script>, но один: cmEditor создаётся в DOMContentLoaded-колбэке чуть
          ниже, так что достаточно, чтобы бандл успел выполниться до этого
          события (обычный порядковый <script> это и так гарантирует). -->
+<!-- ==== ВРЕМЕННАЯ DEBUG-КОНСОЛЬ  ==== -->
+    <script>
+        (function () {
+            var maxLines = 300;
+            var MIN_HEIGHT = 120;
+            var MAX_HEIGHT_RATIO = 0.85;
+            var consoleHeight = Math.round(window.innerHeight * 0.32);
+            try {
+                var savedHeight = parseInt(localStorage.getItem('rsw_debug_height'), 10);
+                if (!isNaN(savedHeight)) consoleHeight = savedHeight;
+            } catch (e) { }
+
+            var box = document.createElement('div');
+            box.id = 'debugConsole';
+            box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;background:rgba(0,0,0,0.92);' +
+                'color:#0f0;font:11px/1.4 monospace;overflow-y:scroll;-webkit-overflow-scrolling:touch;' +
+                'touch-action:pan-y;overscroll-behavior:contain;z-index:999999;padding:18px 8px 6px 8px;' +
+                'box-sizing:border-box;white-space:pre-wrap;word-break:break-all;border-top:2px solid #0f0;' +
+                'display:none;height:' + consoleHeight + 'px;';
+
+            // Полоска-хваталка сверху консоли — перетаскиванием вверх/вниз
+            // можно менять её высоту (как перетаскиваемый bottom sheet).
+            // position:absolute внутри position:fixed родителя не скроллится
+            // вместе с содержимым лога — остаётся приклеенной к верхнему краю.
+            var handle = document.createElement('div');
+            handle.id = 'debugConsoleHandle';
+            handle.style.cssText = 'position:absolute;top:0;left:0;right:0;height:16px;cursor:ns-resize;' +
+                'display:flex;align-items:center;justify-content:center;touch-action:none;' +
+                'background:rgba(0,0,0,0.92);z-index:1;';
+            handle.innerHTML = '<div style="width:36px;height:4px;border-radius:2px;background:#0f0;opacity:0.6;"></div>';
+
+            var toggle = document.createElement('button');
+            toggle.textContent = '🐞';
+            toggle.style.cssText = 'position:fixed;right:8px;z-index:1000000;width:36px;' +
+                'height:36px;border-radius:50%;background:#222;color:#0f0;border:1px solid #0f0;font-size:16px;' +
+                'touch-action:none;';
+
+            // Кнопки быстрой прокрутки лога вверх/вниз — видны только пока консоль открыта.
+            var btnStyle = 'position:fixed;right:8px;z-index:1000001;width:36px;height:36px;border-radius:50%;' +
+                'background:#222;color:#0f0;border:1px solid #0f0;font-size:16px;display:none;';
+            var btnTop = document.createElement('button');
+            btnTop.textContent = '⬆';
+            btnTop.style.cssText = btnStyle;
+            btnTop.onclick = function () { box.scrollTop = 0; };
+            var btnBottom = document.createElement('button');
+            btnBottom.textContent = '⬇';
+            btnBottom.style.cssText = btnStyle;
+            btnBottom.onclick = function () { box.scrollTop = box.scrollHeight; };
+
+            // Высота консоли определяет, где над ней висит кнопка-переключатель
+            // и кнопки прокрутки — пересчитываем при каждом изменении высоты.
+            // Все три кнопки размещаются НАД консолью (bottom = consoleHeight + 8),
+            // в один ряд, чтобы консоль их не перекрывала.
+            function layoutForHeight() {
+                box.style.height = consoleHeight + 'px';
+                btnTop.style.bottom = (consoleHeight + 8) + 'px';
+                btnTop.style.right = '52px';
+                btnBottom.style.bottom = (consoleHeight + 8) + 'px';
+                btnBottom.style.right = '96px';
+                if (!toggleHasCustomPos) {
+                    toggle.style.left = 'auto';
+                    toggle.style.top = 'auto';
+                    toggle.style.bottom = (consoleHeight + 8) + 'px';
+                }
+            }
+
+            function saveHeight() {
+                try { localStorage.setItem('rsw_debug_height', String(consoleHeight)); } catch (e) { }
+            }
+
+            // --- Перетаскивание хваталки: изменение высоты консоли ---
+            (function () {
+                var dragging = false;
+                var startY = 0;
+                var startHeight = 0;
+                handle.addEventListener('pointerdown', function (e) {
+                    dragging = true;
+                    startY = e.clientY;
+                    startHeight = consoleHeight;
+                    try { handle.setPointerCapture(e.pointerId); } catch (err) { }
+                });
+                handle.addEventListener('pointermove', function (e) {
+                    if (!dragging) return;
+                    var dy = e.clientY - startY;
+                    var maxHeight = Math.round(window.innerHeight * MAX_HEIGHT_RATIO);
+                    consoleHeight = Math.max(MIN_HEIGHT, Math.min(startHeight - dy, maxHeight));
+                    layoutForHeight();
+                });
+                function endHandleDrag() {
+                    if (!dragging) return;
+                    dragging = false;
+                    saveHeight();
+                }
+                handle.addEventListener('pointerup', endHandleDrag);
+                handle.addEventListener('pointercancel', endHandleDrag);
+            })();
+
+            // --- Перетаскивание кнопки 🐞 в любое место экрана (как иконка mod-меню) ---
+            var toggleHasCustomPos = false;
+            (function () {
+                var DRAG_THRESHOLD = 6;
+                var dragging = false;
+                var moved = false;
+                var startX = 0, startY = 0;
+                var startRight = 0, startBottom = 0;
+
+                try {
+                    var saved = JSON.parse(localStorage.getItem('rsw_debug_btn_pos') || 'null');
+                    if (saved && typeof saved.right === 'number' && typeof saved.bottom === 'number') {
+                        toggleHasCustomPos = true;
+                        applyTogglePos(saved.right, saved.bottom);
+                    }
+                } catch (e) { }
+
+                function applyTogglePos(right, bottom) {
+                    var maxRight = window.innerWidth - 36 - 4;
+                    var maxBottom = window.innerHeight - 36 - 4;
+                    right = Math.max(4, Math.min(right, maxRight));
+                    bottom = Math.max(4, Math.min(bottom, maxBottom));
+                    toggle.style.left = 'auto';
+                    toggle.style.top = 'auto';
+                    toggle.style.right = right + 'px';
+                    toggle.style.bottom = bottom + 'px';
+                    return { right: right, bottom: bottom };
+                }
+
+                toggle.addEventListener('pointerdown', function (e) {
+                    dragging = true;
+                    moved = false;
+                    startX = e.clientX;
+                    startY = e.clientY;
+                    var rect = toggle.getBoundingClientRect();
+                    startRight = window.innerWidth - rect.right;
+                    startBottom = window.innerHeight - rect.bottom;
+                    try { toggle.setPointerCapture(e.pointerId); } catch (err) { }
+                });
+
+                toggle.addEventListener('pointermove', function (e) {
+                    if (!dragging) return;
+                    var dx = e.clientX - startX;
+                    var dy = e.clientY - startY;
+                    if (!moved && (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD)) moved = true;
+                    if (moved) {
+                        toggleHasCustomPos = true;
+                        applyTogglePos(startRight - dx, startBottom - dy);
+                    }
+                });
+
+                function endToggleDrag(e) {
+                    if (!dragging) return;
+                    dragging = false;
+                    if (moved) {
+                        var rect = toggle.getBoundingClientRect();
+                        var pos = { right: window.innerWidth - rect.right, bottom: window.innerHeight - rect.bottom };
+                        try { localStorage.setItem('rsw_debug_btn_pos', JSON.stringify(pos)); } catch (err) { }
+                        // Не даём этому же жесту сработать как клик (открыть/закрыть консоль).
+                        var suppressClick = function (ev) { ev.stopPropagation(); ev.preventDefault(); };
+                        toggle.addEventListener('click', suppressClick, { capture: true, once: true });
+                    }
+                }
+                toggle.addEventListener('pointerup', endToggleDrag);
+                toggle.addEventListener('pointercancel', endToggleDrag);
+                // В коде инициализации дебаг-консоли:
+                toggle.style.cssText = 'position:fixed;right:8px;z-index:10000000;width:36px;' +
+                    'height:36px;border-radius:50%;background:#222;color:#0f0;border:1px solid #0f0;font-size:16px;' +
+                    'touch-action:none;cursor:pointer;';
+            })();
+
+            toggle.onclick = function () {
+                var show = box.style.display === 'none';
+                box.style.display = show ? 'block' : 'none';
+                btnTop.style.display = show ? 'block' : 'none';
+                btnBottom.style.display = show ? 'block' : 'none';
+                if (show) box.scrollTop = box.scrollHeight;
+            };
+
+            function addLine(text, color) {
+                // Автопрокрутка вниз только если пользователь и так уже был у низа —
+                // иначе он не смог бы пролистать лог вверх руками во время потока
+                // новых сообщений (как это нормально работает на странице/в чатах).
+                var wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+                var line = document.createElement('div');
+                if (color) line.style.color = color;
+                line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+                box.appendChild(line);
+                while (box.children.length > maxLines) box.removeChild(box.firstChild);
+                if (wasAtBottom) box.scrollTop = box.scrollHeight;
+            }
+
+            function toText(a) {
+                try {
+                    if (typeof a === 'string') return a;
+                    if (a instanceof Error) return a.stack || a.message;
+                    return JSON.stringify(a);
+                } catch (e) { return String(a); }
+            }
+
+            ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
+                var orig = console[level];
+                console[level] = function () {
+                    var args = Array.prototype.slice.call(arguments).map(toText).join(' ');
+                    var prefix = level === 'error' ? '❌ ' : (level === 'warn' ? '⚠️ ' : '');
+                    var color = level === 'error' ? '#f66' : (level === 'warn' ? '#fd6' : (level === 'debug' ? '#6cf' : '#0f0'));
+                    addLine(prefix + args, color);
+                    orig.apply(console, arguments);
+                };
+            });
+
+            // Ловим в т.ч. ошибки загрузки ресурсов (сорванные <script src>/<link>/<img>) —
+            // именно это нужно для диагностики офлайн-запуска.
+            window.addEventListener('error', function (e) {
+                var t = e.target;
+                if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
+                    addLine('❌ Не удалось загрузить ресурс: ' + (t.src || t.href), '#f66');
+                } else if (t && t !== window && (t.tagName === 'VIDEO' || t.tagName === 'AUDIO' || t.tagName === 'SOURCE')) {
+                    // Ошибка загрузки <video>/<audio> (сорванный источник) — это
+                    // обычный Event, а не ErrorEvent: у него нет message/
+                    // filename/lineno, поэтому раньше она проваливалась в ветку
+                    // ниже и превращалась в бесполезное "JS error @ :". Берём
+                    // код ошибки из el.error (MediaError), чтобы было видно,
+                    // что реально не так с медиа.
+                    var mediaErr = t.error;
+                    var mediaErrNames = { 1: 'ABORTED', 2: 'NETWORK', 3: 'DECODE', 4: 'SRC_NOT_SUPPORTED' };
+                    var code = mediaErr ? (mediaErr.code + ' ' + (mediaErrNames[mediaErr.code] || '')) : '?';
+                    addLine('❌ Ошибка загрузки медиа (' + t.tagName.toLowerCase() + ', код ' + code + '): ' + (t.currentSrc || t.src || ''), '#f66');
+                } else {
+                    addLine('❌ ' + (e.message || 'JS error') + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''), '#f66');
+                }
+            }, true);
+
+            window.addEventListener('unhandledrejection', function (e) {
+                addLine('❌ Unhandled promise rejection: ' + toText(e.reason), '#f66');
+            });
+
+            box.appendChild(handle);
+            document.body.appendChild(box);
+            document.body.appendChild(toggle);
+            document.body.appendChild(btnTop);
+            document.body.appendChild(btnBottom);
+            box.addEventListener('touchmove', function (e) { e.stopPropagation(); }, { passive: true });
+            layoutForHeight();
+            addLine('Debug-консоль запущена (Roblox Studio Web)');
+        })();
+    </script>
+    <!-- ==== КОНЕЦ ВРЕМЕННОЙ DEBUG-КОНСОЛИ ==== -->
+    <script>
+        (function () {
+            var of = window.fetch;
+            if (!of) return;
+            window.fetch = function (input, init) {
+                var url = typeof input === 'string' ? input : (input && input.url) || '';
+                return of.apply(this, arguments).then(function (r) {
+                    if (!r.ok) console.warn('HTTP ' + r.status + ' ' + url);
+                    return r;
+                }, function (e) {
+                    console.error('fetch fail ' + url + ': ' + e);
+                    throw e;
+                });
+            };
+        })();
+    </script>
+
     <script src="vendor/cm6-bundle.min.js"></script>
 
 

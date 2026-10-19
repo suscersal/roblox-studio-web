@@ -12010,9 +12010,18 @@ end
             if (el) el.classList.remove('show');
         }
 
+        function _stTileFail(img) {
+            console.warn('Иконка не загрузилась: ' + img.getAttribute('data-src'));
+            const d = document.createElement('div');
+            d.className = 'st-tile';
+            d.textContent = img.getAttribute('data-glyph') || '🌐';
+            img.replaceWith(d);
+        }
+
         function _stTile(icon, glyph, extra) {
             return icon
-                ? '<img class="st-tile" src="' + _escAttr(icon) + '" loading="lazy" referrerpolicy="no-referrer">'
+                ? '<img class="st-tile" src="/api/roblox/thumb?u=' + encodeURIComponent(icon) + '" data-src="' + _escAttr(icon) +
+                  '" data-glyph="' + _escAttr(glyph) + '" onerror="_stTileFail(this)" referrerpolicy="no-referrer">'
                 : '<div class="st-tile' + (extra ? ' ' + extra : '') + '">' + glyph + '</div>';
         }
 
@@ -12243,10 +12252,11 @@ end
         }
 
         async function openExperience(i) {
-            const x = _experiences[i];
-            if (!x) return;
+            const x = _stExpList()[i];
+            if (!x) { console.error('openExperience: нет элемента #' + i); return; }
             if (!_confirmDiscardForOpen()) return;
             window._rbxPendingName = x.name;
+            console.log('openExperience:', x.name, x.placeId, x.universeId);
             const pr = await api('GET', '/api/roblox/experience/places?universeId=' + x.universeId + '&rootPlaceId=' + x.placeId);
             if (pr.ok && pr.places && pr.places.length > 1) {
                 let h = '<h3>' + esc(x.name) + '</h3><p style="opacity:.8">' + t('exp_pick_place') + '</p>' +

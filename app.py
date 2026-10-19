@@ -1491,6 +1491,43 @@ def api_roblox_experiences():
     return jsonify({'ok': True, 'experiences': items})
 
 
+_THUMB_CACHE = {}
+_THUMB_CACHE_MAX = 400
+
+
+@flask_app.route('/api/roblox/thumb')
+def api_roblox_thumb():
+    """Прокси иконок experiences. WebView/браузер часто не может сам
+    открыть tr.rbxcdn.com (блокировка, нет VPN у приложения), хотя сервер
+    до Roblox достаёт — поэтому картинку отдаём с нашего же origin.
+    Разрешены только https-хосты *.rbxcdn.com (защита от SSRF)."""
+    u = request.args.get('u', '')
+    try:
+        pu = _urlparse.urlparse(u)
+    except Exception:
+        return Response('bad url', status=400)
+    host = (pu.hostname or '').lower()
+    if pu.scheme != 'https' or not (host == 'rbxcdn.com' or host.endswith('.rbxcdn.com')):
+        return Response('host not allowed', status=400)
+    hit = _THUMB_CACHE.get(u)
+    if hit:
+        ct, data = hit
+    else:
+        try:
+            r = _req.Request(u, headers={'User-Agent': ROBLOX_HEADERS_BASE.get('User-Agent', 'Mozilla/5.0')})
+            with _req.urlopen(r, timeout=15) as resp:
+                data = resp.read()
+                ct = resp.headers.get('Content-Type', 'image/png')
+        except Exception as e:
+            return Response('thumb fetch failed: ' + str(e), status=502)
+        if len(_THUMB_CACHE) >= _THUMB_CACHE_MAX:
+            _THUMB_CACHE.pop(next(iter(_THUMB_CACHE)))
+        _THUMB_CACHE[u] = (ct, data)
+    resp = Response(data, mimetype=ct)
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
+
 @flask_app.route('/api/roblox/experience/places')
 def api_roblox_experience_places():
     """Места внутри Experience (у многих одно — тогда клиент открывает его сразу)."""
