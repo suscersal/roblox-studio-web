@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · particles';
+        const BUILD_LABEL = '2026-10-20 · particles-2';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -3234,8 +3234,13 @@
             });
         }
 
-        function _psSeqNum(seq, t) {
-            if (!seq || !seq.length) return [1, 0];
+        function _psSeqNum(seq, t, dflt) {
+            // В файле значение может быть обычным числом (константа) или вообще
+            // отсутствовать (тогда парсер подставляет число-дефолт) — это не «пустая»
+            // последовательность: раньше 0 принимался за «нет данных» и частицы были
+            // полностью прозрачными.
+            if (typeof seq === 'number') return [seq, 0];
+            if (!seq || !seq.length) return [dflt === undefined ? 1 : dflt, 0];
             if (t <= seq[0].time) return [seq[0].value, seq[0].envelope || 0];
             for (let i = 1; i < seq.length; i++) {
                 if (t <= seq[i].time) {
@@ -3353,6 +3358,11 @@
                         ' | Enabled=' + (e.p.Enabled !== false) + ' Rate=' + e.p.Rate + ' tex=' + (e.p.Texture || '—')).join('');
                 console.log(_msg);
                 try { logLuaOutput('info', _msg); } catch (e) { /* Output ещё не готов */ }
+                setTimeout(() => {
+                    const m2 = 'Particles alive: ' + PS.list.map(e => e.d.name + '=' + e.count + (e.points.visible ? '' : '(скрыт: далеко)')).join(', ');
+                    console.log(m2);
+                    try { logLuaOutput('info', m2); } catch (e) { /* Output ещё не готов */ }
+                }, 1500);
             } catch (e) {
                 console.error('loadParticles:', e);
             } finally {
@@ -3522,9 +3532,9 @@
                         P[k + 1] = me[1] * x + me[5] * y + me[9] * z + me[13];
                         P[k + 2] = me[2] * x + me[6] * y + me[10] * z + me[14];
                     } else { P[k] = e.pos[k]; P[k + 1] = e.pos[k + 1]; P[k + 2] = e.pos[k + 2]; }
-                    const sv = _psSeqNum(p.Size, t);
+                    const sv = _psSeqNum(p.Size, t, 1);
                     e.size[j] = Math.max(0, sv[0] + sv[1] * e.rnd[j * 2]);
-                    const tv = _psSeqNum(p.Transparency, t);
+                    const tv = _psSeqNum(p.Transparency, t, 0);
                     const alpha = 1 - Math.min(1, Math.max(0, tv[0] + tv[1] * e.rnd[j * 2 + 1]));
                     _psSeqColor(p.Color, t, _psTmpC);
                     const c4 = j * 4;
