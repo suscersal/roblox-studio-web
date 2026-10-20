@@ -1,12 +1,21 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · teleport';
+        const BUILD_LABEL = '2026-10-20 · file-menu';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
         const I18N = {
             en: {
+                menu_file: '📁 File',
+                menu_new: 'New',
+                menu_open_file: 'Open from file…',
+                menu_open_roblox: 'Open from Roblox…',
+                menu_save: 'Save',
+                menu_save_note: 'files only',
+                menu_save_as: 'Save as .rbxl…',
+                menu_import: 'Import model (.rbxm)…',
+                menu_export: 'Export selection (.rbxm)…',
                 ui_explorer: 'Explorer',
                 ui_properties: 'Properties',
                 ui_script_tab: 'Script',
@@ -241,6 +250,15 @@
                 preview_stop: 'Stop',
             },
             ru: {
+                menu_file: '📁 Файл',
+                menu_new: 'Новый',
+                menu_open_file: 'Открыть из файла…',
+                menu_open_roblox: 'Открыть из Roblox…',
+                menu_save: 'Сохранить',
+                menu_save_note: 'только файлы',
+                menu_save_as: 'Сохранить как .rbxl…',
+                menu_import: 'Импорт модели (.rbxm)…',
+                menu_export: 'Экспорт выделенного (.rbxm)…',
                 ui_explorer: 'Проводник',
                 ui_properties: 'Свойства',
                 ui_script_tab: 'Скрипт',
@@ -12508,6 +12526,87 @@ end
         }
 
         // ============ ДИАЛОГИ ============
+
+        // === Меню «Файл» (как в строке меню macOS): действия с файлами и плейсами одним выпадающим списком.
+        // Рисуется position:fixed поверх страницы — панель инструментов прокручивается по горизонтали
+        // (overflow), внутри неё выпадающее меню обрезалось бы.
+        function closeFileMenu() {
+            const m = document.getElementById('file-menu');
+            if (m) m.remove();
+            const b = document.getElementById('file-menu-btn');
+            if (b) b.classList.remove('open');
+            document.removeEventListener('pointerdown', _fileMenuOutside, true);
+        }
+
+        function _fileMenuOutside(e) {
+            const m = document.getElementById('file-menu');
+            const b = document.getElementById('file-menu-btn');
+            if (m && !m.contains(e.target) && !(b && b.contains(e.target))) closeFileMenu();
+        }
+
+        function toggleFileMenu(ev) {
+            if (ev) ev.stopPropagation();
+            if (document.getElementById('file-menu')) { closeFileMenu(); return; }
+            if (!document.getElementById('file-menu-css')) {
+                const st = document.createElement('style');
+                st.id = 'file-menu-css';
+                st.textContent =
+                    '#file-menu{position:fixed;z-index:150;min-width:260px;max-width:92vw;padding:6px;border-radius:12px;' +
+                    'background:rgba(40,44,56,.92);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);' +
+                    'border:1px solid rgba(255,255,255,.12);box-shadow:0 14px 40px rgba(0,0,0,.5);color:#e8ebf3;' +
+                    'font:14px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;animation:fmpop .12s ease-out}' +
+                    '@keyframes fmpop{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}' +
+                    '#file-menu .fm-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}' +
+                    '#file-menu .fm-item:hover,#file-menu .fm-item:active{background:#2f6bff;color:#fff}' +
+                    '#file-menu .fm-item.dis{opacity:.4;cursor:default}' +
+                    '#file-menu .fm-item.dis:hover{background:transparent;color:inherit}' +
+                    '#file-menu .fm-ico{width:20px;text-align:center}' +
+                    '#file-menu .fm-lbl{flex:1}' +
+                    '#file-menu .fm-hint{opacity:.55;font-size:12px;margin-left:18px}' +
+                    '#file-menu .fm-sep{height:1px;margin:5px 8px;background:rgba(255,255,255,.14)}' +
+                    '#file-menu-btn.open{background:#2f6bff !important}';
+                document.head.appendChild(st);
+            }
+            const fromRoblox = !!window._rbxOrigin;   // Save — только для файлов: плейс из Roblox сохраняем через «Сохранить как»
+            const items = [
+                { ico: '🆕', k: 'menu_new', act: () => newProject() },
+                'sep',
+                { ico: '📂', k: 'menu_open_file', hint: 'Ctrl+O', act: () => openFileBrowser('open') },
+                { ico: '⬇', k: 'menu_open_roblox', act: () => showStartScreen(false) },
+                'sep',
+                { ico: '💾', k: 'menu_save', hint: fromRoblox ? t('menu_save_note') : 'Ctrl+S', dis: fromRoblox, act: () => saveFile() },
+                { ico: '💾', k: 'menu_save_as', hint: '⇧Ctrl+S', act: () => openFileBrowser('save') },
+                'sep',
+                { ico: '📥', k: 'menu_import', act: () => importRbxm() },
+                { ico: '📤', k: 'menu_export', act: () => exportSelectedRbxm() },
+            ];
+            const menu = document.createElement('div');
+            menu.id = 'file-menu';
+            menu.setAttribute('role', 'menu');
+            for (const it of items) {
+                if (it === 'sep') {
+                    const s = document.createElement('div'); s.className = 'fm-sep'; menu.appendChild(s); continue;
+                }
+                const row = document.createElement('div');
+                row.className = 'fm-item' + (it.dis ? ' dis' : '');
+                row.setAttribute('role', 'menuitem');
+                row.innerHTML = '<span class="fm-ico">' + it.ico + '</span><span class="fm-lbl">' + esc(t(it.k)) +
+                    '</span>' + (it.hint ? '<span class="fm-hint">' + esc(it.hint) + '</span>' : '');
+                if (!it.dis) row.addEventListener('click', () => { closeFileMenu(); it.act(); });
+                menu.appendChild(row);
+            }
+            document.body.appendChild(menu);
+            const btn = document.getElementById('file-menu-btn');
+            if (btn) {
+                btn.classList.add('open');
+                const r = btn.getBoundingClientRect();
+                const w = menu.offsetWidth;
+                menu.style.top = (r.bottom + 6) + 'px';
+                menu.style.left = Math.max(6, Math.min(r.left, window.innerWidth - w - 6)) + 'px';
+            }
+            document.addEventListener('pointerdown', _fileMenuOutside, true);
+        }
+
         function showAddDialog() {
             const ALL_CLS = [
                 'Part', 'WedgePart', 'SpherePart', 'MeshPart', 'Model', 'Folder',
@@ -13775,6 +13874,7 @@ end
             } else if (e.key === 'Delete') {
                 deleteSelected();
             } else if (e.key === 'Escape') {
+                closeFileMenu();
                 closeModal();
                 deselect();
             } else if (e.key === 'F5') {

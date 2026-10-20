@@ -38,20 +38,10 @@
     <div id="toolbar-top">
         <span class="title">🎮 RbxStudio</span>
         <div class="sep"></div>
-        <button onclick="newProject()" data-i18n-title="tb_new_title" title="New empty scene"><span
-                data-i18n="tb_new">🆕 New</span></button>
-        <button onclick="openFileBrowser('open')" data-i18n-title="tb_open_title" title="Open file (Ctrl+O)"><span
-                data-i18n="tb_open">📂 Open</span></button>
-        <button onclick="showStartScreen(false)" data-i18n-title="tb_download_title" title="Download a place from Roblox by Place ID"><span
-                data-i18n="tb_download">⬇ From Roblox</span></button>
+        <button id="file-menu-btn" onclick="toggleFileMenu(event)" aria-haspopup="true"><span
+                data-i18n="menu_file">📁 File</span> ▾</button>
         <button class="green" onclick="saveFile()" data-i18n-title="tb_save_title" title="Save (Ctrl+S)"><span
                 data-i18n="tb_save">💾 Save</span></button>
-        <button onclick="openFileBrowser('save')" data-i18n-title="tb_saveas_title" title="Save as"><span
-                data-i18n="tb_saveas">💾 As...</span></button>
-        <button onclick="importRbxm()" data-i18n-title="tb_import_title" title="Import a model (.rbxm) into the scene"><span
-                data-i18n="tb_import">📥 Import</span></button>
-        <button onclick="exportSelectedRbxm()" data-i18n-title="tb_export_title" title="Export the selected objects to a model (.rbxm)"><span
-                data-i18n="tb_export">📤 Export</span></button>
         <div class="sep"></div>
         <button onclick="showAddDialog()" data-i18n-title="tb_addobj_title" title="Add object"><span
                 data-i18n="tb_add">➕ Add</span></button>
