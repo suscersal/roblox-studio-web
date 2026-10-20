@@ -1298,12 +1298,14 @@ def api_recents():
 
 @flask_app.route('/api/open', methods=['POST'])
 def api_open():
-    path = (request.json or {}).get('path', '')
+    body = request.json or {}
+    path = body.get('path', '')
+    shown = (body.get('name') or '').strip() or None   # настоящее имя файла (Android отдаёт копию imported_<цифры>.rbxl)
     try:
         parsed = parse_rbxl(path)
         state['parsed'] = parsed
         state['file_path'] = path
-        _recents_add_file(path)
+        _recents_add_file(path, name=shown)
         return jsonify({'ok': True, 'count': len(parsed['referent_to_class'])})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
@@ -5009,7 +5011,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-20 · emu-camera'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-10-20 · file-names'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

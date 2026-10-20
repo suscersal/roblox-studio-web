@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · emu-camera';
+        const BUILD_LABEL = '2026-10-20 · file-names';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -12391,7 +12391,7 @@ end
         }
 
         // Вызывается из Kotlin (MainActivity.AndroidBridge) после того как
-        window.onAndroidFileImported = async function (path, errMsg) {
+        window.onAndroidFileImported = async function (path, errMsg, shownName) {
             const wasRbxmImport = !!window._rbxmImportPending;
             window._rbxmImportPending = false;
             if (!path) {
@@ -12403,7 +12403,7 @@ end
                 await afterRbxmImport(await api('POST', '/api/import/rbxm', { path: path, parent: parent }));
                 return;
             }
-            const r = await api('POST', '/api/open', { path: path });
+            const r = await api('POST', '/api/open', { path: path, name: shownName || '' });
             if (r.ok) {
                 window._rbxOrigin = null;
                 window._startMode = false;

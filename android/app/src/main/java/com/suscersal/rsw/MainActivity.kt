@@ -50,12 +50,23 @@ class MainActivity : AppCompatActivity() {
     // от прошлых версий приложения — пробуем стереть его тоже (не
     // критично, если не получится). Плюс: ошибка копирования больше не
     // падает необработанным исключением молча — сообщаем странице явно.
+    // Настоящее имя выбранного файла (SAF отдаёт Uri вида content://…/msf:1234 —
+    // по нему имя не получить, нужен запрос DISPLAY_NAME). Без этого в «Недавних»
+    // файл назывался по имени нашей внутренней копии: imported_<цифры>.rbxl.
+    private fun displayNameOf(uri: Uri): String? = try {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    } catch (e: Exception) {
+        null
+    }
+
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val uri: Uri? = if (result.resultCode == RESULT_OK) result.data?.data else null
         if (uri == null) return@registerForActivityResult
         File(filesDir, "imported.rbxl").delete() // старое фиксированное имя — best-effort уборка
+        val shownName: String? = displayNameOf(uri)
         val dest = File(filesDir, "imported_${System.currentTimeMillis()}.rbxl")
         try {
             contentResolver.openInputStream(uri)?.use { input ->
@@ -64,7 +75,7 @@ class MainActivity : AppCompatActivity() {
             webView.evaluateJavascript(
                 "window.onAndroidFileImported && window.onAndroidFileImported(${
                     org.json.JSONObject.quote(dest.absolutePath)
-                });",
+                }, null, ${shownName?.let { org.json.JSONObject.quote(it) } ?: "null"});",
                 null
             )
         } catch (e: Exception) {
