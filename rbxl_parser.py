@@ -598,6 +598,33 @@ def t_capabilities(buf, count):
     return [untransform_i64(v) for v in raw]
 
 
+def t_content(buf, count):
+    """Content (0x22, напр. SurfaceAppearance.EmissiveMaskContent): массив
+    типов источника (u32, interleaved: 0 — пусто, 1 — Uri, 2 — Object),
+    затем u32 число Uri и сами строки, затем u32 число Object-ссылок
+    (ссылки на экземпляры не поддерживаем — для них значение '')."""
+    types = read_interleaved_u32_array(buf, count)
+    pos = 4 * count
+    n_uri = int.from_bytes(buf[pos:pos + 4], 'little'); pos += 4
+    uris = []
+    for _ in range(n_uri):
+        l = int.from_bytes(buf[pos:pos + 4], 'little'); pos += 4
+        uris.append(buf[pos:pos + l].decode('utf-8', 'replace')); pos += l
+    out, ui = [], 0
+    for t in types:
+        if t == 1 and ui < len(uris):
+            out.append(uris[ui]); ui += 1
+        else:
+            out.append('')
+    return out
+
+
+def t_ignored(buf, count):
+    """Тип, содержимое которого нам не нужно (напр. Terrain.VoxelGridAssetContentMap, 0x23):
+    читаем как «пусто», чтобы не сыпать предупреждениями."""
+    return [None] * count
+
+
 def t_font(buf, count):
     out = []
     pos = 0
@@ -621,6 +648,18 @@ def s_string(vals):
         v if isinstance(v, (str, bytes)) else ('' if v is None else str(v))
         for v in vals
     ])
+
+def s_content(vals):
+    uris = [v for v in vals if isinstance(v, str) and v]
+    types = [1 if (isinstance(v, str) and v) else 0 for v in vals]
+    out = write_interleaved_u32_array(types)
+    out += len(uris).to_bytes(4, 'little')
+    for u in uris:
+        b = u.encode('utf-8')
+        out += len(b).to_bytes(4, 'little') + b
+    out += (0).to_bytes(4, 'little')
+    return out
+
 
 def s_bool(vals):
     return bytes([1 if v else 0 for v in vals])
@@ -929,7 +968,7 @@ TYPE_DECODERS = {
     0x16: t_colorsequence, 0x17: t_numberrange, 0x18: t_rect,
     0x19: t_physicalproperties, 0x1a: t_color3uint8, 0x1b: t_int64,
     0x1c: t_sharedstring, 0x1d: t_string, 0x1f: t_uniqueid, 0x20: t_font,
-    0x1e: t_optionalcframe, 0x21: t_capabilities,
+    0x1e: t_optionalcframe, 0x21: t_capabilities, 0x22: t_content, 0x23: t_ignored,
 }
 
 TYPE_SERIALIZERS = {
@@ -941,7 +980,7 @@ TYPE_SERIALIZERS = {
     0x16: s_colorsequence, 0x17: s_numberrange, 0x18: s_rect,
     0x19: s_physicalproperties, 0x1a: s_color3uint8, 0x1b: s_int64,
     0x1c: s_sharedstring, 0x1d: s_string, 0x1f: s_uniqueid, 0x20: s_font,
-    0x1e: s_optionalcframe, 0x21: s_capabilities,
+    0x1e: s_optionalcframe, 0x21: s_capabilities, 0x22: s_content,
 }
 
 

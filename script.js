@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · particles-2';
+        const BUILD_LABEL = '2026-10-20 · emu-camera';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -5894,6 +5894,30 @@ InstanceMT.__index = function(t, k)
     if k == "FireServer" then
         return function(self, ...) __fire_remote(ref, "server", ...) end
     end
+    -- Camera: ViewportSize / FieldOfView (живое значение) / WorldToViewportPoint / ViewportPointToRay
+    if k == "ViewportSize" or k == "FieldOfView" or k == "WorldToViewportPoint" or k == "WorldToScreenPoint"
+        or k == "ViewportPointToRay" or k == "ScreenPointToRay" then
+        if __get_class(ref) == "Camera" then
+            if k == "ViewportSize" then
+                local w, h = __cam_info()
+                return Vector2.new(w, h)
+            elseif k == "FieldOfView" then
+                local _, _, f = __cam_info()
+                return f
+            elseif k == "WorldToViewportPoint" or k == "WorldToScreenPoint" then
+                return function(self, pos)
+                    local x, y, d, on = __cam_project(pos.X, pos.Y, pos.Z)
+                    return Vector3.new(x, y, d), on
+                end
+            else
+                return function(self, x, y, depth)
+                    local ox, oy, oz, dx, dy, dz = __cam_ray(x, y)
+                    local o, dir = Vector3.new(ox, oy, oz), Vector3.new(dx, dy, dz)
+                    return { Origin = o, Direction = dir * (depth and depth > 0 and depth or 1) }
+                end
+            end
+        end
+    end
     if k == "FireClient" then
         -- первый аргумент — Player, у нас всегда ровно один
         -- (LocalPlayer) — просто отбрасываем его.
@@ -6936,6 +6960,30 @@ end
         function luaIsPartRef(ref) { return !!(sceneObjs[ref] || physicsBodies[ref]); }
         function luaIsCameraRef(ref) {
             return !!(luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined');
+        }
+        // Camera API для Lua: размер вьюпорта, живой FieldOfView, проекция точки и луч из пикселя
+        function luaCamInfo() {
+            const sz = renderer.getSize(new THREE.Vector2());
+            return { w: sz.x, h: sz.y, fov: camera.fov };
+        }
+        function luaCamProject(x, y, z) {
+            camera.updateMatrixWorld();
+            const sz = renderer.getSize(new THREE.Vector2());
+            const v = new THREE.Vector3(x, y, z);
+            const depth = -v.clone().applyMatrix4(camera.matrixWorldInverse).z;
+            const n = v.project(camera);
+            return {
+                x: (n.x * 0.5 + 0.5) * sz.x, y: (1 - (n.y * 0.5 + 0.5)) * sz.y, depth: depth,
+                on: depth > 0 && Math.abs(n.x) <= 1 && Math.abs(n.y) <= 1,
+            };
+        }
+        function luaCamRay(px, py) {
+            camera.updateMatrixWorld();
+            const sz = renderer.getSize(new THREE.Vector2());
+            const ndc = new THREE.Vector2((px / sz.x) * 2 - 1, -(py / sz.y) * 2 + 1);
+            const rc = new THREE.Raycaster();
+            rc.setFromCamera(ndc, camera);
+            return { o: rc.ray.origin, d: rc.ray.direction };
         }
         function luaPartMatrix(ref) {
             const p = luaPositionOfRef(ref);
@@ -8363,6 +8411,22 @@ end
                 lua.lua_insert(L2, -2); // стек был [function, true] -> [true, function]
                 return 2;
             });
+            def('__cam_info', function (L2) {
+                const i = luaCamInfo();
+                lua.lua_pushnumber(L2, i.w); lua.lua_pushnumber(L2, i.h); lua.lua_pushnumber(L2, i.fov);
+                return 3;
+            });
+            def('__cam_project', function (L2) {
+                const r = luaCamProject(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3));
+                lua.lua_pushnumber(L2, r.x); lua.lua_pushnumber(L2, r.y); lua.lua_pushnumber(L2, r.depth);
+                lua.lua_pushboolean(L2, r.on ? 1 : 0);
+                return 4;
+            });
+            def('__cam_ray', function (L2) {
+                const r = luaCamRay(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2));
+                for (const v of [r.o.x, r.o.y, r.o.z, r.d.x, r.d.y, r.d.z]) lua.lua_pushnumber(L2, v);
+                return 6;
+            });
             def('__particle_emit', function (L2) {
                 try { psEmit(lua.lua_tonumber(L2, 1), Math.max(0, Math.min(500, lua.lua_tonumber(L2, 2) || 1))); } catch (e) { console.error('Emit:', e); }
                 return 0;
@@ -8834,6 +8898,12 @@ end
                     }
                     luaSetGenericProp(ref, name, enumName);
                     fireLuaSignal(ref, '__prop_' + name, []);
+                    return 0;
+                }
+                if (name === 'FieldOfView' && lua.lua_type(L2, 3) === lua.LUA_TNUMBER && luaIsCameraRef(ref)) {
+                    camera.fov = Math.max(1, Math.min(120, lua.lua_tonumber(L2, 3)));
+                    camera.updateProjectionMatrix();
+                    fireLuaSignal(ref, '__prop_FieldOfView', []);
                     return 0;
                 }
                 if (name === 'CFrame' && lua.lua_type(L2, 3) === lua.LUA_TTABLE) {
