@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · decal-bias';
+        const BUILD_LABEL = '2026-10-20 · teleport';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -6187,6 +6187,47 @@ local CollectionServiceObj = setmetatable({}, { __index = {
     end,
 } })
 
+-- TeleportService: перехода между плейсами в эмуляторе нет (как и в Studio без публикации), поэтому
+-- любой запрос на телепорт честно ЗАВЕРШАЕТСЯ ОТКАЗОМ: в Output предупреждение и сигнал
+-- TeleportInitFailed(player, Enum.TeleportResult.Failure, сообщение, placeId, options) — скрипты лобби
+-- (лифты/матчмейкинг) подписываются на него при старте и раньше падали на "attempt to index a nil value
+-- (field 'TeleportInitFailed')", не доходя до остального кода.
+local TeleportServiceObj
+do
+    local initFailed = newSignal()
+    local arrived = newSignal()
+    local function failure()
+        local ok, v = pcall(function() return Enum.TeleportResult.Failure end)
+        return ok and v or "Failure"
+    end
+    local function deny(placeId, players, options)
+        local msg = "Teleport недоступен в эмуляторе (placeId " .. tostring(placeId) .. ")"
+        warn(msg)
+        local list = players
+        if type(list) ~= "table" or list.ClassName ~= nil then list = { list } end
+        if #list == 0 then list = { game:GetService("Players").LocalPlayer } end
+        task.defer(function()
+            for _, pl in ipairs(list) do initFailed.__fire(pl, failure(), msg, placeId, options) end
+        end)
+    end
+    TeleportServiceObj = setmetatable({}, { __index = {
+        TeleportInitFailed = initFailed,
+        LocalPlayerArrivedFromTeleport = arrived,
+        Teleport = function(self, placeId, player) deny(placeId, player) end,
+        TeleportAsync = function(self, placeId, players, options) deny(placeId, players, options) return nil end,
+        TeleportToPlaceInstance = function(self, placeId, instanceId, player) deny(placeId, player) end,
+        TeleportToPrivateServer = function(self, placeId, code, players) deny(placeId, players) end,
+        TeleportToSpawnByName = function(self, placeId, spawn, player) deny(placeId, player) end,
+        TeleportPartyAsync = function(self, placeId, players, teleportData) deny(placeId, players) return "" end,
+        ReserveServer = function(self, placeId) return "emu-reserved-" .. tostring(placeId), "emu-private-" .. tostring(placeId) end,
+        GetLocalPlayerTeleportData = function(self) return nil end,
+        GetArrivingTeleportGui = function(self) return nil end,
+        SetTeleportGui = function(self, gui) end,
+        GetTeleportSetting = function(self, name) return nil end,
+        SetTeleportSetting = function(self, name, value) end,
+    } })
+end
+
 local function isDescendantOf(ref, ancestor)
     local anc = refOf(ancestor)
     local cur, depth = __get_parent(ref), 0
@@ -6477,6 +6518,10 @@ local function getService(name)
     if name == "CollectionService" then
         serviceCache[name] = CollectionServiceObj
         return CollectionServiceObj
+    end
+    if name == "TeleportService" then
+        serviceCache[name] = TeleportServiceObj
+        return TeleportServiceObj
     end
     local ref = __find_service(name)
     if ref == -1 then ref = __instance_new(name) end
