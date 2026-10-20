@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-18 · start-screen';
+        const BUILD_LABEL = '2026-10-20 · particles';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -3348,7 +3348,11 @@
                 for (const d of r.emitters) {
                     try { PS.list.push(_psBuild(d)); } catch (e) { console.error('particle build:', e); }
                 }
-                if (PS.list.length) console.log('Particles: эмиттеров ' + PS.list.length);
+                const _msg = 'Particles: эмиттеров ' + PS.list.length +
+                    PS.list.map(e => '\n  • ' + e.d.name + ' @ ' + e.d.world.p.map(v => v.toFixed(1)).join(', ') +
+                        ' | Enabled=' + (e.p.Enabled !== false) + ' Rate=' + e.p.Rate + ' tex=' + (e.p.Texture || '—')).join('');
+                console.log(_msg);
+                try { logLuaOutput('info', _msg); } catch (e) { /* Output ещё не готов */ }
             } catch (e) {
                 console.error('loadParticles:', e);
             } finally {
