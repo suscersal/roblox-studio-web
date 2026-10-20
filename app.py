@@ -1188,6 +1188,13 @@ def vendor_files(fn):
     return send_from_directory(str(VENDOR_DIR), fn)
 
 
+@flask_app.route('/api/class_icons')
+def api_class_icons():
+    """Иконки классов (data-URI) для диалога «Add»: ?classes=Part,Script,..."""
+    names = [c for c in (request.args.get('classes') or '').split(',') if c][:200]
+    return jsonify({'ok': True, 'icons': {c: icon_src(c) for c in names}})
+
+
 @flask_app.route('/icons/<path:fn>')
 def serve_icon(fn):
     if ICONS_DIR.exists():
@@ -5011,7 +5018,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-20 · file-menu'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-10-20 · add-icons'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

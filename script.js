@@ -1,12 +1,13 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · file-menu';
+        const BUILD_LABEL = '2026-10-20 · add-icons';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
         const I18N = {
             en: {
+                add_search_ph: 'Search class…',
                 menu_file: '📁 File',
                 menu_new: 'New',
                 menu_open_file: 'Open from file…',
@@ -250,6 +251,7 @@
                 preview_stop: 'Stop',
             },
             ru: {
+                add_search_ph: 'Поиск класса…',
                 menu_file: '📁 Файл',
                 menu_new: 'Новый',
                 menu_open_file: 'Открыть из файла…',
@@ -12613,14 +12615,31 @@ end
                 'Script', 'LocalScript', 'ModuleScript', 'RemoteEvent', 'RemoteFunction',
                 'BindableEvent', 'BindableFunction', 'ScreenGui', 'Frame', 'TextLabel',
                 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton', 'Sound',
-                'ParticleEmitter', 'Fire', 'Smoke', 'PointLight', 'SpotLight',
+                'ParticleEmitter', 'Attachment', 'Fire', 'Smoke', 'PointLight', 'SpotLight',
                 'SurfaceLight', 'NumberValue', 'StringValue', 'BoolValue', 'IntValue',
                 'Animation', 'Tool', 'Camera'
             ].sort();
+            if (!document.getElementById('add-grid-css')) {
+                const st = document.createElement('style');
+                st.id = 'add-grid-css';
+                st.textContent =
+                    '#add-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:6px;max-height:44vh;overflow-y:auto;padding:2px}' +
+                    '#add-grid .add-tile{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 4px;border-radius:8px;' +
+                    'background:#374151;border:2px solid transparent;cursor:pointer;text-align:center;font-size:11px;line-height:1.15;word-break:break-word}' +
+                    '#add-grid .add-tile:hover{background:#4b5563}' +
+                    '#add-grid .add-tile.sel{border-color:#3b82f6;background:#1e3a8a}' +
+                    '#add-grid .add-tile img{width:28px;height:28px;image-rendering:auto}' +
+                    '#add-grid .add-tile .ph{width:28px;height:28px}';
+                document.head.appendChild(st);
+            }
             showModal(
                 '<h3>' + t('tb_add') + '</h3>' +
-                '<select id="add-cls">' + ALL_CLS.map(c => '<option>' + c + '</option>').join('') + '</select>' +
-                '<input id="add-name" placeholder="' + t('add_name_ph') + '" value="NewPart">' +
+                '<input id="add-search" placeholder="' + _escAttr(t('add_search_ph')) + '" oninput="addFilterClasses()">' +
+                '<div id="add-grid">' + ALL_CLS.map(c =>
+                    '<div class="add-tile' + (c === 'Part' ? ' sel' : '') + '" data-cls="' + c + '" onclick="addPickClass(\'' + c + '\')">' +
+                    '<div class="ph"></div><span>' + c + '</span></div>').join('') + '</div>' +
+                '<input id="add-cls" type="hidden" value="Part">' +
+                '<input id="add-name" placeholder="' + t('add_name_ph') + '" value="NewPart" oninput="this.dataset.edited=1">' +
                 '<p style="font-size:11px;color:#9ca3af;margin-top:4px">' + t('add_parent_label') + ' ' +
                 (selectedRef !== null ? 'ref ' + selectedRef : 'Workspace') + '</p>' +
                 '<div class="modal-row">' +
@@ -12628,6 +12647,37 @@ end
                 '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
+            // иконки подгружаем после показа окна (один запрос; кэшируем на время сессии)
+            const fill = (icons) => {
+                document.querySelectorAll('#add-grid .add-tile').forEach(el => {
+                    const src = icons[el.dataset.cls];
+                    const ph = el.querySelector('.ph');
+                    if (src && ph) {
+                        const img = document.createElement('img');
+                        img.src = src;
+                        img.onerror = () => { img.style.visibility = 'hidden'; };
+                        ph.replaceWith(img);
+                    }
+                });
+            };
+            if (window._addIcons) fill(window._addIcons);
+            else api('GET', '/api/class_icons?classes=' + ALL_CLS.join(',')).then(r => {
+                if (r && r.ok) { window._addIcons = r.icons; fill(r.icons); }
+            }).catch(e => console.warn('class_icons:', e));
+        }
+
+        function addPickClass(cls) {
+            document.getElementById('add-cls').value = cls;
+            document.querySelectorAll('#add-grid .add-tile').forEach(el => el.classList.toggle('sel', el.dataset.cls === cls));
+            const nm = document.getElementById('add-name');
+            if (nm && !nm.dataset.edited) nm.value = 'New' + cls;
+        }
+
+        function addFilterClasses() {
+            const q = (document.getElementById('add-search').value || '').trim().toLowerCase();
+            document.querySelectorAll('#add-grid .add-tile').forEach(el => {
+                el.style.display = (!q || el.dataset.cls.toLowerCase().includes(q)) ? '' : 'none';
+            });
         }
 
         async function doAdd() {
