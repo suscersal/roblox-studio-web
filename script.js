@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · file-names';
+        const BUILD_LABEL = '2026-10-20 · decal-bias';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -2822,6 +2822,19 @@
         // к камере в буфере глубины, чтобы он не мерцал и не пропадал под углом (z-fighting); visible=true
         // перекрывает visible:false у «невидимой» детали, на которой висит постер.
         const DECAL_FACE_OPTS = { visible: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 };
+        // polygonOffset при near=0.5/far=500 даёт сдвиг в доли тысячных стада — стена, стоящая вплотную спереди
+        // (постер «утоплен» в стену на 0.02–0.1), всё равно закрывает Decal. Поэтому дополнительно сдвигаем
+        // вершины грани с Decal К КАМЕРЕ на фиксированные DECAL_BIAS студов (в view-space, от дистанции не зависит):
+        // как в Roblox, Decal рисуется поверх соседней геометрии, лежащей почти в той же плоскости.
+        const DECAL_BIAS = 0.12;
+        function _applyDecalBias(mat) {
+            mat.customProgramCacheKey = () => 'decal-bias';
+            mat.onBeforeCompile = (shader) => {
+                shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>',
+                    '#include <project_vertex>\n mvPosition.z += ' + DECAL_BIAS.toFixed(3) + ';\n gl_Position = projectionMatrix * mvPosition;');
+            };
+            return mat;
+        }
         const _partTexCache = {};
         // Раньше THREE.TextureLoader создавался здесь же, на верхнем уровне
         let _partTexLoader = null;
@@ -3068,10 +3081,10 @@
                 if (faceIdx !== null) {
                     // Массив материалов по группам граней BoxGeometry:
                     const plain = new THREE.MeshLambertMaterial({ ...baseOpts, color: o.color || '#a0a0a0' });
-                    const textured = new THREE.MeshLambertMaterial({
+                    const textured = _applyDecalBias(new THREE.MeshLambertMaterial({
                         ...baseOpts, ...DECAL_FACE_OPTS, transparent: true, opacity: decalOp, depthWrite: decalOp >= 0.99,
                         color: '#ffffff', map: getOrLoadPartTexture(texId),
-                    });
+                    }));
                     const arr = [plain, plain, plain, plain, plain, plain];
                     arr[faceIdx] = textured;
                     matCache[matKey] = arr;
@@ -3108,7 +3121,7 @@
                         const g = FACE_TO_BOX_GROUP[typeof d.face === 'number' ? NAMES[d.face] : d.face];
                         if (g === undefined) continue;
                         // свой opacity у Decal (Transparency Decal), а не прозрачность детали — постер на невидимой детали виден
-                        arrM[g] = new THREE.MeshLambertMaterial({ ...dBase, ...DECAL_FACE_OPTS, transparent: true, opacity: d.op, depthWrite: d.op >= 0.99, color: '#ffffff', map: getOrLoadPartTexture(d.tex) });
+                        arrM[g] = _applyDecalBias(new THREE.MeshLambertMaterial({ ...dBase, ...DECAL_FACE_OPTS, transparent: true, opacity: d.op, depthWrite: d.op >= 0.99, color: '#ffffff', map: getOrLoadPartTexture(d.tex) }));
                     }
                     matCache[dk] = arrM;
                 }
