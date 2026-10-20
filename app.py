@@ -3281,6 +3281,72 @@ def api_set_prop(ref):
     return jsonify({'ok': True})
 
 
+def _m3_mul(a, b):
+    """3x3 (по строкам, 9 чисел) * 3x3."""
+    return [sum(a[i * 3 + k] * b[k * 3 + j] for k in range(3)) for i in range(3) for j in range(3)]
+
+
+def _m3_vec(m, v):
+    return [m[i * 3] * v[0] + m[i * 3 + 1] * v[1] + m[i * 3 + 2] * v[2] for i in range(3)]
+
+
+_PARTICLE_PROPS = (
+    'Enabled', 'Rate', 'Lifetime', 'Speed', 'SpreadAngle', 'Rotation', 'RotSpeed',
+    'Size', 'Transparency', 'Color', 'Squash', 'Acceleration', 'Drag', 'Texture',
+    'LightEmission', 'LightInfluence', 'Brightness', 'EmissionDirection', 'LockedToPart',
+    'TimeScale', 'ZOffset', 'Shape', 'ShapeStyle', 'ShapeInOut', 'ShapePartial',
+    'Orientation', 'VelocityInheritance', 'WindAffectsDrag',
+)
+
+
+@flask_app.route('/api/particles')
+def api_particles():
+    """Все ParticleEmitter сцены: где они стоят (мировая позиция/поворот
+    эмиттера и относительная к детали) и их свойства. Рисует их клиент
+    (script.js, блок «ЧАСТИЦЫ»). Родитель эмиттера — Attachment (точка) или
+    сама деталь (тогда частицы появляются в объёме детали)."""
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': True, 'emitters': []})
+    r2c, pmap, allp = parsed['referent_to_class'], parsed['parent_map'], parsed['props']
+    out = []
+    for ref, cls in r2c.items():
+        if cls != 'ParticleEmitter':
+            continue
+        parent = pmap.get(ref, -1)
+        pcls = r2c.get(parent)
+        if pcls == 'Attachment':
+            att_cf = allp.get(parent, {}).get('CFrame')
+            part = pmap.get(parent, -1)
+            on_part = False
+        elif pcls in PART_CLASSES:
+            att_cf, part, on_part = None, parent, True
+        else:
+            continue
+        if r2c.get(part) not in PART_CLASSES:
+            continue
+        pp = allp.get(part, {})
+        pcf = pp.get('CFrame', {})
+        px, py, pz = get_pos(pcf)
+        prot = get_rot_matrix(pcf)
+        ax, ay, az = get_pos(att_cf) if att_cf else (0.0, 0.0, 0.0)
+        arot = get_rot_matrix(att_cf) if att_cf else [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        wpos = [a + b for a, b in zip(_m3_vec(prot, [ax, ay, az]), [px, py, pz])]
+        wrot = _m3_mul(prot, arot)
+        sz = pp.get('Size', {})
+        size = [safe_float(sz.get('x', 1), 1), safe_float(sz.get('y', 1), 1), safe_float(sz.get('z', 1), 1)] \
+            if isinstance(sz, dict) else [1, 1, 1]
+        props = allp.get(ref, {})
+        out.append({
+            'ref': ref, 'name': props.get('Name', 'ParticleEmitter'), 'part': part,
+            'onPart': on_part, 'partSize': size,
+            'att': {'p': [ax, ay, az], 'r': arot},
+            'world': {'p': wpos, 'r': wrot},
+            'p': {k: props[k] for k in _PARTICLE_PROPS if k in props},
+        })
+    return jsonify({'ok': True, 'emitters': out})
+
+
 @flask_app.route('/api/instance', methods=['PUT'])
 def api_add():
     parsed = state['parsed']

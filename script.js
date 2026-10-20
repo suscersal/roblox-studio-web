@@ -1714,6 +1714,11 @@
                 _reportFrameError('stepPhysics', e);
             }
             try {
+                updateParticles(now);
+            } catch (e) {
+                _reportFrameError('particles', e);
+            }
+            try {
                 renderer.render(scene, camera);
             } catch (e) {
                 _reportFrameError('render', e);
@@ -3181,6 +3186,356 @@
             return mesh;
         }
 
+        // ============ ЧАСТИЦЫ (ParticleEmitter) ============
+        // Сервер отдаёт эмиттеры (/api/particles), здесь они симулируются на CPU
+        // и рисуются одним THREE.Points на эмиттер (свой ShaderMaterial: размер в
+        // студах, поворот, цвет/прозрачность по времени жизни).
+        const PS = { list: [], key: '', texCache: {}, soft: null, lastT: 0, timer: null, loading: false };
+        const PS_MAX_PER = 1500;
+        const PS_MAX_TOTAL = 8000;
+        const PS_AXES = { 0: [1, 0, 0], 1: [0, 1, 0], 2: [0, 0, 1], 3: [0, -1, 0], 4: [0, 0, -1], 5: [-1, 0, 0] };
+
+        function _psSoftTexture() {
+            if (PS.soft) return PS.soft;
+            const c = document.createElement('canvas');
+            c.width = c.height = 64;
+            const g = c.getContext('2d');
+            const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gr.addColorStop(0, 'rgba(255,255,255,1)');
+            gr.addColorStop(0.4, 'rgba(255,255,255,.55)');
+            gr.addColorStop(1, 'rgba(255,255,255,0)');
+            g.fillStyle = gr;
+            g.fillRect(0, 0, 64, 64);
+            PS.soft = new THREE.CanvasTexture(c);
+            return PS.soft;
+        }
+
+        // Текстура эмиттера: rbxassetid://N / ссылка с id= / число -> через asset-proxy,
+        // всё остальное (rbxasset://... встроенные .dds) -> мягкий круглый спрайт.
+        function _psLoadTexture(uniforms, url) {
+            const m = /(?:id=|rbxassetid:\/\/|^)(\d{3,})/.exec(String(url || ''));
+            if (!m) { uniforms.map.value = _psSoftTexture(); return; }
+            const id = m[1];
+            if (PS.texCache[id]) {
+                const c = PS.texCache[id];
+                uniforms.map.value = c.tex || _psSoftTexture();
+                if (!c.tex && !c.failed) c.waiters.push(uniforms);
+                return;
+            }
+            const entry = PS.texCache[id] = { tex: null, failed: false, waiters: [uniforms] };
+            uniforms.map.value = _psSoftTexture();
+            new THREE.TextureLoader().load('/api/asset-proxy?id=' + id, (tex) => {
+                entry.tex = tex;
+                entry.waiters.forEach(u => { u.map.value = tex; });
+                entry.waiters = [];
+            }, undefined, () => {
+                entry.failed = true;
+                console.warn('Particle texture ' + id + ' не загрузилась — мягкий спрайт вместо неё');
+            });
+        }
+
+        function _psSeqNum(seq, t) {
+            if (!seq || !seq.length) return [1, 0];
+            if (t <= seq[0].time) return [seq[0].value, seq[0].envelope || 0];
+            for (let i = 1; i < seq.length; i++) {
+                if (t <= seq[i].time) {
+                    const a = seq[i - 1], b = seq[i];
+                    const k = (t - a.time) / Math.max(1e-6, b.time - a.time);
+                    return [a.value + (b.value - a.value) * k, (a.envelope || 0) + ((b.envelope || 0) - (a.envelope || 0)) * k];
+                }
+            }
+            const l = seq[seq.length - 1];
+            return [l.value, l.envelope || 0];
+        }
+
+        function _psSeqColor(seq, t, out) {
+            if (!seq || !seq.length) { out[0] = out[1] = out[2] = 1; return; }
+            if (t <= seq[0].time) { out[0] = seq[0].r; out[1] = seq[0].g; out[2] = seq[0].b; return; }
+            for (let i = 1; i < seq.length; i++) {
+                if (t <= seq[i].time) {
+                    const a = seq[i - 1], b = seq[i];
+                    const k = (t - a.time) / Math.max(1e-6, b.time - a.time);
+                    out[0] = a.r + (b.r - a.r) * k; out[1] = a.g + (b.g - a.g) * k; out[2] = a.b + (b.b - a.b) * k;
+                    return;
+                }
+            }
+            const l = seq[seq.length - 1];
+            out[0] = l.r; out[1] = l.g; out[2] = l.b;
+        }
+
+        function _psRange(r, dmin, dmax) {
+            const lo = (r && typeof r.min === 'number') ? r.min : dmin;
+            const hi = (r && typeof r.max === 'number') ? r.max : dmax;
+            return lo + Math.random() * (hi - lo);
+        }
+
+        function _psMat4(r, p) {
+            const m = new THREE.Matrix4();
+            m.set(r[0], r[1], r[2], p[0], r[3], r[4], r[5], p[1], r[6], r[7], r[8], p[2], 0, 0, 0, 1);
+            return m;
+        }
+
+        function _psDispose() {
+            for (const e of PS.list) {
+                if (scene) scene.remove(e.points);
+                e.geo.dispose();
+                e.mat.dispose();
+            }
+            PS.list = [];
+        }
+
+        function _psBuild(d) {
+            const p = d.p || {};
+            const rate = typeof p.Rate === 'number' ? p.Rate : 20;
+            const life = p.Lifetime || { min: 5, max: 5 };
+            const ts = typeof p.TimeScale === 'number' ? p.TimeScale : 1;
+            const n = Math.max(8, Math.min(PS_MAX_PER, Math.ceil(rate * Math.max(life.max || 0, life.min || 0) * Math.max(ts, 0.1) * 1.25) + 8));
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(n * 3), size = new Float32Array(n), rot = new Float32Array(n), col = new Float32Array(n * 4);
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+            geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage));
+            geo.setAttribute('aRot', new THREE.BufferAttribute(rot, 1).setUsage(THREE.DynamicDrawUsage));
+            geo.setAttribute('aColor', new THREE.BufferAttribute(col, 4).setUsage(THREE.DynamicDrawUsage));
+            geo.setDrawRange(0, 0);
+            const additive = (typeof p.LightEmission === 'number' ? p.LightEmission : 0) >= 0.5;
+            const uniforms = { map: { value: null }, uScale: { value: 600 } };
+            _psLoadTexture(uniforms, p.Texture);
+            const mat = new THREE.ShaderMaterial({
+                uniforms: uniforms,
+                vertexShader:
+                    'attribute float aSize; attribute float aRot; attribute vec4 aColor;' +
+                    'varying vec4 vColor; varying float vRot; uniform float uScale;' +
+                    'void main(){ vColor = aColor; vRot = aRot;' +
+                    ' vec4 mv = modelViewMatrix * vec4(position, 1.0);' +
+                    ' gl_PointSize = clamp(aSize * uScale / max(0.001, -mv.z), 0.0, 512.0);' +
+                    ' gl_Position = projectionMatrix * mv; }',
+                fragmentShader:
+                    'uniform sampler2D map; varying vec4 vColor; varying float vRot;' +
+                    'void main(){ vec2 c = gl_PointCoord - 0.5; float s = sin(vRot), co = cos(vRot);' +
+                    ' c = vec2(co * c.x - s * c.y, s * c.x + co * c.y) + 0.5;' +
+                    ' if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0) discard;' +
+                    ' vec4 col = texture2D(map, c) * vColor; if (col.a < 0.01) discard; gl_FragColor = col; }',
+                transparent: true, depthWrite: false,
+                blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+            });
+            const points = new THREE.Points(geo, mat);
+            points.frustumCulled = false;
+            points.renderOrder = 10;
+            scene.add(points);
+            const att = d.att || { p: [0, 0, 0], r: [1, 0, 0, 0, 1, 0, 0, 0, 1] };
+            const w = d.world || att;
+            return {
+                d: d, p: p, n: n, count: 0, acc: 0, geo: geo, mat: mat, points: points,
+                pos: pos, size: size, rot: rot, col: col,
+                vel: new Float32Array(n * 3), age: new Float32Array(n), life: new Float32Array(n),
+                rnd: new Float32Array(n * 2), spin: new Float32Array(n), rot0: new Float32Array(n),
+                attMat: _psMat4(att.r, att.p), staticMat: _psMat4(w.r, w.p), mat4: new THREE.Matrix4(),
+                dir: PS_AXES[p.EmissionDirection !== undefined ? p.EmissionDirection : 1] || PS_AXES[1],
+            };
+        }
+
+        async function loadParticles() {
+            if (typeof scene === 'undefined' || !scene || typeof THREE === 'undefined') return;
+            if (PS.loading) return;
+            PS.loading = true;
+            try {
+                const r = await api('GET', '/api/particles');
+                if (!r || !r.ok) return;
+                const key = JSON.stringify(r.emitters);
+                if (key === PS.key) return;       // ничего не изменилось — не сбрасываем живые частицы
+                PS.key = key;
+                _psDispose();
+                for (const d of r.emitters) {
+                    try { PS.list.push(_psBuild(d)); } catch (e) { console.error('particle build:', e); }
+                }
+                if (PS.list.length) console.log('Particles: эмиттеров ' + PS.list.length);
+            } catch (e) {
+                console.error('loadParticles:', e);
+            } finally {
+                PS.loading = false;
+            }
+        }
+
+        function _psSchedule() {
+            clearTimeout(PS.timer);
+            PS.timer = setTimeout(loadParticles, 300);
+        }
+
+        function _psSpawn(e, mat) {
+            if (e.count >= e.n) return;
+            const p = e.p, i = e.count++;
+            const o = e.d.onPart ? 1 : 0;
+            // точка появления: в Attachment — точка; в детали — внутри объёма (Box/Sphere)
+            let lx = 0, ly = 0, lz = 0;
+            if (o) {
+                const sz = e.d.partSize || [1, 1, 1];
+                if (p.Shape === 1) {           // Sphere
+                    let x, y, z;
+                    do { x = Math.random() * 2 - 1; y = Math.random() * 2 - 1; z = Math.random() * 2 - 1; } while (x * x + y * y + z * z > 1);
+                    lx = x * sz[0] / 2; ly = y * sz[1] / 2; lz = z * sz[2] / 2;
+                } else {
+                    lx = (Math.random() - 0.5) * sz[0]; ly = (Math.random() - 0.5) * sz[1]; lz = (Math.random() - 0.5) * sz[2];
+                }
+            }
+            // направление: ось эмиттера + случайное отклонение SpreadAngle (градусы)
+            const sa = p.SpreadAngle || { x: 0, y: 0 };
+            const ax = Math.abs(sa.x || 0), ay = Math.abs(sa.y || 0);
+            let dx, dy, dz;
+            const A = e.dir;
+            if (Math.max(ax, ay) >= 180) {
+                let x, y, z, l;
+                do { x = Math.random() * 2 - 1; y = Math.random() * 2 - 1; z = Math.random() * 2 - 1; l = x * x + y * y + z * z; } while (l > 1 || l < 1e-4);
+                l = Math.sqrt(l); dx = x / l; dy = y / l; dz = z / l;
+            } else {
+                const u = Math.abs(A[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+                // v1 = A x u, v2 = A x v1
+                let v1 = [A[1] * u[2] - A[2] * u[1], A[2] * u[0] - A[0] * u[2], A[0] * u[1] - A[1] * u[0]];
+                const l1 = Math.hypot(v1[0], v1[1], v1[2]) || 1; v1 = [v1[0] / l1, v1[1] / l1, v1[2] / l1];
+                const v2 = [A[1] * v1[2] - A[2] * v1[1], A[2] * v1[0] - A[0] * v1[2], A[0] * v1[1] - A[1] * v1[0]];
+                const t1 = (Math.random() * 2 - 1) * ax * Math.PI / 180, t2 = (Math.random() * 2 - 1) * ay * Math.PI / 180;
+                const s1 = Math.sin(t1), c1 = Math.cos(t1), s2 = Math.sin(t2), c2 = Math.cos(t2);
+                // сначала поворот вокруг v1 (в плоскости A-v2), затем вокруг v2
+                const bx = A[0] * c1 + v2[0] * s1, by = A[1] * c1 + v2[1] * s1, bz = A[2] * c1 + v2[2] * s1;
+                dx = bx * c2 + v1[0] * s2; dy = by * c2 + v1[1] * s2; dz = bz * c2 + v1[2] * s2;
+                const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+            }
+            const speed = _psRange(p.Speed, 5, 5);
+            const k = i * 3;
+            const m = mat.elements;       // column-major
+            const locked = !!p.LockedToPart;
+            // локальные -> мировые координаты (если не LockedToPart); LockedToPart хранит локальные
+            if (locked) {
+                e.pos[k] = lx; e.pos[k + 1] = ly; e.pos[k + 2] = lz;
+                e.vel[k] = dx * speed; e.vel[k + 1] = dy * speed; e.vel[k + 2] = dz * speed;
+            } else {
+                e.pos[k] = m[0] * lx + m[4] * ly + m[8] * lz + m[12];
+                e.pos[k + 1] = m[1] * lx + m[5] * ly + m[9] * lz + m[13];
+                e.pos[k + 2] = m[2] * lx + m[6] * ly + m[10] * lz + m[14];
+                e.vel[k] = (m[0] * dx + m[4] * dy + m[8] * dz) * speed;
+                e.vel[k + 1] = (m[1] * dx + m[5] * dy + m[9] * dz) * speed;
+                e.vel[k + 2] = (m[2] * dx + m[6] * dy + m[10] * dz) * speed;
+            }
+            e.age[i] = 0;
+            e.life[i] = Math.max(0.02, _psRange(p.Lifetime, 5, 5));
+            e.rnd[i * 2] = Math.random() * 2 - 1;
+            e.rnd[i * 2 + 1] = Math.random() * 2 - 1;
+            e.rot0[i] = _psRange(p.Rotation, 0, 0) * Math.PI / 180;
+            e.spin[i] = _psRange(p.RotSpeed, 0, 0) * Math.PI / 180;
+        }
+
+        function psEmit(ref, count) {
+            for (const e of PS.list) {
+                if (e.d.ref !== ref) continue;
+                const mat = _psWorldMat(e);
+                for (let i = 0; i < count; i++) _psSpawn(e, mat);
+            }
+        }
+
+        function _psWorldMat(e) {
+            const part = sceneObjs[e.d.part];
+            if (part) {
+                e.mat4.compose(part.position, part.quaternion, new THREE.Vector3(1, 1, 1));
+                return e.mat4.multiply(e.attMat);
+            }
+            return e.staticMat;
+        }
+
+        const _psTmpC = [1, 1, 1];
+
+        function updateParticles(nowMs) {
+            if (!PS.list.length) { PS.lastT = nowMs; return; }
+            let dt = (nowMs - PS.lastT) / 1000;
+            PS.lastT = nowMs;
+            if (!(dt > 0)) return;
+            dt = Math.min(dt, 0.05);
+            // перевод размера в студах -> пиксели точки
+            let scale = 600;
+            if (renderer && camera) {
+                const hpx = renderer.getDrawingBufferSize(new THREE.Vector2()).y;
+                scale = hpx / (2 * Math.tan(camera.fov * Math.PI / 360));
+            }
+            const qf = currentQuality === 'low' ? 0.5 : (currentQuality === 'medium' ? 0.8 : 1);
+            const maxDist = (qualitySettings && qualitySettings.renderDistance ? qualitySettings.renderDistance : 300) * 1.5;
+            let total = 0;
+            for (const e of PS.list) total += e.count;
+            for (const e of PS.list) {
+                const p = e.p;
+                const mat = _psWorldMat(e);
+                const me = mat.elements;
+                // дальние эмиттеры не считаем (и не рисуем)
+                const ddx = me[12] - camera.position.x, ddy = me[13] - camera.position.y, ddz = me[14] - camera.position.z;
+                if (ddx * ddx + ddy * ddy + ddz * ddz > maxDist * maxDist) { e.points.visible = false; e.count = 0; continue; }
+                e.points.visible = true;
+                e.mat.uniforms.uScale.value = scale;
+                const ts = (typeof p.TimeScale === 'number' ? p.TimeScale : 1);
+                const sdt = dt * ts;
+                // эмиссия
+                if (p.Enabled !== false && total < PS_MAX_TOTAL) {
+                    e.acc += (typeof p.Rate === 'number' ? p.Rate : 20) * sdt * qf;
+                    let n = Math.floor(e.acc);
+                    e.acc -= n;
+                    if (n > 200) n = 200;
+                    for (let i = 0; i < n; i++) _psSpawn(e, mat);
+                } else {
+                    e.acc = 0;
+                }
+                // симуляция
+                const acc = p.Acceleration || { x: 0, y: 0, z: 0 };
+                const drag = Math.max(0, p.Drag || 0);
+                const dk = drag > 0 ? Math.exp(-drag * sdt) : 1;
+                const locked = !!p.LockedToPart;
+                const bright = typeof p.Brightness === 'number' ? p.Brightness : 1;
+                let i = 0;
+                while (i < e.count) {
+                    e.age[i] += sdt;
+                    if (e.age[i] >= e.life[i]) {
+                        // swap-remove: последний встаёт на место умершего
+                        const last = --e.count;
+                        if (i !== last) {
+                            const a = i * 3, b = last * 3;
+                            e.pos[a] = e.pos[b]; e.pos[a + 1] = e.pos[b + 1]; e.pos[a + 2] = e.pos[b + 2];
+                            e.vel[a] = e.vel[b]; e.vel[a + 1] = e.vel[b + 1]; e.vel[a + 2] = e.vel[b + 2];
+                            e.age[i] = e.age[last]; e.life[i] = e.life[last];
+                            e.rnd[i * 2] = e.rnd[last * 2]; e.rnd[i * 2 + 1] = e.rnd[last * 2 + 1];
+                            e.rot0[i] = e.rot0[last]; e.spin[i] = e.spin[last];
+                        }
+                        continue;
+                    }
+                    const k = i * 3;
+                    e.vel[k] += acc.x * sdt; e.vel[k + 1] += acc.y * sdt; e.vel[k + 2] += acc.z * sdt;
+                    if (dk !== 1) { e.vel[k] *= dk; e.vel[k + 1] *= dk; e.vel[k + 2] *= dk; }
+                    e.pos[k] += e.vel[k] * sdt; e.pos[k + 1] += e.vel[k + 1] * sdt; e.pos[k + 2] += e.vel[k + 2] * sdt;
+                    i++;
+                }
+                // выгрузка в атрибуты
+                const P = e.geo.attributes.position.array;
+                for (let j = 0; j < e.count; j++) {
+                    const t = e.age[j] / e.life[j];
+                    const k = j * 3;
+                    if (locked) {
+                        const x = e.pos[k], y = e.pos[k + 1], z = e.pos[k + 2];
+                        P[k] = me[0] * x + me[4] * y + me[8] * z + me[12];
+                        P[k + 1] = me[1] * x + me[5] * y + me[9] * z + me[13];
+                        P[k + 2] = me[2] * x + me[6] * y + me[10] * z + me[14];
+                    } else { P[k] = e.pos[k]; P[k + 1] = e.pos[k + 1]; P[k + 2] = e.pos[k + 2]; }
+                    const sv = _psSeqNum(p.Size, t);
+                    e.size[j] = Math.max(0, sv[0] + sv[1] * e.rnd[j * 2]);
+                    const tv = _psSeqNum(p.Transparency, t);
+                    const alpha = 1 - Math.min(1, Math.max(0, tv[0] + tv[1] * e.rnd[j * 2 + 1]));
+                    _psSeqColor(p.Color, t, _psTmpC);
+                    const c4 = j * 4;
+                    e.col[c4] = _psTmpC[0] * bright; e.col[c4 + 1] = _psTmpC[1] * bright; e.col[c4 + 2] = _psTmpC[2] * bright;
+                    e.col[c4 + 3] = alpha;
+                    e.rot[j] = e.rot0[j] + e.spin[j] * e.age[j];
+                }
+                e.geo.setDrawRange(0, e.count);
+                e.geo.attributes.position.needsUpdate = true;
+                e.geo.attributes.aSize.needsUpdate = true;
+                e.geo.attributes.aRot.needsUpdate = true;
+                e.geo.attributes.aColor.needsUpdate = true;
+            }
+        }
+
         async function reloadScene() {
             if (isPlaying) {
                 notify(t('notify_stop_play_first'), 'warn');
@@ -3295,6 +3650,7 @@
             if (selectedRefs.size || (selectedRef && sceneObjs[selectedRef])) {
                 highlightSelected(selectedRef);
             }
+            loadParticles();
         }
 
         function highlightSelected(ref) {
@@ -5793,8 +6149,8 @@ local function isDescendantOf(ref, ancestor)
 end
 
 local COMPAT = {
-    -- ParticleEmitter:Emit(n) — частицы в эмуляторе не рисуются, вызов допустим и ничего не делает
-    Emit = function(t, ref) return function(self, count) end end,
+    -- ParticleEmitter:Emit(n) — выпускает n частиц сразу (см. блок ЧАСТИЦЫ в script.js)
+    Emit = function(t, ref) return function(self, count) __particle_emit(ref, tonumber(count) or 1) end end,
     -- Debris:AddItem(item, lifetime) — уничтожить item через lifetime секунд (по умолчанию 10)
     AddItem = function(t, ref) return function(self, item, lifetime)
         if item == nil then return end
@@ -7992,6 +8348,10 @@ end
                 lua.lua_pushboolean(L2, true);
                 lua.lua_insert(L2, -2); // стек был [function, true] -> [true, function]
                 return 2;
+            });
+            def('__particle_emit', function (L2) {
+                try { psEmit(lua.lua_tonumber(L2, 1), Math.max(0, Math.min(500, lua.lua_tonumber(L2, 2) || 1))); } catch (e) { console.error('Emit:', e); }
+                return 0;
             });
             def('__get_parent', function (L2) {
                 const ref = luaParentByRef[lua.lua_tonumber(L2, 1)];
@@ -11642,6 +12002,7 @@ end
                 prop: prop,
                 value: val
             });
+            if (prop !== 'Source') _psSchedule();
         }
 
         async function saveScript() {
@@ -11695,6 +12056,7 @@ end
             if (r.ok) {
                 notify(t('notify_quickadd', { cls: cls }));
                 loadTree();
+                _psSchedule();
             } else {
                 notify(r.error || t('notify_error'), 'err');
             }
@@ -12051,6 +12413,7 @@ end
             if (r.ok) {
                 notify('✅ ' + cls);
                 loadTree();
+                _psSchedule();
             } else {
                 notify(r.error || t('notify_error'), 'err');
             }
@@ -12062,6 +12425,7 @@ end
                 return;
             }
             const r = await api('DELETE', '/api/instance/' + selectedRef);
+            _psSchedule();
             if (r.ok) {
                 notify(t('notify_deleted'));
                 selectedRef = null;
