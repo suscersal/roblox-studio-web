@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-20 · add-icons';
+        const BUILD_LABEL = '2026-10-21 · world-pivot';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -5651,6 +5651,9 @@ InstanceMT.__index = function(t, k)
     if k == "CFrame" then
         return CFrame.new(__get_cframe(ref))
     end
+    if k == "WorldPivot" then
+        return CFrame.new(__get_pivot(ref))
+    end
     if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
         -- Второй аргумент FindFirstChild(name, recursive) раньше игнорировался: ViewModelController искал
         -- MuzzleAttachment глубоко внутри модели и «не находил» его, хотя в файле он есть.
@@ -6497,6 +6500,9 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             elseif k == "Value" then
                 __tblVals[ref] = v
                 return
+            elseif k == "WorldPivot" and rawget(v, "R00") ~= nil then
+                __set_world_pivot(ref, v:GetComponents())
+                return
             elseif k == "CFrame" and rawget(v, "R00") ~= nil then
                 __set_cframe(ref, v:GetComponents())
                 return
@@ -6851,6 +6857,7 @@ end
         // Данные объектов ИЗ ФАЙЛА (с /api/all_instances): атрибуты, теги, команды. luaAttrs/luaTags пересоздаются при
         // каждом запуске Play (luaResetSignals) и засеваются отсюда — раньше GetAttribute по объектам карты давал nil.
         let luaFileAttrs = {}, luaFileTags = {}, luaTeamInfo = {}, luaPlayerTeam = -1;
+        let luaFilePivots = {};   // ref модели -> {p:[x,y,z], r:[9 по строкам]} — WorldPivotData из файла
         // Группы столкновений (PhysicsService): имя -> {bit}; Default = бит 1; бит 2 занят «нет столкновений» (CanCollide=false).
         // В cannon тела сталкиваются, если (A.group & B.mask) && (B.group & A.mask): у каждой группы свой бит, а маска —
         // сумма битов групп, с которыми она сталкивается.
@@ -7104,6 +7111,14 @@ end
             }
             if (luaIsPartRef(ref)) return luaPartMatrix(ref).multiply(luaPivotOffsetMatrix(ref));
             if (_modelPivots[ref]) return _modelPivots[ref].clone();
+            const fp = luaFilePivots[ref];
+            if (fp) {
+                const r = fp.r, p = fp.p;
+                const fm = new THREE.Matrix4();
+                fm.set(r[0], r[1], r[2], p[0], r[3], r[4], r[5], p[1], r[6], r[7], r[8], p[2], 0, 0, 0, 1);
+                _modelPivots[ref] = fm.clone();
+                return fm;
+            }
             const parts = luaCollectParts(ref, []);
             const m = new THREE.Matrix4();
             if (parts.length) {
@@ -8241,6 +8256,11 @@ end
             }
             const p = luaPositionOfRef(ref);
             if (p) luaSetPositionOfRef(newRef, p.x, p.y, p.z);
+            // Клон детали должен повторять и ПОВОРОТ оригинала (раньше копировалась только позиция —
+            // клоны повёрнутых лифтов/дверей вставали «прямо», а PivotTo считался от неверной матрицы).
+            if (luaIsPartRef(ref) && !luaIsCharRef(ref)) {
+                try { luaApplyPartMatrix(newRef, luaPartMatrix(ref)); } catch (e) { console.warn('Clone: поворот не скопирован:', e); }
+            }
             // GUI (Frame/TextButton/...) раньше тут вообще не копировался —
             if (guiPropsByRef[ref]) {
                 cloneGuiSubtreeInto(ref, newRef);
@@ -8251,6 +8271,11 @@ end
                     if (!luaByRef[childRef]) continue;
                     luaSetParent(luaCloneRef(childRef), newRef);
                 }
+            }
+            // Пивот контейнера (Model/Folder): клон наследует пивот оригинала (WorldPivotData), иначе
+            // PivotTo(клона) считался бы от центра габаритов и клон вставал бы со смещением.
+            if (!luaIsPartRef(ref) && !luaIsCharRef(ref) && !luaIsCameraRef(ref) && (_modelPivots[ref] || luaFilePivots[ref])) {
+                _modelPivots[newRef] = luaGetPivotMatrix(ref).clone();
             }
             return newRef;
         }
@@ -8794,6 +8819,11 @@ end
                 } else {
                     luaSetCFrameMatrix(ref, M);
                 }
+                return 0;
+            });
+            def('__set_world_pivot', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                if (!luaIsPartRef(ref)) _modelPivots[ref] = _readMatrix(L2, 2);   // у Model — только пивот, детали остаются на месте
                 return 0;
             });
             def('__set_pivot', function (L2) {
@@ -9979,7 +10009,7 @@ end
             luaRefProps = {};
             luaWelds = [];
             luaCloneOrigin = {};
-            luaFileAttrs = {}; luaFileTags = {}; luaTeamInfo = {}; luaPlayerTeam = -1;
+            luaFileAttrs = {}; luaFileTags = {}; luaTeamInfo = {}; luaPlayerTeam = -1; luaFilePivots = {};
             luaCollGroups = {}; luaNextGroupBit = 4; luaGroupCollide = {}; luaPartGroup = {};
             playCamDist = THIRD_PERSON_DIST;
             if (allR && allR.ok && allR.instances) {
@@ -9988,6 +10018,7 @@ end
                     luaParentByRef[inst.ref] = inst.parent;
                     if (inst.attrs) luaFileAttrs[inst.ref] = inst.attrs;
                     if (inst.tags) luaFileTags[inst.ref] = inst.tags;
+                    if (inst.pivot) luaFilePivots[inst.ref] = inst.pivot;
                     if (inst.cls === 'Team') luaTeamInfo[inst.ref] = { color: inst.teamColor, auto: inst.autoAssignable !== false };
                     if (inst.att) luaAttCF[inst.ref] = inst.att;
                     if (inst.refs) luaRefProps[inst.ref] = inst.refs;

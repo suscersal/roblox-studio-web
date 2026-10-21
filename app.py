@@ -2751,6 +2751,12 @@ def api_all_instances():
         _tg = _decode_tags(_pp.get('Tags'), parsed.get('shared_strings') or [])
         if _tg:
             item['tags'] = _tg
+        # Model.WorldPivotData (OptionalCFrame, мировой): без него Model.WorldPivot/GetPivot считались
+        # по центру габаритов, а скрипты вроде ElevatorSpawner (ELEV1.WorldPivot) падали на nil.
+        _wp = _pp.get('WorldPivotData')
+        if isinstance(_wp, dict):
+            _wx, _wy, _wz = get_pos(_wp)
+            item['pivot'] = {'p': [_wx, _wy, _wz], 'r': get_rot_matrix(_wp)}
         if cls == 'Team':
             item['teamColor'] = _pp.get('TeamColor')
             item['autoAssignable'] = _pp.get('AutoAssignable', True)
@@ -5018,7 +5024,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-20 · add-icons'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-10-21 · world-pivot'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')
