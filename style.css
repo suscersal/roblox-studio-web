@@ -258,7 +258,7 @@
         }
 
         /* Метка сборки: script.js сверяет её со своей и с app.py (см. checkBuildConsistency) */
-        :root { --css-build: "2026-10-21 · world-pivot"; }
+        :root { --css-build: "2026-10-21 · luau-std"; }
 
         /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
         #gui-overlay {

@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-21 · world-pivot';
+        const BUILD_LABEL = '2026-10-21 · luau-std';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -5028,6 +5028,80 @@ function math.round(x) return math.floor(x + 0.5) end
 function math.sign(x)
     if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
 end
+
+-- Расширения стандартной библиотеки Luau, которых нет в Lua 5.3 (fengari). В списке известных имён они
+-- значились, но реализованы не были: table.find(...) падал с "attempt to call a nil value (field 'find')"
+-- прямо в обработчике Touched лифта — поэтому лобби не открывалось и UI не показывался.
+function table.find(t, value, init)
+    for i = init or 1, #t do
+        if t[i] == value then return i end
+    end
+    return nil
+end
+function table.clone(t)
+    local c = {}
+    for k, v in pairs(t) do c[k] = v end
+    return setmetatable(c, getmetatable(t))
+end
+function table.clear(t)
+    for k in pairs(t) do t[k] = nil end
+end
+function table.create(n, value)
+    local t = {}
+    if value ~= nil then for i = 1, n do t[i] = value end end
+    return t
+end
+-- freeze только помечает таблицу (запрет записи не эмулируется — для этого пришлось бы подменять таблицу)
+local __frozenTables = setmetatable({}, { __mode = "k" })
+function table.freeze(t) __frozenTables[t] = true return t end
+function table.isfrozen(t) return __frozenTables[t] == true end
+-- string.split(s, sep): разделитель по умолчанию ",", как в Luau (разделитель — обычная строка, не паттерн)
+function string.split(s, sep)
+    sep = sep or ","
+    local out, pos = {}, 1
+    if sep == "" then
+        for i = 1, #s do out[i] = s:sub(i, i) end
+        return out
+    end
+    while true do
+        local a, b = s:find(sep, pos, true)
+        if not a then out[#out + 1] = s:sub(pos) break end
+        out[#out + 1] = s:sub(pos, a - 1)
+        pos = b + 1
+    end
+    return out
+end
+-- bit32 (в Lua 5.3 есть операторы, но не библиотека). Целые в fengari 32-битные со знаком, а bit32 Roblox работает
+-- с беззнаковыми 0..2^32-1: входы приводим к знаковым 32 бит (s32), результат — обратно к беззнаковому (u32).
+local function __s32(x)
+    x = x % 4294967296
+    if x >= 2147483648 then x = x - 4294967296 end
+    return math.tointeger(x) or x
+end
+local function __u32(x) x = x % 4294967296 return math.tointeger(x) or x end
+bit32 = bit32 or {
+    band = function(a, b, ...) local r = __s32(a) & __s32(b) for _, v in ipairs({...}) do r = r & __s32(v) end return __u32(r) end,
+    bor = function(a, b, ...) local r = __s32(a) | __s32(b) for _, v in ipairs({...}) do r = r | __s32(v) end return __u32(r) end,
+    bxor = function(a, b, ...) local r = __s32(a) ~ __s32(b) for _, v in ipairs({...}) do r = r ~ __s32(v) end return __u32(r) end,
+    bnot = function(a) return __u32(~__s32(a)) end,
+    lshift = function(a, n) if n >= 32 or n <= -32 then return 0 end if n < 0 then return __u32(__s32(a) >> -n) end return __u32(__s32(a) << n) end,
+    rshift = function(a, n) if n >= 32 or n <= -32 then return 0 end if n < 0 then return __u32(__s32(a) << -n) end return __u32(__s32(a) >> n) end,
+    arshift = function(a, n)
+        a = __s32(a)
+        if n <= 0 then return __u32(a << -n) end
+        if n >= 32 then return a < 0 and 4294967295 or 0 end
+        local r = a >> n                               -- логический сдвиг
+        if a < 0 then r = r | ~(-1 >> n) end           -- дописываем старшие единицы
+        return __u32(r)
+    end,
+    btest = function(a, b) return (__s32(a) & __s32(b)) ~= 0 end,
+    extract = function(n, f, w) w = w or 1 return __u32((__s32(n) >> f) & ((1 << w) - 1)) end,
+    replace = function(n, v, f, w)
+        w = w or 1
+        local mask = ((1 << w) - 1) << f
+        return __u32((__s32(n) & ~mask) | ((__s32(v) << f) & mask))
+    end,
+}
 
 -- CFrame.new(...) — только конструктор + позиция, БЕЗ полноценной алгебры
 -- поворота (нет "*", нет CFrame.Angles с реальным эффектом) — как и у
