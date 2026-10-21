@@ -363,6 +363,19 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun getDataDir(): String = filesDir.absolutePath
 
+        /** versionCode установленного APK (= номер запуска CI, тег v1.N). */
+        @JavascriptInterface
+        fun getAppVersionCode(): Int = try {
+            packageManager.getPackageInfo(packageName, 0).versionCode
+        } catch (e: Exception) { 0 }
+
+        /** Открывает ссылку (страницу релиза) во внешнем браузере. */
+        @JavascriptInterface
+        fun openUrl(url: String) {
+            if (!url.startsWith("https://github.com/")) return
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+
         /** sourcePath — файл, который сервер уже записал в приватное
          * хранилище (см. getDataDir). suggestedName — имя по умолчанию
          * в диалоге "Сохранить как". */

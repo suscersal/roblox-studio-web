@@ -194,6 +194,10 @@
                 notify_not_selected: 'Nothing selected',
                 notify_deleted: '🗑 Deleted',
                 notify_published: '✅ Published!',
+                upd_title: '🚀 New version available',
+                upd_text: 'Version {ver} has been released. Update the app to get the latest features and fixes.',
+                upd_go: 'Go',
+                upd_later: 'Later',
                 notify_quickadd: '✅ {cls} added',
                 avatar_title: '🧍 3D Avatar',
                 avatar_title_uid: '🧍 3D Avatar by User ID',
@@ -438,6 +442,10 @@
                 notify_not_selected: 'Не выбран',
                 notify_deleted: '🗑 Удалён',
                 notify_published: '✅ Опубликовано!',
+                upd_title: '🚀 Вышла новая версия',
+                upd_text: 'Вышла версия {ver}. Обновите приложение, чтобы получить новые функции и исправления.',
+                upd_go: 'Перейти',
+                upd_later: 'Позже',
                 notify_quickadd: '✅ {cls} добавлен',
                 avatar_title: '🧍 3D-аватар',
                 avatar_title_uid: '🧍 3D-аватар по User ID',
@@ -3844,7 +3852,11 @@
             mesh.matrix.decompose(p0, q0, s0);
             mesh.matrix.compose(new THREE.Vector3(t.p[0], t.p[1], t.p[2]), new THREE.Quaternion(t.q[0], t.q[1], t.q[2], t.q[3]), s0);
         }
+        // Данные деталей карты (ответы /api/scene) по ref — нужны, чтобы Instance:Clone() детали из файла
+        // получал меш и физику (см. luaRealizeClonedParts): у виртуального клона своей геометрии нет.
+        let playObjData = {};
         function addPhysicsBodyForObj(o) {
+            playObjData[o.ref] = o;
             if (physicsBodies[o.ref]) return; // уже физически представлен
             let mesh = sceneObjs[o.ref];
             if (!mesh) {
@@ -3900,6 +3912,7 @@
 
         // Только меш, без CANNON.Body — для объектов, которые видно, но до
         function addVisualMeshForObj(o) {
+            playObjData[o.ref] = o;
             if (sceneObjs[o.ref]) {
                 loadedObjPos[o.ref] = objPosFor(o);
                 loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
@@ -3991,7 +4004,7 @@
                 }
                 // Объект раньше был среди ближайших physicsCap, а теперь
                 for (const refStr of Object.keys(physicsBodies)) {
-                    if (!nearRefs.has(parseInt(refStr))) {
+                    if (!nearRefs.has(parseInt(refStr)) && luaCloneOrigin[refStr] === undefined) {
                         demoteToVisualOnly(parseInt(refStr));
                     }
                 }
@@ -4000,7 +4013,7 @@
                 const unloadDist = visualRadius + UNLOAD_MARGIN;
                 for (const ref of Array.from(playOnlyRefs)) {
                     const p = loadedObjPos[ref];
-                    if (!p) continue;
+                    if (!p || luaCloneOrigin[ref] !== undefined) continue;
                     const d = Math.hypot(p.x - cx, p.y - cy, p.z - cz) - objRadiusOfRef(ref);
                     if (d > unloadDist) {
                         removePhysicsBodyForRef(ref);
@@ -4511,6 +4524,7 @@
             physicsBodies = {};
             playSnapshot = {};
             playOnlyRefs = new Set();
+            playObjData = {};
 
             // Меши, оставшиеся в сцене от редактора (загружены раньше,
             for (const mesh of Object.values(sceneObjs)) {
@@ -6940,6 +6954,8 @@ end
                 mesh.matrix.decompose(pos, q, sc);
                 return { x: pos.x, y: pos.y, z: pos.z };
             }
+            const tx = luaPartXform[ref];
+            if (tx && luaIsPendingClonePart(ref)) return { x: tx.p[0], y: tx.p[1], z: tx.p[2] };
             return { x: 0, y: 0, z: 0 };
         }
         function luaSetPositionOfRef(ref, x, y, z) {
@@ -7145,7 +7161,13 @@ end
         function luaIsCharRef(ref) {
             return ref !== -1 && (ref === luaCharacterRef || ref === luaHumanoidRootPartRef || ref === luaHumanoidRef);
         }
-        function luaIsPartRef(ref) { return !!(sceneObjs[ref] || physicsBodies[ref]); }
+        // Клон детали из файла, которому ещё не построили меш (он не в Workspace): для скрипта это всё равно
+        // деталь — иначе PivotTo(клона-контейнера) до .Parent = workspace ничего не двигал (см. luaRealizeClonedParts).
+        function luaIsPendingClonePart(ref) {
+            const o = luaCloneOrigin[ref];
+            return o !== undefined && !sceneObjs[ref] && !!playObjData[o];
+        }
+        function luaIsPartRef(ref) { return !!(sceneObjs[ref] || physicsBodies[ref] || luaIsPendingClonePart(ref)); }
         function luaIsCameraRef(ref) {
             return !!(luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined');
         }
@@ -7182,11 +7204,14 @@ end
                 q.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
             } else if (mesh) {
                 mesh.matrix.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+            } else if (luaPartXform[ref] && luaIsPendingClonePart(ref)) {
+                const tq = luaPartXform[ref].q;
+                q.set(tq[0], tq[1], tq[2], tq[3]);
             }
             return new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(1, 1, 1));
         }
         function luaPivotOffsetMatrix(ref) {
-            const mesh = sceneObjs[ref];
+            const mesh = sceneObjs[ref] || (luaIsPendingClonePart(ref) ? sceneObjs[luaCloneOrigin[ref]] : null);
             const po = mesh && mesh.userData && mesh.userData.pivotOffset;
             const m = new THREE.Matrix4();
             if (!po || po.length < 12) return m;
@@ -8332,6 +8357,68 @@ end
             }
             return ref;
         }
+        // Script, склонированный через :Clone() ВО ВРЕМЯ игры (холодильники/двери/лифты, которые
+        // карта размножает из шаблона), раньше не запускался вообще: скрипты стартуют ОДИН раз из
+        // файла при нажатии Play, а у виртуального клона нет ни Source, ни запуска — у копии не было
+        // ни ProximityPrompt, ни двери. Как в Roblox: когда клон оказывается в Workspace /
+        // ServerScriptService — его Script-ы запускаются (script.Parent = склонированный контейнер).
+        let luaScriptsByRef = {};            // ref скрипта из файла -> {ref,name,cls,source,...} (из /api/scripts)
+        let luaStartedClonedScripts = new Set();
+        function luaIsUnderServerContainer(ref) {
+            let cur = ref, g = 0;
+            while (cur !== undefined && cur !== -1 && g++ < 200) {
+                const i = luaByRef[cur];
+                if (i && luaParentByRef[cur] === -1) return i.cls === 'Workspace' || i.cls === 'ServerScriptService';
+                cur = luaParentByRef[cur];
+            }
+            return false;
+        }
+        function luaIsUnderWorkspace(ref) {
+            let cur = ref, g = 0;
+            while (cur !== undefined && cur !== -1 && g++ < 200) {
+                if (luaParentByRef[cur] === -1) return !!(luaByRef[cur] && luaByRef[cur].cls === 'Workspace');
+                cur = luaParentByRef[cur];
+            }
+            return false;
+        }
+        // Клон детали из файла (UnionOperation/MeshPart/Part холодильника) — пустой виртуальный инстанс: без меша и физики
+        // он стоял в (0,0,0) невидимкой. Когда клон попадает в Workspace — строим ему меш и тело по данным оригинала,
+        // в позиции, которую клону выставили Clone()/PivotTo (luaPartXform).
+        function luaRealizeClonedParts(root) {
+            if (!isPlaying || !luaIsUnderWorkspace(root)) return;
+            const stack = [root];
+            while (stack.length) {
+                const r0 = stack.pop();
+                for (const c of (luaChildrenByRef[r0] || [])) stack.push(c);
+                const origin = luaCloneOrigin[r0];
+                if (origin === undefined || sceneObjs[r0]) continue;
+                const o = playObjData[origin];
+                if (!o) continue;
+                try { addPhysicsBodyForObj(Object.assign({}, o, { ref: r0 })); }
+                catch (e) { console.warn('Clone: меш/физика клона не построены:', e); }
+            }
+        }
+        function luaStartClonedScripts(root) {
+            if (!luaServerL || !luaIsUnderServerContainer(root)) return;
+            const stack = [root];
+            while (stack.length) {
+                const r0 = stack.pop();
+                for (const c of (luaChildrenByRef[r0] || [])) stack.push(c);
+                const info = luaByRef[r0];
+                if (!info || info.cls !== 'Script' || luaStartedClonedScripts.has(r0)) continue;
+                const origin = luaCloneOrigin[r0];
+                const scr = origin !== undefined ? luaScriptsByRef[origin] : undefined;
+                if (!scr || scr.disabled) continue;
+                luaStartedClonedScripts.add(r0);
+                const runAs = Object.assign({}, scr, { ref: r0, cls: 'Script' });
+                // отложенно: как в Roblox, скрипт клона стартует после того, как текущий код доработал до yield
+                setTimeout(() => {
+                    if (!isPlaying || !luaServerL) return;
+                    try { runLuaScript(runAs, luaServerL); }
+                    catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, 'Script'); }
+                }, 0);
+            }
+        }
         function luaCloneRef(ref) {
             // Instance:Clone() — новый виртуальный ref с тем же классом/именем
             const src = luaByRef[ref];
@@ -8342,6 +8429,9 @@ end
             if (virtualInstanceProps[ref]) {
                 virtualInstanceProps[newRef] = Object.assign({}, virtualInstanceProps[ref]);
             }
+            // Clone() копирует и атрибуты, и теги (раньше у клона холодильника GetAttribute("HideOffset"/"Yaw") был nil)
+            if (luaAttrs[ref]) luaAttrs[newRef] = Object.assign({}, luaAttrs[ref]);
+            if (luaTags[ref]) luaTags[newRef] = new Set(luaTags[ref]);
             // Sound: у клона раньше не было аудио-элемента (SoundId лежал только у оригинала), поэтому
             // sound:Clone():Play() молчал, а luaSoundControl тихо выходил с «SoundId ещё не задан».
             if (cls === 'Sound') {
@@ -8454,6 +8544,7 @@ end
             if (parentRef !== -1 && parentRef !== oldParent) {
                 fireLuaSignal(parentRef, 'ChildAdded', [{ __instanceRef: ref }]);
             }
+            if (parentRef !== -1) { luaRealizeClonedParts(ref); luaStartClonedScripts(ref); }
         }
         function luaDestroyRef(ref) {
             if (playOnlyRefs.has(ref)) {
@@ -10194,6 +10285,9 @@ end
             }
 
             // ModuleScript-исходники по ref — require() ищет тут (см.
+            luaScriptsByRef = {};
+            luaStartedClonedScripts = new Set();
+            for (const scr of r.scripts) luaScriptsByRef[scr.ref] = scr;
             luaModuleSourceByRef = {};
             luaModuleNameByRef = {};
             for (const scr of r.scripts) {
@@ -10290,6 +10384,8 @@ end
             luaGenericPropsByRef = {};
             luaCharacterRef = -1;
             luaPlayerRef = -1;
+            luaScriptsByRef = {};
+            luaStartedClonedScripts = new Set();
             luaControlsDisabled = false;
             luaReleaseAllKeys();
             luaHollowUnions.clear(); luaGhostedUnions.clear();
@@ -13249,6 +13345,7 @@ end
             if (never || (cb && cb.checked)) {
                 try { localStorage.setItem('rsw-login-never', '1'); } catch (e) { emuWarn('swallow:localStorage.setItem:13227', 'localStorage.setItem: ' + _errText(e) + ''); }
             }
+            if (_pendingUpdateRelease) showUpdatePrompt();
         }
 
         function lpLoginAndroid() {
@@ -13329,6 +13426,63 @@ end
                 else { const st = await api('GET', '/api/roblox/auth-status'); ok = !!(st && st.ok && st.loggedIn); }
             } catch (e) { return; }
             if (!ok) showLoginPrompt();
+        }
+
+        // === Меню «Вышла новая версия» (только Android-приложение, только stable-релизы v1.N)
+        // Hot-update релизы (hot-N) помечены prerelease и сюда не попадают — они ставятся сами.
+        let _pendingUpdateRelease = null;
+
+        function showUpdatePrompt() {
+            const rel = _pendingUpdateRelease;
+            if (!rel) return;
+            _pendingUpdateRelease = null;
+            showModal(
+                '<h3>' + esc(t('upd_title')) + '</h3>' +
+                '<p style="font-size:14px; line-height:1.45;">' + esc(t('upd_text', { ver: rel.tag })) + '</p>' +
+                '<div class="modal-row">' +
+                '<button onclick="goToUpdate(' + _escAttr(JSON.stringify(rel.url)) + ')" style="background:#7c3aed">' + esc(t('upd_go')) + '</button>' +
+                '<button onclick="closeModal()">' + esc(t('upd_later')) + '</button>' +
+                '</div>'
+            );
+        }
+
+        function goToUpdate(url) {
+            closeModal();
+            try {
+                if (window.AndroidBridge && typeof window.AndroidBridge.openUrl === 'function') {
+                    window.AndroidBridge.openUrl(url);
+                    return;
+                }
+            } catch (e) { console.error('openUrl:', e); }
+            window.open(url, '_blank');
+        }
+
+        async function _maybeShowUpdatePrompt() {
+            try {
+                if (!IS_ANDROID || typeof window.AndroidBridge.getAppVersionCode !== 'function') return;
+                const cur = Number(window.AndroidBridge.getAppVersionCode());
+                if (!cur) return;
+                const ctl = new AbortController();
+                const timer = setTimeout(() => ctl.abort(), 7000);
+                let list;
+                try {
+                    const r = await fetch('https://api.github.com/repos/suscersal/roblox-studio-web/releases?per_page=30',
+                        { signal: ctl.signal, headers: { 'Accept': 'application/vnd.github+json' } });
+                    if (!r.ok) return;
+                    list = await r.json();
+                } finally { clearTimeout(timer); }
+                let best = null;
+                for (const rel of (Array.isArray(list) ? list : [])) {
+                    if (rel.prerelease || rel.draft) continue;
+                    const m = /^v1\.(\d+)$/.exec(rel.tag_name || '');
+                    if (!m) continue;
+                    const n = Number(m[1]);
+                    if (!best || n > best.n) best = { n: n, tag: rel.tag_name, url: rel.html_url };
+                }
+                if (!best || best.n <= cur) return;
+                _pendingUpdateRelease = best;
+                if (!_loginPromptVisible()) showUpdatePrompt();
+            } catch (e) { /* нет сети — молча пропускаем, обновление не критично */ }
         }
 
         function showDownloadPlaceDialog() {
@@ -14122,7 +14276,8 @@ end
             api('GET', '/api/status').then(st => {
                 if (st && st.ok && !st.loaded) showStartScreen(true);
             }).catch(() => { /* сервер недоступен — нечего показывать */ })
-                .then(() => _maybeShowLoginPrompt());
+                .then(() => _maybeShowLoginPrompt())
+                .then(() => _maybeShowUpdatePrompt());
         });
 
         document.addEventListener('keydown', (e) => {
