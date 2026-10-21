@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-21 · luau-std';
+        const BUILD_LABEL = '2026-10-21 · no-swallow';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -501,7 +501,7 @@
             try {
                 const saved = localStorage.getItem('rbxstudio-lang');
                 if (saved && I18N[saved]) return saved;
-            } catch (e) { }
+            } catch (e) { emuWarn('swallow:detectLang:504', 'detectLang: ' + _errText(e) + ''); }
             const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
             for (const l of langs) {
                 const short = (l || '').slice(0, 2).toLowerCase();
@@ -537,7 +537,7 @@
         // Простой переключатель между двумя языками (en/ru).
         function toggleLang() {
             const next = LANG === 'ru' ? 'en' : 'ru';
-            try { localStorage.setItem('rbxstudio-lang', next); } catch (e) { }
+            try { localStorage.setItem('rbxstudio-lang', next); } catch (e) { emuWarn('swallow:localStorage.setItem:540', 'localStorage.setItem: ' + _errText(e) + ''); }
             location.reload();
         }
 
@@ -907,7 +907,7 @@
                         document.body.style.userSelect = '';
                         try {
                             localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
-                        } catch (e) { }
+                        } catch (e) { emuWarn('swallow:L910', 'блок около script.js:910: ' + _errText(e) + ''); }
                     }
                 });
 
@@ -939,7 +939,7 @@
                         document.body.style.webkitUserSelect = '';
                         try {
                             localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
-                        } catch (e) { }
+                        } catch (e) { emuWarn('swallow:L942', 'блок около script.js:942: ' + _errText(e) + ''); }
                     }
                 };
                 document.addEventListener('touchend', endHResize);
@@ -1014,11 +1014,11 @@
             st.setProperty('--bs', uiCfg.bs);
             if (uiCfg.rz) st.setProperty('--rz', uiCfg.rz + 'px'); else st.removeProperty('--rz');
             if (uiCfg.sb) st.setProperty('--sb', uiCfg.sb + 'px'); else st.removeProperty('--sb');
-            try { localStorage.setItem('rbxstudio-ui', JSON.stringify(uiCfg)); } catch (e) { }
-            try { refreshCM(); resize(); } catch (e) { }
+            try { localStorage.setItem('rbxstudio-ui', JSON.stringify(uiCfg)); } catch (e) { emuWarn('swallow:localStorage.setItem:1017', 'localStorage.setItem: ' + _errText(e) + ''); }
+            try { refreshCM(); resize(); } catch (e) { emuWarn('swallow:refreshCM:1018', 'refreshCM: ' + _errText(e) + ''); }
         }
         function initUiSettings() {
-            try { uiCfg = { ...UI_DEFAULTS, ...JSON.parse(localStorage.getItem('rbxstudio-ui') || '{}') }; } catch (e) { }
+            try { uiCfg = { ...UI_DEFAULTS, ...JSON.parse(localStorage.getItem('rbxstudio-ui') || '{}') }; } catch (e) { emuWarn('swallow:uiCfg:1021', 'uiCfg: ' + _errText(e) + ''); }
             applyUiSettings();
             const lang = document.getElementById('lang-btn');
             if (!lang || !lang.parentNode) return;
@@ -1088,7 +1088,7 @@
                 if (h) {
                     document.getElementById('bottom-panel').style.height = h + 'px';
                 }
-            } catch (e) { }
+            } catch (e) { emuWarn('swallow:L1091', 'блок около script.js:1091: ' + _errText(e) + ''); }
         }
 
         function resetLayout() {
@@ -1346,7 +1346,7 @@
 
         async function refreshMapLighting() {
             let r = null;
-            try { r = await api('GET', '/api/lighting'); } catch (e) { /* без сети/сервера — свет по умолчанию */ }
+            try { r = await api('GET', '/api/lighting'); } catch (e) { emuWarn('swallow:L1349', 'блок около script.js:1349: ' + _errText(e) + ' (без сети/сервера — свет по умолчанию)'); }
             mapLighting = (r && r.ok && r.found) ? r : null;
             applyMapLighting();
             applyMapSky();
@@ -2555,7 +2555,7 @@
                     }
                     from = found + 1;
                 }
-            } catch (e) { /* падаем в сообщение ниже */ }
+            } catch (e) { emuWarn('swallow:L2558', 'блок около script.js:2558: ' + _errText(e) + ' (падаем в сообщение ниже)'); }
             _lastMeshParseFailReason = 'Draco-декодер не смог разобрать поток по офсету ' + dracoOffset +
                 (dracoLength != null ? (', длина ' + dracoLength) : '') + ' (поиск сигнатуры DRACO тоже не помог)';
             return null;
@@ -2766,7 +2766,7 @@
                             applyUnionTrimesh(physicsBodies[o.ref], mesh);
                         } else if (ratio < 0.75) luaHollowUnions.add(o.ref);
                     }
-                } catch (e) {}
+                } catch (e) { emuWarn('swallow:L2769', 'блок около script.js:2769: ' + _errText(e) + ''); }
             });
             _trackLoad(p);
         }
@@ -4454,7 +4454,7 @@
             try {
                 const r = await api('GET', '/api/roblox/me');
                 if (r && r.ok && r.loggedIn) acc = r;
-            } catch (e) { /* без сети — гость */ }
+            } catch (e) { emuWarn('swallow:setupPlayerAvatar:4457', 'setupPlayerAvatar: ' + _errText(e) + ' (без сети — гость)'); }
             if (charMesh !== group) return; // Play уже остановили
             if (!acc) { logLuaOutput('info', t('log_play_guest')); return; }
             playerAccount = { userId: acc.userId, name: acc.name, displayName: acc.displayName };
@@ -5575,6 +5575,12 @@ INSTANCE_CLASS_ANCESTORS = {
 -- используют ДРУГИЕ отрицательные ref'ы (см. __instance_new) — это валидные
 -- объекты, их заворачивать НУЖНО, поэтому проверяем именно "== -1", а не
 -- "< 0".
+local __emuWarned = {}
+function __emuWarnOnce(key, text)
+    if __emuWarned[key] then return end
+    __emuWarned[key] = true
+    __emu_warn(key, text)
+end
 local function wrap(ref)
     if ref == nil or ref == -1 then return nil end
     local existing = instances[ref]
@@ -6034,6 +6040,10 @@ InstanceMT.__index = function(t, k)
         return function(self, player, ...) __fire_remote(ref, "client", ...) end
     end
     local ok, v = pcall(__get_prop, ref, k)
+    if not ok then
+        __emuWarnOnce("getprop:" .. tostring(__get_class(ref)) .. "." .. tostring(k),
+            tostring(__get_class(ref)) .. "." .. tostring(k) .. " — ошибка чтения свойства: " .. tostring(v))
+    end
     -- Свойства-перечисления JS хранит строкой ('Scriptable'), а скрипты сравнивают
     -- их с Enum-значениями: camera.CameraType == Enum.CameraType.Scriptable.
     -- Строка никогда не равна таблице-Enum, из-за чего такое условие всегда было
@@ -6053,7 +6063,15 @@ InstanceMT.__index = function(t, k)
     -- хотя ребёнок с таким именем на самом деле есть — отсюда "field
     -- 'Engine'"/"field 'Parts'"/"field 'Weapon'" на объектах, которые
     -- реально существуют в файле карты.
-    return wrap(__find_first_child(ref, k))
+    local child = __find_first_child(ref, k)
+    if child ~= nil and child ~= -1 then return wrap(child) end
+    -- Ни свойства, ни потомка с таким именем: в Roblox это ошибка "X is not a valid member of Class". Эмулятор
+    -- отдавал молча nil — теперь говорим об этом (один раз на Класс.Имя), чтобы было видно, чего не хватает.
+    local cls = tostring(__get_class(ref))
+    __emuWarnOnce("missing:" .. cls .. "." .. tostring(k),
+        tostring(k) .. " — не свойство и не потомок " .. tostring(__get_name(ref)) .. " (" .. cls ..
+        "); эмулятор вернул nil (в Roblox: 'is not a valid member', либо этого свойства нет в эмуляторе)")
+    return nil
 end
 InstanceMT.__newindex = function(t, k, v)
     local ref = rawget(t, "__ref")
@@ -6786,6 +6804,17 @@ end
         // source — имя скрипта-источника (для print/warn/error) или null для
         let luaLogSessionId = null;
         let _luaOutputRenderTimer = null;
+        // «Проглоченные» ошибки и недостающие возможности эмулятора больше не молчат: любое такое событие один раз
+        // (на ключ) попадает в Output с пометкой «⚠ эмулятор». Набор ключей живёт в window, чтобы не зависеть от
+        // порядка инициализации (emuWarn вызывается и из кода, который выполняется до объявления Output).
+        function emuWarn(key, text) {
+            const seen = (window._emuWarned = window._emuWarned || new Set());
+            if (seen.has(key)) return;
+            seen.add(key);
+            try { logLuaOutput('warn', '⚠ эмулятор: ' + text); } catch (e) { console.warn('⚠ эмулятор: ' + text); }
+        }
+        function _errText(e) { return (e && e.message) ? e.message : String(e); }
+
         function logLuaOutput(level, text, source, trace, sideCls) {
             // Одинаковая ошибка/предупреждение подряд (обработчик события падает КАЖДЫЙ кадр) — не новая строка, а счётчик
             // «×N»: иначе Output забивается сотнями строк, 200 из них пересобираются через innerHTML на каждый кадр
@@ -7418,7 +7447,7 @@ end
                 const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
                 const src = ctx.createBufferSource();
                 src.buffer = buf; src.connect(ctx.destination); src.start(0);
-            } catch (e) { /* не критично */ }
+            } catch (e) { emuWarn('swallow:L7432', 'блок около script.js:7432: ' + _errText(e) + ' (не критично)'); }
         }
         ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'keydown'].forEach((ev) => {
             document.addEventListener(ev, _unlockAudioContext, { passive: true });
@@ -7617,7 +7646,7 @@ end
                 const db = await _openStretchDb();
                 const tx = db.transaction('stretched', 'readwrite');
                 tx.objectStore('stretched').put(value, key);
-            } catch (e) { /* best-effort */ }
+            } catch (e) { emuWarn('swallow:_stretchDbPut:7631', '_stretchDbPut: ' + _errText(e) + ' (best-effort)'); }
         }
 
         // Настоящий звуковой движок поверх Sound-инстансов.
@@ -7656,7 +7685,7 @@ end
                 });
             }
             addEventListener(type, cb) { (this._listeners[type] = this._listeners[type] || []).push(cb); }
-            _fire(type) { (this._listeners[type] || []).forEach((cb) => { try { cb(); } catch (e) { } }); }
+            _fire(type) { (this._listeners[type] || []).forEach((cb) => { try { cb(); } catch (e) { emuWarn('swallow:cb:7670', 'cb: ' + _errText(e) + ''); } }); }
 
             get src() { return this._src; }
             set src(url) {
@@ -7801,7 +7830,7 @@ end
             }
             _stopSourceNode() {
                 if (this._sourceNode) {
-                    try { this._sourceNode.onended = null; this._sourceNode.stop(); } catch (e) { }
+                    try { this._sourceNode.onended = null; this._sourceNode.stop(); } catch (e) { emuWarn('swallow:this._sourceNode.onended:7815', 'this._sourceNode.onended: ' + _errText(e) + ''); }
                     this._sourceNode = null;
                 }
                 this._playing = false;
@@ -8540,13 +8569,13 @@ end
             }
             def('__json_encode', function (L2) {
                 let out = '{}';
-                try { out = JSON.stringify(luaToJs(L2, 1)); } catch (e) { /* циклическая ссылка и т.п. — отдаём безопасный fallback */ }
+                try { out = JSON.stringify(luaToJs(L2, 1)); } catch (e) { emuWarn('swallow:out:8554', 'out: ' + _errText(e) + ' (циклическая ссылка и т.п. — отдаём безопасный fallback)'); }
                 lua.lua_pushstring(L2, out === undefined ? 'null' : out);
                 return 1;
             });
             def('__json_decode', function (L2) {
                 let val = null;
-                try { val = JSON.parse(lua.lua_tojsstring(L2, 1)); } catch (e) { /* невалидный JSON — nil, как и настоящий Roblox упал бы через error(), но тут безопаснее отдать nil */ }
+                try { val = JSON.parse(lua.lua_tojsstring(L2, 1)); } catch (e) { emuWarn('swallow:val:8560', 'val: ' + _errText(e) + ' (невалидный JSON — nil, как и настоящий Roblox упал бы через error(), но тут безопаснее отдать nil)'); }
                 pushJsAsLua(L2, val);
                 return 1;
             });
@@ -8587,6 +8616,10 @@ end
                 lua.lua_pushboolean(L2, true);
                 lua.lua_insert(L2, -2); // стек был [function, true] -> [true, function]
                 return 2;
+            });
+            def('__emu_warn', function (L2) {
+                emuWarn('lua:' + lua.lua_tojsstring(L2, 1), lua.lua_tojsstring(L2, 2));
+                return 0;
             });
             def('__cam_info', function (L2) {
                 const i = luaCamInfo();
@@ -9868,13 +9901,13 @@ end
             try {
                 const s = lua.lua_tojsstring(L, -1);
                 if (s !== null && s !== undefined) return s;
-            } catch (e) { /* падаем на luaL_tolstring ниже */ }
+            } catch (e) { emuWarn('swallow:luaErrToString:9882', 'luaErrToString: ' + _errText(e) + ' (падаем на luaL_tolstring ниже)'); }
             try {
                 lauxlib.luaL_tolstring(L, -1, null);
                 const s2 = lua.lua_tojsstring(L, -1);
                 lua.lua_pop(L, 1);
                 if (s2 !== null && s2 !== undefined) return s2;
-            } catch (e) { /* последний шанс — просто не строка */ }
+            } catch (e) { emuWarn('swallow:luaErrToString:9888', 'luaErrToString: ' + _errText(e) + ' (последний шанс — просто не строка)'); }
             return '(ошибка не строкового типа)';
         }
 
@@ -10084,6 +10117,7 @@ end
             luaWelds = [];
             luaCloneOrigin = {};
             luaFileAttrs = {}; luaFileTags = {}; luaTeamInfo = {}; luaPlayerTeam = -1; luaFilePivots = {};
+            if (window._emuWarned) window._emuWarned.clear();
             luaCollGroups = {}; luaNextGroupBit = 4; luaGroupCollide = {}; luaPartGroup = {};
             playCamDist = THIRD_PERSON_DIST;
             if (allR && allR.ok && allR.instances) {
@@ -11226,7 +11260,7 @@ end
                         if (!luaByRef[p.ref]) luaByRef[p.ref] = { cls: 'ProximityPrompt', name: 'ProximityPrompt' };
                     }
                 }
-            } catch (e) { /* подсказок из файла не будет — рантаймовые всё равно подхватятся через хуки */ }
+            } catch (e) { emuWarn('swallow:for:11240', 'for: ' + _errText(e) + ' (подсказок из файла не будет — рантаймовые всё равно подхватятся через хуки)'); }
         }
         function _promptKeyLabel(p) {
             if (typeof p.KeyboardKeyCode === 'number') return KEYCODE_LABELS[p.KeyboardKeyCode] || 'E';
@@ -11716,7 +11750,7 @@ end
             d.active = true;
             document.body.classList.add('tree-dragging');
             const treeEl = document.getElementById('tree');
-            try { treeEl.setPointerCapture(d.pointerId); } catch (e) {}
+            try { treeEl.setPointerCapture(d.pointerId); } catch (e) { emuWarn('swallow:treeEl.setPointerCapture:11730', 'treeEl.setPointerCapture: ' + _errText(e) + ''); }
             const ghost = document.createElement('div');
             ghost.id = 'tree-drag-ghost';
             const first = treeByRef[refs[0]];
@@ -11724,7 +11758,7 @@ end
             document.body.appendChild(ghost);
             d.ghost = ghost;
             d.scrollEl = treeScrollParent(treeEl);
-            if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+            if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { emuWarn('swallow:navigator.vibrate:11738', 'navigator.vibrate: ' + _errText(e) + ''); } }
             treeDragUpdate(d.lastX, d.lastY);
             const tick = () => {
                 if (!_tdrag || !_tdrag.active) return;
@@ -11772,7 +11806,7 @@ end
             if (d.ghost) d.ghost.remove();
             document.body.classList.remove('tree-dragging');
             const treeEl = document.getElementById('tree');
-            try { treeEl.releasePointerCapture(d.pointerId); } catch (e) {}
+            try { treeEl.releasePointerCapture(d.pointerId); } catch (e) { emuWarn('swallow:treeEl.releasePointerCapture:11786', 'treeEl.releasePointerCapture: ' + _errText(e) + ''); }
             for (const row of treeEl.querySelectorAll('.drop-target,.drop-invalid,.dragging-src')) {
                 row.classList.remove('drop-target', 'drop-invalid', 'dragging-src');
             }
@@ -12256,7 +12290,7 @@ end
                 inp.value = typeof v === 'object' ? JSON.stringify(v).slice(0, 80) : String(v ?? '');
                 inp.onchange = () => {
                     let val = inp.value;
-                    try { val = JSON.parse(val); } catch (e) { }
+                    try { val = JSON.parse(val); } catch (e) { emuWarn('swallow:val:12270', 'val: ' + _errText(e) + ''); }
                     setProp(ref, k, val);
                 };
                 row.appendChild(inp);
@@ -12434,7 +12468,7 @@ end
                 const resp = await fetch('/api/export/rbxm?refs=' + refs.join(',') + '&name=' + encodeURIComponent(name));
                 if (!resp.ok) {
                     let msg = t('notify_error');
-                    try { msg = (await resp.json()).error || msg; } catch (e) { }
+                    try { msg = (await resp.json()).error || msg; } catch (e) { emuWarn('swallow:msg:12448', 'msg: ' + _errText(e) + ''); }
                     notify(msg, 'err');
                     return;
                 }
@@ -12449,7 +12483,7 @@ end
                 setTimeout(() => URL.revokeObjectURL(url), 10000);
                 notify(t('notify_rbxm_exported', { n: resp.headers.get('X-Rbxm-Count') || refs.length }));
                 let warns = [];
-                try { warns = JSON.parse(decodeURIComponent(resp.headers.get('X-Rbxm-Warnings') || '[]')); } catch (e) { }
+                try { warns = JSON.parse(decodeURIComponent(resp.headers.get('X-Rbxm-Warnings') || '[]')); } catch (e) { emuWarn('swallow:warns:12463', 'warns: ' + _errText(e) + ''); }
                 if (warns.length) notify(t('notify_rbxm_warn', { msg: warns[0] }), 'warn');
             } catch (err) {
                 console.error('Экспорт rbxm:', err);
@@ -13213,7 +13247,7 @@ end
             if (el) el.classList.remove('show');
             const cb = document.getElementById('lp-never');
             if (never || (cb && cb.checked)) {
-                try { localStorage.setItem('rsw-login-never', '1'); } catch (e) { }
+                try { localStorage.setItem('rsw-login-never', '1'); } catch (e) { emuWarn('swallow:localStorage.setItem:13227', 'localStorage.setItem: ' + _errText(e) + ''); }
             }
         }
 
@@ -13288,7 +13322,7 @@ end
         }
 
         async function _maybeShowLoginPrompt() {
-            try { if (localStorage.getItem('rsw-login-never') === '1') return; } catch (e) { }
+            try { if (localStorage.getItem('rsw-login-never') === '1') return; } catch (e) { emuWarn('swallow:L13302', 'блок около script.js:13302: ' + _errText(e) + ''); }
             let ok = false;
             try {
                 if (IS_ANDROID) ok = !!window.AndroidBridge.isRobloxLoggedIn();
@@ -13975,7 +14009,7 @@ end
 
             // Рендер-цикл приложения не всегда рисует каждый кадр по
             if (typeof renderer !== 'undefined' && renderer && typeof camera !== 'undefined') {
-                try { renderer.render(scene, camera); } catch (e) { }
+                try { renderer.render(scene, camera); } catch (e) { emuWarn('swallow:renderer.render:13989', 'renderer.render: ' + _errText(e) + ''); }
             }
 
             return { vertCount, ref };
@@ -14072,7 +14106,7 @@ end
                 } else {
                     logLuaOutput('info', 'script.js, app.py и style.css одной сборки ✓');
                 }
-            } catch (e) { /* без сервера нечего сравнивать */ }
+            } catch (e) { emuWarn('swallow:L14086', 'блок около script.js:14086: ' + _errText(e) + ' (без сервера нечего сравнивать)'); }
         }
 
         window.addEventListener('DOMContentLoaded', () => {
