@@ -219,6 +219,8 @@ GUI_PROPS = (
     'GroupTransparency',
     # SurfaceGui (интерфейс на грани детали)
     'Face', 'SizingMode', 'PixelsPerStud', 'CanvasSize', 'AlwaysOnTop', 'Brightness',
+    # BillboardGui (интерфейс в мире, лицом к камере)
+    'Adornee', 'StudsOffset', 'StudsOffsetWorldSpace', 'SizeOffset', 'ExtentsOffset', 'MaxDistance',
 )
 
 # Script/LocalScript исполняются в РАЗНЫХ средах в настоящем Roblox
@@ -2901,7 +2903,12 @@ def api_gui_tree():
         }
         for pname in GUI_PROPS:
             if pname in props:
-                item[pname] = props[pname]
+                v = props[pname]
+                # MaxDistance = inf (по умолчанию у BillboardGui) нельзя отдавать в JSON: Infinity невалиден,
+                # fetch().json() падает и весь Play. Нет поля = без ограничения дистанции.
+                if isinstance(v, float) and (v != v or v in (float('inf'), float('-inf'))):
+                    continue
+                item[pname] = v
         out.append(item)
     return jsonify({'ok': True, 'elements': out})
 

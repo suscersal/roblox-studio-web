@@ -1751,6 +1751,9 @@
             } catch (e) {
                 _reportFrameError('render', e);
             }
+            if (isPlaying) {
+                try { updateBillboardGuis(); } catch (e) { _reportFrameError('billboard', e); }
+            }
         }
         let _lastFrameErrorMsg = null, _lastFrameErrorAt = 0;
         function _reportFrameError(where, e) {
@@ -10844,6 +10847,133 @@ end
                 });
             }
             return el;
+        }
+
+        // ============ BillboardGui: интерфейс в мире, всегда лицом к камере ============
+        // Раньше BillboardGui рисовался как обычный ScreenGui — на весь экран, а не над деталью/Attachment.
+        // Якорь: Adornee, иначе родитель (деталь, Attachment, модель). Size: Scale — в студах (px = Scale * px_на_стад
+        // на дистанции якоря), Offset — в пикселях. StudsOffsetWorldSpace — в мире, StudsOffset — в системе камеры (x,y).
+        // MaxDistance — скрыть дальше. AlwaysOnTop=false — скрываем, если между камерой и якорем есть геометрия
+        // (луч, не чаще раза в 5 кадров; части самой модели-владельца не заслоняют).
+        const _bbOcc = {};   // ref -> { frame, hidden }
+        let _bbFrame = 0;
+        function _bbAnchorWorld(ref, out) {
+            const info = luaByRef[ref];
+            if (!info) return false;
+            if (info.cls === 'Attachment') {
+                const part = luaParentByRef[ref];
+                const a = luaAttCF[ref];
+                if (part === undefined || !luaIsPartRef(part)) return false;
+                const m = luaPartMatrix(part);
+                if (a) {
+                    const l = new THREE.Matrix4().set(a[3], a[4], a[5], a[0], a[6], a[7], a[8], a[1], a[9], a[10], a[11], a[2], 0, 0, 0, 1);
+                    m.multiply(l);
+                }
+                out.setFromMatrixPosition(m);
+                return true;
+            }
+            if (luaIsPartRef(ref)) {
+                const p = luaPositionOfRef(ref);
+                out.set(p.x, p.y, p.z);
+                return true;
+            }
+            // Model/Folder и т.п.: первая деталь среди потомков
+            const stack = [ref];
+            while (stack.length) {
+                const r0 = stack.shift();
+                if (luaIsPartRef(r0)) { const p = luaPositionOfRef(r0); out.set(p.x, p.y, p.z); return true; }
+                for (const c of (luaChildrenByRef[r0] || [])) stack.push(c);
+            }
+            return false;
+        }
+        function _bbOccluded(ref, anchorRef, camPos, target) {
+            const st = _bbOcc[ref] || (_bbOcc[ref] = { frame: -99, hidden: false });
+            if (_bbFrame - st.frame < 5) return st.hidden;
+            st.frame = _bbFrame;
+            // части модели-владельца якоря не заслоняют (иначе Attachment внутри торса всегда «закрыт» своим торсом)
+            // владелец = САМАЯ ВЕРХНЯЯ Model цепочки (весь враг/персонаж целиком), а не ближайшая вложенная ('head')
+            let owner = anchorRef, cur = anchorRef, g = 0;
+            while (cur !== undefined && cur !== -1 && g++ < 50) {
+                const i = luaByRef[cur];
+                if (i && i.cls === 'Model') owner = cur;
+                cur = luaParentByRef[cur];
+            }
+            const dir = target.clone().sub(camPos);
+            const dist = dir.length();
+            if (dist < 1e-3) { st.hidden = false; return false; }
+            dir.divideScalar(dist);
+            const inOwner = (r) => {
+                let c = r, k = 0;
+                while (c !== undefined && c !== -1 && k++ < 200) { if (c === owner) return true; c = luaParentByRef[c]; }
+                return false;
+            };
+            const targets = [];
+            for (const k in sceneObjs) { const m = sceneObjs[k]; if (m) targets.push(m); }
+            const rc = new THREE.Raycaster(camPos, dir, 0, dist - 0.05);
+            let hidden = false;
+            try {
+                for (const h of rc.intersectObjects(targets, true)) {
+                    let o = h.object, r;
+                    while (o) { if (o.userData && o.userData.ref !== undefined) { r = o.userData.ref; break; } o = o.parent; }
+                    // шаблоны из ServerStorage нарисованы в сцене поверх реальных объектов, но в Roblox их нет в мире
+                    if (r === undefined || inOwner(r) || !luaIsUnderWorkspace(r)) continue;
+                    hidden = true; break;
+                }
+            } catch (e) { hidden = false; }
+            st.hidden = hidden;
+            return hidden;
+        }
+        function updateBillboardGuis() {
+            const overlay = document.getElementById('gui-overlay');
+            if (!overlay || !camera) return;
+            _bbFrame++;
+            const cr = renderer.domElement.getBoundingClientRect(), orc = overlay.getBoundingClientRect();
+            const W = cr.width, H = cr.height, offX = cr.left - orc.left, offY = cr.top - orc.top;
+            if (!(W > 0 && H > 0)) return;
+            camera.updateMatrixWorld();
+            const camPos = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+            const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+            const world = new THREE.Vector3(), view = new THREE.Vector3();
+            for (const refStr in guiDomByRef) {
+                const props = guiPropsByRef[refStr];
+                if (!props || props.cls !== 'BillboardGui') continue;
+                const ref = Number(refStr), el = guiDomByRef[refStr];
+                let anchor = (props.Adornee !== undefined && props.Adornee !== null && props.Adornee !== -1 && luaByRef[props.Adornee])
+                    ? props.Adornee : luaParentByRef[ref];
+                const hide = () => { el.style.display = 'none'; };
+                // шаблоны в ServerStorage/ReplicatedStorage и т.п. в мире не рисуются — только то, что лежит в Workspace
+                if (props.Enabled === false || anchor === undefined || anchor === -1 || !luaIsUnderWorkspace(anchor) ||
+                    !_bbAnchorWorld(anchor, world)) { hide(); continue; }
+                const wo = props.StudsOffsetWorldSpace;
+                if (wo) world.add(new THREE.Vector3(wo.x || 0, wo.y || 0, wo.z || 0));
+                const dist = world.distanceTo(camPos);
+                const maxD = Number(props.MaxDistance);
+                if (Number.isFinite(maxD) && maxD > 0 && dist > maxD) { hide(); continue; }
+                view.copy(world).applyMatrix4(camera.matrixWorldInverse);
+                const so = props.StudsOffset;
+                if (so) { view.x += so.x || 0; view.y += so.y || 0; }
+                const depth = -view.z;
+                if (depth < 0.1) { hide(); continue; }
+                if (props.AlwaysOnTop !== true && _bbOccluded(ref, anchor, camPos, world)) { hide(); continue; }
+                const pxPerStud = H / (2 * depth * tanHalf);
+                const sz = props.Size || { x: { scale: 1, offset: 0 }, y: { scale: 1, offset: 0 } };
+                const w = ((sz.x && sz.x.scale) || 0) * pxPerStud + ((sz.x && sz.x.offset) || 0);
+                const h = ((sz.y && sz.y.scale) || 0) * pxPerStud + ((sz.y && sz.y.offset) || 0);
+                if (!(w > 0.5 && h > 0.5)) { hide(); continue; }
+                view.z = -depth;
+                const ndc = view.clone().applyMatrix4(camera.projectionMatrix);
+                const sx = offX + (ndc.x * 0.5 + 0.5) * W, sy = offY + (-ndc.y * 0.5 + 0.5) * H;
+                const so2 = props.SizeOffset;
+                const ax = (so2 && so2.x) || 0, ay = (so2 && so2.y) || 0;
+                el.style.display = 'flex';
+                el.style.position = 'absolute';
+                el.style.right = 'auto'; el.style.bottom = 'auto';
+                el.style.width = w + 'px'; el.style.height = h + 'px';
+                el.style.left = sx + 'px'; el.style.top = sy + 'px';
+                el.style.transform = 'translate(' + (-50 + ax * 100) + '%,' + (-50 - ay * 100) + '%)';
+                el.style.transformOrigin = '50% 50%';
+                el.style.zIndex = '5';
+            }
         }
 
         function guiRenderNode(ref, parentEl) {
