@@ -2154,6 +2154,36 @@
             }
             return { positions, normals, uvs, indices };
         }
+        function _tryParseV3(dv, buf, hdrSize, vertSize, nLod) {
+            const numVerts = dv.getUint32(8, true), numFaces = dv.getUint32(12, true);
+            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) return null;
+            const faceOff = hdrSize + numVerts * vertSize;
+            const lodOff = faceOff + numFaces * 12;
+            if (lodOff + nLod * 4 > buf.byteLength) return null;
+            const positions = new Float32Array(numVerts * 3);
+            const normals = new Float32Array(numVerts * 3);
+            const uvs = new Float32Array(numVerts * 2);
+            for (let i = 0; i < numVerts; i++) {
+                const base = hdrSize + i * vertSize;
+                for (let k = 0; k < 3; k++) {
+                    positions[i * 3 + k] = dv.getFloat32(base + k * 4, true);
+                    normals[i * 3 + k] = dv.getFloat32(base + 12 + k * 4, true);
+                }
+                uvs[i * 2] = dv.getFloat32(base + 24, true);
+                uvs[i * 2 + 1] = dv.getFloat32(base + 28, true);
+            }
+            let f0 = 0, f1 = numFaces;
+            if (nLod >= 2) {
+                const a = dv.getUint32(lodOff, true), b = dv.getUint32(lodOff + 4, true);
+                if (a < b && b <= numFaces) { f0 = a; f1 = b; }
+            }
+            const indices = new Uint32Array((f1 - f0) * 3);
+            for (let i = 0; i < indices.length; i++) {
+                indices[i] = dv.getUint32(faceOff + f0 * 12 + i * 4, true);
+                if (indices[i] >= numVerts) return null;
+            }
+            return { positions, normals, uvs, indices };
+        }
         function _parseRobloxMeshBinary(buf) {
             const dv = new DataView(buf);
             // 5 байт — подтверждённый реальной документацией размер
@@ -2161,6 +2191,18 @@
             if (buf.byteLength < 13) { _lastMeshParseFailReason = 'буфер короче минимального заголовка v2.00 (' + dbg + ')'; return null; }
             // Заголовок v2.00: u16 sizeof_Header (=12), u8 sizeof_Vertex (36, либо 40 — с цветом вершины),
             // u8 sizeof_Face (=12), u32 numVerts, u32 numFaces; данные вершин начинаются с sizeof_Header.
+            if (buf.byteLength >= 16) {
+                // Заголовок v3.00 (16 байт): u16 sizeof_Header, u8 sizeof_Vertex (40), u8 sizeof_Face (12),
+                // u16 sizeof_LodOffset (4), u16 numLodOffsets, u32 numVerts, u32 numFaces. Счётчики лежат со смещения 8,
+                // а не 4, как в v2 — раньше v3 шёл через v2-разбор и падал «ни один вариант заглушки не подошёл».
+                // После граней идут numLodOffsets смещений LOD (индексы граней): рисуем только LOD0 = [lod[0], lod[1]).
+                const hs = dv.getUint16(0, true), vs = dv.getUint8(2), fs = dv.getUint8(3);
+                const lodSz = dv.getUint16(4, true), nLod = dv.getUint16(6, true);
+                if (hs === 16 && vs >= 32 && vs <= 64 && fs === 12 && lodSz === 4) {
+                    const r3 = _tryParseV3(dv, buf, hs, vs, nLod);
+                    if (r3) return r3;
+                }
+            }
             if (buf.byteLength >= 12) {
                 const hdrSize = dv.getUint16(0, true), vSize = dv.getUint8(2), fSize = dv.getUint8(3);
                 if (hdrSize >= 12 && hdrSize <= 64 && vSize >= 32 && vSize <= 64 && fSize === 12) {

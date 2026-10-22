@@ -2844,7 +2844,12 @@ def api_scripts():
         enabled = props.get('Enabled', True)
         if isinstance(enabled, str):
             enabled = enabled.lower() in ('true', '1')
-        if cls != 'ModuleScript' and not enabled:
+        # В .rbxl флаг отключённого скрипта хранится как Disabled (а не Enabled) — раньше он игнорировался,
+        # и Script с Disabled=true всё равно запускался в Play.
+        disabled = props.get('Disabled', False)
+        if isinstance(disabled, str):
+            disabled = disabled.lower() in ('true', '1')
+        if cls != 'ModuleScript' and (not enabled or disabled):
             continue
         out.append({
             'ref': ref, 'cls': cls,
