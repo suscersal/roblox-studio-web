@@ -194,6 +194,8 @@
                 notify_not_selected: 'Nothing selected',
                 notify_deleted: '🗑 Deleted',
                 notify_published: '✅ Published!',
+                notify_saved_original: '💾 Saved to the original file',
+                notify_save_original_failed: '⚠️ Could not write to the original file: {err}. Use “Save As”.',
                 upd_title: '🚀 New version available',
                 upd_text: 'Version {ver} has been released. Update the app to get the latest features and fixes.',
                 upd_go: 'Go',
@@ -442,6 +444,8 @@
                 notify_not_selected: 'Не выбран',
                 notify_deleted: '🗑 Удалён',
                 notify_published: '✅ Опубликовано!',
+                notify_saved_original: '💾 Сохранено в исходный файл',
+                notify_save_original_failed: '⚠️ Не удалось записать в исходный файл: {err}. Сохраните через «Сохранить как».',
                 upd_title: '🚀 Вышла новая версия',
                 upd_text: 'Вышла версия {ver}. Обновите приложение, чтобы получить новые функции и исправления.',
                 upd_go: 'Перейти',
@@ -10479,8 +10483,20 @@ end
 
             // Server-скрипты (Script) выполняются как есть — по одному
             // разу, "на сервере", видят реальную (нефильтрованную) карту.
+            // В Roblox скрипты из ServerStorage не выполняются вообще (это склад шаблонов). Эмулятор запускал и их, из-за чего
+            // шаблон врага (EnemyTemplates/ЖИЛЕЦ) жил своей жизнью параллельно настоящему: двойной ИИ, лишние атаки и скримеры.
+            // Клоны шаблонов в Workspace по-прежнему запускаются (luaStartClonedScripts), так что спавнеры работают как раньше.
+            const _inServerStorage = (ref) => {
+                let cur = ref, g = 0;
+                while (cur !== undefined && cur !== -1 && g++ < 200) {
+                    const ii = luaByRef[cur];
+                    if (ii && luaParentByRef[cur] === -1) return ii.cls === 'ServerStorage';
+                    cur = luaParentByRef[cur];
+                }
+                return false;
+            };
             for (const scr of r.scripts) {
-                if (scr.cls !== 'Script' || _isClientScript(scr) || _underCharacterScripts(scr.ref)) continue;
+                if (scr.cls !== 'Script' || _isClientScript(scr) || _underCharacterScripts(scr.ref) || _inServerStorage(scr.ref)) continue;
                 try { runLuaScript(scr, luaServerL); }
                 catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, scr.cls); }
             }
@@ -13021,8 +13037,20 @@ end
 
         async function doSave(path) {
             const r = await api('POST', '/api/save', { path: path });
-            if (r.ok) notify('💾 ' + r.path);
-            else notify(r.error || t('notify_error'), 'err');
+            if (!r.ok) { notify(r.error || t('notify_error'), 'err'); return; }
+            // Android: открытый файл — это внутренняя копия (imported_*.rbxl). Переписываем ещё и оригинал, выбранный в пикере.
+            try {
+                if (window.AndroidBridge && typeof window.AndroidBridge.writeBackToSource === 'function') {
+                    const wb = String(window.AndroidBridge.writeBackToSource(r.path || path));
+                    if (wb === 'ok') { notify(t('notify_saved_original')); return; }
+                    if (wb.indexOf('err:') === 0) {
+                        notify(t('notify_save_original_failed', { err: wb.slice(4) }), 'err');
+                        openFileBrowser('save');   // оригинал не перезаписать (нет права записи) — предлагаем «Сохранить как»
+                        return;
+                    }
+                }
+            } catch (e) { console.error('writeBackToSource:', e); }
+            notify('💾 ' + r.path);
         }
 
         async function newProject(template, fromStart) {

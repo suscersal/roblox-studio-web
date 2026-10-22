@@ -60,6 +60,21 @@ class MainActivity : AppCompatActivity() {
         null
     }
 
+    // Приложение работает с КОПИЕЙ выбранного файла (imported_<время>.rbxl в приватной папке), поэтому «Сохранить»
+    // раньше менял только копию, а оригинал оставался нетронутым. Помним Uri оригинала (SharedPreferences —
+    // переживает перезапуск, copyPath -> uri) и после записи копии переписываем им оригинал.
+    private val srcPrefs by lazy { getSharedPreferences("rsw_source_uris", MODE_PRIVATE) }
+
+    private fun rememberSourceUri(copyPath: String, uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        } catch (e: Exception) {
+            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+        }
+        srcPrefs.edit().putString(copyPath, uri.toString()).apply()
+    }
+
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -72,6 +87,7 @@ class MainActivity : AppCompatActivity() {
             contentResolver.openInputStream(uri)?.use { input ->
                 dest.outputStream().use { output -> input.copyTo(output) }
             } ?: throw java.io.IOException("contentResolver вернул пустой поток для $uri")
+            rememberSourceUri(dest.absolutePath, uri)
             webView.evaluateJavascript(
                 "window.onAndroidFileImported && window.onAndroidFileImported(${
                     org.json.JSONObject.quote(dest.absolutePath)
@@ -354,6 +370,9 @@ class MainActivity : AppCompatActivity() {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
+                // право на запись + «запомнить» — чтобы «Сохранить» могло перезаписать выбранный файл, а не только копию
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             }
             filePickerLauncher.launch(intent)
         }
@@ -368,6 +387,21 @@ class MainActivity : AppCompatActivity() {
         fun getAppVersionCode(): Int = try {
             packageManager.getPackageInfo(packageName, 0).versionCode
         } catch (e: Exception) { 0 }
+
+        /** Записывает сохранённую копию (copyPath = imported_*.rbxl) обратно в ИСХОДНЫЙ файл, выбранный в пикере.
+         * Возвращает "ok", "nosource" (у этого файла нет исходного Uri — открыт не через пикер) или "err:<причина>". */
+        @JavascriptInterface
+        fun writeBackToSource(copyPath: String): String {
+            val uriStr = srcPrefs.getString(copyPath, null) ?: return "nosource"
+            return try {
+                val uri = Uri.parse(uriStr)
+                val out = contentResolver.openOutputStream(uri, "wt") ?: return "err:нет потока записи"
+                File(copyPath).inputStream().use { input -> out.use { input.copyTo(it) } }
+                "ok"
+            } catch (e: Exception) {
+                "err:" + (e.message ?: e.toString())
+            }
+        }
 
         /** Открывает ссылку (страницу релиза) во внешнем браузере. */
         @JavascriptInterface
