@@ -5632,6 +5632,62 @@ InstanceMT.__index = function(t, k)
     -- сам телепорт игрока и переключение CameraType. Находим Camera-ребёнка
     -- Workspace по классу — так же, как реальный Roblox всегда возвращает
     -- единственную настоящую камеру независимо от того, как она названа.
+    -- workspace:Raycast(origin, direction, params) -> RaycastResult | nil (раньше метода не было вовсе:
+    -- attempt to call a nil value (method 'Raycast') — ломало ИИ врагов и спавнеры).
+    if k == "Raycast" and __get_class(ref) == "Workspace" then
+        return function(self, origin, direction, params)
+            local mode, refs = 0, {}
+            if type(params) == "table" then
+                local ft = params.FilterType
+                local fname = type(ft) == "table" and tostring(ft.Name or ft) or tostring(ft)
+                if string.find(fname, "Include", 1, true) then mode = 1 end
+                local list = params.FilterDescendantsInstances
+                if type(list) == "table" then
+                    for _, inst in ipairs(list) do
+                        local r = type(inst) == "table" and rawget(inst, "__ref") or nil
+                        if r ~= nil then refs[#refs + 1] = r end
+                    end
+                end
+            end
+            local hr, px, py, pz, nx, ny, nz, dist = __raycast(mode, origin.X, origin.Y, origin.Z,
+                direction.X, direction.Y, direction.Z, table.unpack(refs))
+            if hr == nil then return nil end
+            local res = { Instance = wrap(hr), Position = Vector3.new(px, py, pz),
+                          Normal = Vector3.new(nx, ny, nz), Distance = dist }
+            pcall(function() res.Material = Enum.Material.Plastic end)
+            return res
+        end
+    end
+    -- Player:GetMouse() — заглушка Mouse (позиция/цель не отслеживаются, сигналы никогда не срабатывают);
+    -- без неё скрипты падали на attempt to call a nil value (method 'GetMouse').
+    if k == "GetMouse" and __get_class(ref) == "Player" then
+        return function(self)
+            local function sig()
+                local s = {}
+                function s:Connect() return { Disconnect = function() end, Connected = true } end
+                s.connect = s.Connect
+                function s:Once() return { Disconnect = function() end } end
+                function s:Wait() return end
+                return s
+            end
+            local m = { Target = nil, X = 0, Y = 0, ViewSizeX = 0, ViewSizeY = 0, Icon = "", TargetFilter = nil }
+            pcall(function() m.Hit = CFrame.new(0, 0, 0); m.Origin = CFrame.new(0, 0, 0) end)
+            for _, ev in ipairs({ "Button1Down", "Button1Up", "Button2Down", "Button2Up", "Move", "Idle",
+                                  "WheelForward", "WheelBackward", "KeyDown", "KeyUp" }) do m[ev] = sig() end
+            return m
+        end
+    end
+    if __get_class(ref) == "Player" then
+        if k == "CameraMinZoomDistance" then return 0.5 end
+        if k == "CameraMaxZoomDistance" then return 128 end
+        if k == "CameraMode" then return "Classic" end
+    end
+    -- StarterGui:SetCoreGuiEnabled/SetCore/GetCore... — отключать встроенный CoreGui в эмуляторе нечего: no-op
+    if __get_class(ref) == "StarterGui" then
+        if k == "SetCoreGuiEnabled" or k == "SetCore" then return function() end end
+        if k == "GetCoreGuiEnabled" then return function() return true end end
+        if k == "GetCore" then return function() return nil end end
+    end
     if k == "CurrentCamera" and __get_class(ref) == "Workspace" then
         local n = __child_count(ref)
         for i = 1, n do
@@ -8597,6 +8653,49 @@ end
                 return 0;
             });
             def('tick', function (L2) { lua.lua_pushnumber(L2, performance.now() / 1000); return 1; });
+            // __raycast(mode, ox,oy,oz, dx,dy,dz, ...filterRefs) -> ref, px,py,pz, nx,ny,nz, dist | nil
+            // mode 0 = Exclude (пропускаем потомков filterRefs), 1 = Include (только потомки filterRefs).
+            // Лучом бьём по всем мешам сцены (как Roblox: CanCollide/Transparency не важны), берём ближайшее попадание.
+            def('__raycast', function (L2) {
+                try {
+                    const n = lua.lua_gettop(L2);
+                    const mode = lua.lua_tointeger(L2, 1);
+                    const num = (i) => lua.lua_tonumber(L2, i);
+                    const o = new THREE.Vector3(num(2), num(3), num(4));
+                    const d = new THREE.Vector3(num(5), num(6), num(7));
+                    const len = d.length();
+                    if (!(len > 1e-9)) { lua.lua_pushnil(L2); return 1; }
+                    d.divideScalar(len);
+                    const roots = new Set();
+                    for (let i = 8; i <= n; i++) roots.add(lua.lua_tointeger(L2, i));
+                    const inFilter = (ref) => {
+                        let cur = ref, g = 0;
+                        while (cur !== undefined && cur !== -1 && g++ < 200) {
+                            if (roots.has(cur)) return true;
+                            cur = luaParentByRef[cur];
+                        }
+                        return false;
+                    };
+                    const targets = [];
+                    for (const k in sceneObjs) { const m = sceneObjs[k]; if (m) targets.push(m); }
+                    const rc = new THREE.Raycaster(o, d, 0, len);
+                    const hits = rc.intersectObjects(targets, true);
+                    for (const h of hits) {
+                        let obj = h.object, ref;
+                        while (obj) { if (obj.userData && obj.userData.ref !== undefined) { ref = obj.userData.ref; break; } obj = obj.parent; }
+                        if (ref === undefined) continue;
+                        if (mode === 1 ? !inFilter(ref) : (roots.size > 0 && inFilter(ref))) continue;
+                        const nrm = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld).normalize() : d.clone().negate();
+                        lua.lua_pushinteger(L2, ref);
+                        lua.lua_pushnumber(L2, h.point.x); lua.lua_pushnumber(L2, h.point.y); lua.lua_pushnumber(L2, h.point.z);
+                        lua.lua_pushnumber(L2, nrm.x); lua.lua_pushnumber(L2, nrm.y); lua.lua_pushnumber(L2, nrm.z);
+                        lua.lua_pushnumber(L2, h.distance);
+                        return 8;
+                    }
+                } catch (e) { console.warn('Raycast:', e); }
+                lua.lua_pushnil(L2);
+                return 1;
+            });
             def('wait', function (L2) {
                 const secs = lua.lua_isnumber(L2, 1) ? lua.lua_tonumber(L2, 1) : 0.03;
                 luaWaits.push({ co: L2, resumeAt: performance.now() + Math.max(0, secs) * 1000 });
@@ -9548,6 +9647,26 @@ end
                 let m;
                 while ((m = wordRe.exec(seg.text))) {
                     const w = m[0], idx = m.index;
+                    // `return` обязан быть последним оператором блока, а метка ::__continue_N:: перед `end` цикла
+                    // идёт после него -> "'end' expected near '::'". Внутри циклов оборачиваем return в do ... end.
+                    if ((w === 'end' || w === 'else' || w === 'elseif' || w === 'until') &&
+                        stack.length && stack[stack.length - 1].kind === 'ret') {
+                        stack.pop();
+                        out += seg.text.slice(last, idx) + ' end ';
+                        last = idx;
+                    }
+                    if (w === 'return') {
+                        let inLoop = false;
+                        for (let k = stack.length - 1; k >= 0; k--) {
+                            if (stack[k].kind === 'function') break;
+                            if (stack[k].kind === 'loop' || stack[k].kind === 'repeat') { inLoop = true; break; }
+                        }
+                        if (inLoop) {
+                            out += seg.text.slice(last, idx) + 'do return';
+                            stack.push({ kind: 'ret' });
+                            last = idx + w.length; continue;
+                        }
+                    }
                     if (w === 'for' || w === 'while') {
                         stack.push({ kind: 'loop', id: ++loopId, continueUsed: false });
                         pendingLoopDo = true;
