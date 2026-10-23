@@ -1514,6 +1514,89 @@ def api_roblox_experiences():
     return jsonify({'ok': True, 'experiences': items})
 
 
+# === Игры студии на стартовом экране ===
+# Список берётся из STUDIO_GAMES_DEFAULT ниже; можно переопределить файлом studio_games.json (в папке данных
+# приложения или рядом с app.py). groupId — id группы Roblox: её игры подтянутся автоматически (публичный API),
+# games — закреплённые вручную ({"name": "druns", "placeId": 123, "universeId": 456}; universeId необязателен).
+STUDIO_GAMES_DEFAULT = {
+    'title': 'Игры студии',
+    'groupId': 0,
+    'games': [],
+}
+
+
+def _studio_config():
+    cfg = dict(STUDIO_GAMES_DEFAULT)
+    for base in (_recents_dir(), Path(__file__).parent):
+        f = base / 'studio_games.json'
+        try:
+            if f.is_file():
+                loaded = json.loads(f.read_text(encoding='utf-8'))
+                if isinstance(loaded, dict):
+                    cfg.update(loaded)
+                break
+        except Exception:
+            traceback.print_exc()
+    return cfg
+
+
+@flask_app.route('/api/studio/games')
+def api_studio_games():
+    cfg = _studio_config()
+    items, seen = [], set()
+
+    def add(name, place_id, universe_id=None, updated='', owner=''):
+        try:
+            place_id = int(place_id)
+        except Exception:
+            return
+        key = ('u', int(universe_id)) if universe_id else ('p', place_id)
+        if key in seen:
+            return
+        seen.add(key)
+        items.append({'name': str(name or place_id), 'placeId': place_id,
+                      'universeId': int(universe_id) if universe_id else '',
+                      'updated': updated or '', 'owner': owner or '', 'icon': None})
+
+    for g in (cfg.get('games') or []):
+        if isinstance(g, dict) and g.get('placeId'):
+            add(g.get('name'), g.get('placeId'), g.get('universeId'))
+
+    group_id = cfg.get('groupId') or 0
+    group_err = None
+    if group_id:
+        try:
+            url = (f'https://games.roblox.com/v2/groups/{int(group_id)}/games'
+                   '?accessFilter=2&limit=50&sortOrder=Asc')
+            d = _rbx_get_json(url)
+            for u in (d.get('data') or []):
+                root = (u.get('rootPlace') or {}).get('id')
+                if u.get('id') and root:
+                    add(u.get('name'), root, u.get('id'), u.get('updated') or u.get('created') or '',
+                        (u.get('creator') or {}).get('name') or '')
+        except Exception as e:
+            group_err = str(e)
+
+    # иконки (необязательны)
+    try:
+        with_u = [x for x in items if x['universeId']]
+        for i in range(0, len(with_u), 50):
+            chunk = with_u[i:i + 50]
+            ids = ','.join(str(x['universeId']) for x in chunk)
+            d = _rbx_get_json('https://thumbnails.roblox.com/v1/games/icons'
+                              f'?universeIds={ids}&returnPolicy=PlaceHolder'
+                              '&size=256x256&format=Png&isCircular=false')
+            by_id = {r.get('targetId'): r for r in (d.get('data') or [])}
+            for x in chunk:
+                r = by_id.get(x['universeId'])
+                if r and r.get('state') == 'Completed' and r.get('imageUrl'):
+                    x['icon'] = r['imageUrl']
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'title': cfg.get('title') or 'Игры студии', 'games': items,
+                    'configured': bool(group_id or cfg.get('games')), 'groupError': group_err})
+
+
 _DOH_CACHE = {}
 
 
@@ -2771,6 +2854,12 @@ def api_all_instances():
         if isinstance(_wp, dict):
             _wx, _wy, _wz = get_pos(_wp)
             item['pivot'] = {'p': [_wx, _wy, _wz], 'r': get_rot_matrix(_wp)}
+        # Model.PrimaryPart (ссылка на деталь): pivot модели = pivot этой детали. Без него скрипты вроде спавна комнат
+        # (room.PrimaryPart = маркер двери; room:PivotTo(...)) ставили комнату не по маркеру, а по центру габаритов.
+        if cls == 'Model':
+            _ppr = _pp.get('PrimaryPart')
+            if isinstance(_ppr, int) and not isinstance(_ppr, bool) and _ppr in r2c:
+                item['refs'] = {'PrimaryPart': _ppr}
         if cls == 'Team':
             item['teamColor'] = _pp.get('TeamColor')
             item['autoAssignable'] = _pp.get('AutoAssignable', True)

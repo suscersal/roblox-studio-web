@@ -133,7 +133,7 @@
                 tb_publish: '☁ Publish', tb_publish_title: 'Publish',
                 tb_download: '🏠 Start', tb_download_title: 'Start screen: recent files and your Roblox experiences',
                 dl_hint: 'Uses your Roblox sign-in (Account), like Studio. You need edit access to the place or it must be copyable.', cookie_ph: '.ROBLOSECURITY value', cookie_btn: 'Sign in with cookie', cookie_help: 'Desktop sign-in: in your browser, signed in to roblox.com, open DevTools → Application → Cookies → .ROBLOSECURITY and paste the value. Treat it like a password: it gives full account access. It is stored only on this device.', cookie_ok: '✅ Signed in as {name}', cookie_bad: 'Sign-in failed',
-                st_new: 'New Experience', st_recents: 'Recents', st_home: 'Home', st_experiences: 'Experiences', st_templates: 'Templates', st_archive: 'Archive', st_recent_h: 'My Recent Experiences', st_tpl_h: 'Open a Template', st_banner_t: 'Pick up where you left off', st_banner_p: 'Open a file, download one of your experiences from Roblox, or start from a template.', st_modified: 'Modified {d}', st_opened: 'Opened {d}', st_local: 'Local', st_refresh: 'Refresh', st_close: 'Close', st_remove: 'Remove from recents?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Empty scene', st_tpl_sub: 'Template', st_menu: 'Remove from recents',
+                st_new: 'New Experience', st_recents: 'Recents', st_home: 'Home', st_experiences: 'Experiences', st_templates: 'Templates', st_archive: 'Archive', st_recent_h: 'My Recent Experiences', st_tpl_h: 'Open a Template', st_banner_t: 'Pick up where you left off', st_banner_p: 'Open a file, download one of your experiences from Roblox, or start from a template.', st_modified: 'Modified {d}', st_opened: 'Opened {d}', st_local: 'Local', st_refresh: 'Refresh', st_close: 'Close', st_remove: 'Remove from recents?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Empty scene', st_tpl_sub: 'Template', st_menu: 'Remove from recents', st_studio: 'Studio games', st_studio_pill: 'Studio', st_studio_empty: 'The studio game list is empty. Set groupId or games in studio_games.json.', st_studio_group_err: 'Could not load group games: {err}',
                 start_title: 'Start', start_welcome: 'Welcome, {name}', start_recent: 'Recent', start_new: 'New scene', start_open: 'Open file…', start_file: 'File', start_roblox: 'Roblox', start_err: 'Could not load your experiences: {err}',
                 exp_title: 'My Experiences', exp_loading: 'Loading experiences…', exp_search: 'Search…', exp_empty: 'Nothing found', exp_login_needed: 'Sign in to Roblox first (Account) to see your experiences.', exp_private: 'Private', exp_public: 'Public', exp_by_id: 'By Place ID…', exp_pick_place: 'This experience has several places. Pick one:', pub_origin: 'Opened from Roblox: {name} (Place {id}). IDs are prefilled.',
                 dl_title: '⬇ Download place', dl_place: 'Place ID', dl_version: 'Version (optional)', dl_btn: 'Download', dl_discard: 'Unsaved changes in the current scene will be lost. Continue?', dl_ok: '✅ Place loaded: {n} objects', dl_loading: 'Downloading the latest version…',
@@ -383,7 +383,7 @@
                 tb_publish: '☁ Публикация', tb_publish_title: 'Опубликовать',
                 tb_download: '🏠 Старт', tb_download_title: 'Стартовый экран: недавние файлы и твои experiences с Roblox',
                 dl_hint: 'Используется твой вход в Roblox (Account), как в Studio. Нужен доступ на редактирование места или оно должно быть копируемым.', cookie_ph: 'Значение .ROBLOSECURITY', cookie_btn: 'Войти по куке', cookie_help: 'Вход на десктопе: в браузере, где ты вошёл на roblox.com, открой DevTools → Application → Cookies → .ROBLOSECURITY и вставь значение. Относись как к паролю: оно даёт полный доступ к аккаунту. Хранится только на этом устройстве.', cookie_ok: '✅ Вход выполнен: {name}', cookie_bad: 'Вход не выполнен',
-                st_new: 'Новый experience', st_recents: 'Недавние', st_home: 'Главная', st_experiences: 'Experiences', st_templates: 'Шаблоны', st_archive: 'Архив', st_recent_h: 'Мои недавние Experiences', st_tpl_h: 'Открыть шаблон', st_banner_t: 'Продолжи с того же места', st_banner_p: 'Открой файл, скачай одно из своих experiences с Roblox или начни с шаблона.', st_modified: 'Изменено {d}', st_opened: 'Открыто {d}', st_local: 'Локально', st_refresh: 'Обновить', st_close: 'Закрыть', st_remove: 'Убрать из недавних?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Пустая сцена', st_tpl_sub: 'Шаблон', st_menu: 'Убрать из недавних',
+                st_new: 'Новый experience', st_recents: 'Недавние', st_home: 'Главная', st_experiences: 'Experiences', st_templates: 'Шаблоны', st_archive: 'Архив', st_recent_h: 'Мои недавние Experiences', st_tpl_h: 'Открыть шаблон', st_banner_t: 'Продолжи с того же места', st_banner_p: 'Открой файл, скачай одно из своих experiences с Roblox или начни с шаблона.', st_modified: 'Изменено {d}', st_opened: 'Открыто {d}', st_local: 'Локально', st_refresh: 'Обновить', st_close: 'Закрыть', st_remove: 'Убрать из недавних?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Пустая сцена', st_tpl_sub: 'Шаблон', st_menu: 'Убрать из недавних', st_studio: 'Игры студии', st_studio_pill: 'Студия', st_studio_empty: 'Список игр студии пуст. Укажите groupId или games в studio_games.json.', st_studio_group_err: 'Не удалось загрузить игры группы: {err}',
                 start_title: 'Старт', start_welcome: 'Привет, {name}', start_recent: 'Недавние', start_new: 'Новая сцена', start_open: 'Открыть файл…', start_file: 'Файл', start_roblox: 'Roblox', start_err: 'Не удалось загрузить experiences: {err}',
                 exp_title: 'Мои Experiences', exp_loading: 'Загружаю список…', exp_search: 'Поиск…', exp_empty: 'Ничего не найдено', exp_login_needed: 'Сначала войди в Roblox (Аккаунт), чтобы увидеть свои experiences.', exp_private: 'Private', exp_public: 'Public', exp_by_id: 'По Place ID…', exp_pick_place: 'В этом experience несколько мест. Выбери:', pub_origin: 'Открыто с Roblox: {name} (Place {id}). ID подставлены.',
                 dl_title: '⬇ Скачать место', dl_place: 'Place ID', dl_version: 'Версия (необязательно)', dl_btn: 'Скачать', dl_discard: 'Несохранённые изменения в текущей сцене пропадут. Продолжить?', dl_ok: '✅ Место загружено: {n} объектов', dl_loading: 'Скачиваю свежую версию…',
@@ -6649,10 +6649,10 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             local rx, ry, rz = cf:ToOrientation()
             return Vector3.new(math.deg(rx), math.deg(ry), math.deg(rz))
         end
-        if k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1" then
+        if k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1" or k == "PrimaryPart" then
             local rr = __refprop_get(ref, k)
             if rr ~= nil then
-                if rr < 0 then return nil end
+                if rr == -1 then return nil end   -- -1 = nil; у клонов ref тоже отрицательные (виртуальные)
                 return wrap(rr)
             end
         end
@@ -6702,6 +6702,10 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 __refprop_set(ref, k, v == nil and -1 or rawget(v, "__ref"))
                 return
             end
+        end
+        if k == "PrimaryPart" and (v == nil or (type(v) == "table" and rawget(v, "__ref") ~= nil)) then
+            __refprop_set(ref, k, v == nil and -1 or rawget(v, "__ref"))
+            return
         end
         if type(v) == "table" then
             if k == "Position" and rawget(v, "X") ~= nil and __get_class(ref) == "Attachment" then
@@ -7365,6 +7369,11 @@ end
                 return new THREE.Matrix4().compose(camera.position.clone(), camera.quaternion.clone(), new THREE.Vector3(1, 1, 1));
             }
             if (luaIsPartRef(ref)) return luaPartMatrix(ref).multiply(luaPivotOffsetMatrix(ref));
+            // Model с PrimaryPart: pivot модели = pivot этой детали (как в Roblox), а не WorldPivot/центр габаритов
+            const rpp = luaRefProps[ref];
+            if (rpp && rpp.PrimaryPart !== undefined && rpp.PrimaryPart !== -1 && rpp.PrimaryPart !== ref && luaIsPartRef(rpp.PrimaryPart)) {
+                return luaPartMatrix(rpp.PrimaryPart).multiply(luaPivotOffsetMatrix(rpp.PrimaryPart));
+            }
             if (_modelPivots[ref]) return _modelPivots[ref].clone();
             const fp = luaFilePivots[ref];
             if (fp) {
@@ -8115,6 +8124,7 @@ end
         let luaRefProps = {};   // ref -> {Part0|Part1|Attachment0|Attachment1: ref (-1 = nil)} у сварок и констрейнтов
         let luaWelds = [];      // активные WeldConstraint, созданные СКРИПТОМ: {ref, p0, p1, off: Matrix4, prev}
         let luaCloneOrigin = {}; // ref клона -> ref оригинала из файла (Clone() аксессуаров и т.п.)
+        let luaCloneSource = {}; // ref клона -> ref того, что клонировали (непосредственный источник)
         let luaAttCF = {};   // ref вложения (Attachment) -> [x,y,z,R00..R22]: Position/CFrame, в т.ч. записанные скриптами
         let luaInitValues = []; // [{ref, value:{k,v}}] — табличные Value из файла, заливаются в Lua после prelude
         let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
@@ -8552,6 +8562,7 @@ end
             const cls = src ? src.cls : 'Instance';
             const newRef = luaCreateVirtualInstance(cls);
             luaCloneOrigin[newRef] = luaCloneOrigin[ref] !== undefined ? luaCloneOrigin[ref] : ref;
+            luaCloneSource[newRef] = ref;
             if (src) luaByRef[newRef].name = src.name;
             if (virtualInstanceProps[ref]) {
                 virtualInstanceProps[newRef] = Object.assign({}, virtualInstanceProps[ref]);
@@ -8591,6 +8602,18 @@ end
                     if (!luaByRef[childRef]) continue;
                     luaSetParent(luaCloneRef(childRef), newRef);
                 }
+            }
+            // PrimaryPart клона Model — КОПИЯ той же детали внутри клона (если PrimaryPart лежал вне модели, у клона nil)
+            const rpp0 = luaRefProps[ref];
+            if (rpp0 && rpp0.PrimaryPart !== undefined && rpp0.PrimaryPart !== -1) {
+                let found = -1;
+                const stk = [newRef];
+                while (stk.length) {
+                    const x = stk.pop();
+                    if (x !== newRef && luaCloneSource[x] === rpp0.PrimaryPart) { found = x; break; }
+                    for (const c of (luaChildrenByRef[x] || [])) stk.push(c);
+                }
+                (luaRefProps[newRef] = luaRefProps[newRef] || {}).PrimaryPart = found;
             }
             // Пивот контейнера (Model/Folder): клон наследует пивот оригинала (WorldPivotData), иначе
             // PivotTo(клона) считался бы от центра габаритов и клон вставал бы со смещением.
@@ -8850,13 +8873,17 @@ end
             // require(moduleScriptInstance) — компилирует Source конкретного
             def('__compile_module', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
-                const src = luaModuleSourceByRef[ref];
+                // ModuleScript, склонированный в рантайме (копия StarterGui в PlayerGui, Clone() шаблона), — виртуальный ref
+                // с отрицательным номером: исходник лежит у оригинала из файла. Раньше require(клон) падал «не ModuleScript
+                // этой карты» (так ломался InventoryController: require(script.Parent.<Модуль>) в PlayerGui).
+                const srcRef = luaModuleSourceByRef[ref] !== undefined ? ref : luaCloneOrigin[ref];
+                const src = srcRef !== undefined ? luaModuleSourceByRef[srcRef] : undefined;
                 if (src === undefined) {
                     lua.lua_pushboolean(L2, false);
                     lua.lua_pushstring(L2, 'require(): ссылка #' + ref + ' — не ModuleScript этой карты');
                     return 2;
                 }
-                const chunkname = luaModuleNameByRef[ref] || ('Module#' + ref);
+                const chunkname = luaModuleNameByRef[ref] || luaModuleNameByRef[srcRef] || ('Module#' + ref);
                 const wrapped = 'return function(script)\n' + src + '\nend';
                 let status = loadLuaChunk(L2, wrapped, chunkname);
                 if (status !== lua.LUA_OK) {
@@ -10272,6 +10299,9 @@ end
                 luaByRef[newRef].name = origInfo.name;
                 luaSetParent(newRef, newParentRef);
                 refMap[origRef] = newRef;
+                // копия знает оригинал: по нему require(копия-ModuleScript) находит исходник (см. __compile_module)
+                luaCloneOrigin[newRef] = luaCloneOrigin[origRef] !== undefined ? luaCloneOrigin[origRef] : origRef;
+                luaCloneSource[newRef] = origRef;
                 if (guiPropsByRef[origRef]) {
                     guiPropsByRef[newRef] = Object.assign({}, guiPropsByRef[origRef], { cls: origInfo.cls, ref: newRef, parent: newParentRef });
                 }
@@ -10397,6 +10427,7 @@ end
             luaRefProps = {};
             luaWelds = [];
             luaCloneOrigin = {};
+            luaCloneSource = {};
             luaFileAttrs = {}; luaFileTags = {}; luaTeamInfo = {}; luaPlayerTeam = -1; luaFilePivots = {};
             if (window._emuWarned) window._emuWarned.clear();
             luaCollGroups = {}; luaNextGroupBit = 4; luaGroupCollide = {}; luaPartGroup = {};
@@ -13330,6 +13361,7 @@ end
         let _stExp = { ok: false };          // ответ /api/roblox/experiences
         let _stArch = null;                  // ответ ...?archived=1 (грузится при первом заходе в Archive)
         let _stWho = '';
+        let _stStudio = { ok: false, games: [] };   // ответ /api/studio/games
 
         function _startVisible() {
             const el = document.getElementById('start-screen');
@@ -13404,6 +13436,31 @@ end
             return html;
         }
 
+        function _stStudioCards() {
+            let html = '';
+            ((_stStudio && _stStudio.games) || []).forEach((x, i) => {
+                if (!_stMatch(x.name)) return;
+                html += _stCard('openStudioGame(' + i + ')', _stTile(x.icon, '🎮'), '🎮 ' + t('st_studio_pill'),
+                    x.name, x.updated ? t('st_modified', { d: _fmtDate(x.updated) }) : '', x.owner);
+            });
+            return html;
+        }
+
+        function _stStudioBlock() {
+            const cards = _stStudioCards();
+            let h = cards ? '<div class="st-grid">' + cards + '</div>'
+                : '<p class="st-msg">' + t('st_studio_empty') + '</p>';
+            if (_stStudio && _stStudio.groupError) h += '<p class="st-msg">' + t('st_studio_group_err', { err: esc(_stStudio.groupError) }) + '</p>';
+            return h;
+        }
+
+        function openStudioGame(i) {
+            const x = _stStudio && _stStudio.games && _stStudio.games[i];
+            if (!x || !_confirmDiscardForOpen()) return;
+            window._rbxPendingName = x.name;
+            loadPlaceFromRoblox(x.placeId, x.universeId || '');
+        }
+
         function _stTemplateCards() {
             return _stCard("startNew('baseplate')", _stTile(null, '🏠', 'tpl'), '🧩 ' + t('st_tpl_sub'), t('st_tpl_base'), '', '') +
                 _stCard("startNew('empty')", _stTile(null, '⬜'), '🧩 ' + t('st_tpl_sub'), t('st_tpl_empty'), '', '');
@@ -13438,6 +13495,7 @@ end
             document.getElementById('st-side').innerHTML =
                 '<div class="st-logo">Roblox Studio Web</div>' +
                 '<button class="st-nav" onclick="startNew(\'baseplate\')"><span class="st-plus">+</span><span class="st-lbl">' + t('st_new') + '</span></button>' +
+                nav('studio', '🎮', (_stStudio && _stStudio.title) || t('st_studio')) +
                 nav('recents', '🕘', t('st_recents')) + nav('home', '🏠', t('st_home')) +
                 nav('experiences', '📁', t('st_experiences')) + nav('templates', '🗂', t('st_templates')) +
                 nav('archive', '🗄', t('st_archive'));
@@ -13452,9 +13510,12 @@ end
                     '<div class="st-banner"><h3>' + t('st_banner_t') + '</h3><p>' + t('st_banner_p') + '</p><div class="st-row">' +
                     '<button class="st-btn" onclick="startOpenFile()">' + t('start_open') + '</button>' +
                     '<button class="st-btn sec" onclick="showDownloadPlaceDialog()">' + t('exp_by_id') + '</button></div></div>';
+                if (_stStudio && _stStudio.configured) h += '<div class="st-h2">🎮 ' + esc(_stStudio.title || t('st_studio')) + '</div>' + _stStudioBlock();
                 const rc = _stRecentCards(8);
                 h += '<div class="st-h2">' + t('st_recent_h') + '</div>' + (rc ? '<div class="st-grid">' + rc + '</div>' : '<p class="st-msg">' + t('exp_empty') + '</p>');
                 h += '<div class="st-h2">' + t('st_tpl_h') + '</div><div class="st-grid">' + _stTemplateCards() + '</div>';
+            } else if (_stView === 'studio') {
+                h += '<div class="st-h1">🎮 ' + esc((_stStudio && _stStudio.title) || t('st_studio')) + '</div>' + _stStudioBlock();
             } else if (_stView === 'recents') {
                 const rc = _stRecentCards(0);
                 h += '<div class="st-h1">' + t('st_recents') + '</div>' + (rc ? '<div class="st-grid">' + rc + '</div>' : '<p class="st-msg">' + t('exp_empty') + '</p>');
@@ -13490,11 +13551,13 @@ end
             const safe = (p, fallback) => p.catch(() => fallback);
             const c = document.getElementById('st-content');
             if (c) c.innerHTML = '<p class="st-msg">' + t('exp_loading') + '</p>';
-            const [rec, exp, me] = await Promise.all([
+            const [rec, exp, me, studio] = await Promise.all([
                 safe(api('GET', '/api/recents'), {}),
                 safe(api('GET', '/api/roblox/experiences'), { ok: false, error: '—' }),
-                safe(api('GET', '/api/roblox/me'), {})
+                safe(api('GET', '/api/roblox/me'), {}),
+                safe(api('GET', '/api/studio/games'), { ok: false, games: [] })
             ]);
+            _stStudio = studio || { ok: false, games: [] };
             _recents = (rec && rec.ok && rec.recents) || [];
             _stExp = exp || { ok: false };
             _stWho = (me && me.ok && me.loggedIn) ? (me.displayName || me.name || '') : '';
