@@ -1039,8 +1039,20 @@ def build_all_scene_objects():
                     or any(abs(x - y) > 1e-6 for x, y in zip(_pr, [1, 0, 0, 0, 1, 0, 0, 0, 1]))):
                 pivot_offset = _pp + _pr
 
+        # Деталь лежит в контейнере, которого нет в мире (ServerStorage/ReplicatedStorage — склад шаблонов): клиент не рисует её
+        # и не даёт ей физику, но данные оставляет — по ним Clone() строит меш копии в Workspace.
+        _root = ref
+        _pm = parsed['parent_map']
+        _r2c = parsed['referent_to_class']
+        _g = 0
+        while _pm.get(_root) in _r2c and _g < 500:
+            _root = _pm[_root]
+            _g += 1
+        not_in_world = _r2c.get(_root) in ('ServerStorage', 'ReplicatedStorage')
+
         objs.append({
             'ref': ref, 'class': cls, 'name': name,
+            'nw': bool(not_in_world),
             'shape': shape,
             'pivotOffset': pivot_offset,
             'px': px, 'py': py, 'pz': pz,
@@ -2980,6 +2992,12 @@ def api_tree():
 
 @flask_app.route('/api/scene', methods=['GET', 'POST'])
 def api_scene():
+    # Шаблоны (ServerStorage/ReplicatedStorage): клиент в Play их не рисует, но данные нужны Clone() — отдаём ВСЕ сразу,
+    # без лимита по дистанции (иначе у дальних шаблонов комнат/врагов клоны остаются без меша).
+    if request.args.get('nw') == '1':
+        if not state['parsed']:
+            return jsonify({'ok': True, 'objects': []})
+        return jsonify({'ok': True, 'objects': [o for o in build_all_scene_objects() if o.get('nw')]})
     # POST с телом {cx,cy,cz,load_radius,limit,chunk} — используется
     # Play-стримингом (см. index.html, refreshStreamedGeometry): просто
     # "все объекты в радиусе load_radius от игрока", без рейкаста и без

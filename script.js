@@ -4035,6 +4035,8 @@
 
                 // Сервер сортирует ответ с поправкой на размер объекта
                 const physicsCap = maxStreamedBodies();
+                for (const o of sceneResp.objects) { if (o.nw) playObjData[o.ref] = o; }
+                sceneResp.objects = sceneResp.objects.filter(o => !o.nw);   // шаблоны ServerStorage: данные сохранены, меша/физики нет
                 const withDist = sceneResp.objects.map(o => { const op = objPosFor(o); return [o, Math.max(0, Math.hypot(op.x - cx, op.y - cy, op.z - cz) - 0.5 * Math.hypot(o.sx || 0, o.sy || 0, o.sz || 0))]; });
                 withDist.sort((a, b) => a[1] - b[1]);
 
@@ -4581,8 +4583,14 @@
             }
 
             for (const o of sceneResp.objects) {
+                if (o.nw) { playObjData[o.ref] = o; continue; }   // шаблон из ServerStorage: только данные для Clone()
                 addPhysicsBodyForObj(o);
             }
+            // Данные ВСЕХ шаблонов (а не только тех, что попали в лимит по дистанции) — для Clone() комнат/врагов/лифтов
+            fetch('/api/scene?nw=1').then(r => r.json()).then(tr => {
+                if (!tr || !tr.ok || !isPlaying) return;
+                for (const o of tr.objects) if (!playObjData[o.ref]) playObjData[o.ref] = o;
+            }).catch(e => console.warn('template data:', e));
 
             {
                 const cutoff = playRenderCutoff();
@@ -7061,6 +7069,8 @@ end
             }
             const tx = luaPartXform[ref];
             if (tx && luaIsPendingClonePart(ref)) return { x: tx.p[0], y: tx.p[1], z: tx.p[2] };
+            const dd = luaDormantData(ref);
+            if (dd) return { x: dd.px, y: dd.py, z: dd.pz };
             return { x: 0, y: 0, z: 0 };
         }
         function luaSetPositionOfRef(ref, x, y, z) {
@@ -7268,10 +7278,15 @@ end
         }
         // Клон детали из файла, которому ещё не построили меш (он не в Workspace): для скрипта это всё равно
         // деталь — иначе PivotTo(клона-контейнера) до .Parent = workspace ничего не двигал (см. luaRealizeClonedParts).
-        function luaIsPendingClonePart(ref) {
+        // Данные детали без меша/тела: шаблон из ServerStorage (его не рисуем, см. o.nw) или клон, ещё не попавший в Workspace.
+        function luaDormantData(ref) {
+            if (sceneObjs[ref] || physicsBodies[ref]) return null;
+            const d = playObjData[ref];
+            if (d) return d;
             const o = luaCloneOrigin[ref];
-            return o !== undefined && !sceneObjs[ref] && !!playObjData[o];
+            return o !== undefined ? (playObjData[o] || null) : null;
         }
+        function luaIsPendingClonePart(ref) { return !!luaDormantData(ref); }
         function luaIsPartRef(ref) { return !!(sceneObjs[ref] || physicsBodies[ref] || luaIsPendingClonePart(ref)); }
         function luaIsCameraRef(ref) {
             return !!(luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined');
@@ -7312,12 +7327,19 @@ end
             } else if (luaPartXform[ref] && luaIsPendingClonePart(ref)) {
                 const tq = luaPartXform[ref].q;
                 q.set(tq[0], tq[1], tq[2], tq[3]);
+            } else {
+                const dd = luaDormantData(ref);
+                if (dd && dd.rot && dd.rot.length >= 9) {
+                    const r9 = dd.rot;
+                    q.setFromRotationMatrix(new THREE.Matrix4().set(r9[0], r9[1], r9[2], 0, r9[3], r9[4], r9[5], 0, r9[6], r9[7], r9[8], 0, 0, 0, 0, 1));
+                }
             }
             return new THREE.Matrix4().compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(1, 1, 1));
         }
         function luaPivotOffsetMatrix(ref) {
             const mesh = sceneObjs[ref] || (luaIsPendingClonePart(ref) ? sceneObjs[luaCloneOrigin[ref]] : null);
-            const po = mesh && mesh.userData && mesh.userData.pivotOffset;
+            const dd = mesh ? null : luaDormantData(ref);
+            const po = (mesh && mesh.userData && mesh.userData.pivotOffset) || (dd && dd.pivotOffset);
             const m = new THREE.Matrix4();
             if (!po || po.length < 12) return m;
             m.set(po[3], po[4], po[5], po[0],
@@ -8732,7 +8754,7 @@ end
                     for (const h of hits) {
                         let obj = h.object, ref;
                         while (obj) { if (obj.userData && obj.userData.ref !== undefined) { ref = obj.userData.ref; break; } obj = obj.parent; }
-                        if (ref === undefined) continue;
+                        if (ref === undefined || !luaIsUnderWorkspace(ref)) continue;
                         if (mode === 1 ? !inFilter(ref) : (roots.size > 0 && inFilter(ref))) continue;
                         const nrm = h.face ? h.face.normal.clone().transformDirection(h.object.matrixWorld).normalize() : d.clone().negate();
                         lua.lua_pushinteger(L2, ref);
