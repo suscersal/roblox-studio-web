@@ -9,6 +9,7 @@ import struct
 import math
 import traceback
 import json
+import time
 from urllib.parse import quote
 from rbxl_parser import parse_rbxl, save_rbxl, publish_place, export_rbxm, import_rbxm
 from rbxl_parser import union_mesh_from_parsed as _union_mesh_solid, union_mesh_render_json
@@ -1519,24 +1520,71 @@ def api_roblox_experiences():
 # приложения или рядом с app.py). groupId — id группы Roblox: её игры подтянутся автоматически (публичный API),
 # games — закреплённые вручную ({"name": "druns", "placeId": 123, "universeId": 456}; universeId необязателен).
 STUDIO_GAMES_DEFAULT = {
-    'title': 'Игры студии',
+    'title': None,      # None — заголовок берётся из перевода интерфейса (st_studio); строка — показывается как есть
     'groupId': 0,
     'games': [],
 }
+# Список подгружается С СЕРВЕРА: JSON в репозитории (поменял файл, закоммитил — у всех обновилось без пересборки APK).
+# RSW_STUDIO_URL — своя ссылка; "url" в локальном studio_games.json тоже переопределяет. Нет сети — последняя
+# удачно загруженная копия (studio_games.cache.json в папке данных), потом то, что зашито выше.
+STUDIO_GAMES_URL = os.environ.get('RSW_STUDIO_URL') or \
+    'https://raw.githubusercontent.com/suscersal/roblox-studio-web/main/studio_games.json'
+_STUDIO_REMOTE = {'at': 0.0, 'cfg': None}
+
+
+def _studio_remote_config(url):
+    """Конфиг с сервера с кэшем на 5 минут и запасной копией на диске. Возвращает dict или None."""
+    now = time.time()
+    if _STUDIO_REMOTE['cfg'] is not None and now - _STUDIO_REMOTE['at'] < 300:
+        return _STUDIO_REMOTE['cfg']
+    cache_file = _recents_dir() / 'studio_games.cache.json'
+    cfg = None
+    try:
+        r = _req.Request(url, headers={'User-Agent': 'RbxStudioWeb', 'Accept': 'application/json',
+                                       'Cache-Control': 'no-cache'})
+        with _req.urlopen(r, timeout=6) as resp:
+            data = json.loads(_rbx_maybe_gunzip(resp.read()).decode('utf-8', 'replace'))
+        if isinstance(data, dict):
+            cfg = data
+            try:
+                cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+            except Exception:
+                pass
+    except Exception:
+        try:
+            if cache_file.is_file():
+                data = json.loads(cache_file.read_text(encoding='utf-8'))
+                if isinstance(data, dict):
+                    cfg = data
+        except Exception:
+            pass
+    _STUDIO_REMOTE['at'] = now
+    _STUDIO_REMOTE['cfg'] = cfg
+    return cfg
 
 
 def _studio_config():
-    cfg = dict(STUDIO_GAMES_DEFAULT)
-    for base in (_recents_dir(), Path(__file__).parent):
-        f = base / 'studio_games.json'
+    """Порядок (каждый следующий перекрывает предыдущий): зашитое в app.py → studio_games.json рядом с app.py (из репозитория)
+    → список с сервера → ручной studio_games.json в папке данных приложения (если она задана отдельно, RSW_DATA_DIR)."""
+    def read(f):
         try:
             if f.is_file():
-                loaded = json.loads(f.read_text(encoding='utf-8'))
-                if isinstance(loaded, dict):
-                    cfg.update(loaded)
-                break
+                d = json.loads(f.read_text(encoding='utf-8'))
+                return d if isinstance(d, dict) else {}
         except Exception:
             traceback.print_exc()
+        return {}
+
+    cfg = dict(STUDIO_GAMES_DEFAULT)
+    baked = read(Path(__file__).parent / 'studio_games.json')
+    override = {}
+    if os.environ.get('RSW_DATA_DIR'):
+        override = read(Path(os.environ['RSW_DATA_DIR']) / 'studio_games.json')
+    cfg.update(baked)
+    remote = _studio_remote_config(override.get('url') or baked.get('url') or STUDIO_GAMES_URL)
+    if remote:
+        cfg.update(remote)
+    cfg.update(override)
     return cfg
 
 
@@ -1593,7 +1641,7 @@ def api_studio_games():
                     x['icon'] = r['imageUrl']
     except Exception:
         pass
-    return jsonify({'ok': True, 'title': cfg.get('title') or 'Игры студии', 'games': items,
+    return jsonify({'ok': True, 'title': cfg.get('title') or None, 'games': items,
                     'configured': bool(group_id or cfg.get('games')), 'groupError': group_err})
 
 
