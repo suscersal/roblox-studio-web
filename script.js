@@ -11157,10 +11157,12 @@ end
         const _SG_FACES = {
             // NormalId: Right=0 Top=1 Back=2 Left=3 Bottom=4 Front=5 (Front = -Z детали)
             0: { n: [1, 0, 0], ry: Math.PI / 2, rx: 0 },
-            1: { n: [0, 1, 0], ry: 0, rx: -Math.PI / 2 },
+            // Top/Bottom: холст в Roblox идёт ШИРИНОЙ вдоль Z детали, «верх» — вдоль +X (проверено на A.rbxl: «Рулетка» на
+            // грани Bottom детали 4x1x9.5, стоящей торцом, читается горизонтально). basis = [право, верх, нормаль] плоскости.
+            1: { n: [0, 1, 0], basis: [[0, 0, 1], [1, 0, 0], [0, 1, 0]] },
             2: { n: [0, 0, 1], ry: 0, rx: 0 },
             3: { n: [-1, 0, 0], ry: -Math.PI / 2, rx: 0 },
-            4: { n: [0, -1, 0], ry: 0, rx: Math.PI / 2 },
+            4: { n: [0, -1, 0], basis: [[0, 0, -1], [1, 0, 0], [0, -1, 0]] },
             5: { n: [0, 0, -1], ry: Math.PI, rx: 0 },
         };
         function surfaceGuiRootOf(ref) {
@@ -11259,8 +11261,9 @@ end
                 const face = _SG_FACES[Number(p.Face === undefined ? 5 : p.Face)] || _SG_FACES[5];
                 const fnum = Number(p.Face === undefined ? 5 : p.Face);
                 const sideZ = (fnum === 0 || fnum === 3);
-                const fw = (fnum === 1 || fnum === 4 || fnum === 2 || fnum === 5) ? psz.x : psz.z;
-                const fh = (fnum === 1 || fnum === 4) ? psz.z : psz.y;
+                const topBottom = (fnum === 1 || fnum === 4);
+                const fw = topBottom ? psz.z : ((fnum === 2 || fnum === 5) ? psz.x : psz.z);
+                const fh = topBottom ? psz.x : psz.y;
                 let dw, dh;
                 if (Number(p.SizingMode) === 0 && p.CanvasSize) {          // FixedSize
                     dw = Number(p.CanvasSize.x) || 800; dh = Number(p.CanvasSize.y) || 600;
@@ -11283,7 +11286,10 @@ end
                 // локальная матрица плоскости относительно детали: на 0.003 студа от грани наружу
                 const half = [psz.x / 2, psz.y / 2, psz.z / 2];
                 const off = new THREE.Vector3(face.n[0] * (half[0] + 0.003), face.n[1] * (half[1] + 0.003), face.n[2] * (half[2] + 0.003));
-                const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(face.rx, face.ry, 0, 'YXZ'));
+                const q = face.basis
+                    ? new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+                        new THREE.Vector3(...face.basis[0]), new THREE.Vector3(...face.basis[1]), new THREE.Vector3(...face.basis[2])))
+                    : new THREE.Quaternion().setFromEuler(new THREE.Euler(face.rx, face.ry, 0, 'YXZ'));
                 const local = new THREE.Matrix4().compose(off, q, new THREE.Vector3(1, 1, 1));
                 scene.add(mesh);
                 const sg = { ref, partRef, mesh, canvas, ctx: canvas.getContext('2d'), tex, dw, dh, k, local, dirty: true };
