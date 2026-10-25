@@ -5532,6 +5532,41 @@ local __nextAnimTrackId = 0 -- см. Animator:LoadAnimation в InstanceMT.__inde
 -- тут, в момент Connect, а не на JS-стороне: Enum это Lua-таблицы,
 -- строить их из JS было бы либо копированием той же кэширующей логики
 -- дважды, либо синтетическими объектами, не равными настоящим Enum.*.
+local __MOUSE = nil
+local __CAS = { actions = {}, hooked = false }
+local function __casHook()
+    if __CAS.hooked then return end
+    __CAS.hooked = true
+    local uis = game:GetService("UserInputService")
+    local function dispatch(input, state)
+        for name, a in pairs(__CAS.actions) do
+            for _, key in ipairs(a.keys) do
+                if input.KeyCode == key or input.UserInputType == key then
+                    a.fn(name, state, input)
+                    break
+                end
+            end
+        end
+    end
+    uis.InputBegan:Connect(function(input) dispatch(input, Enum.UserInputState.Begin) end)
+    uis.InputEnded:Connect(function(input) dispatch(input, Enum.UserInputState.End) end)
+end
+local __CAS_METHODS = {
+    BindAction = function(self, name, fn, touch, ...)
+        __casHook(); __CAS.actions[name] = { fn = fn, keys = { ... } }
+    end,
+    BindActionAtPriority = function(self, name, fn, touch, priority, ...)
+        __casHook(); __CAS.actions[name] = { fn = fn, keys = { ... } }
+    end,
+    UnbindAction = function(self, name) __CAS.actions[name] = nil end,
+    UnbindAllActions = function(self) __CAS.actions = {} end,
+    GetAllBoundActionInfo = function(self) return {} end,
+    GetBoundActionInfo = function(self, name) return {} end,
+    SetTitle = function() end, SetDescription = function() end, SetImage = function() end,
+    SetPosition = function() end, GetButton = function() return nil end,
+}
+local __TOOL_DEFAULTS = { Enabled = true, TextureId = "", ToolTip = "", CanBeDropped = true, RequiresHandle = true,
+    ManualActivationOnly = false }
 local function wrapInputEventFn(fn, evName)
     local state = evName == "InputBegan" and "Begin" or (evName == "InputEnded" and "End" or "Change")
     return function(typeName, x, y, keyName)
@@ -5719,18 +5754,52 @@ InstanceMT.__index = function(t, k)
     -- без неё скрипты падали на attempt to call a nil value (method 'GetMouse').
     if k == "GetMouse" and __get_class(ref) == "Player" then
         return function(self)
+            -- Живая мышь: X/Y (клиентские пиксели — те же, что у AbsolutePosition) и события из UserInputService
+            -- (мышь и тач). Раньше события не стреляли, и хотбар (Button1Up/Move/X/Y) не мог принять тап/перетаскивание слота.
+            if __MOUSE then return __MOUSE end
             local function sig()
-                local s = {}
-                function s:Connect() return { Disconnect = function() end, Connected = true } end
+                local s = { fns = {} }
+                function s:Connect(fn)
+                    table.insert(self.fns, fn)
+                    local conn = { Connected = true }
+                    function conn:Disconnect()
+                        for i, f in ipairs(s.fns) do if f == fn then table.remove(s.fns, i) break end end
+                        self.Connected = false
+                    end
+                    conn.disconnect = conn.Disconnect
+                    return conn
+                end
                 s.connect = s.Connect
-                function s:Once() return { Disconnect = function() end } end
+                function s:Once(fn)
+                    local c
+                    c = self:Connect(function(...) c:Disconnect(); fn(...) end)
+                    return c
+                end
                 function s:Wait() return end
+                function s:Fire(...) for _, f in ipairs({ table.unpack(self.fns) }) do f(...) end end
                 return s
             end
             local m = { Target = nil, X = 0, Y = 0, ViewSizeX = 0, ViewSizeY = 0, Icon = "", TargetFilter = nil }
             pcall(function() m.Hit = CFrame.new(0, 0, 0); m.Origin = CFrame.new(0, 0, 0) end)
             for _, ev in ipairs({ "Button1Down", "Button1Up", "Button2Down", "Button2Up", "Move", "Idle",
                                   "WheelForward", "WheelBackward", "KeyDown", "KeyUp" }) do m[ev] = sig() end
+            local uis = game:GetService("UserInputService")
+            local UIT = Enum.UserInputType
+            local function upd(input) m.X, m.Y = input.Position.X, input.Position.Y end
+            uis.InputBegan:Connect(function(input)
+                upd(input)
+                if input.UserInputType == UIT.MouseButton1 or input.UserInputType == UIT.Touch then m.Button1Down:Fire()
+                elseif input.UserInputType == UIT.MouseButton2 then m.Button2Down:Fire() end
+            end)
+            uis.InputEnded:Connect(function(input)
+                upd(input)
+                if input.UserInputType == UIT.MouseButton1 or input.UserInputType == UIT.Touch then m.Button1Up:Fire()
+                elseif input.UserInputType == UIT.MouseButton2 then m.Button2Up:Fire() end
+            end)
+            uis.InputChanged:Connect(function(input)
+                if input.UserInputType == UIT.MouseMovement or input.UserInputType == UIT.Touch then upd(input); m.Move:Fire() end
+            end)
+            __MOUSE = m
             return m
         end
     end
@@ -6195,6 +6264,11 @@ InstanceMT.__index = function(t, k)
     -- Ни свойства, ни потомка с таким именем: в Roblox это ошибка "X is not a valid member of Class". Эмулятор
     -- отдавал молча nil — теперь говорим об этом (один раз на Класс.Имя), чтобы было видно, чего не хватает.
     local cls = tostring(__get_class(ref))
+    if cls == "Tool" then
+        -- значения по умолчанию Tool (Enabled, TextureId, ToolTip, ...): раньше nil + предупреждение, а хотбар читает tool.Enabled
+        local d = __TOOL_DEFAULTS[k]
+        if d ~= nil then return d end
+    end
     __emuWarnOnce("missing:" .. cls .. "." .. tostring(k),
         tostring(k) .. " — не свойство и не потомок " .. tostring(__get_name(ref)) .. " (" .. cls ..
         "); эмулятор вернул nil (в Roblox: 'is not a valid member', либо этого свойства нет в эмуляторе)")
@@ -6614,6 +6688,41 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
     local baseIndex = InstanceMT.__index
     InstanceMT.__index = function(t, k)
         local ref = rawget(t, "__ref")
+        -- ContextActionService: BindAction & co. Без него хотбар (SETTINGS:500) падал «attempt to call a nil value (method 'BindAction')».
+        -- Действия вызываются по клавишам из UserInputService.InputBegan/InputEnded (Begin/End); touch-кнопки не рисуем.
+        if __get_class(ref) == "ContextActionService" then
+            local f = __CAS_METHODS[k]
+            if f then return f end
+        end
+        -- PlayerGui:GetGuiObjectsAtPosition(x, y) — GuiObject-ы под точкой (сверху вниз), по реальному DOM
+        if k == "GetGuiObjectsAtPosition" and __get_class(ref) == "PlayerGui" then
+            return function(self, x, y)
+                local t = {}
+                for id in string.gmatch(__gui_at_pos(x or 0, y or 0), "[^,]+") do t[#t + 1] = wrap(tonumber(id)) end
+                return t
+            end
+        end
+        if k == "EquipTool" and __get_class(ref) == "Humanoid" then
+            return function(self, tool)
+                local ch = self.Parent
+                local pl = game:GetService("Players").LocalPlayer
+                if not (ch and tool) then return end
+                for _, c in ipairs(ch:GetChildren()) do
+                    if c ~= tool and c:IsA("Tool") then c.Parent = pl.Backpack end
+                end
+                tool.Parent = ch
+            end
+        end
+        if k == "UnequipTools" and __get_class(ref) == "Humanoid" then
+            return function(self)
+                local ch = self.Parent
+                local pl = game:GetService("Players").LocalPlayer
+                if not ch then return end
+                for _, c in ipairs(ch:GetChildren()) do
+                    if c:IsA("Tool") then c.Parent = pl.Backpack end
+                end
+            end
+        end
         if k == "IsKeyDown" and __get_class(ref) == "UserInputService" then
             return function(self, kc) return kc ~= nil and __is_key_down(kc.Name) end
         end
@@ -8211,7 +8320,16 @@ end
             if (charBody && luaIsCharRef(ref)) { charBody.__rbxGroup = value; luaApplyGroup(charBody); }
         }
         function luaSetGenericProp(ref, name, value) {
-            if (name === 'Name' && luaByRef[ref]) { luaByRef[ref].name = value; return; }
+            if (name === 'Name' && luaByRef[ref]) {
+                luaByRef[ref].name = String(value);
+                if (guiPropsByRef[ref]) {
+                    guiPropsByRef[ref].Name = String(value);
+                    // SortOrder = Name: смена имени меняет порядок в UIListLayout/UIGridLayout родителя (слоты хотбара: frame.Name = position)
+                    const gp = luaParentByRef[ref];
+                    if (gp !== undefined && gp !== -1) { try { applyUIListLayout(gp); } catch (e) { /* DOM ещё нет */ } }
+                }
+                return;
+            }
             if (name === 'CollisionGroup') { luaSetCollisionGroup(ref, value); return; }
             // ValueBase.Value — раньше запись просто клалась в общий
             // "мусорный ящик" свойств и на этом всё: сигнал .Changed
@@ -8502,10 +8620,14 @@ end
         let luaScriptsByRef = {};            // ref скрипта из файла -> {ref,name,cls,source,...} (из /api/scripts)
         let luaStartedClonedScripts = new Set();
         function luaIsUnderServerContainer(ref) {
-            let cur = ref, g = 0;
+            let cur = ref, g = 0, viaBackpack = false;
             while (cur !== undefined && cur !== -1 && g++ < 200) {
                 const i = luaByRef[cur];
-                if (i && luaParentByRef[cur] === -1) return i.cls === 'Workspace' || i.cls === 'ServerScriptService';
+                if (i && i.cls === 'Backpack') viaBackpack = true;
+                if (i && luaParentByRef[cur] === -1) {
+                    // Script внутри Tool в Backpack игрока (Players/<Игрок>/Backpack) в Roblox выполняется
+                    return i.cls === 'Workspace' || i.cls === 'ServerScriptService' || (i.cls === 'Players' && viaBackpack);
+                }
                 cur = luaParentByRef[cur];
             }
             return false;
@@ -8694,6 +8816,11 @@ end
             if (parentRef !== -1 && parentRef !== oldParent) {
                 fireLuaSignal(parentRef, 'ChildAdded', [{ __instanceRef: ref }]);
             }
+            // Tool перешёл в персонажа / вышел из него — Equipped / Unequipped (как в Roblox; на этом строится хотбар)
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Tool' && luaCharacterRef !== -1) {
+                if (parentRef === luaCharacterRef && oldParent !== luaCharacterRef) fireLuaSignal(ref, 'Equipped', []);
+                else if (oldParent === luaCharacterRef && parentRef !== luaCharacterRef) fireLuaSignal(ref, 'Unequipped', []);
+            }
             if (parentRef !== -1) { luaRealizeClonedParts(ref); luaStartClonedScripts(ref); }
         }
         function luaDestroyRef(ref) {
@@ -8750,6 +8877,28 @@ end
             // __raycast(mode, ox,oy,oz, dx,dy,dz, ...filterRefs) -> ref, px,py,pz, nx,ny,nz, dist | nil
             // mode 0 = Exclude (пропускаем потомков filterRefs), 1 = Include (только потомки filterRefs).
             // Лучом бьём по всем мешам сцены (как Roblox: CanCollide/Transparency не важны), берём ближайшее попадание.
+            // __fire_signal(ref, evName): выстрелить событие инстанса из Lua (Tool.Equipped/Unequipped и т.п.)
+            // __gui_at_pos(x, y) -> "ref,ref,..." — GUI-узлы под точкой (клиентские координаты), верхний первым
+            def('__gui_at_pos', function (L2) {
+                const x = lua.lua_tonumber(L2, 1), y = lua.lua_tonumber(L2, 2);
+                const rev = new Map();
+                for (const k in guiDomByRef) rev.set(guiDomByRef[k], Number(k));
+                const out = [], seen = new Set();
+                for (const el of document.elementsFromPoint(x, y)) {
+                    let cur = el;
+                    while (cur && cur !== document.body) {
+                        const r = rev.get(cur);
+                        if (r !== undefined) { if (!seen.has(r)) { seen.add(r); out.push(r); } break; }
+                        cur = cur.parentElement;
+                    }
+                }
+                lua.lua_pushstring(L2, out.join(','));
+                return 1;
+            });
+            def('__fire_signal', function (L2) {
+                try { fireLuaSignal(lua.lua_tointeger(L2, 1), lua.lua_tojsstring(L2, 2), []); } catch (e) { console.warn('__fire_signal:', e); }
+                return 0;
+            });
             def('__raycast', function (L2) {
                 try {
                     const n = lua.lua_gettop(L2);
@@ -8942,7 +9091,7 @@ end
                     lua.lua_pushstring(L2, playerAccount.name);
                     return 1;
                 }
-                lua.lua_pushstring(L2, inst ? inst.name : ('ref' + nref));
+                lua.lua_pushstring(L2, inst ? String(inst.name) : ('ref' + nref));
                 return 1;
             });
             def('__get_class', function (L2) {
@@ -10376,6 +10525,15 @@ end
             luaSetParent(playerGuiRef, playerRef);
             const backpackRef = luaCreateVirtualInstance('Backpack'); // существует для полноты API; не рендерится
             luaSetParent(backpackRef, playerRef);
+            // Как в Roblox: при появлении игрока всё из StarterPack копируется в Backpack. Раньше Backpack оставался пустым, и
+            // самописный инвентарь/хотбар (InventoryController: слоты строятся по Backpack) не получал ни одного инструмента.
+            const starterPackRef = Object.keys(luaByRef).map(Number).find(r => luaByRef[r] && luaByRef[r].cls === 'StarterPack' && luaParentByRef[r] === -1);
+            if (starterPackRef !== undefined) {
+                for (const childRef of (luaChildrenByRef[starterPackRef] || []).slice()) {
+                    try { luaSetParent(luaCloneRef(childRef), backpackRef); }
+                    catch (e) { console.warn('StarterPack -> Backpack:', e); }
+                }
+            }
 
             const playerScriptsRef = luaCreateVirtualInstance('PlayerScripts');
             luaSetParent(playerScriptsRef, playerRef);
@@ -10543,7 +10701,7 @@ end
                 let cur = ref, g = 0;
                 while (cur !== undefined && cur !== -1 && g++ < 200) {
                     const ii = luaByRef[cur];
-                    if (ii && luaParentByRef[cur] === -1) return ii.cls === 'ServerStorage';
+                    if (ii && luaParentByRef[cur] === -1) return ii.cls === 'ServerStorage' || ii.cls === 'StarterPack';
                     cur = luaParentByRef[cur];
                 }
                 return false;
@@ -10564,6 +10722,10 @@ end
                 // Раньше исключение тут (не пойманное) обрывало ВСЮ функцию —
                 logLuaOutput('error', 'bootstrapClientPlayer упал: ' + e.message + ' — LocalScript-и и GUI не запущены');
             }
+            // GUI должен существовать в DOM ДО запуска LocalScript-ов (в Roblox PlayerGui уже собран): иначе AbsoluteSize/
+            // AbsolutePosition на старте = 0 и хотбар (hotBar.Grid.CellSize = AbsoluteSize.Y) схлопывал ячейки в ноль.
+            // После запуска скриптов overlay перерисовывается начисто (renderGuiOverlayFromClient ниже) уже с их правками.
+            try { renderGuiOverlayFromClient(); } catch (e) { console.warn('early GUI render:', e); }
             for (const scr of r.scripts) {
                 if (!_isClientScript(scr) || _underCharacterScripts(scr.ref)) continue;
                 const clonedRef = refMap[scr.ref];
@@ -10851,6 +11013,11 @@ end
             }
             guiApplyPointer(el, props);
         }
+        // ячейка UIGridLayout переприменяет размер/позицию после любой перекраски элемента (иначе Text/Color затирали раскладку)
+        {
+            const _ages = applyGuiElementStyle;
+            applyGuiElementStyle = function (el, props) { _ages(el, props); if (el && el._gridCell) _applyGridCell(el); };
+        }
 
         function domInputTypeName(e, isMove) {
             if (e.touches !== undefined || (e.type && e.type.indexOf('touch') === 0)) return 'Touch';
@@ -11054,6 +11221,7 @@ end
             for (const childRef of (guiChildrenByRef[ref] || [])) {
                 const childProps = guiPropsByRef[childRef];
                 if (childProps && childProps.cls === 'UIScale') continue; // применяется в applyGuiElementStyle родителя
+                if (childProps && (childProps.cls === 'UIListLayout' || childProps.cls === 'UIGridLayout')) continue; // раскладка: свойства есть, DOM-узла нет
                 if (childProps && (childProps.cls === 'UICorner' || childProps.cls === 'UIStroke')) {
                     // Модификатор, не отдельный визуальный узел — красим
                     // el (родителя), а не создаём для него DOM-элемент.
@@ -11063,6 +11231,73 @@ end
                 guiRenderNode(childRef, el);
             }
             applyUIListLayout(ref);
+        }
+
+        // UIGridLayout: ячейки CellSize с зазором CellPadding, строки/столбцы по FillDirection (0 Horizontal), выравнивание
+        // Horizontal/VerticalAlignment (HA: 0 Center, 1 Left, 2 Right; VA: 0 Center, 1 Top, 2 Bottom). Раньше раскладки не было:
+        // слоты хотбара растягивались во всю ширину строками друг под другом. Размер/позиция ячеек пишутся прямо в style
+        // (props не трогаем — Lua читает исходный Size), el._gridCell переприменяется в applyGuiElementStyle.
+        // SortOrder раскладки: 0 = Name (по имени), 1 = Custom (порядок потомков), 2 = LayoutOrder (по числу, затем порядок потомков)
+        function _sortLayoutKids(kids, lp) {
+            const so = lp.SortOrder === undefined ? 2 : lp.SortOrder;
+            const idx = new Map(kids.map((k, i) => [k, i]));
+            const nm = (k) => String((luaByRef[k] && luaByRef[k].name !== undefined) ? luaByRef[k].name : ((guiPropsByRef[k] || {}).Name || ''));
+            if (so === 0 || so === 'Name') return kids.slice().sort((a, b) => (nm(a) < nm(b) ? -1 : nm(a) > nm(b) ? 1 : idx.get(a) - idx.get(b)));
+            if (so === 2 || so === 'LayoutOrder') return kids.slice().sort((a, b) => (((guiPropsByRef[a] || {}).LayoutOrder || 0) - ((guiPropsByRef[b] || {}).LayoutOrder || 0)) || (idx.get(a) - idx.get(b)));
+            return kids;
+        }
+        function applyUIGridLayout(containerRef, layoutRef, kids0) {
+            const kids = _sortLayoutKids(kids0, guiPropsByRef[layoutRef] || {});
+            const cel = guiDomByRef[containerRef];
+            const lp = guiPropsByRef[layoutRef] || {};
+            if (!cel) return;
+            const cw = cel.clientWidth, ch = cel.clientHeight;
+            const ud = (u, base) => u ? ((u.x && u.x.scale || 0) * base.x + (u.x && u.x.offset || 0)) : 0;
+            const cs = lp.CellSize || { x: { scale: 0, offset: 100 }, y: { scale: 0, offset: 100 } };
+            const cp = lp.CellPadding || { x: { scale: 0, offset: 0 }, y: { scale: 0, offset: 0 } };
+            const cellW = (cs.x.scale || 0) * cw + (cs.x.offset || 0), cellH = (cs.y.scale || 0) * ch + (cs.y.offset || 0);
+            const padX = (cp.x.scale || 0) * cw + (cp.x.offset || 0), padY = (cp.y.scale || 0) * ch + (cp.y.offset || 0);
+            const horizontal = !(lp.FillDirection === 1 || lp.FillDirection === 'Vertical');
+            const items = [];
+            for (const k of kids) {
+                const p = guiPropsByRef[k];
+                if (!p || k === layoutRef || (p.cls && p.cls.indexOf('UI') === 0) || p.Visible === false) continue;
+                if (guiDomByRef[k]) items.push(k);
+            }
+            const maxCells = lp.FillDirectionMaxCells > 0 ? lp.FillDirectionMaxCells
+                : Math.max(1, Math.floor(((horizontal ? cw : ch) + (horizontal ? padX : padY)) / ((horizontal ? cellW + padX : cellH + padY) || 1)));
+            const lines = Math.ceil(items.length / maxCells);
+            const lineLen = (n) => n * (horizontal ? cellW : cellH) + Math.max(0, n - 1) * (horizontal ? padX : padY);
+            const totalCross = lines * (horizontal ? cellH : cellW) + Math.max(0, lines - 1) * (horizontal ? padY : padX);
+            const HA = lp.HorizontalAlignment === undefined ? 0 : lp.HorizontalAlignment;   // 0 Center, 1 Left, 2 Right
+            const VA = lp.VerticalAlignment === undefined ? 0 : lp.VerticalAlignment;       // 0 Center, 1 Top, 2 Bottom
+            items.forEach((k, idx) => {
+                const line = Math.floor(idx / maxCells), pos = idx % maxCells;
+                const inLine = Math.min(maxCells, items.length - line * maxCells);
+                let x, y;
+                if (horizontal) {
+                    const rowW = lineLen(inLine);
+                    const ox = HA === 1 ? 0 : HA === 2 ? cw - rowW : (cw - rowW) / 2;
+                    const oy = VA === 1 ? 0 : VA === 2 ? ch - totalCross : (ch - totalCross) / 2;
+                    x = ox + pos * (cellW + padX); y = oy + line * (cellH + padY);
+                } else {
+                    const colH = lineLen(inLine);
+                    const oy = VA === 1 ? 0 : VA === 2 ? ch - colH : (ch - colH) / 2;
+                    const ox = HA === 1 ? 0 : HA === 2 ? cw - totalCross : (cw - totalCross) / 2;
+                    x = ox + line * (cellW + padX); y = oy + pos * (cellH + padY);
+                }
+                const el = guiDomByRef[k];
+                el._gridCell = { x, y, w: cellW, h: cellH };
+                _applyGridCell(el);
+            });
+        }
+        function _applyGridCell(el) {
+            const g = el._gridCell;
+            if (!g) return;
+            el.style.position = 'absolute';
+            el.style.left = g.x + 'px'; el.style.top = g.y + 'px';
+            el.style.width = g.w + 'px'; el.style.height = g.h + 'px';
+            el.style.right = 'auto'; el.style.bottom = 'auto'; el.style.transform = 'none';
         }
 
         // UIListLayout — раньше был только числом-заглушкой в GUI_CLASS_NAMES.
@@ -11077,12 +11312,16 @@ end
             const kids = (guiChildrenByRef[containerRef] || []).slice();
             let layoutRef = null;
             for (const k of kids) {
-                if (guiPropsByRef[k] && guiPropsByRef[k].cls === 'UIListLayout') { layoutRef = k; break; }
+                if (guiPropsByRef[k] && (guiPropsByRef[k].cls === 'UIListLayout' || guiPropsByRef[k].cls === 'UIGridLayout')) { layoutRef = k; break; }
             }
             if (!layoutRef) return;
             const layoutProps = guiPropsByRef[layoutRef] || {};
+            if (layoutProps.cls === 'UIGridLayout') { applyUIGridLayout(containerRef, layoutRef, kids); return; }
+            const sortedKids = _sortLayoutKids(kids, layoutProps);
+            kids.length = 0; sortedKids.forEach(k => kids.push(k));
             const paddingPx = (layoutProps.Padding && layoutProps.Padding.offset) || 0;
-            const horizontal = layoutProps.FillDirection === 'Horizontal';
+            // FillDirection в файле — число enum (0 = Horizontal, 1 = Vertical), в Lua-присваивании — строка
+            const horizontal = layoutProps.FillDirection === 'Horizontal' || layoutProps.FillDirection === 0;
             let offset = 0;
             for (const k of kids) {
                 const p = guiPropsByRef[k];
@@ -11328,6 +11567,12 @@ end
             const props = guiPropsByRef[ref];
             if (!props) return false;
             props[name] = value;
+            if (props.cls === 'UIListLayout' || props.cls === 'UIGridLayout') {
+                // Grid.CellSize = ... / list.Padding = ... — пересчитать раскладку контейнера
+                const parentRef = luaParentByRef[ref];
+                if (parentRef !== undefined && parentRef !== -1) applyUIListLayout(parentRef);
+                return true;
+            }
             if (props.cls === 'UIScale') {
                 // у UIScale нет своего DOM-узла: пересчитываем стиль родителя (GuiScale меняет Scale на лету)
                 const parentRef = luaParentByRef[ref];

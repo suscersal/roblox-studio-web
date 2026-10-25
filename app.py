@@ -195,7 +195,7 @@ GUI_LEAF_CLASSES = {
 # никогда не узнавал о TopLeftRadius/.../Thickness, лежащих в самом
 # .rbxl, и все GUI-плашки в Play всегда рисовались с прямыми углами и
 # без обводки, независимо от того, что реально настроено в файле.
-GUI_DECORATION_CLASSES = {'UICorner', 'UIStroke', 'UIScale'}   # UIScale: масштаб родителя (см. applyGuiElementStyle)
+GUI_DECORATION_CLASSES = {'UICorner', 'UIStroke', 'UIScale', 'UIListLayout', 'UIGridLayout'}   # layout-ы: свойства раскладки нужны клиенту, DOM-узла у них нет   # UIScale: масштаб родителя (см. applyGuiElementStyle)
 GUI_CLASSES = GUI_ROOT_CLASSES | GUI_CONTAINER_CLASSES | GUI_LEAF_CLASSES | GUI_DECORATION_CLASSES
 
 # Свойства, которые реально нужны фронтенду для рисования GUI-оверлея —
@@ -222,6 +222,9 @@ GUI_PROPS = (
     'Face', 'SizingMode', 'PixelsPerStud', 'CanvasSize', 'AlwaysOnTop', 'Brightness',
     # BillboardGui (интерфейс в мире, лицом к камере)
     'Adornee', 'StudsOffset', 'StudsOffsetWorldSpace', 'SizeOffset', 'ExtentsOffset', 'MaxDistance',
+    # UIListLayout / UIGridLayout (раскладка потомков)
+    'FillDirection', 'Padding', 'HorizontalAlignment', 'VerticalAlignment', 'SortOrder', 'StartCorner',
+    'CellSize', 'CellPadding', 'FillDirectionMaxCells', 'LayoutOrder',
 )
 
 # Script/LocalScript исполняются в РАЗНЫХ средах в настоящем Roblox
@@ -1049,7 +1052,7 @@ def build_all_scene_objects():
         while _pm.get(_root) in _r2c and _g < 500:
             _root = _pm[_root]
             _g += 1
-        not_in_world = _r2c.get(_root) in ('ServerStorage', 'ReplicatedStorage')
+        not_in_world = _r2c.get(_root) in ('ServerStorage', 'ReplicatedStorage', 'StarterPack')
 
         objs.append({
             'ref': ref, 'class': cls, 'name': name,
