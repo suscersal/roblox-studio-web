@@ -2896,6 +2896,16 @@ def api_all_instances():
             _attrs = _decode_attributes(bytes(_ab))
             if _attrs:
                 item['attrs'] = _attrs
+        # Свойства Tool из файла (TextureId — иконка в хотбаре, ToolTip, CanBeDropped, ...): без них tool.TextureId был пуст
+        # и хотбар рисовал слоты без картинок.
+        if cls == 'Tool':
+            _tp = {}
+            for _k in ('TextureId', 'ToolTip', 'CanBeDropped', 'RequiresHandle', 'Enabled', 'ManualActivationOnly'):
+                _v = _pp.get(_k)
+                if isinstance(_v, (str, bool)):
+                    _tp[_k] = _v
+            if _tp:
+                item['gprops'] = _tp
         _tg = _decode_tags(_pp.get('Tags'), parsed.get('shared_strings') or [])
         if _tg:
             item['tags'] = _tg

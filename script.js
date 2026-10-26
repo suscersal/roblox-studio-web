@@ -860,7 +860,7 @@
         function setQuality(level) {
             currentQuality = level;
             qualitySettings = QUALITY_PRESETS[level];
-            document.querySelectorAll('#quality-selector button').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('#quality-selector button[id^="q-"]').forEach(b => b.classList.remove('active'));
             document.getElementById('q-' + level).classList.add('active');
             if (renderer) {
                 renderer.shadowMap.enabled = qualitySettings.shadows;
@@ -8702,8 +8702,9 @@ end
             if (luaTags[ref]) luaTags[newRef] = new Set(luaTags[ref]);
             // Sound: у клона раньше не было аудио-элемента (SoundId лежал только у оригинала), поэтому
             // sound:Clone():Play() молчал, а luaSoundControl тихо выходил с «SoundId ещё не задан».
+            // свойства «мусорного ящика» (Tool.TextureId/ToolTip из файла и т.п.) копируются у любого класса, не только у Sound
+            if (luaGenericPropsByRef[ref]) luaGenericPropsByRef[newRef] = Object.assign({}, luaGenericPropsByRef[ref]);
             if (cls === 'Sound') {
-                if (luaGenericPropsByRef[ref]) luaGenericPropsByRef[newRef] = Object.assign({}, luaGenericPropsByRef[ref]);
                 const sa = soundElByRef[ref];
                 if (sa) {
                     const na = getOrCreateSoundEl(newRef);
@@ -8888,7 +8889,8 @@ end
             // __fire_signal(ref, evName): выстрелить событие инстанса из Lua (Tool.Equipped/Unequipped и т.п.)
             // __gui_at_pos(x, y) -> "ref,ref,..." — GUI-узлы под точкой (клиентские координаты), верхний первым
             def('__gui_at_pos', function (L2) {
-                const x = lua.lua_tonumber(L2, 1), y = lua.lua_tonumber(L2, 2);
+                const ovr = _guiOverlayRect();
+                const x = ovr.left + lua.lua_tonumber(L2, 1) * guiScale, y = ovr.top + lua.lua_tonumber(L2, 2) * guiScale;
                 const rev = new Map();
                 for (const k in guiDomByRef) rev.set(guiDomByRef[k], Number(k));
                 const out = [], seen = new Set();
@@ -9068,17 +9070,17 @@ end
             });
             def('__cam_info', function (L2) {
                 const i = luaCamInfo();
-                lua.lua_pushnumber(L2, i.w); lua.lua_pushnumber(L2, i.h); lua.lua_pushnumber(L2, i.fov);
+                lua.lua_pushnumber(L2, i.w / guiScale); lua.lua_pushnumber(L2, i.h / guiScale); lua.lua_pushnumber(L2, i.fov);
                 return 3;
             });
             def('__cam_project', function (L2) {
                 const r = luaCamProject(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3));
-                lua.lua_pushnumber(L2, r.x); lua.lua_pushnumber(L2, r.y); lua.lua_pushnumber(L2, r.depth);
+                lua.lua_pushnumber(L2, r.x / guiScale); lua.lua_pushnumber(L2, r.y / guiScale); lua.lua_pushnumber(L2, r.depth);
                 lua.lua_pushboolean(L2, r.on ? 1 : 0);
                 return 4;
             });
             def('__cam_ray', function (L2) {
-                const r = luaCamRay(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2));
+                const r = luaCamRay(lua.lua_tonumber(L2, 1) * guiScale, lua.lua_tonumber(L2, 2) * guiScale);
                 for (const v of [r.o.x, r.o.y, r.o.z, r.d.x, r.d.y, r.d.z]) lua.lua_pushnumber(L2, v);
                 return 6;
             });
@@ -9416,7 +9418,10 @@ end
                 const ref = lua.lua_tonumber(L2, 1);
                 const el = guiDomByRef[ref];
                 let x = 0, y = 0, w = 0, h = 0;
-                if (el) { const r = el.getBoundingClientRect(); x = r.left; y = r.top; w = r.width; h = r.height; }
+                if (el) {
+                    const r = el.getBoundingClientRect();
+                    [x, y] = _clientToGui(r.left, r.top); w = r.width / guiScale; h = r.height / guiScale;
+                }
                 lua.lua_pushnumber(L2, x); lua.lua_pushnumber(L2, y);
                 lua.lua_pushnumber(L2, w); lua.lua_pushnumber(L2, h);
                 return 4;
@@ -10605,6 +10610,7 @@ end
                     if (inst.attrs) luaFileAttrs[inst.ref] = inst.attrs;
                     if (inst.tags) luaFileTags[inst.ref] = inst.tags;
                     if (inst.pivot) luaFilePivots[inst.ref] = inst.pivot;
+                    if (inst.gprops) luaGenericPropsByRef[inst.ref] = Object.assign({}, inst.gprops);   // Tool.TextureId/ToolTip/... из файла
                     if (inst.cls === 'Team') luaTeamInfo[inst.ref] = { color: inst.teamColor, auto: inst.autoAssignable !== false };
                     if (inst.att) luaAttCF[inst.ref] = inst.att;
                     if (inst.refs) luaRefProps[inst.ref] = inst.refs;
@@ -10997,6 +11003,7 @@ end
                 } else {
                     el.textContent = props.Text != null ? String(props.Text) : '';
                 }
+                _fitScaledText(el, props);
             } else if (cls === 'ImageLabel' || cls === 'ImageButton') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
                 el.textContent = '';
@@ -11034,9 +11041,63 @@ end
             if (e.button === 1) return 'MouseButton3';
             return 'MouseButton1';
         }
+        // Масштаб игрового GUI (оверлей получает CSS zoom): на телефоне окно Play маленькое, а GUI считается в «пикселях Roblox».
+        // Все координаты, которые видит Lua (мышь/тач, AbsolutePosition/AbsoluteSize, ViewportSize), — в единицах GUI,
+        // от левого верхнего угла оверлея (как в Roblox), а не в пикселях экрана.
+        let guiScale = 1;
+        try { const v = parseFloat(localStorage.getItem('rbxstudio-gui-scale')); if (v >= 1 && v <= 3) guiScale = v; } catch (e) { /* нет localStorage */ }
+        function _guiOverlayRect() {
+            const ov = document.getElementById('gui-overlay');
+            return ov ? ov.getBoundingClientRect() : { left: 0, top: 0 };
+        }
+        function _clientToGui(cx, cy) {
+            const r = _guiOverlayRect();
+            return [(cx - r.left) / guiScale, (cy - r.top) / guiScale];
+        }
+        function setGuiScale(sc) {
+            guiScale = sc;
+            try { localStorage.setItem('rbxstudio-gui-scale', String(sc)); } catch (e) { /* ничего */ }
+            _markGuiScaleButtons();
+            const ov = document.getElementById('gui-overlay');
+            if (ov) ov.style.zoom = String(guiScale);
+            if (isPlaying) { try { renderGuiOverlayFromClient(); } catch (e) { console.warn('GUI scale re-render:', e); } }
+        }
+        function _markGuiScaleButtons() {
+            document.querySelectorAll('#quality-selector button[id^="g-"]').forEach(b => {
+                b.classList.toggle('active', Math.abs(parseFloat(b.dataset.s) - guiScale) < 0.01);
+            });
+        }
+        document.addEventListener('DOMContentLoaded', () => _markGuiScaleButtons());
+        // TextScaled у DOM-текста: Roblox подбирает самый крупный шрифт (до 100), при котором текст влезает в элемент по ширине
+        // и высоте. Раньше шрифт всегда равнялся TextSize (16px), и подписи слотов хотбара налезали друг на друга.
+        let _fitCtx = null;
+        function _fitScaledText(el, props) {
+            if (!props || !props.TextScaled) {
+                if (el._scaledRO) { el._scaledRO.disconnect(); el._scaledRO = null; }
+                return;
+            }
+            const run = () => {
+                const w = el.clientWidth, h = el.clientHeight;
+                if (!(w > 0 && h > 0)) return;
+                const lines = String(el.textContent || '').split('\n');
+                if (!_fitCtx) _fitCtx = document.createElement('canvas').getContext('2d');
+                let size = Math.max(4, Math.min(100, (h / lines.length) * 0.95));
+                _fitCtx.font = size + 'px sans-serif';
+                const widest = Math.max(...lines.map(l => _fitCtx.measureText(l).width), 1);
+                if (widest > w) size = Math.max(4, size * (w / widest) * 0.98);
+                el.style.fontSize = size + 'px';
+                el.style.whiteSpace = 'nowrap';
+                el.style.lineHeight = 'normal';
+            };
+            run();
+            if (!el._scaledRO && typeof ResizeObserver !== 'undefined') {
+                el._scaledRO = new ResizeObserver(run);
+                el._scaledRO.observe(el);
+            }
+        }
         function domInputXY(e) {
-            const t = e.touches && e.touches[0];
-            return t ? [t.clientX, t.clientY] : [e.clientX, e.clientY];
+            const t = e.touches && e.touches[0] || (e.changedTouches && e.changedTouches[0]);
+            return t ? _clientToGui(t.clientX, t.clientY) : _clientToGui(e.clientX, e.clientY);
         }
 
         function guiCreateDomNode(ref, props) {
@@ -11212,8 +11273,8 @@ end
                 el.style.display = 'flex';
                 el.style.position = 'absolute';
                 el.style.right = 'auto'; el.style.bottom = 'auto';
-                el.style.width = w + 'px'; el.style.height = h + 'px';
-                el.style.left = sx + 'px'; el.style.top = sy + 'px';
+                el.style.width = (w / guiScale) + 'px'; el.style.height = (h / guiScale) + 'px';
+                el.style.left = (sx / guiScale) + 'px'; el.style.top = (sy / guiScale) + 'px';
                 el.style.transform = 'translate(' + (-50 + ax * 100) + '%,' + (-50 - ay * 100) + '%)';
                 el.style.transformOrigin = '50% 50%';
                 el.style.zIndex = '5';
@@ -11358,6 +11419,7 @@ end
             const overlay = document.getElementById('gui-overlay');
             if (!overlay) { logLuaOutput('error', 'renderGuiOverlayFromClient: #gui-overlay не найден в DOM'); return; }
             overlay.innerHTML = '';
+            overlay.style.zoom = String(guiScale);
             guiDomByRef = {};
             guiChildrenByRef = {};
             for (const [refStr, props] of Object.entries(guiPropsByRef)) {
