@@ -24,7 +24,7 @@
             act_wait: 'Needs your confirmation (it deletes objects).', act_bad_json: 'Could not read the actions block: {msg}',
             act_no_ref: 'object ref={ref} not found', act_bad: 'invalid action: {what}', act_protected: 'cannot delete a service or system object',
             act_set: '{name} [{ref}]: {prop} → {val}', act_create: '+ {cls} “{name}”', act_delete: '✕ delete {name} [{ref}]',
-            custom_addr: 'Custom address', ollama: 'Ollama (local)',
+            custom_addr: 'Custom address', ollama: 'Ollama (local)', lines: 'lines',
             q1: 'Explain the script', q1p: 'Explain what the open script does, step by step.',
             q2: 'Find the bug', q2p: 'Find bugs in the open script and show the fixed code.',
             q3: 'Simplify the code', q3p: 'Simplify and optimize the open script and explain what you changed.'
@@ -48,7 +48,7 @@
             act_bad_json: 'Не удалось прочитать блок действий: {msg}',
             act_no_ref: 'объект ref={ref} не найден', act_bad: 'некорректное действие: {what}', act_protected: 'нельзя удалять сервисы и системные объекты',
             act_set: '{name} [{ref}]: {prop} → {val}', act_create: '+ {cls} «{name}»', act_delete: '✕ удалить {name} [{ref}]',
-            custom_addr: 'Свой адрес', ollama: 'Ollama (локально)',
+            custom_addr: 'Свой адрес', ollama: 'Ollama (локально)', lines: 'строк',
             q1: 'Объясни скрипт', q1p: 'Объясни, что делает открытый скрипт, по шагам.',
             q2: 'Найди ошибку', q2p: 'Найди ошибки в открытом скрипте и покажи исправленный код.',
             q3: 'Упрости код', q3p: 'Упрости и оптимизируй открытый скрипт, объясни что изменил.'
@@ -106,7 +106,7 @@
 .ai-m.err{background:#7f1d1d;border-color:#7f1d1d}
 .ai-m code{font:calc(12px*var(--fs,1)) 'Fira Code',Consolas,monospace;background:#374151;padding:0 4px;border-radius:3px}
 .ai-m pre{position:relative;margin:6px 0 2px;padding:26px 10px 9px;background:#0f172a;border:1px solid #374151;border-radius:6px;overflow-x:auto;white-space:pre;font:calc(12px*var(--fs,1))/1.55 'Fira Code',Consolas,monospace}
-.ai-m pre code{background:none;padding:0}
+.ai-m pre code{background:none;padding:0}\n.ai-m .ai-h{display:block;margin-top:4px;color:#93c5fd}.ai-m a{color:#60a5fa}.ai-m hr{border:0;border-top:1px solid #374151;margin:6px 0}
 .ai-m pre .ai-copy{position:absolute;top:4px;right:4px;font-size:calc(11px*var(--fs,1));min-height:0;padding:1px 7px}
 .ai-caret::after{content:"";display:inline-block;width:7px;height:1em;background:#3b82f6;margin-left:2px;vertical-align:-2px;animation:ai-b 1s steps(2) infinite}
 @keyframes ai-b{50%{opacity:0}}
@@ -188,10 +188,28 @@
         } catch (e) { setNote(T('no_server', { msg: e })); }
     }
 
-    // Минимальное форматирование: экранируем всё, ``` блоки -> <pre>, `код` -> <code>
+    // Форматирование: ``` блоки -> <pre>, `код` -> <code>, **жирный**, *курсив*, # заголовки, списки, [текст](http…)
+    function inline(t) {
+        return t.split('`').map((x, i) => {
+            if (i % 2) return '<code>' + esc(x) + '</code>';
+            return esc(x)
+                .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+                .replace(/(^|[\s(])\*([^*\s][^*\n]*?)\*(?=$|[\s).,!?:;])/g, '$1<i>$2</i>')
+                .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        }).join('');
+    }
+    function fmtText(p) {
+        return p.split('\n').map(line => {
+            let m;
+            if ((m = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line))) return '<b class="ai-h">' + inline(m[1]) + '</b>';
+            if ((m = /^(\s*)[-*•]\s+(.*)$/.exec(line))) return m[1] + '• ' + inline(m[2]);
+            if (/^\s*([-*_])\1{2,}\s*$/.test(line)) return '<hr>';
+            return inline(line);
+        }).join('\n');
+    }
     function fmt(text) {
         return String(text).split('```').map((p, i) => {
-            if (i % 2 === 0) return esc(p).replace(/`([^`\n]+)`/g, '<code>$1</code>');
+            if (i % 2 === 0) return fmtText(p);
             if (/^rbx-actions\b/.test(p)) return '<div class="ai-actmark">' + esc(T('act_prep')) + '</div>';
             const code = p.replace(/^[a-zA-Z0-9_+-]*\n/, '').replace(/\n$/, '');
             return '<pre><button type="button" class="ai-copy">' + esc(T('copy')) + '</button>' + esc(code) + '</pre>';
@@ -261,8 +279,9 @@
 
     // ===== Действия над сценой: ассистент присылает блок ```rbx-actions с JSON-массивом =====
     const ACT_PROPS = { Position: 'v3', Rotation: 'v3', Size: 'size', Color: 'color', Transparency: 'unit', Reflectance: 'unit',
-        Anchored: 'bool', CanCollide: 'bool', CastShadow: 'bool', Name: 'str' };
-    const ACT_CLASSES = ['Part', 'WedgePart', 'SpherePart', 'CornerWedgePart', 'SpawnLocation', 'Folder', 'Model'];
+        Anchored: 'bool', CanCollide: 'bool', CastShadow: 'bool', Name: 'str', Source: 'src' };
+    const SCRIPT_CLASSES = ['Script', 'LocalScript', 'ModuleScript'];
+    const ACT_CLASSES = ['Part', 'WedgePart', 'SpherePart', 'CornerWedgePart', 'SpawnLocation', 'Folder', 'Model'].concat(SCRIPT_CLASSES);
     const PROTECTED = ['Terrain', 'Camera'];
     const bad = what => new Error(T('act_bad', { what: what }));
     const num = (x, lo, hi, what) => { const f = Number(x); if (!isFinite(f)) throw bad(what); return Math.max(lo, Math.min(hi, f)); };
@@ -284,6 +303,7 @@
         }
         if (kind === 'unit') return num(v, 0, 1, what);
         if (kind === 'bool') { if (typeof v !== 'boolean') throw bad(what); return v; }
+        if (kind === 'src') { if (typeof v !== 'string') throw bad(what); return v.slice(0, 200000); }
         if (kind === 'str') { if (typeof v !== 'string' || !v.trim()) throw bad(what); return v.slice(0, 100); }
         throw bad(what);
     }
@@ -292,7 +312,7 @@
     const postProp = (ref, prop, value) => aapi('POST', '/api/instance/' + ref, { prop: prop, value: value });
     const nodeName = ref => { try { const n = treeByRef[ref]; return (n && n.name) || String(ref); } catch (e) { return String(ref); } };
     const isRoot = ref => { try { return treeData.some(n => n.ref === ref); } catch (e) { return false; } };
-    const fmtVal = v => (v && typeof v === 'object') ? Object.keys(v).map(k => +(+v[k]).toFixed(2)).join(', ') : String(v);
+    const fmtVal = v => (typeof v === 'string' && v.length > 40) ? v.slice(0, 37).replace(/\n/g, ' ') + '…' : (v && typeof v === 'object') ? Object.keys(v).map(k => +(+v[k]).toFixed(2)).join(', ') : String(v);
 
     function parseActions(text) {
         const list = []; let err = null;
@@ -307,7 +327,7 @@
     function describe(a) {
         try {
             if (a.op === 'set') return T('act_set', { name: nodeName(+a.ref), ref: a.ref, prop: a.prop, val: fmtVal(a.value) });
-            if (a.op === 'create') return T('act_create', { cls: a.class || 'Part', name: a.name || a.class || 'Part' });
+            if (a.op === 'create') return T('act_create', { cls: a.class || 'Part', name: a.name || a.class || 'Part' }) + ((a.source || (a.props && a.props.Source)) ? ' (' + String(a.source || a.props.Source).split('\n').length + ' ' + T('lines') + ')' : '');
             if (a.op === 'delete') return T('act_delete', { name: nodeName(+a.ref), ref: a.ref });
         } catch (e) { /* ниже общий вариант */ }
         return JSON.stringify(a).slice(0, 80);
@@ -342,11 +362,16 @@
         const p = a.props || {}, body = { class: cls, name: name };
         let parent = parseInt(a.parent, 10);
         if (!isFinite(parent)) {
-            const ws = (typeof treeData !== 'undefined' ? treeData : []).find(n => n.cls === 'Workspace');
-            parent = ws ? ws.ref : -1;
+            const roots = (typeof treeData !== 'undefined' ? treeData : []);
+            const root = c => roots.find(n => n.cls === c);
+            let def = root('Workspace');
+            if (SCRIPT_CLASSES.includes(cls)) def = (cls === 'LocalScript' ? root('StarterPlayer') : null) || root('ServerScriptService') || def;
+            if (cls === 'LocalScript' && def && def.cls === 'StarterPlayer') def = (def.children || []).find(n => n.cls === 'StarterPlayerScripts') || def;
+            parent = def ? def.ref : -1;
         } else await exists(parent);
         body.parent = parent;
         const extra = [];
+        if (typeof a.source === 'string' && !('Source' in p)) p.Source = a.source;
         for (const k in p) {
             if (!(k in ACT_PROPS) || k === 'Name') throw bad(k);
             const v = normVal(ACT_PROPS[k], p[k], k);
@@ -355,6 +380,7 @@
             else if (k === 'Color') body.color = { r: v.r / 255, g: v.g / 255, b: v.b / 255 };
             else if (k === 'Anchored') body.anchored = v;
             else if (k === 'CanCollide') body.cancollide = v;
+            else if (k === 'Source' && !SCRIPT_CLASSES.includes(cls)) throw bad(k);
             else extra.push([k, v]);
         }
         const r = await aapi('PUT', '/api/instance', body);

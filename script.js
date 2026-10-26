@@ -6660,6 +6660,8 @@ local COMPAT = {
     TriggerEnded = function(t, ref) return makeEvent(ref, "TriggerEnded") end,
     PromptShown = function(t, ref) return makeEvent(ref, "PromptShown") end,
     PromptHidden = function(t, ref) return makeEvent(ref, "PromptHidden") end,
+    PromptButtonHoldBegan = function(t, ref) return makeEvent(ref, "PromptButtonHoldBegan") end,
+    PromptButtonHoldEnded = function(t, ref) return makeEvent(ref, "PromptButtonHoldEnded") end,
     AncestryChanged = function(t, ref) return makeEvent(ref, "AncestryChanged") end,
     Destroying = function(t, ref) return makeEvent(ref, "Destroying") end,
 }
@@ -11054,12 +11056,29 @@ end
             const r = _guiOverlayRect();
             return [(cx - r.left) / guiScale, (cy - r.top) / guiScale];
         }
+        // CSS zoom на оверлее: в Chromium >=128 бокс остаётся равным родителю, а в старых WebView (Android) он становился
+        // в guiScale раз больше и нижняя часть GUI (хотбар, anchor снизу) уезжала за экран. Применяем zoom и сверяем
+        // реальный размер с родителем: если оверлей вылез — ужимаем его на guiScale.
+        function _applyGuiZoom(ov) {
+            if (!ov) return;
+            ov.style.zoom = String(guiScale);
+            ov.style.width = ''; ov.style.height = ''; ov.style.right = ''; ov.style.bottom = '';
+            const par = ov.parentElement;
+            if (!par || guiScale === 1) return;
+            const pr = par.getBoundingClientRect(), orr = ov.getBoundingClientRect();
+            if (pr.width > 0 && orr.width > pr.width * 1.02) {
+                ov.style.right = 'auto'; ov.style.bottom = 'auto';
+                ov.style.width = (pr.width / guiScale) + 'px';
+                ov.style.height = (pr.height / guiScale) + 'px';
+            }
+        }
+        window.addEventListener('resize', () => { const ov = document.getElementById('gui-overlay'); if (ov && ov.classList.contains('active')) _applyGuiZoom(ov); });
         function setGuiScale(sc) {
             guiScale = sc;
             try { localStorage.setItem('rbxstudio-gui-scale', String(sc)); } catch (e) { /* ничего */ }
             _markGuiScaleButtons();
             const ov = document.getElementById('gui-overlay');
-            if (ov) ov.style.zoom = String(guiScale);
+            _applyGuiZoom(ov);
             if (isPlaying) { try { renderGuiOverlayFromClient(); } catch (e) { console.warn('GUI scale re-render:', e); } }
         }
         function _markGuiScaleButtons() {
@@ -11419,7 +11438,7 @@ end
             const overlay = document.getElementById('gui-overlay');
             if (!overlay) { logLuaOutput('error', 'renderGuiOverlayFromClient: #gui-overlay не найден в DOM'); return; }
             overlay.innerHTML = '';
-            overlay.style.zoom = String(guiScale);
+            _applyGuiZoom(overlay);
             guiDomByRef = {};
             guiChildrenByRef = {};
             for (const [refStr, props] of Object.entries(guiPropsByRef)) {
