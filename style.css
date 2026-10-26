@@ -1,3 +1,5 @@
+/* Единая палитра: тёмный фон #111827, панели #1f2937, кнопки #374151/#4b5563, акцент синий */
+:root{--ui-bg:#111827;--ui-panel:#1f2937;--ui-btn:#374151;--ui-line:#4b5563;--ui-text:#f3f4f6;--ui-muted:#9ca3af;--ui-accent:#3b82f6;--ui-accent-h:#2563eb}
         * {
             box-sizing: border-box;
             margin: 0;
@@ -64,7 +66,7 @@
         }
 
         #toolbar-top button.purple {
-            background: #7c3aed
+            background: #2563eb
         }
 
         #toolbar-top .sep {
@@ -172,7 +174,7 @@
         }
 
         #explorer-header button.active {
-            background: #ff6600;
+            background: #3b82f6;
         }
 
         #search-box {
@@ -229,7 +231,7 @@
             height: 16px;
             object-fit: contain;
             flex-shrink: 0;
-            background: white;
+            background: transparent;
             border-radius: 2px
         }
 
@@ -1327,51 +1329,51 @@
 body.tree-dragging, body.tree-dragging * { user-select: none !important; -webkit-user-select: none !important; }
 
 /* ===== Стартовый экран (как у Roblox Studio): боковая панель + карточки ===== */
-#start-screen { position: fixed; inset: 0; z-index: 90; display: none; background: #f4f6fb; color: #1b1f2a; }
+#start-screen { position: fixed; inset: 0; z-index: 90; display: none; background: #111827; color: #f3f4f6; }
 #start-screen.show { display: flex; }
-#start-screen .st-side { width: 230px; flex: none; background: #eef1f8; border-right: 1px solid #dde1ea;
+#start-screen .st-side { width: 230px; flex: none; background: #1f2937; border-right: 1px solid #374151;
     padding: 18px 12px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 #start-screen .st-logo { font-weight: 800; font-size: 16px; padding: 6px 10px 16px; letter-spacing: .2px; }
 #start-screen .st-nav { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
-    padding: 11px 12px; border: none; border-radius: 8px; background: transparent; color: #2b3142;
+    padding: 11px 12px; border: none; border-radius: 8px; background: transparent; color: #e5e7eb;
     font-size: 14px; font-weight: 600; cursor: pointer; }
-#start-screen .st-nav:hover { background: #e1e6f2; }
-#start-screen .st-nav.active { background: #dbe3f7; }
+#start-screen .st-nav:hover { background: #374151; }
+#start-screen .st-nav.active { background: #1e3a5f; color: #fff; }
 #start-screen .st-ico { width: 24px; text-align: center; font-size: 18px; flex: none; }
-#start-screen .st-plus { width: 24px; height: 24px; border-radius: 50%; background: #2f5bff; color: #fff;
+#start-screen .st-plus { width: 24px; height: 24px; border-radius: 50%; background: #3b82f6; color: #fff;
     display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; flex: none; }
 #start-screen .st-main { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 34px 40px; }
 #start-screen .st-top { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; margin-bottom: 16px; }
 #start-screen .st-search { flex: 1 1 200px; max-width: 320px; margin-right: auto; padding: 8px 12px;
-    border: 1px solid #cfd5e3; border-radius: 8px; background: #fff; color: #1b1f2a; font-size: 14px; outline: none; }
-#start-screen .st-btn { padding: 9px 16px; border: none; border-radius: 8px; background: #2f5bff; color: #fff;
+    border: 1px solid #4b5563; border-radius: 8px; background: #374151; color: #f3f4f6; font-size: 14px; outline: none; }
+#start-screen .st-btn { padding: 9px 16px; border: none; border-radius: 8px; background: #3b82f6; color: #fff;
     font-size: 14px; font-weight: 600; cursor: pointer; }
-#start-screen .st-btn:hover { background: #2548d6; }
-#start-screen .st-btn.sec { background: #fff; color: #2b3142; border: 1px solid #cfd5e3; }
-#start-screen .st-btn.sec:hover { background: #eef1f8; }
+#start-screen .st-btn:hover { background: #2563eb; }
+#start-screen .st-btn.sec { background: #374151; color: #f3f4f6; border: 1px solid #4b5563; }
+#start-screen .st-btn.sec:hover { background: #4b5563; }
 #start-screen .st-h1 { font-size: 28px; font-weight: 800; margin: 6px 0 18px; }
 #start-screen .st-h2 { font-size: 18px; font-weight: 700; margin: 26px 0 12px; }
-#start-screen .st-banner { border-radius: 14px; padding: 24px 28px; border: 1px solid #dde1ea;
-    background: linear-gradient(120deg, #dbe8ff 0%, #f6e2ea 55%, #ffe9c7 100%); }
+#start-screen .st-banner { border-radius: 14px; padding: 24px 28px; border: 1px solid #374151;
+    background: linear-gradient(120deg, #1e3a5f 0%, #1f2937 100%); }
 #start-screen .st-banner h3 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
-#start-screen .st-banner p { font-size: 14px; color: #3a4258; margin-bottom: 14px; max-width: 560px; }
+#start-screen .st-banner p { font-size: 14px; color: #d1d5db; margin-bottom: 14px; max-width: 560px; }
 #start-screen .st-banner .st-row { display: flex; gap: 8px; flex-wrap: wrap; }
 #start-screen .st-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
 #start-screen .st-card { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px;
-    border-radius: 12px; background: #e9edf6; cursor: pointer; }
-#start-screen .st-card:hover { background: #dfe5f2; }
+    border-radius: 12px; background: #1f2937; cursor: pointer; }
+#start-screen .st-card:hover { background: #374151; }
 #start-screen .st-tile { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 1 / 1;
-    border-radius: 8px; object-fit: cover; font-size: 56px; background: linear-gradient(145deg, #c3c9d8, #9fa8bb); }
+    border-radius: 8px; object-fit: cover; font-size: 56px; background: linear-gradient(145deg, #4b5563, #374151); }
 #start-screen .st-tile.tpl { background: linear-gradient(180deg, #8ec5ff 0%, #cfe8ff 55%, #7bbf6a 55%, #6aa95b 100%); }
 #start-screen .st-pill { display: inline-flex; align-items: center; gap: 4px; width: fit-content; padding: 3px 10px;
-    border-radius: 999px; background: #d6dcea; font-size: 12px; font-weight: 600; color: #2b3142; }
+    border-radius: 999px; background: #374151; font-size: 12px; font-weight: 600; color: #e5e7eb; }
 #start-screen .st-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 28px; }
 #start-screen .st-name { font-size: 15px; font-weight: 700; word-break: break-word; }
-#start-screen .st-sub { font-size: 12px; color: #5b6479; }
+#start-screen .st-sub { font-size: 12px; color: #9ca3af; }
 #start-screen .st-dots { flex: none; width: 28px; height: 28px; border: none; border-radius: 6px; background: transparent;
-    color: #3a4258; font-size: 18px; line-height: 1; cursor: pointer; }
-#start-screen .st-dots:hover { background: #cdd5e8; }
-#start-screen .st-msg { font-size: 14px; color: #4a5268; padding: 6px 0 12px; }
+    color: #d1d5db; font-size: 18px; line-height: 1; cursor: pointer; }
+#start-screen .st-dots:hover { background: #4b5563; }
+#start-screen .st-msg { font-size: 14px; color: #d1d5db; padding: 6px 0 12px; }
 @media (max-width: 760px) {
     #start-screen .st-side { width: 64px; padding: 12px 6px; }
     #start-screen .st-logo, #start-screen .st-nav .st-lbl { display: none; }

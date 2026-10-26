@@ -7,6 +7,10 @@
         // ============ I18N ============
         const I18N = {
             en: {
+                stop_title: 'Stop',
+                no_output: '(no output)',
+                pub_ver_published: 'Published',
+                pub_ver_saved: 'Saved',
                 add_search_ph: 'Search class…',
                 menu_file: '📁 File',
                 menu_new: 'New',
@@ -257,6 +261,10 @@
                 preview_stop: 'Stop',
             },
             ru: {
+                stop_title: 'Стоп',
+                no_output: '(нет вывода)',
+                pub_ver_published: 'Опубликовать (Published)',
+                pub_ver_saved: 'Только сохранить (Saved)',
                 add_search_ph: 'Поиск класса…',
                 menu_file: '📁 Файл',
                 menu_new: 'Новый',
@@ -7100,7 +7108,7 @@ end
             // filter — 'all' | 'Script' (Server) | 'LocalScript' (Client).
             const lines = filter === 'all' ? luaOutputLines : luaOutputLines.filter(l => !l.sideCls || l.sideCls === filter);
             if (!lines.length) {
-                el.innerHTML = '<span style="color:#6b7280;">(no output)</span>';
+                el.innerHTML = '<span style="color:#6b7280;">' + t('no_output') + '</span>';
                 return;
             }
             const colors = { error: '#f87171', warn: '#facc15', print: '#e5e7eb' };
@@ -12749,7 +12757,7 @@ end
             hdr.className = 'prop-header';
             if (r.icon) {
                 const img = document.createElement('img');
-                img.style.cssText = 'width:32px;height:32px;object-fit:contain;background:white;border-radius:4px;margin-bottom:4px;display:block';
+                img.style.cssText = 'width:32px;height:32px;object-fit:contain;background:#374151;border-radius:4px;margin-bottom:4px;display:block';
                 img.src = r.icon;
                 hdr.appendChild(img);
             }
@@ -14031,20 +14039,20 @@ end
                     '#login-prompt.show{display:flex;animation:lpfade .25s ease}' +
                     '@keyframes lpfade{from{opacity:0}to{opacity:1}}' +
                     '@keyframes lppop{from{transform:translateY(14px) scale(.97);opacity:0}to{transform:none;opacity:1}}' +
-                    '#login-prompt .lp-card{width:100%;max-width:400px;max-height:94vh;overflow-y:auto;border-radius:22px;background:#fff;color:#1b1f2a;box-shadow:0 24px 70px rgba(0,0,0,.45);animation:lppop .3s ease}' +
-                    '#login-prompt .lp-hero{padding:26px 22px 20px;text-align:center;color:#fff;background:linear-gradient(135deg,#2f5bff 0%,#7c3aed 100%);border-radius:22px 22px 0 0}' +
+                    '#login-prompt .lp-card{width:100%;max-width:400px;max-height:94vh;overflow-y:auto;border-radius:12px;background:#1f2937;color:#f3f4f6;border:1px solid #374151;box-shadow:0 24px 70px rgba(0,0,0,.55);animation:lppop .3s ease}' +
+                    '#login-prompt .lp-hero{padding:26px 22px 20px;text-align:center;color:#fff;background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%);border-radius:12px 12px 0 0}' +
                     '#login-prompt .lp-logo{width:64px;height:64px;margin:0 auto 12px;border-radius:18px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:34px}' +
                     '#login-prompt .lp-title{font:800 21px/1.2 sans-serif;margin:0}' +
                     '#login-prompt .lp-body{padding:18px 22px 20px}' +
-                    '#login-prompt .lp-text{margin:0 0 14px;font:14px/1.45 sans-serif;color:#4a5163}' +
+                    '#login-prompt .lp-text{margin:0 0 14px;font:14px/1.45 sans-serif;color:#d1d5db}' +
                     '#login-prompt .lp-feat{display:flex;flex-direction:column;gap:8px;margin:0 0 16px;font:600 14px/1.3 sans-serif}' +
-                    '#login-prompt .lp-feat div{background:#eef1f8;border-radius:12px;padding:9px 12px}' +
-                    '#login-prompt .lp-input{width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:10px;border:1px solid #cdd5e8;border-radius:12px;font:14px sans-serif;background:#f7f8fc;color:#1b1f2a}' +
-                    '#login-prompt .lp-btn{display:block;width:100%;padding:13px;border:none;border-radius:13px;font:700 15px sans-serif;cursor:pointer;background:linear-gradient(135deg,#2f5bff,#7c3aed);color:#fff}' +
-                    '#login-prompt .lp-btn.sec{margin-top:8px;background:transparent;color:#4a5163;font-weight:600}' +
-                    '#login-prompt .lp-never{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font:13px sans-serif;color:#6b7280}' +
-                    '#login-prompt .lp-note{margin-top:12px;text-align:center;font:12px sans-serif;color:#8a90a2}' +
-                    '#login-prompt .lp-help{margin:0 0 10px;font:12px/1.4 sans-serif;color:#6b7280}';
+                    '#login-prompt .lp-feat div{background:#111827;border-radius:8px;padding:9px 12px}' +
+                    '#login-prompt .lp-input{width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:10px;border:1px solid #4b5563;border-radius:6px;font:14px sans-serif;background:#374151;color:#f3f4f6}' +
+                    '#login-prompt .lp-btn{display:block;width:100%;padding:13px;border:none;border-radius:6px;font:700 15px sans-serif;cursor:pointer;background:#2563eb;color:#fff}' +
+                    '#login-prompt .lp-btn.sec{margin-top:8px;background:transparent;color:#9ca3af;font-weight:600}' +
+                    '#login-prompt .lp-never{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;font:13px sans-serif;color:#9ca3af}' +
+                    '#login-prompt .lp-note{margin-top:12px;text-align:center;font:12px sans-serif;color:#9ca3af}' +
+                    '#login-prompt .lp-help{margin:0 0 10px;font:12px/1.4 sans-serif;color:#9ca3af}';
                 document.head.appendChild(st);
             }
             let el = document.getElementById('login-prompt');
@@ -14095,7 +14103,7 @@ end
                 '<h3>' + esc(t('upd_title')) + '</h3>' +
                 '<p style="font-size:14px; line-height:1.45;">' + esc(t('upd_text', { ver: rel.tag })) + '</p>' +
                 '<div class="modal-row">' +
-                '<button onclick="goToUpdate(' + _escAttr(JSON.stringify(rel.url)) + ')" style="background:#7c3aed">' + esc(t('upd_go')) + '</button>' +
+                '<button onclick="goToUpdate(' + _escAttr(JSON.stringify(rel.url)) + ')" style="background:#2563eb">' + esc(t('upd_go')) + '</button>' +
                 '<button onclick="closeModal()">' + esc(t('upd_later')) + '</button>' +
                 '</div>'
             );
@@ -14147,7 +14155,7 @@ end
                 '<input id="dlp" placeholder="' + t('dl_place') + '" inputmode="numeric">' +
                 '<input id="dlv" placeholder="' + t('dl_version') + '" inputmode="numeric">' +
                 '<div class="modal-row">' +
-                '<button onclick="doDownloadPlace()" style="background:#7c3aed">' + t('dl_btn') + '</button>' +
+                '<button onclick="doDownloadPlace()" style="background:#2563eb">' + t('dl_btn') + '</button>' +
                 '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
@@ -14171,11 +14179,11 @@ end
                 '<input id="pp" placeholder="Place ID" value="' + (window._rbxOrigin ? _escAttr(window._rbxOrigin.placeId) : '') + '">' +
                 '<input id="pk" placeholder="API Key" type="password">' +
                 '<select id="pv">' +
-                '<option>Published</option>' +
-                '<option>Saved</option>' +
+                '<option value="Published">' + t('pub_ver_published') + '</option>' +
+                '<option value="Saved">' + t('pub_ver_saved') + '</option>' +
                 '</select>' +
                 '<div class="modal-row">' +
-                '<button onclick="doPub()" style="background:#7c3aed">' + t('btn_publish') + '</button>' +
+                '<button onclick="doPub()" style="background:#2563eb">' + t('btn_publish') + '</button>' +
                 '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
@@ -14198,7 +14206,7 @@ end
                     :
                     '<input id="rbx-apikey-input" type="password" placeholder="' + t('apikey_placeholder') + '" style="width:100%; padding:6px; box-sizing:border-box;">' +
                     '<div class="modal-row" style="margin-top:6px;">' +
-                    '<button onclick="saveRobloxApiKey()" style="background:#7c3aed">' + t('apikey_save') + '</button>' +
+                    '<button onclick="saveRobloxApiKey()" style="background:#2563eb">' + t('apikey_save') + '</button>' +
                     (has ? '<button onclick="clearRobloxApiKey()" style="background:#b91c1c">' + t('apikey_delete') + '</button>' : '') +
                     (has ? '<button onclick="validateRobloxApiKey()" style="background:#3b82f6">' + t('apikey_validate') + '</button>' : '') +
                     '</div>' +
@@ -14398,10 +14406,10 @@ end
                     '<p style="margin-top:10px">' + t('avatar_login_needed') + '</p>' +
                     '<div class="modal-row">' +
                     (IS_ANDROID
-                        ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#7c3aed">' + t('avatar_login_btn') + '</button>'
+                        ? '<button onclick="window.AndroidBridge.loginToRoblox()" style="background:#2563eb">' + t('avatar_login_btn') + '</button>'
                         : '<p style="opacity:.7; font-size:13px;">' + t('cookie_help') + '</p>' +
                           '<input id="rbx-cookie-input" type="password" autocomplete="off" placeholder="' + t('cookie_ph') + '" style="width:100%; padding:6px; box-sizing:border-box;">' +
-                          '<div class="modal-row" style="margin-top:6px;"><button onclick="saveRobloxCookie()" style="background:#7c3aed">' + t('cookie_btn') + '</button></div>') +
+                          '<div class="modal-row" style="margin-top:6px;"><button onclick="saveRobloxCookie()" style="background:#2563eb">' + t('cookie_btn') + '</button></div>') +
                     '</div>' +
                     hr + assetHtml + hr + apiKeyHtml +
                     '<div class="modal-row" style="margin-top:10px">' +
@@ -14421,7 +14429,7 @@ end
         <input id="av-uid" placeholder="${t('acc_uid_ph')}">
         <img id="avatar-preview" style="width:80px; height:80px; border-radius:50%; display:none; margin:6px auto; background:#1f2937;">
         <div class="modal-row">
-            <button onclick="doDownloadAvatar3d('import')" style="background:#7c3aed">${t('avatar_import_scene')}</button>
+            <button onclick="doDownloadAvatar3d('import')" style="background:#2563eb">${t('avatar_import_scene')}</button>
             <button onclick="doDownloadAvatar3d('save')">${t('avatar_download_zip')}</button>
         </div>
         ${localImportRow}

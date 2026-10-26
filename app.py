@@ -5326,6 +5326,206 @@ def script_js():
     return _no_cache(Response(JS_TEMPLATE, mimetype='application/javascript'))
 
 
+# ============ ИИ-АССИСТЕНТ ============
+# Любой OpenAI-совместимый провайдер (OpenRouter, Groq, Mistral, Ollama,
+# российские агрегаторы...): адрес, ключ и модель задаются в панели «🤖 AI».
+# Ключ хранится только на сервере (в браузер не отдаётся), по умолчанию
+# эндпоинты принимают запросы только с 127.0.0.1 — сервер слушает 0.0.0.0,
+# и без этого любой в локальной сети мог бы тратить чужой ключ.
+# RSW_ASSISTANT_ALLOW_REMOTE=1 снимает это ограничение.
+try:
+    with open("assistant.js", "r", encoding="utf-8") as file:
+        ASSISTANT_JS = file.read()
+except OSError:   # нет файла (старая сборка) — редактор работает без ассистента
+    ASSISTANT_JS = "/* assistant.js не найден */"
+
+
+def _assistant_cfg_path():
+    p = os.environ.get('RSW_ASSISTANT_CONFIG')
+    if p:
+        return Path(p)
+    try:
+        return Path.home() / '.rsw_assistant.json'
+    except Exception:
+        return Path(__file__).parent / '.rsw_assistant.json'
+
+
+def _assistant_load():
+    cfg = {'base_url': 'https://openrouter.ai/api/v1', 'api_key': '', 'model': ''}
+    try:
+        with open(_assistant_cfg_path(), 'r', encoding='utf-8') as f:
+            saved = json.load(f)
+        for k in cfg:
+            if isinstance(saved.get(k), str):
+                cfg[k] = saved[k]
+    except (OSError, ValueError):
+        pass
+    return cfg
+
+
+def _assistant_save(cfg):
+    path = _assistant_cfg_path()
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _alang(ru, en):
+    """Сообщение на языке интерфейса (заголовок X-Lang от assistant.js)."""
+    return ru if (request.headers.get('X-Lang') or '').lower().startswith('ru') else en
+
+
+def _assistant_guard():
+    if os.environ.get('RSW_ASSISTANT_ALLOW_REMOTE') == '1':
+        return None
+    if request.remote_addr in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
+        return None
+    return jsonify({'ok': False, 'error': _alang('Ассистент доступен только с этого устройства', 'The assistant is only available from this device')}), 403
+
+
+def _assistant_http(url, key, payload=None, timeout=120):
+    headers = {'User-Agent': 'roblox-studio-web/1.0', 'Accept': 'application/json'}
+    data = None
+    if payload is not None:
+        headers['Content-Type'] = 'application/json'
+        data = json.dumps(payload).encode('utf-8')
+    if key:
+        headers['Authorization'] = 'Bearer ' + key
+    return _req.urlopen(_req.Request(url, data=data, headers=headers), timeout=timeout)
+
+
+def _assistant_error(e):
+    if isinstance(e, _urlerr.HTTPError):
+        try:
+            body = e.read()[:500].decode('utf-8', 'replace')
+        except Exception:
+            body = ''
+        return 'HTTP %d: %s' % (e.code, body)
+    return str(e)
+
+
+_ASSISTANT_SYSTEM = {
+    'ru': ("Ты ассистент, встроенный в веб-редактор Roblox Studio (клон на Flask). "
+           "Помогаешь с Luau-скриптами, свойствами объектов и устройством игры. "
+           "Отвечай на языке пользователя, кратко. Код пиши в блоках ``` и проверяй, "
+           "что он использует только реальный Roblox API."),
+    'en': ("You are an assistant built into a web-based Roblox Studio editor (a Flask clone). "
+           "You help with Luau scripts, object properties and game structure. "
+           "Reply in the user's language, concisely. Put code in ``` blocks and make sure "
+           "it only uses the real Roblox API."),
+}
+
+
+@flask_app.route('/assistant.js')
+def assistant_js():
+    return _no_cache(Response(ASSISTANT_JS, mimetype='application/javascript'))
+
+
+@flask_app.route('/api/assistant/config', methods=['GET', 'POST'])
+def assistant_config():
+    deny = _assistant_guard()
+    if deny:
+        return deny
+    cfg = _assistant_load()
+    if request.method == 'POST':
+        d = request.get_json(silent=True) or {}
+        if isinstance(d.get('base_url'), str) and d['base_url'].strip():
+            cfg['base_url'] = d['base_url'].strip()
+        if isinstance(d.get('model'), str):
+            cfg['model'] = d['model'].strip()
+        if d.get('clear_key'):
+            cfg['api_key'] = ''
+        elif isinstance(d.get('api_key'), str) and d['api_key'].strip():
+            cfg['api_key'] = d['api_key'].strip()
+        try:
+            _assistant_save(cfg)
+        except OSError as e:
+            return jsonify({'ok': False, 'error': _alang('Не удалось сохранить настройки: %s', 'Could not save settings: %s') % e}), 500
+    return jsonify({'ok': True, 'base_url': cfg['base_url'], 'model': cfg['model'],
+                    'has_key': bool(cfg['api_key'])})
+
+
+@flask_app.route('/api/assistant/models')
+def assistant_models():
+    deny = _assistant_guard()
+    if deny:
+        return deny
+    cfg = _assistant_load()
+    try:
+        with _assistant_http(cfg['base_url'].rstrip('/') + '/models', cfg['api_key'], timeout=30) as resp:
+            j = json.loads(resp.read().decode('utf-8', 'replace'))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': _assistant_error(e)}), 502
+    items = j.get('data') if isinstance(j, dict) else j
+    ids = []
+    for m in items or []:
+        mid = m.get('id') if isinstance(m, dict) else None
+        if isinstance(mid, str):
+            ids.append(mid)
+    return jsonify({'ok': True, 'models': ids[:500]})
+
+
+@flask_app.route('/api/assistant/chat', methods=['POST'])
+def assistant_chat():
+    deny = _assistant_guard()
+    if deny:
+        return deny
+    cfg = _assistant_load()
+    if not cfg['model']:
+        return jsonify({'ok': False, 'error': _alang('Не выбрана модель (⚙ в панели ассистента)', 'No model selected (⚙ in the assistant panel)')}), 400
+    d = request.get_json(silent=True) or {}
+    msgs = []
+    for m in (d.get('messages') or [])[-20:]:
+        if isinstance(m, dict) and m.get('role') in ('user', 'assistant') and isinstance(m.get('content'), str):
+            msgs.append({'role': m['role'], 'content': m['content'][:20000]})
+    if not msgs:
+        return jsonify({'ok': False, 'error': _alang('Пустой запрос', 'Empty request')}), 400
+    system = _alang(_ASSISTANT_SYSTEM['ru'], _ASSISTANT_SYSTEM['en'])
+    ctx = d.get('context')
+    if isinstance(ctx, str) and ctx.strip():
+        system += _alang('\n\nКонтекст редактора:\n', '\n\nEditor context:\n') + ctx[:14000]
+    payload = {'model': cfg['model'], 'stream': True,
+               'messages': [{'role': 'system', 'content': system}] + msgs}
+    try:
+        resp = _assistant_http(cfg['base_url'].rstrip('/') + '/chat/completions', cfg['api_key'], payload)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': _assistant_error(e)}), 502
+
+    # сообщения готовим заранее: внутри генератора контекста запроса уже нет
+    msg_prov = _alang('\n\n[Ошибка провайдера: %s]', '\n\n[Provider error: %s]')
+    msg_stream = _alang('\n\n[Ошибка потока: %s]', '\n\n[Stream error: %s]')
+
+    def gen():
+        try:
+            with resp:
+                for raw in resp:
+                    line = raw.decode('utf-8', 'replace').strip()
+                    if not line.startswith('data:'):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == '[DONE]':
+                        break
+                    try:
+                        j = json.loads(chunk)
+                    except ValueError:
+                        continue
+                    if j.get('error'):
+                        yield msg_prov % json.dumps(j['error'], ensure_ascii=False)[:300]
+                        break
+                    delta = ((j.get('choices') or [{}])[0].get('delta')) or {}
+                    t = delta.get('content')
+                    if t:
+                        yield t
+        except Exception as e:
+            yield msg_stream % e
+
+    return Response(gen(), mimetype='text/plain; charset=utf-8',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
 if __name__ == '__main__':
     import threading
     import webbrowser

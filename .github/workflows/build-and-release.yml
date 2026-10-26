@@ -10,6 +10,7 @@ on:
       - 'index.html'
       - 'script.js'
       - 'style.css'
+      - 'assistant.js'
       - 'icons.txt'
       - 'icons/**'
       - 'scripts/**'

@@ -97,7 +97,7 @@
         <div class="resizer" id="resizer-1"></div>
         <div id="viewport" tabindex="0">
             <div id="gui-overlay"></div>
-            <button id="play-stop-fab" onclick="togglePlay()" title="Stop">⏸</button>
+            <button id="play-stop-fab" onclick="togglePlay()" data-i18n-title="stop_title" title="Stop">⏸</button>
             <div id="fps-counter">FPS: --</div>
             <div id="speed-indicator">🚀 x1.0</div>
             <div id="quality-selector">
@@ -443,6 +443,7 @@
 
 
     <script src="script.js"></script>
+    <script src="assistant.js"></script>
     <!-- show-hint.min.js/lua-hint.js (CodeMirror 5 addon) больше не нужны —
          автодополнение теперь встроено в CM6-бандл (@codemirror/autocomplete),
          см. entry.mjs. -->
