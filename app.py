@@ -5427,34 +5427,34 @@ _ASSISTANT_ACTIONS_RU = (
     "Свойства (props/set): Position, Rotation, Size ([x,y,z]), Color (\"#RRGGBB\"), Transparency, Reflectance (0..1), "
     "Anchored, CanCollide, CastShadow (bool), Name, Source (текст скрипта, только для скриптов).\n"
     "Скрипт: {\"op\":\"create\",\"class\":\"Script\",\"name\":\"Spin\",\"source\":\"-- Luau код\"}. "
-    "Без parent Script/ModuleScript попадает в ServerScriptService, LocalScript в StarterPlayerScripts, "
-    "ПРАВИЛА РАЗМЕЩЕНИЯ СКРИПТОВ (обязательно):"
-    "1. Если скрипт управляет конкретным объектом из Workspace — вращает Part, двигает дверь, "
-    "обрабатывает клик по модели, — создавай Script как РЕБЁНКА этого объекта: "
-    "parent = ref самого объекта. В Luau используй local target = script.Parent."
-    "2. Не создавай исполняемые Script или LocalScript в ServerStorage или ReplicatedStorage, "
-    "если пользователь явно не попросил именно туда(или такм точно будет лучше). Script в ServerStorage не выполняется; "
-    "LocalScript в ReplicatedStorage тоже не выполняется."
-    "3. Обычный серверный Script без явного parent создавай в ServerScriptService. "
-    "В его коде ищи целевой объект через Workspace:WaitForChild(\"ИмяОбъекта\") или другой путь."
-    "4. LocalScript без явного parent создавай в StarterPlayer > StarterPlayerScripts. "
-    "Никогда не клади LocalScript в ServerScriptService или ServerStorage."
-    "5. ModuleScript для кода, нужного и серверу, и клиенту, создавай в ReplicatedStorage. "
-    "ModuleScript только для сервера можно создать в ServerScriptService или ServerStorage."
-    "6. Никогда не используй parent = -1 и не выдумывай ref. Если подходящий объект не найден "
-    "в контексте редактора, не указывай parent вовсе и объясни в ответе, куда скрипт будет помещён."
-    "ПРИМЕР ПРАВИЛЬНОЙ ИЕРАРХИИ для вращающегося куба:"
-    "Workspace"
-    "└─ Part \"Cube\"   <- parent для Script = ref этого Part"
-    "   └─ Script \"Spin\""
-    "Код Script:"
-    "local part = script.Parent"
-    "game:GetService(\"RunService\").Heartbeat:Connect(function(dt)"
-    "    part.CFrame *= CFrame.Angles(0, dt * 1, 0)"
-    "end)"
-    "НЕПРАВИЛЬНО: создавать Script \"Spin\" с parent = ref ServerStorage."
-    "ПРАВИЛЬНО: создавать Script \"Spin\" с parent = ref Part \"Cube\" в Workspace."
-    "остальное в Workspace. Чтобы поменять код существующего скрипта: op=set, prop=Source. "
+   "Без parent Script/ModuleScript попадает в ServerScriptService, LocalScript в StarterPlayerScripts, \n"
+"ПРАВИЛА РАЗМЕЩЕНИЯ СКРИПТОВ (обязательно):\n"
+"1. Если скрипт управляет конкретным объектом из Workspace — вращает Part, двигает дверь, "
+"обрабатывает клик по модели, — создавай Script как РЕБЁНКА этого объекта: "
+"parent = ref самого объекта. В Luau используй local target = script.Parent.\n"
+"2. Не создавай исполняемые Script или LocalScript в ServerStorage или ReplicatedStorage, "
+"если пользователь явно не попросил именно туда (или там точно будет лучше). "
+"Script в ServerStorage не выполняется; LocalScript в ReplicatedStorage тоже не выполняется.\n"
+"3. Обычный серверный Script без явного parent создавай в ServerScriptService. "
+"В его коде ищи целевой объект через Workspace:WaitForChild(\"ИмяОбъекта\") или другой путь.\n"
+"4. LocalScript без явного parent создавай в StarterPlayer > StarterPlayerScripts. "
+"Никогда не клади LocalScript в ServerScriptService или ServerStorage.\n"
+"5. ModuleScript для кода, нужного и серверу, и клиенту, создавай в ReplicatedStorage. "
+"ModuleScript только для сервера можно создать в ServerScriptService или ServerStorage.\n"
+"6. Никогда не используй parent = -1 и не выдумывай ref. Если подходящий объект не найден "
+"в контексте редактора, не указывай parent вовсе и объясни в ответе, куда скрипт будет помещён.\n"
+"ПРИМЕР ПРАВИЛЬНОЙ ИЕРАРХИИ для вращающегося куба:\n"
+"Workspace\n"
+"└─ Part \"Cube\"   <- parent для Script = ref этого Part\n"
+"   └─ Script \"Spin\"\n"
+"Код Script:\n"
+"local part = script.Parent\n"
+"game:GetService(\"RunService\").Heartbeat:Connect(function(dt)\n"
+"    part.CFrame *= CFrame.Angles(0, dt * 1, 0)\n"
+"end)\n"
+"НЕПРАВИЛЬНО: создавать Script \"Spin\" с parent = ref ServerStorage.\n"
+"ПРАВИЛЬНО: создавать Script \"Spin\" с parent = ref Part \"Cube\" в Workspace.\n"
+"остальное в Workspace. Чтобы поменять код существующего скрипта: op=set, prop=Source. "    
     "ref берись только из контекста редактора. В JSON переводы строк в source пиши как \\n и экранируй кавычки. "
     "Перед блоком коротко (1-2 фразы) скажи, что делаешь. Если пользователь просил вращающийся куб — "
     "создай Part и Script, который его вращает, оба в одном блоке."
@@ -5599,19 +5599,49 @@ def assistant_chat():
     cfg = _assistant_load()
     if not cfg['model']:
         return jsonify({'ok': False, 'error': _alang('Не выбрана модель (⚙ в панели ассистента)', 'No model selected (⚙ in the assistant panel)')}), 400
+        
     d = request.get_json(silent=True) or {}
+
+    raw = d.get('messages') or []
     msgs = []
-    for m in (d.get('messages') or [])[-20:]:
-        if isinstance(m, dict) and m.get('role') in ('user', 'assistant') and isinstance(m.get('content'), str):
-            msgs.append({'role': m['role'], 'content': m['content'][:20000]})
+    for m in raw[-12:]:                      # 6 пар user/assistant вместо 20 сообщений
+        if not (isinstance(m, dict) and m.get('role') in ('user', 'assistant')
+                and isinstance(m.get('content'), str)):
+            continue
+        msgs.append({'role': m['role'], 'content': m['content']})
     if not msgs:
         return jsonify({'ok': False, 'error': _alang('Пустой запрос', 'Empty request')}), 400
+    # старые assistant-сообщения режем до головы+хвоста (там был блок rbx-actions,
+    # который уже выполнен — целиком он больше не нужен)
+    assist_idx = [i for i, m in enumerate(msgs) if m['role'] == 'assistant']
+    keep_full = set(assist_idx[-2:])
+    for i, m in enumerate(msgs):
+        c = m['content']
+        if m['role'] == 'user':
+            m['content'] = c[:3000]
+        elif i in keep_full:
+            m['content'] = c[:4000]
+        elif len(c) > 1000:
+            m['content'] = c[:400] + '\n[…]\n' + c[-600:]
     system = _alang(_ASSISTANT_SYSTEM['ru'], _ASSISTANT_SYSTEM['en'])
     ctx = d.get('context')
     if isinstance(ctx, str) and ctx.strip():
-        system += _alang('\n\nКонтекст редактора:\n', '\n\nEditor context:\n') + ctx[:14000]
-    payload = {'model': cfg['model'], 'stream': True,
-               'messages': [{'role': 'system', 'content': system}] + msgs}
+        system += _alang('\n\nКонтекст редактора:\n', '\n\nEditor context:\n') + ctx[:5000]
+    
+    if msgs and msgs[-1]['role'] == 'user':
+        msgs[-1]['content'] += _alang(
+        "\n\n[Напоминание: создавай объекты/скрипты через rbx-actions. "
+        "Script — ребёнком целевого объекта или в ServerScriptService. "
+        "LocalScript — только StarterPlayerScripts/StarterGui. "
+        "ModuleScript — ReplicatedStorage. Без служебных меток.]",
+        "\n\n[Reminder: create objects/scripts via rbx-actions. "
+        "Script — child of the target or in ServerScriptService. "
+        "LocalScript — only StarterPlayerScripts/StarterGui. "
+        "ModuleScript — ReplicatedStorage. No service labels.]",
+        )
+     
+    payload = {'model': cfg['model'], 'stream': True, 'temperature': 0.3,
+           'messages': [{'role': 'system', 'content': system}] + msgs}
     try:
         resp = _assistant_http(cfg['base_url'].rstrip('/') + '/chat/completions', cfg['api_key'], payload)
     except Exception as e:
