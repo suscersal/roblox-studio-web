@@ -106,7 +106,7 @@
 .ai-m.err{background:#7f1d1d;border-color:#7f1d1d}
 .ai-m code{font:calc(12px*var(--fs,1)) 'Fira Code',Consolas,monospace;background:#374151;padding:0 4px;border-radius:3px}
 .ai-m pre{position:relative;margin:6px 0 2px;padding:26px 10px 9px;background:#0f172a;border:1px solid #374151;border-radius:6px;overflow-x:auto;white-space:pre;font:calc(12px*var(--fs,1))/1.55 'Fira Code',Consolas,monospace}
-.ai-m pre code{background:none;padding:0}\n.ai-m .ai-h{display:block;margin-top:4px;color:#93c5fd}.ai-m a{color:#60a5fa}.ai-m hr{border:0;border-top:1px solid #374151;margin:6px 0}
+.ai-m pre code{background:none;padding:0}\n.ai-modlist{flex:none;min-height:40px;max-height:180px;overflow-y:auto;border:1px solid #374151;border-radius:6px;background:#111827;margin:4px 0}.ai-modlist[hidden]{display:none}.ai-mod{padding:8px 10px;font-size:13px;border-bottom:1px solid #1f2937;word-break:break-all;cursor:pointer}.ai-mod:active{background:#1d4ed8}\n.ai-m .ai-h{display:block;margin-top:4px;color:#93c5fd}.ai-m a{color:#60a5fa}.ai-m hr{border:0;border-top:1px solid #374151;margin:6px 0}
 .ai-m pre .ai-copy{position:absolute;top:4px;right:4px;font-size:calc(11px*var(--fs,1));min-height:0;padding:1px 7px}
 .ai-caret::after{content:"";display:inline-block;width:7px;height:1em;background:#3b82f6;margin-left:2px;vertical-align:-2px;animation:ai-b 1s steps(2) infinite}
 @keyframes ai-b{50%{opacity:0}}
@@ -150,7 +150,8 @@
   <select id="ai-preset" aria-label="${esc(T('provider'))}">${PRESETS.map((p, i) => `<option value="${i}">${esc(p[0])}</option>`).join('')}</select>
   <input id="ai-url" aria-label="${esc(T('url_aria'))}" placeholder="${esc(T('url_ph'))}">
   <input id="ai-key" type="password" placeholder="${esc(T('key_ph'))}" autocomplete="off">
-  <div class="row"><input id="ai-model" list="ai-models" aria-label="${esc(T('model_aria'))}" placeholder="${esc(T('model_ph'))}"><datalist id="ai-models"></datalist><button id="ai-load">${esc(T('list'))}</button></div>
+  <div class="row"><input id="ai-model" autocomplete="off" aria-label="${esc(T('model_aria'))}" placeholder="${esc(T('model_ph'))}"><button id="ai-load">${esc(T('list'))}</button></div>
+  <div id="ai-modlist" class="ai-modlist" hidden></div>
   <div class="row"><button id="ai-save">${esc(T('save'))}</button><button id="ai-clrkey">${esc(T('clrkey'))}</button></div>
   <div id="ai-note"></div>
 </div>
@@ -551,6 +552,21 @@
         setNote(c.ok ? T('key_removed') : (c.error || T('error')));
         if (c.ok) loadCfg();
     };
+    // datalist в Android WebView не раскрывается — свой выпадающий список с фильтром по вводу
+    let aiModels = [];
+    function renderModList(all) {
+        const box = $('ai-modlist'), q = $('ai-model').value.trim().toLowerCase();
+        const items = aiModels.filter(m => all || !q || m.toLowerCase().includes(q)).slice(0, 200);
+        box.innerHTML = items.map(m => '<div class="ai-mod" data-m="' + esc(m) + '">' + esc(m) + '</div>').join('');
+        box.hidden = !items.length;
+    }
+    $('ai-modlist').addEventListener('click', e => {
+        const el = e.target.closest('.ai-mod'); if (!el) return;
+        $('ai-model').value = el.dataset.m; $('ai-modlist').hidden = true;
+    });
+    $('ai-model').addEventListener('focus', () => { if (aiModels.length) renderModList(true); });
+    $('ai-model').addEventListener('input', () => { if (aiModels.length) renderModList(false); });
+
     $('ai-load').onclick = async () => {
         setNote(T('loading_models'));
         // сначала сохраняем адрес/ключ, иначе список придёт от прежнего провайдера
@@ -559,7 +575,7 @@
         await jpost('/api/assistant/config', body);
         const r = await jget('/api/assistant/models');
         if (!r.ok) { setNote(T('models_fail', { msg: r.error })); return; }
-        $('ai-models').innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join('');
+        aiModels = r.models.slice(); renderModList(true);
         setNote(T('models_n', { n: r.models.length }));
     };
 

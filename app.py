@@ -5417,6 +5417,24 @@ def _assistant_error(e):
     return str(e)
 
 
+import re as _re_ai
+
+_AI_ACT_BLOCK = _re_ai.compile(r"```[a-zA-Z0-9_+-]*[ \t]*\n\s*\[\s*\{\s*\"op\"[\s\S]*?```")
+_AI_TEXT_ONLY = _re_ai.compile(
+    r"только\s+текст|без\s+(действий|изменений|правок)|не\s+(создавай|меняй|удаляй|трогай)|"
+    r"\b(почему|зачем|объясни|расскажи|как\s+работает|что\s+значит|why|explain|text\s+only|only\s+text)\b|\?\s*$", _re_ai.I)
+
+
+def _ai_strip_done_actions(text):
+    """Выполненные блоки действий из истории заменяем заглушкой: иначе бесплатные модели
+    копируют их по шаблону и снова лезут в сцену на любой вопрос."""
+    return _AI_ACT_BLOCK.sub('[блок действий уже выполнен]', text)
+
+
+def _ai_text_only(text):
+    return bool(_AI_TEXT_ONLY.search(text or ''))
+
+
 _ASSISTANT_ACTIONS_RU = (
     "ТЫ МОЖЕШЬ САМ МЕНЯТЬ СЦЕНУ, в том числе создавать скрипты: редактор выполняет блок "
     "```rbx-actions с JSON-массивом действий (одним блоком в конце ответа). Не проси пользователя "
@@ -5613,6 +5631,9 @@ def assistant_chat():
         return jsonify({'ok': False, 'error': _alang('Пустой запрос', 'Empty request')}), 400
     # старые assistant-сообщения режем до головы+хвоста (там был блок rbx-actions,
     # который уже выполнен — целиком он больше не нужен)
+    for m in msgs:
+        if m['role'] == 'assistant':
+            m['content'] = _ai_strip_done_actions(m['content'])
     assist_idx = [i for i, m in enumerate(msgs) if m['role'] == 'assistant']
     keep_full = set(assist_idx[-2:])
     for i, m in enumerate(msgs):
@@ -5629,21 +5650,28 @@ def assistant_chat():
         system += _alang('\n\nКонтекст редактора:\n', '\n\nEditor context:\n') + ctx[:5000]
     
     if msgs and msgs[-1]['role'] == 'user':
-        msgs[-1]['content'] += _alang(
-        "\n\n[Напоминание: сразу выдай готовый блок ```rbx-actions (ровно такая метка) с JSON-массивом, "
-        "без вопросов и без пересказа инструкции. Script без parent попадает в ServerScriptService — "
-        "так и делай, не клади Script внутрь Part. LocalScript — только StarterPlayerScripts/StarterGui, "
-        "ModuleScript — ReplicatedStorage. В props только Position, Rotation, Size, Color, Transparency, "
-        "Reflectance, Anchored, CanCollide, CastShadow, Name (Material не поддерживается). "
-        "В скриптах используй workspace, а не обращайся к несуществующим объектам.]",
-        "\n\n[Reminder: output the ready ```rbx-actions block (exactly that tag) with a JSON array right away, "
-        "no questions, no restating instructions. A Script without parent goes to ServerScriptService — do that, "
-        "never put a Script inside a Part. LocalScript only in StarterPlayerScripts/StarterGui, "
-        "ModuleScript in ReplicatedStorage. props only: Position, Rotation, Size, Color, Transparency, "
-        "Reflectance, Anchored, CanCollide, CastShadow, Name (Material is not supported). "
-        "In scripts use workspace and never reference objects that do not exist.]",
-        )
-     
+        if _ai_text_only(msgs[-1]['content']):
+            msgs[-1]['content'] += _alang(
+                "\n\n[Это вопрос или обсуждение: ответь ТОЛЬКО текстом, 2-5 предложений, "
+                "БЕЗ блока rbx-actions и без JSON.]",
+                "\n\n[This is a question or discussion: answer with TEXT ONLY, 2-5 sentences, "
+                "NO rbx-actions block and no JSON.]")
+        else:
+            msgs[-1]['content'] += _alang(
+                "\n\n[Если это просьба создать/изменить сцену: одной-двумя фразами скажи план (что и куда "
+                "положишь), затем сразу выдай блок ```rbx-actions (ровно такая метка) с JSON-массивом. "
+                "Script без parent попадает в ServerScriptService, не клади Script внутрь Part. "
+                "LocalScript — StarterPlayerScripts/StarterGui, ModuleScript — ReplicatedStorage. "
+                "В props только Position, Rotation, Size, Color, Transparency, Reflectance, Anchored, "
+                "CanCollide, CastShadow, Name. Если это вопрос или просьба «только текст» — "
+                "отвечай текстом без блока.]",
+                "\n\n[If this asks to create/change the scene: state the plan in 1-2 sentences (what goes "
+                "where), then output the ```rbx-actions block (exactly that tag) with a JSON array. "
+                "A Script without parent goes to ServerScriptService; never put a Script inside a Part. "
+                "LocalScript — StarterPlayerScripts/StarterGui, ModuleScript — ReplicatedStorage. "
+                "props only: Position, Rotation, Size, Color, Transparency, Reflectance, Anchored, "
+                "CanCollide, CastShadow, Name. If it is a question or 'text only' — answer in text, no block.]")
+
     payload = {'model': cfg['model'], 'stream': True, 'temperature': 0.3,
            'messages': [{'role': 'system', 'content': system}] + msgs}
     try:
