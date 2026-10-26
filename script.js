@@ -6315,6 +6315,7 @@ function Instance.new(className, parent)
 end
 
 workspace = wrap(__workspace_ref())
+Workspace = workspace -- в Roblox есть оба глобала
 
 -- game.Players / game.Lighting / game:GetService(...) / game:service(...)
 -- (последнее — устаревший, но часто встречающийся в старых скриптах,

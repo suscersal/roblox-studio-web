@@ -210,7 +210,7 @@
     function fmt(text) {
         return String(text).split('```').map((p, i) => {
             if (i % 2 === 0) return fmtText(p);
-            if (/^rbx-actions\b/.test(p)) return '<div class="ai-actmark">' + esc(T('act_prep')) + '</div>';
+            if (isActBlock(p)) return '<div class="ai-actmark">' + esc(T('act_prep')) + '</div>';
             const code = p.replace(/^[a-zA-Z0-9_+-]*\n/, '').replace(/\n$/, '');
             return '<pre><button type="button" class="ai-copy">' + esc(T('copy')) + '</button>' + esc(code) + '</pre>';
         }).join('');
@@ -314,12 +314,32 @@
     const isRoot = ref => { try { return treeData.some(n => n.ref === ref); } catch (e) { return false; } };
     const fmtVal = v => (typeof v === 'string' && v.length > 40) ? v.slice(0, 37).replace(/\n/g, ' ') + '…' : (v && typeof v === 'object') ? Object.keys(v).map(k => +(+v[k]).toFixed(2)).join(', ') : String(v);
 
+    // Бесплатные модели часто забывают метку rbx-actions (пишут ```json, ``` или голый массив) — принимаем всё,
+    // что парсится в массив объектов с полем "op".
+    function _actList(src) {
+        try {
+            const j = JSON.parse(src.trim());
+            const arr = Array.isArray(j) ? j : [j];
+            return arr.length && arr.every(a => a && typeof a === 'object' && typeof a.op === 'string') ? arr : null;
+        } catch (e) { return null; }
+    }
+    function isActBlock(p) {
+        if (/^rbx-actions\b/.test(p)) return true;
+        return !!_actList(p.replace(/^[a-zA-Z0-9_+-]*[ \t]*\n/, ''));
+    }
     function parseActions(text) {
         const list = []; let err = null;
-        const re = /```rbx-actions[^\n]*\n([\s\S]*?)```/g; let m;
-        while ((m = re.exec(text))) {
-            try { const j = JSON.parse(m[1]); (Array.isArray(j) ? j : [j]).forEach(a => list.push(a)); }
-            catch (e) { err = e.message; }
+        const parts = String(text).split('```');
+        for (let i = 1; i < parts.length; i += 2) {
+            const body = parts[i].replace(/^[a-zA-Z0-9_+-]*[ \t]*\n/, '');
+            if (/^rbx-actions\b/.test(parts[i])) {
+                try { const j = JSON.parse(body); (Array.isArray(j) ? j : [j]).forEach(a => list.push(a)); }
+                catch (e) { err = e.message; }
+            } else { const l = _actList(body); if (l) l.forEach(a => list.push(a)); }
+        }
+        if (!list.length && err === null) {   // голый JSON-массив вне fence
+            const m = /\[\s*\{\s*"op"[\s\S]*\}\s*\]/.exec(parts.filter((x, i) => i % 2 === 0).join('\n'));
+            const l = m && _actList(m[0]); if (l) l.forEach(a => list.push(a));
         }
         return { list: list.slice(0, 30), err: err, found: list.length > 0 || err !== null };
     }
@@ -361,6 +381,12 @@
         const name = (typeof a.name === 'string' && a.name.trim()) ? a.name.slice(0, 100) : cls;
         const p = a.props || {}, body = { class: cls, name: name };
         let parent = parseInt(a.parent, 10);
+        if (!isFinite(parent) && typeof a.parent === 'string' && a.parent.trim()) {
+            const want = a.parent.trim().toLowerCase(); let hit = null;
+            const walk = ns => { for (const n of (ns || [])) { if (!hit && (String(n.name).toLowerCase() === want || String(n.cls).toLowerCase() === want)) hit = n; if (!hit) walk(n.children); } };
+            try { walk(treeData); } catch (e) { /* дерево недоступно */ }
+            if (hit) parent = hit.ref;
+        }
         if (!isFinite(parent)) {
             const roots = (typeof treeData !== 'undefined' ? treeData : []);
             const root = c => roots.find(n => n.cls === c);
@@ -373,14 +399,15 @@
         const extra = [];
         if (typeof a.source === 'string' && !('Source' in p)) p.Source = a.source;
         for (const k in p) {
-            if (!(k in ACT_PROPS) || k === 'Name') throw bad(k);
+            if (k === 'Name' && typeof p[k] === 'string' && p[k].trim()) { body.name = p[k].slice(0, 100); continue; }
+            if (!(k in ACT_PROPS) || k === 'Name') continue;   // неподдерживаемое свойство (Material и т.п.) пропускаем, не валим весь пакет
             const v = normVal(ACT_PROPS[k], p[k], k);
             if (k === 'Position') { body.px = v.x; body.py = v.y; body.pz = v.z; }
             else if (k === 'Size') { body.sx = v.x; body.sy = v.y; body.sz = v.z; }
             else if (k === 'Color') body.color = { r: v.r / 255, g: v.g / 255, b: v.b / 255 };
             else if (k === 'Anchored') body.anchored = v;
             else if (k === 'CanCollide') body.cancollide = v;
-            else if (k === 'Source' && !SCRIPT_CLASSES.includes(cls)) throw bad(k);
+            else if (k === 'Source' && !SCRIPT_CLASSES.includes(cls)) continue;
             else extra.push([k, v]);
         }
         const r = await aapi('PUT', '/api/instance', body);

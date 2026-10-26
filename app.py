@@ -5630,14 +5630,18 @@ def assistant_chat():
     
     if msgs and msgs[-1]['role'] == 'user':
         msgs[-1]['content'] += _alang(
-        "\n\n[Напоминание: создавай объекты/скрипты через rbx-actions. "
-        "Script — ребёнком целевого объекта или в ServerScriptService. "
-        "LocalScript — только StarterPlayerScripts/StarterGui. "
-        "ModuleScript — ReplicatedStorage. Без служебных меток.]",
-        "\n\n[Reminder: create objects/scripts via rbx-actions. "
-        "Script — child of the target or in ServerScriptService. "
-        "LocalScript — only StarterPlayerScripts/StarterGui. "
-        "ModuleScript — ReplicatedStorage. No service labels.]",
+        "\n\n[Напоминание: сразу выдай готовый блок ```rbx-actions (ровно такая метка) с JSON-массивом, "
+        "без вопросов и без пересказа инструкции. Script без parent попадает в ServerScriptService — "
+        "так и делай, не клади Script внутрь Part. LocalScript — только StarterPlayerScripts/StarterGui, "
+        "ModuleScript — ReplicatedStorage. В props только Position, Rotation, Size, Color, Transparency, "
+        "Reflectance, Anchored, CanCollide, CastShadow, Name (Material не поддерживается). "
+        "В скриптах используй workspace, а не обращайся к несуществующим объектам.]",
+        "\n\n[Reminder: output the ready ```rbx-actions block (exactly that tag) with a JSON array right away, "
+        "no questions, no restating instructions. A Script without parent goes to ServerScriptService — do that, "
+        "never put a Script inside a Part. LocalScript only in StarterPlayerScripts/StarterGui, "
+        "ModuleScript in ReplicatedStorage. props only: Position, Rotation, Size, Color, Transparency, "
+        "Reflectance, Anchored, CanCollide, CastShadow, Name (Material is not supported). "
+        "In scripts use workspace and never reference objects that do not exist.]",
         )
      
     payload = {'model': cfg['model'], 'stream': True, 'temperature': 0.3,
