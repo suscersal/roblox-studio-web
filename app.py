@@ -5428,7 +5428,7 @@ _AI_TEXT_ONLY = _re_ai.compile(
 def _ai_strip_done_actions(text):
     """Выполненные блоки действий из истории заменяем заглушкой: иначе бесплатные модели
     копируют их по шаблону и снова лезут в сцену на любой вопрос."""
-    return _AI_ACT_BLOCK.sub('[блок действий уже выполнен]', text)
+    return _re_ai.sub(r'(?im)^\\s*(User|Response) Safety:\\s*\\w+\\s*$', '', _AI_ACT_BLOCK.sub('[блок действий уже выполнен]', text))
 
 
 def _ai_text_only(text):
@@ -5440,7 +5440,8 @@ _ASSISTANT_ACTIONS_RU = (
     "```rbx-actions с JSON-массивом действий (одним блоком в конце ответа). Не проси пользователя "
     "создавать объекты и скрипты вручную и не говори, что не можешь.\n"
     "Действия: {\"op\":\"create\",\"class\":C,\"name\":N,\"parent\":ref?,\"source\":\"код\"?,\"props\":{...}?}, "
-    "{\"op\":\"set\",\"ref\":R,\"prop\":P,\"value\":V}, {\"op\":\"delete\",\"ref\":R}.\n"
+    "{\"op\":\"set\",\"ref\":R,\"prop\":P,\"value\":V}, {\"op\":\"delete\",\"ref\":R}, {\"op\":\"move\",\"ref\":R,\"parent\":P} (перенос в другого родителя; P — ref или имя). "
+    "Не удаляй и не пересоздавай объект ради переноса — используй move. parent можно задавать именем объекта, созданного выше в этом же блоке.\n"
     "class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript. "
     "Свойства (props/set): Position, Rotation, Size ([x,y,z]), Color (\"#RRGGBB\"), Transparency, Reflectance (0..1), "
     "Anchored, CanCollide, CastShadow (bool), Name, Source (текст скрипта, только для скриптов).\n"
@@ -5482,7 +5483,8 @@ _ASSISTANT_ACTIONS_EN = (
     "```rbx-actions block with a JSON array of actions (one block at the end of the reply). Never ask the user "
     "to create objects or scripts by hand and never say you cannot.\n"
     "Actions: {\"op\":\"create\",\"class\":C,\"name\":N,\"parent\":ref?,\"source\":\"code\"?,\"props\":{...}?}, "
-    "{\"op\":\"set\",\"ref\":R,\"prop\":P,\"value\":V}, {\"op\":\"delete\",\"ref\":R}.\n"
+    "{\"op\":\"set\",\"ref\":R,\"prop\":P,\"value\":V}, {\"op\":\"delete\",\"ref\":R}, {\"op\":\"move\",\"ref\":R,\"parent\":P} (reparent; P is a ref or a name). "
+    "Never delete and recreate an object just to move it — use move. parent may be the name of an object created earlier in the same block.\n"
     "class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript. "
     "Properties (props/set): Position, Rotation, Size ([x,y,z]), Color (\"#RRGGBB\"), Transparency, Reflectance (0..1), "
     "Anchored, CanCollide, CastShadow (bool), Name, Source (script text, scripts only).\n"
@@ -5660,14 +5662,14 @@ def assistant_chat():
             msgs[-1]['content'] += _alang(
                 "\n\n[Если это просьба создать/изменить сцену: одной-двумя фразами скажи план (что и куда "
                 "положишь), затем сразу выдай блок ```rbx-actions (ровно такая метка) с JSON-массивом. "
-                "Script без parent попадает в ServerScriptService, не клади Script внутрь Part. "
+                "Script, который управляет объектом через script.Parent, клади ВНУТРЬ этого объекта (parent = его имя, объект создай выше в том же блоке); общий серверный Script без parent попадает в ServerScriptService. Для Part всегда указывай Size и Position. "
                 "LocalScript — StarterPlayerScripts/StarterGui, ModuleScript — ReplicatedStorage. "
                 "В props только Position, Rotation, Size, Color, Transparency, Reflectance, Anchored, "
                 "CanCollide, CastShadow, Name. Если это вопрос или просьба «только текст» — "
                 "отвечай текстом без блока.]",
                 "\n\n[If this asks to create/change the scene: state the plan in 1-2 sentences (what goes "
                 "where), then output the ```rbx-actions block (exactly that tag) with a JSON array. "
-                "A Script without parent goes to ServerScriptService; never put a Script inside a Part. "
+                "A Script that controls an object via script.Parent goes INSIDE that object (parent = its name, create the object earlier in the same block); a general server Script without parent goes to ServerScriptService. Always give a Part Size and Position. "
                 "LocalScript — StarterPlayerScripts/StarterGui, ModuleScript — ReplicatedStorage. "
                 "props only: Position, Rotation, Size, Color, Transparency, Reflectance, Anchored, "
                 "CanCollide, CastShadow, Name. If it is a question or 'text only' — answer in text, no block.]")

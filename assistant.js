@@ -200,7 +200,7 @@
         }).join('');
     }
     function fmtText(p) {
-        return p.split('\n').map(line => {
+        return p.split('\n').filter(l => !/^\s*(User|Response) Safety:\s*\w+\s*$/i.test(l)).map(line => {
             let m;
             if ((m = /^\s{0,3}#{1,6}\s+(.*)$/.exec(line))) return '<b class="ai-h">' + inline(m[1]) + '</b>';
             if ((m = /^(\s*)[-*•]\s+(.*)$/.exec(line))) return m[1] + '• ' + inline(m[2]);
@@ -240,15 +240,22 @@
     function sceneSummary() {
         const out = [];
         try {
-            const ws = (typeof treeData !== 'undefined' ? treeData : []).find(n => n.cls === 'Workspace');
+            const SKIP = ['Terrain', 'Camera'];
             const walk = (nodes, depth) => {
+                let shown = 0;
                 for (const n of nodes || []) {
-                    if (out.length >= 60) return;
-                    out.push(n.ref + ': ' + n.name + ', ' + n.cls);
-                    if (depth < 2) walk(n.children, depth + 1);
+                    if (SKIP.includes(n.cls)) continue;
+                    if (out.length >= 150) return;
+                    if (shown++ >= 25) { out.push('  '.repeat(depth) + '… (+' + (nodes.length - 25) + ')'); return; }
+                    out.push('  '.repeat(depth) + n.ref + ': ' + n.name + ' (' + n.cls + ')');
+                    if (depth < 3) walk(n.children, depth + 1);
                 }
             };
-            if (ws) walk(ws.children, 0);
+            for (const root of (typeof treeData !== 'undefined' ? treeData : [])) {
+                if (!(root.children || []).length && root.cls !== 'Workspace') continue;
+                out.push(root.ref + ': ' + root.name + ' (' + root.cls + ')');
+                walk(root.children, 1);
+            }
         } catch (e) { /* дерево ещё не загружено */ }
         return out.length ? T('ctx_scene') + '\n' + out.join('\n') : '';
     }
@@ -289,7 +296,10 @@
 
     function normVal(kind, v, what) {
         if (kind === 'v3' || kind === 'size') {
-            const o = Array.isArray(v) ? { x: v[0], y: v[1], z: v[2] } : v;
+            let o = v;
+            if (typeof v === 'string') { const m = v.match(/-?\d+(?:\.\d+)?(?:e-?\d+)?/gi); o = (m && m.length >= 3) ? m : null; }
+            if (Array.isArray(o)) o = { x: o[0], y: o[1], z: o[2] };
+            else if (o && typeof o === 'object' && !('x' in o) && 'X' in o) o = { x: o.X, y: o.Y, z: o.Z };
             if (!o || typeof o !== 'object') throw bad(what);
             const lo = kind === 'size' ? 0.05 : -100000, hi = kind === 'size' ? 2048 : 100000;
             return { x: num(o.x, lo, hi, what), y: num(o.y, lo, hi, what), z: num(o.z, lo, hi, what) };
@@ -349,6 +359,7 @@
         try {
             if (a.op === 'set') return T('act_set', { name: nodeName(+a.ref), ref: a.ref, prop: a.prop, val: fmtVal(a.value) });
             if (a.op === 'create') return T('act_create', { cls: a.class || 'Part', name: a.name || a.class || 'Part' }) + ((a.source || (a.props && a.props.Source)) ? ' (' + String(a.source || a.props.Source).split('\n').length + ' ' + T('lines') + ')' : '');
+            if (a.op === 'move') return '→ ' + nodeName(+a.ref) + ' [' + a.ref + '] ⇒ ' + (a.parent !== undefined ? (isFinite(+a.parent) ? nodeName(+a.parent) : a.parent) : '?');
             if (a.op === 'delete') return T('act_delete', { name: nodeName(+a.ref), ref: a.ref });
         } catch (e) { /* ниже общий вариант */ }
         return JSON.stringify(a).slice(0, 80);
@@ -376,18 +387,39 @@
         touched.add(ref);
     }
 
+    // имена объектов, созданных в текущем пакете (дерево в браузере обновится только после пакета)
+    const batch = { names: {}, last: null };
+    function resolveParent(x) {
+        const n = parseInt(x, 10);
+        if (isFinite(n)) return n;
+        if (typeof x !== 'string' || !x.trim()) return NaN;
+        const want = x.trim().toLowerCase();
+        if (batch.names[want] !== undefined) return batch.names[want];
+        let hit = null;
+        const walk = ns => { for (const nd of (ns || [])) { if (!hit && (String(nd.name).toLowerCase() === want || String(nd.cls).toLowerCase() === want)) hit = nd; if (!hit) walk(nd.children); } };
+        try { walk(treeData); } catch (e) { /* дерево недоступно */ }
+        return hit ? hit.ref : NaN;
+    }
+
+    async function doMove(a, undo, touched) {
+        const ref = resolveParent(a.ref), parent = resolveParent(a.parent);   // ref/parent: число или имя
+        if (!isFinite(ref)) throw bad('ref');
+        if (!isFinite(parent)) throw bad('parent');
+        const info = await exists(ref); await exists(parent);
+        if (isRoot(ref) || PROTECTED.includes(info.cls)) throw new Error(T('act_protected'));
+        const r = await aapi('POST', '/api/reparent', { refs: [ref], parent: parent });
+        if (!r || !r.ok) throw new Error((r && r.error) || 'reparent failed');
+        if (isFinite(info.parent) && info.parent >= 0) undo.push(() => aapi('POST', '/api/reparent', { refs: [ref], parent: info.parent }));
+        touched.add(ref);
+    }
+
     async function doCreate(a, undo, touched, made) {
         const cls = String(a.class || 'Part');
         if (!ACT_CLASSES.includes(cls)) throw bad(cls);
         const name = (typeof a.name === 'string' && a.name.trim()) ? a.name.slice(0, 100) : cls;
         const p = a.props || {}, body = { class: cls, name: name };
-        let parent = parseInt(a.parent, 10);
-        if (!isFinite(parent) && typeof a.parent === 'string' && a.parent.trim()) {
-            const want = a.parent.trim().toLowerCase(); let hit = null;
-            const walk = ns => { for (const n of (ns || [])) { if (!hit && (String(n.name).toLowerCase() === want || String(n.cls).toLowerCase() === want)) hit = n; if (!hit) walk(n.children); } };
-            try { walk(treeData); } catch (e) { /* дерево недоступно */ }
-            if (hit) parent = hit.ref;
-        }
+        let parent = resolveParent(a.parent);
+        if (!isFinite(parent) && cls === 'Script' && batch.last && /script\.Parent/.test(String(a.source || p.Source || ''))) parent = batch.last;   // скрипт управляет объектом через script.Parent — кладём внутрь
         if (!isFinite(parent)) {
             const roots = (typeof treeData !== 'undefined' ? treeData : []);
             const root = c => roots.find(n => n.cls === c);
@@ -416,6 +448,8 @@
         for (const [k, v] of extra) await postProp(r.ref, k, v);
         undo.push(() => aapi('DELETE', '/api/instance/' + r.ref));
         made.push(r.ref);
+        batch.names[name.toLowerCase()] = r.ref;
+        if (!SCRIPT_CLASSES.includes(cls)) batch.last = r.ref;
     }
 
     async function doDelete(a, touched) {
@@ -429,7 +463,10 @@
     async function refreshEditor(made, touched) {
         try {
             if (typeof loadTree === 'function') await loadTree();
-            if (made.length && typeof selectRef === 'function') await selectRef(made[made.length - 1]);
+            if (made.length && typeof selectRef === 'function') {
+                await selectRef(made[0]);
+                if (typeof revealRefs === 'function') revealRefs(made, made[0]);
+            }
             else if (typeof selectedRef !== 'undefined' && selectedRef !== null && touched.has(selectedRef) && typeof selectRef === 'function') await selectRef(selectedRef);
         } catch (e) { /* интерфейс обновится при следующем действии */ }
     }
@@ -449,13 +486,14 @@
         async function run() {
             if (running) return; running = true; doBtn.disabled = true;
             const touched = new Set(), made = []; let n = 0;
-            undo = [];
+            undo = []; batch.names = {}; batch.last = null;
             try {
                 for (const a of acts) {
                     if (!a || typeof a !== 'object') throw bad('?');
                     if (a.op === 'set') await doSet(a, undo, touched);
                     else if (a.op === 'create') await doCreate(a, undo, touched, made);
                     else if (a.op === 'delete') await doDelete(a, touched);
+                    else if (a.op === 'move') await doMove(a, undo, touched);
                     else throw bad(String(a.op));
                     n++;
                 }
@@ -493,22 +531,24 @@
         bubble.classList.add('ai-caret');
         let acc = '';
         try {
-            const resp = await fetch('/api/assistant/chat', {
-                method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, HDR),
-                body: JSON.stringify({ messages: history, context: await buildContext() })
-            });
-            if (!resp.ok || (resp.headers.get('content-type') || '').includes('application/json')) {
-                const j = await resp.json().catch(() => ({}));
-                throw new Error(j.error || ('HTTP ' + resp.status));
-            }
-            const reader = resp.body.getReader();
-            const dec = new TextDecoder('utf-8');
-            for (;;) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                acc += dec.decode(value, { stream: true });
-                bubble.innerHTML = fmt(acc);
-                $('ai-msgs').scrollTop = $('ai-msgs').scrollHeight;
+            for (let attempt = 0; attempt < 2 && !acc.trim(); attempt++) {   // бесплатный роутер иногда отдаёт пустой ответ — пробуем ещё раз
+                const resp = await fetch('/api/assistant/chat', {
+                    method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, HDR),
+                    body: JSON.stringify({ messages: history, context: await buildContext() })
+                });
+                if (!resp.ok || (resp.headers.get('content-type') || '').includes('application/json')) {
+                    const j = await resp.json().catch(() => ({}));
+                    throw new Error(j.error || ('HTTP ' + resp.status));
+                }
+                const reader = resp.body.getReader();
+                const dec = new TextDecoder('utf-8');
+                for (;;) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    acc += dec.decode(value, { stream: true });
+                    bubble.innerHTML = fmt(acc);
+                    $('ai-msgs').scrollTop = $('ai-msgs').scrollHeight;
+                }
             }
             if (!acc.trim()) { bubble.textContent = T('empty_reply'); history.pop(); }
             else {

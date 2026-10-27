@@ -12759,6 +12759,19 @@ end
             renderProps(r);
         }
 
+        // Раскрыть предков и прокрутить Explorer к объекту: новые объекты (ассистент, Add) добавляются в КОНЕЦ списка
+        // родителя, а дочерние скрипты лежат в свёрнутом родителе — без этого их не видно.
+        function revealRefs(refs, scrollTo) {
+            for (const ref of refs) {
+                let p = parentByRef[ref], guard = 0;
+                while (p !== undefined && p !== null && p !== -1 && guard++ < 100) { expanded.add(p); p = parentByRef[p]; }
+            }
+            renderTree();
+            const tgt = scrollTo !== undefined ? scrollTo : refs[0];
+            const row = document.querySelector('#tree .tree-node[data-ref="' + tgt + '"]');
+            if (row && row.scrollIntoView) row.scrollIntoView({ block: 'nearest' });
+        }
+
         function deselect() {
             saveCurrentScriptIfDirty(); // fire-and-forget — иначе клик мимо объекта тоже терял правки
             selectedRef = null;
