@@ -11081,7 +11081,23 @@ end
             const ov = document.getElementById('gui-overlay');
             _applyGuiZoom(ov);
             if (isPlaying) { try { renderGuiOverlayFromClient(); } catch (e) { console.warn('GUI scale re-render:', e); } }
+            _notifyViewportChanged();
         }
+        // ViewportSize у камеры (в единицах GUI = экран / guiScale) изменился: скриптам нужно сообщить, иначе, например,
+        // хотбар (camera:GetPropertyChangedSignal("ViewportSize") -> Grid.CellSize) остаётся со старым размером ячеек
+        // и после смены масштаба UI уезжает за край экрана. Дважды — сразу и после перерисовки DOM (AbsoluteSize берётся из него).
+        function _notifyViewportChanged() {
+            if (!luaServerL && !luaClientL) return;
+            const fire = () => {
+                try {
+                    for (const ref in luaByRef) {
+                        if (luaByRef[ref].cls === 'Camera') fireLuaSignal(parseInt(ref), '__prop_ViewportSize', []);
+                    }
+                } catch (e) { console.warn('ViewportSize notify:', e); }
+            };
+            fire(); setTimeout(fire, 120);
+        }
+        window.addEventListener('resize', () => { if (isPlaying) _notifyViewportChanged(); });
         function _markGuiScaleButtons() {
             document.querySelectorAll('#quality-selector button[id^="g-"]').forEach(b => {
                 b.classList.toggle('active', Math.abs(parseFloat(b.dataset.s) - guiScale) < 0.01);
@@ -11108,6 +11124,10 @@ end
                 el.style.fontSize = size + 'px';
                 el.style.whiteSpace = 'nowrap';
                 el.style.lineHeight = 'normal';
+                // Канвас меряет другим шрифтом, чем DOM (и по-разному в разных WebView) — добиваем по реальному переполнению
+                for (let i = 0; i < 12 && size > 4 && el.scrollWidth > w + 1; i++) {
+                    size = Math.max(4, size * 0.9); el.style.fontSize = size + 'px';
+                }
             };
             run();
             if (!el._scaledRO && typeof ResizeObserver !== 'undefined') {
