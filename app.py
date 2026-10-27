@@ -4605,6 +4605,9 @@ def api_asset_export():
     return jsonify({'ok': True, 'path': str(out), 'name': name, 'size': len(raw)})
 
 
+_ASSET_THUMB_CACHE = {}
+
+
 @flask_app.route('/api/asset-proxy')
 def api_asset_proxy():
     """Прокси-загрузка ассета Roblox по id — превращает rbxassetid://N
@@ -4659,6 +4662,26 @@ def api_asset_proxy():
                 f'https://assetdelivery.roblox.com/v1/asset/?id={asset_id}')
         except Exception as e:
             cookie_error = str(e)
+
+    # Анонимный запасной путь только для иконок GUI (thumb=1): с 2025 года AssetDelivery требует авторизацию, а
+    # публичные миниатюры (thumbnails.roblox.com + CDN) отдаются без куки и ключа. Кладём в отдельный кэш — иначе
+    # PNG-миниатюра осела бы под id, который позже запросят как меш/звук.
+    if raw_bytes is None and request.args.get('thumb'):
+        thumb = _ASSET_THUMB_CACHE.get(asset_id)
+        if thumb is None:
+            try:
+                d = _rbx_get_json('https://thumbnails.roblox.com/v1/assets?assetIds=' + asset_id +
+                                  '&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false')
+                row = (d.get('data') or [{}])[0] if isinstance(d, dict) else {}
+                if row.get('state') == 'Completed' and row.get('imageUrl'):
+                    thumb = _rbx_get_bytes(row['imageUrl'])
+                    if len(_ASSET_THUMB_CACHE) > 300:
+                        _ASSET_THUMB_CACHE.pop(next(iter(_ASSET_THUMB_CACHE)))
+                    _ASSET_THUMB_CACHE[asset_id] = thumb
+            except Exception as e:
+                cookie_error = (cookie_error or '') + f' | миниатюра: {e}'
+        if thumb:
+            return _asset_response(thumb, 'image/png' if thumb[:4] == b'\x89PNG' else 'image/jpeg')
 
     if raw_bytes is None:
         parts = []

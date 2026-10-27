@@ -5024,6 +5024,13 @@ function RaycastParams.new()
     return {FilterDescendantsInstances = {}, FilterType = "Exclude", IgnoreWater = false,
             RespectCanCollide = false, CollisionGroup = "Default", BruteForceAllSlow = false}
 end
+-- OverlapParams.new() — контейнер полей для workspace:GetPartBoundsInBox/GetPartsInPart/GetPartBoundsInRadius
+-- (без глобала скрипты падали: attempt to index a nil value (global 'OverlapParams')).
+OverlapParams = {}
+function OverlapParams.new()
+    return {FilterDescendantsInstances = {}, FilterType = "Exclude", MaxParts = 0, CollisionGroup = "Default",
+            RespectCanCollide = false, BruteForceAllSlow = false}
+end
 -- Random — класс Luau: Random.new(seed) + NextNumber/NextInteger/NextUnitVector/Shuffle/Clone.
 -- Свой генератор (xorshift32): один и тот же seed даёт одну и ту же последовательность, как в Roblox.
 -- Целые в fengari 32-битные со знаком, поэтому никаких 64-битных множителей и масок 0xFFFFFFFF:
@@ -5756,6 +5763,71 @@ InstanceMT.__index = function(t, k)
                           Normal = Vector3.new(nx, ny, nz), Distance = dist }
             pcall(function() res.Material = Enum.Material.Plastic end)
             return res
+        end
+    end
+    -- workspace:GetPartBoundsInBox(cframe, size, params) / GetPartBoundsInRadius(pos, r, params) / GetPartsInPart(part, params):
+    -- пересечение по мировым AABB (повёрнутый бокс заменяется описанным AABB) — для дверей/триггеров/зон этого достаточно.
+    if (k == "GetPartBoundsInBox" or k == "GetPartBoundsInRadius" or k == "GetPartsInPart") and __get_class(ref) == "Workspace" then
+        return function(self, a, b, c)
+            local params, cx, cy, cz, hx, hy, hz, skipRef
+            if k == "GetPartBoundsInBox" then
+                params = c
+                cx, cy, cz = a.X, a.Y, a.Z
+                hx, hy, hz = b.X / 2, b.Y / 2, b.Z / 2
+                local ok, r, u, l = pcall(function() return a.RightVector, a.UpVector, a.LookVector end)
+                if ok and r and u and l then
+                    hx = (math.abs(r.X) * b.X + math.abs(u.X) * b.Y + math.abs(l.X) * b.Z) / 2
+                    hy = (math.abs(r.Y) * b.X + math.abs(u.Y) * b.Y + math.abs(l.Y) * b.Z) / 2
+                    hz = (math.abs(r.Z) * b.X + math.abs(u.Z) * b.Y + math.abs(l.Z) * b.Z) / 2
+                end
+            elseif k == "GetPartBoundsInRadius" then
+                params = c
+                cx, cy, cz = a.X, a.Y, a.Z
+                hx, hy, hz = b, b, b
+            else
+                params = b
+                skipRef = type(a) == "table" and rawget(a, "__ref") or nil
+                local bx, by, bz, sx, sy, sz = __get_bbox(skipRef)
+                cx, cy, cz, hx, hy, hz = bx, by, bz, sx / 2, sy / 2, sz / 2
+            end
+            local list, include, maxParts = {}, false, 0
+            if type(params) == "table" then
+                if type(params.FilterDescendantsInstances) == "table" then list = params.FilterDescendantsInstances end
+                local ft = params.FilterType
+                local fname = type(ft) == "table" and tostring(ft.Name or ft) or tostring(ft)
+                include = string.find(fname, "Include", 1, true) ~= nil
+                maxParts = tonumber(params.MaxParts) or 0
+            end
+            local out = {}
+            local function listed(inst)
+                for _, f in ipairs(list) do
+                    if f == inst then return true end
+                    local okd, isd = pcall(function() return inst:IsDescendantOf(f) end)
+                    if okd and isd then return true end
+                end
+                return false
+            end
+            local function walk(r)
+                if maxParts > 0 and #out >= maxParts then return end
+                local n = __child_count(r)
+                for i = 1, n do
+                    local ch = __child_at(r, i - 1)
+                    if ch ~= skipRef then
+                        local okb, px, py, pz, sx, sy, sz = pcall(__get_bbox, ch)
+                        if okb and px ~= nil and math.abs(px - cx) <= hx + sx / 2 and math.abs(py - cy) <= hy + sy / 2
+                            and math.abs(pz - cz) <= hz + sz / 2 then
+                            local w = wrap(ch)
+                            local okp, isPart = pcall(function() return w:IsA("BasePart") end)
+                            if okp and isPart and (listed(w) == include or #list == 0 and not include) then
+                                out[#out + 1] = w
+                            end
+                        end
+                    end
+                    walk(ch)
+                end
+            end
+            walk(ref)
+            return out
         end
     end
     -- Player:GetMouse() — заглушка Mouse (позиция/цель не отслеживаются, сигналы никогда не срабатывают);
@@ -11011,7 +11083,9 @@ end
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
                 el.textContent = '';
                 // Раньше Image просто складывался в title (всплывающая
-                const proxyUrl = rbxAssetIdToProxyUrl(props.Image);
+                // thumb=1: если без входа в Roblox assetdelivery отвечает 401/403 — сервер отдаст публичную миниатюру ассета
+                const _pu = rbxAssetIdToProxyUrl(props.Image);
+                const proxyUrl = _pu ? _pu + '&thumb=1' : _pu;
                 if (proxyUrl) {
                     el.style.backgroundImage = 'url(' + proxyUrl + ')';
                     // Fit — ближе всего к дефолтному ScaleType.Stretch
