@@ -5448,138 +5448,110 @@ _AI_TEXT_ONLY = _re_ai.compile(
     r"\b(почему|зачем|объясни|расскажи|как\s+работает|что\s+значит|why|explain|text\s+only|only\s+text)\b|\?\s*$", _re_ai.I)
 
 
+_AI_SAFETY_LINE = _re_ai.compile(r"(?im)^[ \t]*(User Safety|Response Safety|Safety Categories)\s*:.*$\n?")
+
+
 def _ai_strip_done_actions(text):
-    """Выполненные блоки действий из истории заменяем заглушкой: иначе бесплатные модели
-    копируют их по шаблону и снова лезут в сцену на любой вопрос."""
-    return _re_ai.sub(r'(?im)^\\s*(User|Response) Safety:\\s*\\w+\\s*$', '', _AI_ACT_BLOCK.sub('[блок действий уже выполнен]', text))
+    """Старые блоки действий заменяем заглушкой (если клиент не подставил сводку «Патч применён»):
+    иначе бесплатные модели копируют их по шаблону и лезут в сцену на любой вопрос.
+    Служебные строки Safety (утекают у nemotron-safety и подобных) тоже убираем."""
+    text = _AI_ACT_BLOCK.sub('[блок действий уже обработан]', text)
+    return _AI_SAFETY_LINE.sub('', text)
 
 
 def _ai_text_only(text):
     return bool(_AI_TEXT_ONLY.search(text or ''))
 
 
-_ASSISTANT_ACTIONS_RU = (
-    "ТЫ МОЖЕШЬ САМ МЕНЯТЬ СЦЕНУ, в том числе создавать скрипты: редактор выполняет блок "
-    "```rbx-actions с JSON-массивом действий (одним блоком в конце ответа). Не проси пользователя "
-    "создавать объекты и скрипты вручную и не говори, что не можешь.\n"
-    "Действия: {\"op\":\"create\",\"class\":C,\"name\":N,\"parent\":ref?,\"source\":\"код\"?,\"props\":{...}?}, "
-    "{\"op\":\"set\",\"ref\":R,\"prop\":P,\"value\":V}, {\"op\":\"delete\",\"ref\":R}, {\"op\":\"move\",\"ref\":R,\"parent\":P} (перенос в другого родителя; P — ref или имя). "
-    "Не удаляй и не пересоздавай объект ради переноса — используй move. parent можно задавать именем объекта, созданного выше в этом же блоке.\n"
-    "class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript. "
-    "Свойства (props/set): Position, Rotation, Size ([x,y,z]), Color (\"#RRGGBB\"), Transparency, Reflectance (0..1), "
-    "Anchored, CanCollide, CastShadow (bool), Name, Source (текст скрипта, только для скриптов).\n"
-    "Скрипт: {\"op\":\"create\",\"class\":\"Script\",\"name\":\"Spin\",\"source\":\"-- Luau код\"}. "
-   "Без parent Script/ModuleScript попадает в ServerScriptService, LocalScript в StarterPlayerScripts, \n"
-"ПРАВИЛА РАЗМЕЩЕНИЯ СКРИПТОВ (обязательно):\n"
-"1. Если скрипт управляет конкретным объектом из Workspace — вращает Part, двигает дверь, "
-"обрабатывает клик по модели, — создавай Script как РЕБЁНКА этого объекта: "
-"parent = ref самого объекта. В Luau используй local target = script.Parent.\n"
-"2. Не создавай исполняемые Script или LocalScript в ServerStorage или ReplicatedStorage, "
-"если пользователь явно не попросил именно туда (или там точно будет лучше). "
-"Script в ServerStorage не выполняется; LocalScript в ReplicatedStorage тоже не выполняется.\n"
-"3. Обычный серверный Script без явного parent создавай в ServerScriptService. "
-"В его коде ищи целевой объект через Workspace:WaitForChild(\"ИмяОбъекта\") или другой путь.\n"
-"4. LocalScript без явного parent создавай в StarterPlayer > StarterPlayerScripts. "
-"Никогда не клади LocalScript в ServerScriptService или ServerStorage.\n"
-"5. ModuleScript для кода, нужного и серверу, и клиенту, создавай в ReplicatedStorage. "
-"ModuleScript только для сервера можно создать в ServerScriptService или ServerStorage.\n"
-"6. Никогда не используй parent = -1 и не выдумывай ref. Если подходящий объект не найден "
-"в контексте редактора, не указывай parent вовсе и объясни в ответе, куда скрипт будет помещён.\n"
-"ПРИМЕР ПРАВИЛЬНОЙ ИЕРАРХИИ для вращающегося куба:\n"
-"Workspace\n"
-"└─ Part \"Cube\"   <- parent для Script = ref этого Part\n"
-"   └─ Script \"Spin\"\n"
-"Код Script:\n"
-"local part = script.Parent\n"
-"game:GetService(\"RunService\").Heartbeat:Connect(function(dt)\n"
-"    part.CFrame *= CFrame.Angles(0, dt * 1, 0)\n"
-"end)\n"
-"НЕПРАВИЛЬНО: создавать Script \"Spin\" с parent = ref ServerStorage.\n"
-"ПРАВИЛЬНО: создавать Script \"Spin\" с parent = ref Part \"Cube\" в Workspace.\n"
-"остальное в Workspace. Чтобы поменять код существующего скрипта: op=set, prop=Source. "    
-    "ref берись только из контекста редактора. В JSON переводы строк в source пиши как \\n и экранируй кавычки. "
-    "Перед блоком коротко (1-2 фразы) скажи, что делаешь. Если пользователь просил вращающийся куб — "
-    "создай Part и Script, который его вращает, оба в одном блоке."
-)
-_ASSISTANT_ACTIONS_EN = (
-    "YOU CAN CHANGE THE SCENE YOURSELF, including creating scripts: the editor executes a "
-    "```rbx-actions block with a JSON array of actions (one block at the end of the reply). Never ask the user "
-    "to create objects or scripts by hand and never say you cannot.\n"
-    "Actions: {\"op\":\"create\",\"class\":C,\"name\":N,\"parent\":ref?,\"source\":\"code\"?,\"props\":{...}?}, "
-    "{\"op\":\"set\",\"ref\":R,\"prop\":P,\"value\":V}, {\"op\":\"delete\",\"ref\":R}, {\"op\":\"move\",\"ref\":R,\"parent\":P} (reparent; P is a ref or a name). "
-    "Never delete and recreate an object just to move it — use move. parent may be the name of an object created earlier in the same block.\n"
-    "class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript. "
-    "Properties (props/set): Position, Rotation, Size ([x,y,z]), Color (\"#RRGGBB\"), Transparency, Reflectance (0..1), "
-    "Anchored, CanCollide, CastShadow (bool), Name, Source (script text, scripts only).\n"
-    "Script: {\"op\":\"create\",\"class\":\"Script\",\"name\":\"Spin\",\"source\":\"-- Luau code\"}. "
-    "Without parent, Script/ModuleScript goes to ServerScriptService, LocalScript to StarterPlayerScripts, "
-    "SCRIPT PLACEMENT RULES (mandatory):"
-    "1. If a script controls a specific Workspace object — spins a Part, moves a door, or handles "
-    "a click on a model — create the Script as a CHILD of that object: parent = the object's ref. "
-    "In Luau, use local target = script.Parent."
-    "2. Do not create executable Script or LocalScript instances in ServerStorage or ReplicatedStorage "
-    "unless the user explicitly requests that location. A Script in ServerStorage does not run; "
-    "a LocalScript in ReplicatedStorage does not run either."
-    "3. Create a normal server Script without an explicit parent in ServerScriptService. "
-    "In its code, locate the target through Workspace:WaitForChild(\"ObjectName\") or another explicit path."
-    "4. Create a LocalScript without an explicit parent in StarterPlayer > StarterPlayerScripts. "
-    "Never place a LocalScript in ServerScriptService or ServerStorage."
-    "5. Create a ModuleScript in ReplicatedStorage when both the server and client need its code. "
-    "A server-only ModuleScript may be created in ServerScriptService or ServerStorage."
-    "6. Never use parent = -1 and never invent a ref. If no suitable object exists in the editor context, "
-    "omit parent and state in your reply where the script will be placed."
-    "CORRECT HIERARCHY EXAMPLE for a spinning cube:"
-    "Workspace"
-    "└─ Part \"Cube\"   <- Script parent = this Part's ref"
-    "   └─ Script \"Spin\""
-    "Script code:"
-    "local part = script.Parent"
-    "game:GetService(\"RunService\").Heartbeat:Connect(function(dt)"
-    "    part.CFrame *= CFrame.Angles(0, dt * 1, 0)"
-    "end)"
-    "WRONG: create Script \"Spin\" with parent = ServerStorage's ref."
-    "RIGHT: create Script \"Spin\" with parent = the Workspace Part \"Cube\" ref."
-    "everything else to Workspace. To change an existing script: op=set, prop=Source. "
-    "Take refs only from the editor context. In JSON write newlines in source as \\n and escape quotes. "
-    "Before the block say in 1-2 sentences what you do. For a spinning cube create a Part and a Script that "
-    "spins it, both in one block."
-)
+_ASSISTANT_ACTIONS_RU = r"""
+ТЫ САМ МЕНЯЕШЬ СЦЕНУ. Редактор выполняет блок ```rbx-actions с JSON-массивом действий (один блок в самом конце ответа, метка именно rbx-actions). Не проси пользователя делать что-то вручную и не говори, что не можешь.
+
+Действия:
+{"op":"create","class":C,"name":N,"parent":P?,"props":{...}?,"source":"код"?}
+{"op":"set","ref":R,"prop":P,"value":V}
+{"op":"move","ref":R,"parent":P}
+{"op":"delete","ref":R}
+R — число из контекста редактора. P — число или имя объекта (в том числе созданного выше в этом же блоке). Для переноса используй move, а не delete+create.
+
+class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript.
+props/set: Position, Rotation, Size ([x,y,z]), Color ("#RRGGBB"), Transparency, Reflectance (0..1), Anchored, CanCollide, CastShadow (bool), Name, Source (только скрипты). Другие свойства (Material и т.п.) не поддерживаются, не используй.
+Для каждого Part всегда задавай Size и Position. Position/Size — массивы из трёх чисел.
+
+Размещение скриптов:
+1. Скрипт управляет конкретным объектом (вращает, двигает, ловит касание/клик) — создай его ВНУТРИ этого объекта: parent = имя или ref объекта, в коде local target = script.Parent. Сам объект создай выше в том же блоке.
+2. Общий серверный Script без parent попадает в ServerScriptService; объекты в нём ищи через workspace:WaitForChild("Имя").
+3. LocalScript без parent попадает в StarterPlayerScripts. Не клади LocalScript в ServerScriptService/ServerStorage.
+4. ModuleScript для клиента и сервера — ReplicatedStorage; только серверный — ServerScriptService.
+5. Script в ServerStorage и LocalScript в ReplicatedStorage не выполняются — не создавай их там, если пользователь явно не просил.
+6. Никогда не выдумывай ref и не используй parent = -1. Нет подходящего объекта в контексте — не указывай parent и скажи в ответе, куда попадёт скрипт.
+
+Чтобы изменить код существующего скрипта: {"op":"set","ref":R,"prop":"Source","value":"новый код целиком"}.
+В JSON переводы строк в source пиши как \n, кавычки экранируй. Максимум 30 действий в блоке.
+
+Формат ответа на просьбу изменить сцену: 1–2 фразы о плане, затем сразу блок rbx-actions. Пример (вращающийся куб):
+Создаю куб и скрипт, который его вращает.
+```rbx-actions
+[{"op":"create","class":"Part","name":"Cube","props":{"Size":[4,4,4],"Position":[0,5,0],"Anchored":true,"Color":"#3366FF"}},
+ {"op":"create","class":"Script","name":"Spin","parent":"Cube","source":"local part = script.Parent\nlocal RunService = game:GetService(\"RunService\")\nRunService.Heartbeat:Connect(function(dt)\n    part.CFrame *= CFrame.Angles(0, dt, 0)\nend)"}]
+```
+"""
+
+_ASSISTANT_ACTIONS_EN = r"""
+YOU CHANGE THE SCENE YOURSELF. The editor executes a ```rbx-actions block with a JSON array of actions (one block at the very end of the reply, the tag must be exactly rbx-actions). Never ask the user to do things by hand and never say you cannot.
+
+Actions:
+{"op":"create","class":C,"name":N,"parent":P?,"props":{...}?,"source":"code"?}
+{"op":"set","ref":R,"prop":P,"value":V}
+{"op":"move","ref":R,"parent":P}
+{"op":"delete","ref":R}
+R is a number from the editor context. P is a number or an object name (including one created earlier in the same block). To reparent use move, not delete+create.
+
+class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript.
+props/set: Position, Rotation, Size ([x,y,z]), Color ("#RRGGBB"), Transparency, Reflectance (0..1), Anchored, CanCollide, CastShadow (bool), Name, Source (scripts only). Other properties (Material etc.) are not supported, do not use them.
+Always give every Part a Size and a Position. Position/Size are arrays of three numbers.
+
+Script placement:
+1. A script that controls a specific object (spins, moves, handles touch/click) goes INSIDE that object: parent = the object's name or ref, and the code uses local target = script.Parent. Create the object earlier in the same block.
+2. A general server Script without parent goes to ServerScriptService; find objects there with workspace:WaitForChild("Name").
+3. A LocalScript without parent goes to StarterPlayerScripts. Never put a LocalScript in ServerScriptService/ServerStorage.
+4. A ModuleScript needed by client and server goes to ReplicatedStorage; server-only goes to ServerScriptService.
+5. A Script in ServerStorage and a LocalScript in ReplicatedStorage never run, so do not create them there unless explicitly asked.
+6. Never invent a ref and never use parent = -1. If no suitable object is in the context, omit parent and say in the reply where the script will land.
+
+To change an existing script's code: {"op":"set","ref":R,"prop":"Source","value":"the whole new code"}.
+In JSON write newlines inside source as \n and escape quotes. At most 30 actions per block.
+
+Reply format for a scene-change request: 1-2 sentences with the plan, then the rbx-actions block right away. Example (spinning cube):
+Creating a cube and a script that spins it.
+```rbx-actions
+[{"op":"create","class":"Part","name":"Cube","props":{"Size":[4,4,4],"Position":[0,5,0],"Anchored":true,"Color":"#3366FF"}},
+ {"op":"create","class":"Script","name":"Spin","parent":"Cube","source":"local part = script.Parent\nlocal RunService = game:GetService(\"RunService\")\nRunService.Heartbeat:Connect(function(dt)\n    part.CFrame *= CFrame.Angles(0, dt, 0)\nend)"}]
+```
+"""
 
 _ASSISTANT_SYSTEM = {
     'ru': (
-        "Ты ассистент, встроенный в веб-редактор Roblox Studio (клон на Flask). "
-        "Помогаешь с Luau-скриптами, свойствами объектов и структурой игры. "
-        "Отвечай на языке пользователя, кратко. "
-        "Код оформляй в блоках и убедись, что он использует только реальный Roblox API."
-
-        "ВАЖНО О ФОРМАТЕ ОТВЕТА:"
-        "Ты — обычный ассистент редактора, а не модератор и не классификатор безопасности. "
-        "Никогда не выводи служебные метки, оценки или служебные протоколы, включая:"
-        "User Safety:, Response Safety:, Safety Categories:, safe, unsafe, "
-        "policy violation, moderation result и подобные."
-        "Не объясняй, безопасен ли запрос. Не добавляй служебные заголовки, внутренние рассуждения, "
-        "статусы, префиксы или постфиксы, не относящиеся к ответу пользователю."
-        "Отвечай сразу обычным текстом для пользователя: объяснением, кодом, списком действий "
-        "или вопросом для уточнения."
-
+        "Ты ассистент веб-редактора Roblox Studio (клон на Flask). Помогаешь с Luau-скриптами, "
+        "свойствами объектов и структурой игры. Используй только реальный Roblox API.\n"
+        "Отвечай на языке пользователя, кратко и сразу по делу. Рассуждай про себя: не пиши "
+        "рассуждения, черновики и план «что я сейчас подумаю». Ты не модератор: никаких меток и оценок "
+        "(User Safety, Response Safety, safe/unsafe, moderation и т.п.), не комментируй безопасность запроса.\n"
+        "Вопрос или просьба «только текст» — ответь текстом (2–5 предложений, код в блоках), "
+        "без блока rbx-actions. Если данных не хватает — задай один уточняющий вопрос.\n"
+        "Контекст редактора ниже — источник правды о сцене; в истории пометки вида [Патч применён: ...] "
+        "описывают уже выполненные изменения (с ref объектов), не повторяй их.\n"
         + _ASSISTANT_ACTIONS_RU
     ),
     'en': (
-        "You are an assistant built into a web-based Roblox Studio editor (a Flask clone). "
-        "You help with Luau scripts, object properties and game structure. "
-        "Reply in the user's language, concisely. "
-        "Put code in blocks and make sure it only uses the real Roblox API."
-
-        "IMPORTANT OUTPUT FORMAT:"
-        "You are a regular editor assistant, not a safety moderator or classifier. "
-        "Never output service labels, ratings, or internal protocols, including:"
-        "User Safety:, Response Safety:, Safety Categories:, safe, unsafe, "
-        "policy violation, moderation result, or similar."
-        "Do not explain whether a request is safe. Do not add service headings, internal reasoning, "
-        "statuses, prefixes, or suffixes unrelated to the user-facing answer."
-        "Start immediately with normal user-facing text: an explanation, code, action list, "
-        "or clarifying question."
-
+        "You are an assistant built into a web-based Roblox Studio editor (a Flask clone). You help with "
+        "Luau scripts, object properties and game structure. Use only the real Roblox API.\n"
+        "Reply in the user's language, concisely and straight to the point. Think silently: do not write "
+        "out your reasoning, drafts or a 'let me think' plan. You are not a moderator: no labels or ratings "
+        "(User Safety, Response Safety, safe/unsafe, moderation, etc.), do not comment on request safety.\n"
+        "For a question or a 'text only' request, answer in text (2-5 sentences, code in blocks) "
+        "without an rbx-actions block. If data is missing, ask one clarifying question.\n"
+        "The editor context below is the source of truth about the scene; history notes like [Patch applied: ...] "
+        "describe changes already made (with object refs), do not repeat them.\n"
         + _ASSISTANT_ACTIONS_EN
     ),
 }
@@ -5677,30 +5649,31 @@ def assistant_chat():
     if msgs and msgs[-1]['role'] == 'user':
         if _ai_text_only(msgs[-1]['content']):
             msgs[-1]['content'] += _alang(
-                "\n\n[Это вопрос или обсуждение: ответь ТОЛЬКО текстом, 2-5 предложений, "
-                "БЕЗ блока rbx-actions и без JSON.]",
-                "\n\n[This is a question or discussion: answer with TEXT ONLY, 2-5 sentences, "
-                "NO rbx-actions block and no JSON.]")
+                "\n\n[Вопрос/обсуждение: ответь только текстом, 2-5 предложений, без rbx-actions.]",
+                "\n\n[Question/discussion: answer in text only, 2-5 sentences, no rbx-actions.]")
         else:
             msgs[-1]['content'] += _alang(
-                "\n\n[Если это просьба создать/изменить сцену: одной-двумя фразами скажи план (что и куда "
-                "положишь), затем сразу выдай блок ```rbx-actions (ровно такая метка) с JSON-массивом. "
-                "Script, который управляет объектом через script.Parent, клади ВНУТРЬ этого объекта (parent = его имя, объект создай выше в том же блоке); общий серверный Script без parent попадает в ServerScriptService. Для Part всегда указывай Size и Position. "
-                "LocalScript — StarterPlayerScripts/StarterGui, ModuleScript — ReplicatedStorage. "
-                "В props только Position, Rotation, Size, Color, Transparency, Reflectance, Anchored, "
-                "CanCollide, CastShadow, Name. Если это вопрос или просьба «только текст» — "
-                "отвечай текстом без блока.]",
-                "\n\n[If this asks to create/change the scene: state the plan in 1-2 sentences (what goes "
-                "where), then output the ```rbx-actions block (exactly that tag) with a JSON array. "
-                "A Script that controls an object via script.Parent goes INSIDE that object (parent = its name, create the object earlier in the same block); a general server Script without parent goes to ServerScriptService. Always give a Part Size and Position. "
-                "LocalScript — StarterPlayerScripts/StarterGui, ModuleScript — ReplicatedStorage. "
-                "props only: Position, Rotation, Size, Color, Transparency, Reflectance, Anchored, "
-                "CanCollide, CastShadow, Name. If it is a question or 'text only' — answer in text, no block.]")
+                "\n\n[Если нужно изменить сцену: 1-2 фразы плана и сразу блок ```rbx-actions. "
+                "Без длинных рассуждений. Если это вопрос — только текст.]",
+                "\n\n[If the scene must change: 1-2 sentence plan, then the ```rbx-actions block right away. "
+                "No long reasoning. If it is a question - text only.]")
 
-    payload = {'model': cfg['model'], 'stream': True, 'temperature': 0.3,
-           'messages': [{'role': 'system', 'content': system}] + msgs}
+    base = cfg['base_url'].rstrip('/')
+    payload = {'model': cfg['model'], 'stream': True, 'temperature': 0.3, 'max_tokens': 3000,
+               'messages': [{'role': 'system', 'content': system}] + msgs}
+    is_or = 'openrouter.ai' in base
+    if is_or:
+        # бесплатные reasoning-модели (nemotron и др.) иначе думают минутами до первого токена
+        payload['reasoning'] = {'effort': 'low'}
     try:
-        resp = _assistant_http(cfg['base_url'].rstrip('/') + '/chat/completions', cfg['api_key'], payload)
+        try:
+            resp = _assistant_http(base + '/chat/completions', cfg['api_key'], payload)
+        except _urlerr.HTTPError as e:
+            if is_or and e.code in (400, 404, 422):   # модель не принимает параметр reasoning — повторяем без него
+                payload.pop('reasoning', None)
+                resp = _assistant_http(base + '/chat/completions', cfg['api_key'], payload)
+            else:
+                raise
     except Exception as e:
         return jsonify({'ok': False, 'error': _assistant_error(e)}), 502
 
@@ -5709,6 +5682,9 @@ def assistant_chat():
     msg_stream = _alang('\n\n[Ошибка потока: %s]', '\n\n[Stream error: %s]')
 
     def gen():
+        # \x1f — служебный «пульс»: модель думает (reasoning-токены наружу не отдаём),
+        # клиент показывает «думаю…» и не выглядит зависшим
+        last_ping = 0.0
         try:
             with resp:
                 for raw in resp:
@@ -5729,6 +5705,11 @@ def assistant_chat():
                     t = delta.get('content')
                     if t:
                         yield t
+                    elif delta.get('reasoning') or delta.get('reasoning_content') or delta.get('reasoning_details'):
+                        now = time.time()
+                        if now - last_ping > 1.0:
+                            last_ping = now
+                            yield '\x1f'
         except Exception as e:
             yield msg_stream % e
 

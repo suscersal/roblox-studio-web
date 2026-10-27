@@ -16,7 +16,7 @@
             models_fail: 'Failed: {msg}', no_server: 'Could not reach the server: {msg}',
             ctx: 'Send the selected object and the open script', input_ph: 'Ask about a script or an object…', send: 'Send',
             empty: 'Ask about the open script or the selected object. The assistant sees them while the checkbox below is on.',
-            copy: 'copy', copied: 'copied', err_prefix: 'Error: {msg}', empty_reply: '(empty reply — try another model)',
+            copy: 'copy', copied: 'copied', err_prefix: 'Error: {msg}', empty_reply: '(empty reply — try another model)', thinking: '💭 thinking…', patch_prep: '⚙ preparing patch…',
             ctx_obj: 'Selected object: ref={ref}, {name} ({cls}), properties: {props}', ctx_script: 'Open script {name} ({cls}):',
             ctx_scene: 'Workspace objects (ref: name, class):',
             auto: 'Apply scene changes automatically', act_title: 'Scene changes', act_prep: '⚙ preparing scene changes…',
@@ -39,7 +39,7 @@
             models_fail: 'Не получилось: {msg}', no_server: 'Не удалось связаться с сервером: {msg}',
             ctx: 'Передавать выбранный объект и открытый скрипт', input_ph: 'Спроси про скрипт или объект…', send: 'Отправить',
             empty: 'Спроси про открытый скрипт или выбранный объект. Ассистент видит их, пока включена галочка внизу.',
-            copy: 'копировать', copied: 'скопировано', err_prefix: 'Ошибка: {msg}', empty_reply: '(пустой ответ — попробуй другую модель)',
+            copy: 'копировать', copied: 'скопировано', err_prefix: 'Ошибка: {msg}', empty_reply: '(пустой ответ — попробуй другую модель)', thinking: '💭 думаю…', patch_prep: '⚙ формирую патч…',
             ctx_obj: 'Выбран объект: ref={ref}, {name} ({cls}), свойства: {props}', ctx_script: 'Открыт скрипт {name} ({cls}):',
             ctx_scene: 'Объекты Workspace (ref: имя, класс):',
             auto: 'Применять изменения сцены автоматически', act_title: 'Изменения сцены', act_prep: '⚙ готовлю изменения сцены…',
@@ -471,6 +471,10 @@
         } catch (e) { /* интерфейс обновится при следующем действии */ }
     }
 
+    function acc_text_without_block(t) {
+        return String(t).replace(/```[a-zA-Z0-9_+-]*[ \t]*\n\s*\[\s*\{\s*"op"[\s\S]*?```/g, '').replace(/\n?\[Патч (применён|отменён)[^\]]*\]/g, '').trim();
+    }
+
     function attachActions(bubble, parsed) {
         const card = document.createElement('div');
         card.className = 'ai-act';
@@ -498,6 +502,7 @@
                     n++;
                 }
                 st.textContent = T('act_applied', { n: n }); st.className = 'st ok';
+                if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content) + '\n' + patchSummary(acts, made);
             } catch (e) { st.textContent = T('act_failed', { msg: e.message }); st.className = 'st bad'; }
             await refreshEditor(made, touched);
             if (undo.length) undoBtn.style.display = '';
@@ -508,6 +513,7 @@
             undoBtn.disabled = true;
             for (const f of undo.reverse()) { try { await f(); } catch (e) { /* пропускаем */ } }
             undo = []; st.textContent = T('act_reverted'); st.className = 'st';
+            if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content).replace(/\n?\[Патч применён:[^\]]*\]/, '') + '\n[Патч отменён пользователем]';
             undoBtn.style.display = 'none';
             await refreshEditor([], new Set());
         };
@@ -517,6 +523,26 @@
         if (!acts.length) { doBtn.style.display = 'none'; return; }
         if ($('ai-auto').checked && !hasDelete && !parsed.err) run();
         else if (hasDelete) { st.textContent = T('act_wait'); st.className = 'st'; }
+    }
+
+    // Текст для показа во время стрима: убираем пульс \x1f, <think>…</think> и недописанный/сырой блок rbx-actions
+    function shown(acc) {
+        let t = acc.replace(/\x1f/g, '').replace(/<think>[\s\S]*?(<\/think>|$)/gi, '');
+        t = t.replace(/```rbx-actions[\s\S]*?(```|$)/g, '\n' + T('patch_prep') + '\n');
+        return t.trim();
+    }
+    // Сводка выполненного патча для истории: модель видит, что и с какими ref создано
+    function patchSummary(acts, made) {
+        let mi = 0;
+        const parts = acts.map(a => {
+            if (!a) return '?';
+            if (a.op === 'create') { const r = made[mi++]; return 'create ' + (a.class || 'Part') + ' "' + (a.name || a.class || 'Part') + '"' + (r !== undefined ? ' ref=' + r : ''); }
+            if (a.op === 'set') return 'set ref=' + a.ref + ' ' + a.prop;
+            if (a.op === 'move') return 'move ref=' + a.ref + ' → ' + a.parent;
+            if (a.op === 'delete') return 'delete ref=' + a.ref;
+            return String(a.op);
+        });
+        return '[Патч применён: ' + parts.join('; ').slice(0, 900) + ']';
     }
 
     async function send(textArg) {
@@ -529,9 +555,10 @@
         history.push({ role: 'user', content: text });
         const bubble = addMsg('assistant', '');
         bubble.classList.add('ai-caret');
+        bubble.textContent = T('thinking');
         let acc = '';
         try {
-            for (let attempt = 0; attempt < 2 && !acc.trim(); attempt++) {   // бесплатный роутер иногда отдаёт пустой ответ — пробуем ещё раз
+            for (let attempt = 0; attempt < 2 && !shown(acc); attempt++) {   // бесплатный роутер иногда отдаёт пустой ответ — пробуем ещё раз
                 const resp = await fetch('/api/assistant/chat', {
                     method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, HDR),
                     body: JSON.stringify({ messages: history, context: await buildContext() })
@@ -546,14 +573,19 @@
                     const { value, done } = await reader.read();
                     if (done) break;
                     acc += dec.decode(value, { stream: true });
-                    bubble.innerHTML = fmt(acc);
+                    const vis = shown(acc);
+                    bubble.innerHTML = vis ? fmt(vis) : esc(T('thinking'));
                     $('ai-msgs').scrollTop = $('ai-msgs').scrollHeight;
                 }
             }
-            if (!acc.trim()) { bubble.textContent = T('empty_reply'); history.pop(); }
+            acc = acc.replace(/\x1f/g, '').replace(/<think>[\s\S]*?(<\/think>|$)/gi, '').trim();
+            if (!acc) { bubble.textContent = T('empty_reply'); history.pop(); }
             else {
-                history.push({ role: 'assistant', content: acc });
+                bubble.innerHTML = fmt(acc);
+                const entry = { role: 'assistant', content: acc };
+                history.push(entry);
                 const parsed = parseActions(acc);
+                parsed.entry = entry;
                 if (parsed.found) attachActions(bubble, parsed);
             }
         } catch (e) {
