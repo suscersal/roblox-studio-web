@@ -10788,7 +10788,7 @@ end
             luaClientL = null; // станут доступны для сборки мусора JS-движком
             luaWaits = [];
             luaSignalWaits = [];
-            luaOutputLines = [];
+            // luaOutputLines НЕ чистим: Output остаётся после остановки Play (очищается при следующем запуске или кнопкой 🗑)
             luaByRef = {};
             luaParentByRef = {};
             luaChildrenByRef = {};

@@ -572,6 +572,63 @@
         const q = e.target.closest('#ai-chips button');
         if (q) send(QUICK[+q.dataset.q][1]);
     });
+    // ===== Перетаскивание панели за заголовок (как debug-консоль); позиция запоминается, двойной тап по заголовку — сброс =====
+    (function () {
+        const head = $('ai-head'), KEY = 'rsw_ai_panel_pos';
+        head.style.touchAction = 'none'; head.style.cursor = 'move'; head.title = head.title || '';
+        const clamp = (l, t, w, h) => ({
+            left: Math.max(0, Math.min(l, window.innerWidth - Math.min(w, window.innerWidth))),
+            top: Math.max(0, Math.min(t, window.innerHeight - 40))
+        });
+        function place(l, t, w, h) {
+            const c = clamp(l, t, w, h);
+            panel.style.setProperty('left', c.left + 'px'); panel.style.setProperty('top', c.top + 'px');
+            panel.style.setProperty('right', 'auto'); panel.style.setProperty('bottom', 'auto');
+            panel.style.setProperty('width', Math.min(w, window.innerWidth) + 'px');
+            panel.style.setProperty('height', Math.min(h, window.innerHeight - c.top) + 'px');
+            panel.style.setProperty('max-width', 'none'); panel.style.setProperty('max-height', 'none');
+            return c;
+        }
+        function reset() {
+            ['left', 'top', 'right', 'bottom', 'width', 'height', 'max-width', 'max-height'].forEach(k => panel.style.removeProperty(k));
+            try { localStorage.removeItem(KEY); } catch (e) { /* без хранилища */ }
+        }
+        try {
+            const sv = JSON.parse(localStorage.getItem(KEY) || 'null');
+            if (sv && [sv.left, sv.top, sv.w, sv.h].every(Number.isFinite)) place(sv.left, sv.top, sv.w, sv.h);
+        } catch (e) { /* игнорируем */ }
+        let drag = null, lastTap = 0;
+        head.addEventListener('pointerdown', e => {
+            if (e.target.closest('button, input, select')) return;
+            const now = Date.now();
+            if (now - lastTap < 350) { reset(); lastTap = 0; return; }
+            lastTap = now;
+            const r = panel.getBoundingClientRect();
+            drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, w: r.width, h: r.height, moved: false };
+            try { head.setPointerCapture(e.pointerId); } catch (err) { /* не критично */ }
+        });
+        head.addEventListener('pointermove', e => {
+            if (!drag) return;
+            const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+            if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+            drag.moved = true;
+            place(drag.l + dx, drag.t + dy, drag.w, drag.h);
+        });
+        const end = () => {
+            if (drag && drag.moved) {
+                const r = panel.getBoundingClientRect();
+                try { localStorage.setItem(KEY, JSON.stringify({ left: r.left, top: r.top, w: r.width, h: r.height })); } catch (e) { /* без хранилища */ }
+            }
+            drag = null;
+        };
+        head.addEventListener('pointerup', end); head.addEventListener('pointercancel', end);
+        window.addEventListener('resize', () => {
+            if (!panel.style.left) return;
+            const r = panel.getBoundingClientRect();
+            if (r.width) place(r.left, r.top, r.width, r.height);
+        });
+    })();
+
     $('ai-close').onclick = () => panel.classList.remove('open');
     $('ai-gear').onclick = () => { const o = $('ai-settings').classList.toggle('open'); $('ai-gear').setAttribute('aria-expanded', o); };
     $('ai-clear').onclick = () => { history.length = 0; showEmpty(); };
