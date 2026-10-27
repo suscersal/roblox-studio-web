@@ -25,6 +25,9 @@
             act_no_ref: 'object ref={ref} not found', act_bad: 'invalid action: {what}', act_protected: 'cannot delete a service or system object',
             act_set: '{name} [{ref}]: {prop} → {val}', act_create: '+ {cls} “{name}”', act_delete: '✕ delete {name} [{ref}]',
             custom_addr: 'Custom address', ollama: 'Ollama (local)', lines: 'lines',
+            meter: 'Context', meter_tip: 'System {s} · editor {e} · history {h} · input {i}\n{used} of {win} tokens (estimate)',
+            meter_assumed: 'Model window is unknown, assuming {win} tokens.', meter_trunc: 'Editor context was shortened to fit.',
+            meter_drop: 'Old messages left out of the request: {n}.', meter_full: 'Almost full — clear the chat (🗑).',
             q1: 'Explain the script', q1p: 'Explain what the open script does, step by step.',
             q2: 'Find the bug', q2p: 'Find bugs in the open script and show the fixed code.',
             q3: 'Simplify the code', q3p: 'Simplify and optimize the open script and explain what you changed.'
@@ -49,6 +52,9 @@
             act_no_ref: 'объект ref={ref} не найден', act_bad: 'некорректное действие: {what}', act_protected: 'нельзя удалять сервисы и системные объекты',
             act_set: '{name} [{ref}]: {prop} → {val}', act_create: '+ {cls} «{name}»', act_delete: '✕ удалить {name} [{ref}]',
             custom_addr: 'Свой адрес', ollama: 'Ollama (локально)', lines: 'строк',
+            meter: 'Контекст', meter_tip: 'Система {s} · редактор {e} · история {h} · ввод {i}\n{used} из {win} токенов (оценка)',
+            meter_assumed: 'Окно модели неизвестно, принято {win} токенов.', meter_trunc: 'Контекст редактора сокращён, чтобы поместиться.',
+            meter_drop: 'Старые сообщения не попадают в запрос: {n}.', meter_full: 'Почти заполнен — очисти чат (🗑).',
             q1: 'Объясни скрипт', q1p: 'Объясни, что делает открытый скрипт, по шагам.',
             q2: 'Найди ошибку', q2p: 'Найди ошибки в открытом скрипте и покажи исправленный код.',
             q3: 'Упрости код', q3p: 'Упрости и оптимизируй открытый скрипт, объясни что изменил.'
@@ -125,6 +131,12 @@
 #ai-input{flex:1;background:#374151;border:1px solid #4b5563;border-radius:6px;padding:6px 8px;resize:none;height:calc(50px*var(--bs,1));outline:none}
 #ai-input::placeholder{color:#9ca3af}
 #ai-send{background:#3b82f6!important;font-weight:700;padding:0 14px!important}#ai-send:hover{background:#2563eb!important}
+#ai-meter{display:flex;align-items:center;gap:8px;font-size:calc(11px*var(--fs,1));color:#9ca3af;cursor:help}
+#ai-meter-bar{flex:1;height:6px;border-radius:99px;background:#374151;overflow:hidden}
+#ai-meter-fill{display:block;height:100%;width:0;background:#3b82f6;transition:width .3s,background .3s}
+#ai-meter.warn #ai-meter-fill{background:#f59e0b}#ai-meter.crit #ai-meter-fill{background:#ef4444}
+#ai-meter-pct{min-width:3.4em;text-align:right;color:#e5e7eb;font-weight:600}
+@media (prefers-reduced-motion:reduce){#ai-meter-fill{transition:none}}
 @media (max-width:700px) and (min-height:561px){
 #ai-panel{left:0;right:0;bottom:0;width:auto;max-width:none;height:60vh;max-height:none;border-radius:8px 8px 0 0;border-width:1px 0 0}}
 @media (max-height:560px){
@@ -158,6 +170,7 @@
 <div id="ai-msgs" aria-live="polite"></div>
 <div id="ai-chips">${QUICK.map((q, i) => `<button type="button" data-q="${i}">${esc(q[0])}</button>`).join('')}</div>
 <div id="ai-foot">
+  <div id="ai-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${esc(T('meter'))}"><span>${esc(T('meter'))}</span><div id="ai-meter-bar"><i id="ai-meter-fill"></i></div><b id="ai-meter-pct">0%</b></div>
   <label><input type="checkbox" id="ai-ctx" checked> ${esc(T('ctx'))}</label>
   <label><input type="checkbox" id="ai-auto" checked> ${esc(T('auto'))}</label>
   <div class="row"><textarea id="ai-input" placeholder="${esc(T('input_ph'))}"></textarea><button id="ai-send" aria-label="${esc(T('send'))}">▶</button></div>
@@ -181,6 +194,7 @@
             $('ai-url').value = c.base_url;
             $('ai-model').value = c.model;
             setChip(c.model);
+            scheduleMeter();
             $('ai-key').value = '';
             $('ai-key').placeholder = c.has_key ? T('key_saved_ph') : T('key_ph');
             const idx = PRESETS.findIndex(p => p[1] === c.base_url);
@@ -260,30 +274,57 @@
         return out.length ? T('ctx_scene') + '\n' + out.join('\n') : '';
     }
 
+    // Контекст уходит частями: сервер сам решает, сколько чего оставить (сцена с ref'ами режется последней)
     async function buildContext() {
-        if (!$('ai-ctx').checked) return '';
-        const out = [];
+        if (!$('ai-ctx').checked) return {};
+        const out = { selection: '', scene: '', script: '' };
         try {
-            const refs = [];
+            const refs = [], sel = [];
             if (typeof selectedRefs !== 'undefined' && selectedRefs && selectedRefs.size) refs.push(...Array.from(selectedRefs).slice(0, 5));
             else if (typeof selectedRef !== 'undefined' && selectedRef !== null) refs.push(selectedRef);
             for (const ref of refs) {
                 const r = await (await fetch('/api/instance/' + ref)).json();
-                if (r.ok) out.push(T('ctx_obj', { ref: ref, name: (r.props && r.props.Name) || '?', cls: r.cls, props: ctxProps(r.props) }));
+                if (r.ok) sel.push(T('ctx_obj', { ref: ref, name: (r.props && r.props.Name) || '?', cls: r.cls, props: ctxProps(r.props) }));
             }
+            out.selection = sel.join('\n');
             if (typeof currentScriptRef !== 'undefined' && currentScriptRef !== null) {
                 const r = await (await fetch('/api/instance/' + currentScriptRef)).json();
                 if (r.ok && r.props) {
                     let src = r.props.Source || '';
                     if (typeof cmEditor !== 'undefined' && cmEditor && typeof cmEditor.getValue === 'function') src = cmEditor.getValue();
-                    out.push(T('ctx_script', { name: r.props.Name || '?', cls: r.cls }) + '\n' + src.slice(0, 12000));
+                    out.script = T('ctx_script', { name: r.props.Name || '?', cls: r.cls }) + '\n' + src.slice(0, 40000);
                 }
             }
-            const sc = sceneSummary();
-            if (sc) out.push(sc);
+            out.scene = sceneSummary();
         } catch (e) { /* контекст необязателен */ }
-        return out.join('\n\n');
+        return out;
     }
+
+    // ===== Индикатор заполнения контекста: оценку считает сервер (/api/assistant/usage) =====
+    const fmtK = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n);
+    let meterSeq = 0, meterTimer = 0;
+    async function updateMeter() {
+        if (busy || !panel.classList.contains('open') || document.hidden) return;
+        const seq = ++meterSeq;
+        try {
+            const r = await jpost('/api/assistant/usage', { messages: history, draft: $('ai-input').value, ctx: await buildContext() });
+            if (seq !== meterSeq || !r || !r.ok) return;
+            const pct = Math.max(0, r.percent), m = $('ai-meter');
+            $('ai-meter-fill').style.width = Math.min(100, pct) + '%';
+            m.classList.toggle('warn', pct >= 70 && pct < 90);
+            m.classList.toggle('crit', pct >= 90);
+            $('ai-meter-pct').textContent = (r.assumed ? '≈' : '') + Math.round(pct) + '%';
+            m.setAttribute('aria-valuenow', String(Math.round(Math.min(100, pct))));
+            const p = r.parts || {};
+            const tip = [T('meter_tip', { s: fmtK(p.system || 0), e: fmtK(p.editor || 0), h: fmtK(p.history || 0), i: fmtK(p.input || 0), used: fmtK(r.used), win: fmtK(r.window) })];
+            if (r.assumed) tip.push(T('meter_assumed', { win: fmtK(r.window) }));
+            if (r.truncated) tip.push(T('meter_trunc'));
+            if (r.dropped) tip.push(T('meter_drop', { n: r.dropped }));
+            if (pct >= 70) tip.push(T('meter_full'));
+            m.title = tip.join('\n');
+        } catch (e) { /* индикатор не критичен */ }
+    }
+    const scheduleMeter = () => { clearTimeout(meterTimer); meterTimer = setTimeout(updateMeter, 500); };
 
     // ===== Действия над сценой: ассистент присылает блок ```rbx-actions с JSON-массивом =====
     const ACT_PROPS = { Position: 'v3', Rotation: 'v3', Size: 'size', Color: 'color', Transparency: 'unit', Reflectance: 'unit',
@@ -561,7 +602,7 @@
             for (let attempt = 0; attempt < 2 && !shown(acc); attempt++) {   // бесплатный роутер иногда отдаёт пустой ответ — пробуем ещё раз
                 const resp = await fetch('/api/assistant/chat', {
                     method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, HDR),
-                    body: JSON.stringify({ messages: history, context: await buildContext() })
+                    body: JSON.stringify({ messages: history, ctx: await buildContext() })
                 });
                 if (!resp.ok || (resp.headers.get('content-type') || '').includes('application/json')) {
                     const j = await resp.json().catch(() => ({}));
@@ -592,7 +633,7 @@
             bubble.className = 'ai-m assistant err';
             bubble.textContent = T('err_prefix', { msg: e.message });
             history.pop();
-        } finally { bubble.classList.remove('ai-caret'); busy = false; }
+        } finally { bubble.classList.remove('ai-caret'); busy = false; updateMeter(); }
     }
 
     panel.addEventListener('click', e => {
@@ -663,7 +704,7 @@
 
     $('ai-close').onclick = () => panel.classList.remove('open');
     $('ai-gear').onclick = () => { const o = $('ai-settings').classList.toggle('open'); $('ai-gear').setAttribute('aria-expanded', o); };
-    $('ai-clear').onclick = () => { history.length = 0; showEmpty(); };
+    $('ai-clear').onclick = () => { history.length = 0; showEmpty(); updateMeter(); };
     $('ai-send').onclick = () => send();
     $('ai-input').addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -712,6 +753,9 @@
     $('ai-auto').onchange = () => { try { localStorage.setItem('rsw_ai_auto', $('ai-auto').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
 
     showEmpty();
+    $('ai-ctx').addEventListener('change', updateMeter);
+    $('ai-input').addEventListener('input', scheduleMeter);
+    setInterval(updateMeter, 5000);   // выделение и открытый скрипт меняются без событий для панели
 
     // Кнопка в верхней панели (синяя, как «Account»)
     const bar = document.getElementById('toolbar-top');
@@ -721,7 +765,7 @@
         b.id = 'ai-btn';
         b.textContent = '🤖 AI';
         b.title = T('btn_title');
-        b.onclick = () => { panel.classList.toggle('open'); if (panel.classList.contains('open')) loadCfg(); };
+        b.onclick = () => { panel.classList.toggle('open'); if (panel.classList.contains('open')) { loadCfg(); updateMeter(); } };
         bar.appendChild(b);
     }
 })();

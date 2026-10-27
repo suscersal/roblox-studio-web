@@ -5539,7 +5539,8 @@ _ASSISTANT_SYSTEM = {
         "Вопрос или просьба «только текст» — ответь текстом (2–5 предложений, код в блоках), "
         "без блока rbx-actions. Если данных не хватает — задай один уточняющий вопрос.\n"
         "Контекст редактора ниже — источник правды о сцене; в истории пометки вида [Патч применён: ...] "
-        "описывают уже выполненные изменения (с ref объектов), не повторяй их.\n"
+        "описывают уже выполненные изменения (с ref объектов), не повторяй их. "
+        "Если скрипт в контексте помечен [script truncated], не переписывай его Source целиком.\n"
         + _ASSISTANT_ACTIONS_RU
     ),
     'en': (
@@ -5551,10 +5552,179 @@ _ASSISTANT_SYSTEM = {
         "For a question or a 'text only' request, answer in text (2-5 sentences, code in blocks) "
         "without an rbx-actions block. If data is missing, ask one clarifying question.\n"
         "The editor context below is the source of truth about the scene; history notes like [Patch applied: ...] "
-        "describe changes already made (with object refs), do not repeat them.\n"
+        "describe changes already made (with object refs), do not repeat them. "
+        "If a script in the context is marked [script truncated], never rewrite its whole Source.\n"
         + _ASSISTANT_ACTIONS_EN
     ),
 }
+
+
+# ---------- Контекст редактора: бюджет, оценка токенов, окно модели ----------
+_AI_CTX_MAX = {'selection': 2000, 'scene': 4000, 'script': 12000}   # символов
+_AI_CTX_ORDER = ('selection', 'scene', 'script')    # сцена с ref'ами — раньше скрипта: скрипт режем первым
+_AI_DEFAULT_WINDOW = 32768       # если провайдер не сообщает размер окна
+_AI_REPLY_RESERVE = 3000         # = max_tokens ответа
+_AI_WIN_CACHE = {}               # (base_url, model) -> (окно | None, время запроса)
+_AI_CALIB = {}                   # model -> поправка оценки по реальному usage провайдера
+_AI_WIN_KEYS = ('context_length', 'context_window', 'max_model_len', 'max_context_length', 'n_ctx')
+
+
+def _ai_est_tokens(text):
+    """Грубая оценка: кириллица ~2.3 символа/токен, остальное (английский, код) ~3.5."""
+    if not text:
+        return 0
+    cyr = sum(1 for ch in text if '\u0400' <= ch <= '\u04ff')
+    return int(cyr / 2.3 + (len(text) - cyr) / 3.5) + 1
+
+
+def _ai_raw_tokens(system, msgs):
+    return _ai_est_tokens(system) + sum(_ai_est_tokens(m['content']) + 4 for m in msgs) + 8
+
+
+def _ai_calibrate(model, real, raw):
+    """Подгоняем оценку под реальный prompt_tokens, если провайдер его прислал."""
+    if real > 0 and raw > 0:
+        old = _AI_CALIB.get(model, 1.0)
+        _AI_CALIB[model] = max(0.5, min(2.5, 0.6 * old + 0.4 * real / float(raw)))
+
+
+def _ai_window_from_item(m):
+    if not isinstance(m, dict):
+        return None
+    cands = [m.get(k) for k in _AI_WIN_KEYS]
+    tp = m.get('top_provider')
+    if isinstance(tp, dict):
+        cands.append(tp.get('context_length'))
+    for v in cands:
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 512:
+            return int(v)
+    return None
+
+
+def _ai_remember_windows(base, j):
+    """Запоминает размер окна из ответа /models; возвращает {id: окно}."""
+    items = j.get('data') if isinstance(j, dict) else j
+    now = time.time()
+    found = {}
+    for m in items or []:
+        mid = m.get('id') if isinstance(m, dict) else None
+        win = _ai_window_from_item(m)
+        if isinstance(mid, str) and win:
+            found[mid] = win
+            _AI_WIN_CACHE[(base, mid)] = (win, now)
+    return found
+
+
+def _ai_window(cfg):
+    """Окно выбранной модели в токенах или None, если провайдер его не сообщает."""
+    if not cfg.get('model'):
+        return None
+    base = cfg['base_url'].rstrip('/')
+    key = (base, cfg['model'])
+    hit = _AI_WIN_CACHE.get(key)
+    if hit and (hit[0] or time.time() - hit[1] < 300):     # неудачу не повторяем 5 минут
+        return hit[0]
+    try:
+        with _assistant_http(base + '/models', cfg['api_key'], timeout=8) as resp:
+            _ai_remember_windows(base, json.loads(resp.read().decode('utf-8', 'replace')))
+    except Exception:
+        pass
+    hit = _AI_WIN_CACHE.get(key)
+    if not hit:
+        _AI_WIN_CACHE[key] = hit = (None, time.time())
+    return hit[0]
+
+
+def _ai_cut(text, limit, tail=0.0, note=''):
+    """-> (текст, обрезан ли). tail — доля лимита, сохраняемая с конца."""
+    if len(text) <= limit:
+        return text, False
+    t = int(limit * tail)
+    cut = text[:limit - t] + '\n[…]\n' + (text[len(text) - t:] if t else '')
+    return cut + (('\n' + note) if note else ''), True
+
+
+def _ai_context(d, window):
+    """Контекст редактора -> (текст, был ли сокращён). Порядок: выбор, сцена, скрипт.
+    Раньше всё резалось по ctx[:5000], и сводка сцены (с ref'ами) стояла в самом конце —
+    при длинном скрипте она отваливалась первой, и модель выдумывала ref'ы.
+    Теперь у каждой части свой лимит, а скрипт получает остаток бюджета."""
+    total = sum(_AI_CTX_MAX.values())
+    if window:
+        total = min(total, max(3000, int(window * 3 * 0.4)))
+    ctx = d.get('ctx')
+    if not isinstance(ctx, dict):
+        legacy = d.get('context')           # старый клиент присылал одну строку
+        ctx = {'selection': legacy[:total]} if isinstance(legacy, str) else {}
+    out, truncated, used = [], False, 0
+    for k in _AI_CTX_ORDER:
+        v = ctx.get(k)
+        if not (isinstance(v, str) and v.strip()):
+            continue
+        v = v.strip()
+        if k == 'script':
+            lim = max(800, min(_AI_CTX_MAX[k], total - used))
+            v, tr = _ai_cut(v, lim, tail=0.3, note='[script truncated]')
+        else:
+            lim = min(_AI_CTX_MAX[k], int(total * (0.12 if k == 'selection' else 0.25)))
+            v, tr = _ai_cut(v, max(300, lim))
+        truncated = truncated or tr
+        used += len(v)
+        out.append(v)
+    return '\n\n'.join(out), truncated
+
+
+def _ai_prepare(d, cfg):
+    """Общая подготовка для чата и индикатора: история, контекст, тег режима, подгонка под окно."""
+    window = _ai_window(cfg)
+    msgs = []
+    for m in (d.get('messages') or [])[-12:]:                # 6 пар user/assistant
+        if not (isinstance(m, dict) and m.get('role') in ('user', 'assistant')
+                and isinstance(m.get('content'), str)):
+            continue
+        msgs.append({'role': m['role'], 'content': m['content']})
+    # старые assistant-сообщения режем до головы+хвоста (блок rbx-actions уже выполнен)
+    for m in msgs:
+        if m['role'] == 'assistant':
+            m['content'] = _ai_strip_done_actions(m['content'])
+    keep_full = set([i for i, m in enumerate(msgs) if m['role'] == 'assistant'][-2:])
+    for i, m in enumerate(msgs):
+        c = m['content']
+        if m['role'] == 'user':
+            m['content'] = c[:3000]
+        elif i in keep_full:
+            m['content'] = c[:4000]
+        elif len(c) > 1000:
+            m['content'] = c[:400] + '\n[…]\n' + c[-600:]
+    ctx_text, truncated = _ai_context(d, window)
+    base_system = _alang(_ASSISTANT_SYSTEM['ru'], _ASSISTANT_SYSTEM['en'])
+    system = base_system
+    if ctx_text:
+        system += _alang('\n\nКонтекст редактора:\n', '\n\nEditor context:\n') + ctx_text
+    if msgs and msgs[-1]['role'] == 'user':
+        if _ai_text_only(msgs[-1]['content']):
+            msgs[-1]['content'] += _alang(
+                "\n\n[Вопрос/обсуждение: ответь только текстом, 2-5 предложений, без rbx-actions.]",
+                "\n\n[Question/discussion: answer in text only, 2-5 sentences, no rbx-actions.]")
+        else:
+            msgs[-1]['content'] += _alang(
+                "\n\n[Если нужно изменить сцену: 1-2 фразы плана и сразу блок ```rbx-actions. "
+                "Без длинных рассуждений. Если это вопрос — только текст.]",
+                "\n\n[If the scene must change: 1-2 sentence plan, then the ```rbx-actions block right away. "
+                "No long reasoning. If it is a question - text only.]")
+    # если известное окно переполняется — выкидываем самые старые сообщения
+    dropped = 0
+    if window:
+        k = _AI_CALIB.get(cfg.get('model'), 1.0)
+        limit = int(window * 0.9) - _AI_REPLY_RESERVE
+        while len(msgs) > 1 and _ai_raw_tokens(system, msgs) * k > limit:
+            msgs.pop(0)
+            dropped += 1
+        while len(msgs) > 1 and msgs[0]['role'] == 'assistant':
+            msgs.pop(0)
+            dropped += 1
+    return {'system': system, 'base_system': base_system, 'msgs': msgs, 'window': window,
+            'ctx_text': ctx_text, 'truncated': truncated, 'dropped': dropped}
 
 
 @flask_app.route('/assistant.js')
@@ -5603,7 +5773,38 @@ def assistant_models():
         mid = m.get('id') if isinstance(m, dict) else None
         if isinstance(mid, str):
             ids.append(mid)
-    return jsonify({'ok': True, 'models': ids[:500]})
+    ids = ids[:500]
+    contexts = _ai_remember_windows(cfg['base_url'].rstrip('/'), j)    # {id: окно в токенах}, если провайдер сообщает
+    known = set(ids)
+    return jsonify({'ok': True, 'models': ids, 'contexts': {k: v for k, v in contexts.items() if k in known}})
+
+
+@flask_app.route('/api/assistant/usage', methods=['POST'])
+def assistant_usage():
+    """Сколько окна модели займёт следующий запрос (оценка): система + контекст редактора + история + ввод."""
+    deny = _assistant_guard()
+    if deny:
+        return deny
+    cfg = _assistant_load()
+    d = request.get_json(silent=True) or {}
+    draft = d.get('draft')
+    has_draft = isinstance(draft, str) and bool(draft.strip())
+    if has_draft:
+        d = dict(d)
+        d['messages'] = list(d.get('messages') or []) + [{'role': 'user', 'content': draft[:3000]}]
+    p = _ai_prepare(d, cfg)
+    msgs = p['msgs']
+    k = _AI_CALIB.get(cfg.get('model'), 1.0)
+    inp = _ai_est_tokens(msgs[-1]['content']) + 4 if (has_draft and msgs and msgs[-1]['role'] == 'user') else 0
+    hist = sum(_ai_est_tokens(m['content']) + 4 for m in (msgs[:-1] if inp else msgs))
+    parts = {'system': int((_ai_est_tokens(p['base_system']) + 8) * k),
+             'editor': int(_ai_est_tokens(p['ctx_text']) * k),
+             'history': int(hist * k), 'input': int(inp * k)}
+    used = sum(parts.values())
+    window = p['window'] or _AI_DEFAULT_WINDOW
+    return jsonify({'ok': True, 'used': used, 'window': window, 'assumed': not p['window'],
+                    'percent': round(100.0 * used / window, 1), 'parts': parts,
+                    'truncated': p['truncated'], 'dropped': p['dropped']})
 
 
 @flask_app.route('/api/assistant/chat', methods=['POST'])
@@ -5616,47 +5817,12 @@ def assistant_chat():
         return jsonify({'ok': False, 'error': _alang('Не выбрана модель (⚙ в панели ассистента)', 'No model selected (⚙ in the assistant panel)')}), 400
         
     d = request.get_json(silent=True) or {}
-
-    raw = d.get('messages') or []
-    msgs = []
-    for m in raw[-12:]:                      # 6 пар user/assistant вместо 20 сообщений
-        if not (isinstance(m, dict) and m.get('role') in ('user', 'assistant')
-                and isinstance(m.get('content'), str)):
-            continue
-        msgs.append({'role': m['role'], 'content': m['content']})
+    p = _ai_prepare(d, cfg)
+    system, msgs = p['system'], p['msgs']
     if not msgs:
         return jsonify({'ok': False, 'error': _alang('Пустой запрос', 'Empty request')}), 400
-    # старые assistant-сообщения режем до головы+хвоста (там был блок rbx-actions,
-    # который уже выполнен — целиком он больше не нужен)
-    for m in msgs:
-        if m['role'] == 'assistant':
-            m['content'] = _ai_strip_done_actions(m['content'])
-    assist_idx = [i for i, m in enumerate(msgs) if m['role'] == 'assistant']
-    keep_full = set(assist_idx[-2:])
-    for i, m in enumerate(msgs):
-        c = m['content']
-        if m['role'] == 'user':
-            m['content'] = c[:3000]
-        elif i in keep_full:
-            m['content'] = c[:4000]
-        elif len(c) > 1000:
-            m['content'] = c[:400] + '\n[…]\n' + c[-600:]
-    system = _alang(_ASSISTANT_SYSTEM['ru'], _ASSISTANT_SYSTEM['en'])
-    ctx = d.get('context')
-    if isinstance(ctx, str) and ctx.strip():
-        system += _alang('\n\nКонтекст редактора:\n', '\n\nEditor context:\n') + ctx[:5000]
-    
-    if msgs and msgs[-1]['role'] == 'user':
-        if _ai_text_only(msgs[-1]['content']):
-            msgs[-1]['content'] += _alang(
-                "\n\n[Вопрос/обсуждение: ответь только текстом, 2-5 предложений, без rbx-actions.]",
-                "\n\n[Question/discussion: answer in text only, 2-5 sentences, no rbx-actions.]")
-        else:
-            msgs[-1]['content'] += _alang(
-                "\n\n[Если нужно изменить сцену: 1-2 фразы плана и сразу блок ```rbx-actions. "
-                "Без длинных рассуждений. Если это вопрос — только текст.]",
-                "\n\n[If the scene must change: 1-2 sentence plan, then the ```rbx-actions block right away. "
-                "No long reasoning. If it is a question - text only.]")
+    model = cfg['model']
+    est_raw = _ai_raw_tokens(system, msgs)
 
     base = cfg['base_url'].rstrip('/')
     payload = {'model': cfg['model'], 'stream': True, 'temperature': 0.3, 'max_tokens': 3000,
@@ -5701,6 +5867,9 @@ def assistant_chat():
                     if j.get('error'):
                         yield msg_prov % json.dumps(j['error'], ensure_ascii=False)[:300]
                         break
+                    usage = j.get('usage')
+                    if isinstance(usage, dict) and isinstance(usage.get('prompt_tokens'), int):
+                        _ai_calibrate(model, usage['prompt_tokens'], est_raw)
                     delta = ((j.get('choices') or [{}])[0].get('delta')) or {}
                     t = delta.get('content')
                     if t:
