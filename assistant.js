@@ -82,8 +82,8 @@
     const QUICK = [[T('q1'), T('q1p')], [T('q2'), T('q2p')], [T('q3'), T('q3p')]];
 
     const css = `
-#ai-panel{--f:calc(13px*var(--fs,1));--b:calc(30px*var(--bs,1));position:fixed;right:12px;bottom:12px;width:400px;max-width:calc(100vw - 24px);
- height:62vh;max-height:calc(100vh - 64px);background:#1f2937;color:#fff;border:1px solid #374151;border-radius:8px;display:none;
+#ai-panel{--f:calc(13px*var(--fs,1));--b:calc(30px*var(--bs,1));position:fixed;right:12px;bottom:calc(12px + var(--ai-kb,0px));width:400px;max-width:calc(100vw - 24px);
+ height:62vh;max-height:calc(var(--ai-vh,100vh) - 64px);background:#1f2937;color:#fff;border:1px solid #374151;border-radius:8px;display:none;
  flex-direction:column;z-index:9000;box-shadow:0 8px 28px rgba(0,0,0,.55);font:var(--f)/1.45 system-ui,sans-serif;overflow:hidden}
 #ai-panel.open{display:flex}
 #ai-panel *{box-sizing:border-box}
@@ -132,16 +132,20 @@
 #ai-input::placeholder{color:#9ca3af}
 #ai-send{background:#3b82f6!important;font-weight:700;padding:0 14px!important}#ai-send:hover{background:#2563eb!important}
 #ai-meter{display:flex;align-items:center;gap:8px;font-size:calc(11px*var(--fs,1));color:#9ca3af;cursor:help}
-#ai-meter-bar{flex:1;height:6px;border-radius:99px;background:#374151;overflow:hidden}
-#ai-meter-fill{display:block;height:100%;width:0;background:#3b82f6;transition:width .3s,background .3s}
-#ai-meter.warn #ai-meter-fill{background:#f59e0b}#ai-meter.crit #ai-meter-fill{background:#ef4444}
-#ai-meter-pct{min-width:3.4em;text-align:right;color:#e5e7eb;font-weight:600}
+#ai-ring{flex:none;width:calc(38px*var(--fs,1));height:calc(38px*var(--fs,1))}
+#ai-ring circle{fill:none;stroke-width:4}
+#ai-ring .bg{stroke:#374151}
+#ai-meter-fill{stroke:#3b82f6;stroke-linecap:round;transition:stroke-dasharray .3s,stroke .3s}
+#ai-meter.warn #ai-meter-fill{stroke:#f59e0b}#ai-meter.crit #ai-meter-fill{stroke:#ef4444}
+#ai-meter-pct{fill:#e5e7eb;font:700 9.5px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central}
+#ai-meter-txt{display:flex;flex-direction:column;line-height:1.3}#ai-meter-nums{color:#e5e7eb}
 @media (prefers-reduced-motion:reduce){#ai-meter-fill{transition:none}}
 @media (max-width:700px) and (min-height:561px){
-#ai-panel{left:0;right:0;bottom:0;width:auto;max-width:none;height:60vh;max-height:none;border-radius:8px 8px 0 0;border-width:1px 0 0}}
+#ai-panel{left:0;right:0;bottom:var(--ai-kb,0px);width:auto;max-width:none;height:60vh;max-height:calc(var(--ai-vh,100vh) - 8px);border-radius:8px 8px 0 0;border-width:1px 0 0}}
 @media (max-height:560px){
-#ai-panel{top:44px;bottom:0;right:0;left:auto;height:auto;max-height:none;width:min(48%,420px);border-radius:0;border-width:0 0 0 1px}
+#ai-panel{top:44px;bottom:var(--ai-kb,0px);right:0;left:auto;height:auto;max-height:none;width:min(48%,420px);border-radius:0;border-width:0 0 0 1px}
 #ai-input{height:calc(36px*var(--bs,1))}#ai-foot{padding:6px 8px}#ai-chips{padding-bottom:6px}}
+@media (max-height:300px){#ai-panel{top:4px}}
 @media (prefers-reduced-motion:reduce){.ai-caret::after{animation:none}}
 `;
     const st = document.createElement('style');
@@ -170,7 +174,7 @@
 <div id="ai-msgs" aria-live="polite"></div>
 <div id="ai-chips">${QUICK.map((q, i) => `<button type="button" data-q="${i}">${esc(q[0])}</button>`).join('')}</div>
 <div id="ai-foot">
-  <div id="ai-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${esc(T('meter'))}"><span>${esc(T('meter'))}</span><div id="ai-meter-bar"><i id="ai-meter-fill"></i></div><b id="ai-meter-pct">0%</b></div>
+  <div id="ai-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${esc(T('meter'))}"><svg id="ai-ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="16" pathLength="100"/><circle id="ai-meter-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 20 20)"/><text id="ai-meter-pct" x="20" y="20.5">0%</text></svg><span id="ai-meter-txt"><span>${esc(T('meter'))}</span><span id="ai-meter-nums"></span></span></div>
   <label><input type="checkbox" id="ai-ctx" checked> ${esc(T('ctx'))}</label>
   <label><input type="checkbox" id="ai-auto" checked> ${esc(T('auto'))}</label>
   <div class="row"><textarea id="ai-input" placeholder="${esc(T('input_ph'))}"></textarea><button id="ai-send" aria-label="${esc(T('send'))}">▶</button></div>
@@ -310,10 +314,11 @@
             const r = await jpost('/api/assistant/usage', { messages: history, draft: $('ai-input').value, ctx: await buildContext() });
             if (seq !== meterSeq || !r || !r.ok) return;
             const pct = Math.max(0, r.percent), m = $('ai-meter');
-            $('ai-meter-fill').style.width = Math.min(100, pct) + '%';
+            $('ai-meter-fill').setAttribute('stroke-dasharray', Math.min(100, pct).toFixed(1) + ' 100');
             m.classList.toggle('warn', pct >= 70 && pct < 90);
             m.classList.toggle('crit', pct >= 90);
             $('ai-meter-pct').textContent = (r.assumed ? '≈' : '') + Math.round(pct) + '%';
+            $('ai-meter-nums').textContent = fmtK(r.used) + ' / ' + fmtK(r.window);
             m.setAttribute('aria-valuenow', String(Math.round(Math.min(100, pct))));
             const p = r.parts || {};
             const tip = [T('meter_tip', { s: fmtK(p.system || 0), e: fmtK(p.editor || 0), h: fmtK(p.history || 0), i: fmtK(p.input || 0), used: fmtK(r.used), win: fmtK(r.window) })];
@@ -649,26 +654,38 @@
     (function () {
         const head = $('ai-head'), KEY = 'rsw_ai_panel_pos';
         head.style.touchAction = 'none'; head.style.cursor = 'move'; head.title = head.title || '';
+        // Видимая область: когда открыта экранная клавиатура, она меньше window.innerHeight (или layout-viewport)
+        const vv = window.visualViewport;
+        const visH = () => (vv ? vv.height : window.innerHeight);
         const clamp = (l, t, w, h) => ({
             left: Math.max(0, Math.min(l, window.innerWidth - Math.min(w, window.innerWidth))),
-            top: Math.max(0, Math.min(t, window.innerHeight - 40))
+            top: Math.max(0, Math.min(t, visH() - 40))
         });
+        // Желаемая позиция/размер (то, что выбрал пользователь). На resize панель пересчитывается ОТ НЕЁ,
+        // а не от текущего прямоугольника: раньше клавиатура ужимала панель, и она так и оставалась маленькой.
+        let want = null;
+        function syncViewport() {
+            const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+            panel.style.setProperty('--ai-vh', visH() + 'px');
+            panel.style.setProperty('--ai-kb', kb + 'px');
+        }
         function place(l, t, w, h) {
             const c = clamp(l, t, w, h);
             panel.style.setProperty('left', c.left + 'px'); panel.style.setProperty('top', c.top + 'px');
             panel.style.setProperty('right', 'auto'); panel.style.setProperty('bottom', 'auto');
             panel.style.setProperty('width', Math.min(w, window.innerWidth) + 'px');
-            panel.style.setProperty('height', Math.min(h, window.innerHeight - c.top) + 'px');
+            panel.style.setProperty('height', Math.min(h, visH() - c.top) + 'px');
             panel.style.setProperty('max-width', 'none'); panel.style.setProperty('max-height', 'none');
             return c;
         }
         function reset() {
+            want = null;
             ['left', 'top', 'right', 'bottom', 'width', 'height', 'max-width', 'max-height'].forEach(k => panel.style.removeProperty(k));
             try { localStorage.removeItem(KEY); } catch (e) { /* без хранилища */ }
         }
         try {
             const sv = JSON.parse(localStorage.getItem(KEY) || 'null');
-            if (sv && [sv.left, sv.top, sv.w, sv.h].every(Number.isFinite)) place(sv.left, sv.top, sv.w, sv.h);
+            if (sv && [sv.left, sv.top, sv.w, sv.h].every(Number.isFinite)) { want = { left: sv.left, top: sv.top, w: sv.w, h: sv.h }; place(sv.left, sv.top, sv.w, sv.h); }
         } catch (e) { /* игнорируем */ }
         let drag = null, lastTap = 0;
         head.addEventListener('pointerdown', e => {
@@ -690,16 +707,23 @@
         const end = () => {
             if (drag && drag.moved) {
                 const r = panel.getBoundingClientRect();
+                want = { left: r.left, top: r.top, w: r.width, h: r.height };
                 try { localStorage.setItem(KEY, JSON.stringify({ left: r.left, top: r.top, w: r.width, h: r.height })); } catch (e) { /* без хранилища */ }
             }
             drag = null;
         };
         head.addEventListener('pointerup', end); head.addEventListener('pointercancel', end);
-        window.addEventListener('resize', () => {
-            if (!panel.style.left) return;
-            const r = panel.getBoundingClientRect();
-            if (r.width) place(r.left, r.top, r.width, r.height);
-        });
+        const onViewport = () => {
+            syncViewport();
+            if (want && panel.style.left) place(want.left, want.top, want.w, want.h);
+        };
+        window.addEventListener('resize', onViewport);
+        window.addEventListener('orientationchange', () => setTimeout(onViewport, 300));
+        if (vv) { vv.addEventListener('resize', onViewport); vv.addEventListener('scroll', syncViewport); }
+        // некоторые WebView не присылают resize при закрытии клавиатуры — перепроверяем после потери фокуса
+        panel.addEventListener('focusout', () => setTimeout(onViewport, 350));
+        panel.addEventListener('focusin', () => setTimeout(onViewport, 350));
+        syncViewport();
     })();
 
     $('ai-close').onclick = () => panel.classList.remove('open');
