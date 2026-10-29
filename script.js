@@ -5770,16 +5770,16 @@ InstanceMT.__index = function(t, k)
     if (k == "GetPartBoundsInBox" or k == "GetPartBoundsInRadius" or k == "GetPartsInPart") and __get_class(ref) == "Workspace" then
         return function(self, a, b, c)
             local params, cx, cy, cz, hx, hy, hz, skipRef
+            local rx, ry, rz, ux, uy, uz, lx, ly, lz = 1, 0, 0, 0, 1, 0, 0, 0, 1
+            local function basis(cf)
+                local ok, r, u, l = pcall(function() return cf.RightVector, cf.UpVector, cf.LookVector end)
+                if ok and r and u and l then rx, ry, rz, ux, uy, uz, lx, ly, lz = r.X, r.Y, r.Z, u.X, u.Y, u.Z, l.X, l.Y, l.Z end
+            end
             if k == "GetPartBoundsInBox" then
                 params = c
                 cx, cy, cz = a.X, a.Y, a.Z
                 hx, hy, hz = b.X / 2, b.Y / 2, b.Z / 2
-                local ok, r, u, l = pcall(function() return a.RightVector, a.UpVector, a.LookVector end)
-                if ok and r and u and l then
-                    hx = (math.abs(r.X) * b.X + math.abs(u.X) * b.Y + math.abs(l.X) * b.Z) / 2
-                    hy = (math.abs(r.Y) * b.X + math.abs(u.Y) * b.Y + math.abs(l.Y) * b.Z) / 2
-                    hz = (math.abs(r.Z) * b.X + math.abs(u.Z) * b.Y + math.abs(l.Z) * b.Z) / 2
-                end
+                basis(a)
             elseif k == "GetPartBoundsInRadius" then
                 params = c
                 cx, cy, cz = a.X, a.Y, a.Z
@@ -5787,46 +5787,29 @@ InstanceMT.__index = function(t, k)
             else
                 params = b
                 skipRef = type(a) == "table" and rawget(a, "__ref") or nil
-                local bx, by, bz, sx, sy, sz = __get_bbox(skipRef)
-                cx, cy, cz, hx, hy, hz = bx, by, bz, sx / 2, sy / 2, sz / 2
+                local cf, sz = a.CFrame, a.Size
+                cx, cy, cz = cf.X, cf.Y, cf.Z
+                hx, hy, hz = sz.X / 2, sz.Y / 2, sz.Z / 2
+                basis(cf)
             end
-            local list, include, maxParts = {}, false, 0
+            local mode, maxParts, refs = 0, 0, {}
             if type(params) == "table" then
-                if type(params.FilterDescendantsInstances) == "table" then list = params.FilterDescendantsInstances end
                 local ft = params.FilterType
                 local fname = type(ft) == "table" and tostring(ft.Name or ft) or tostring(ft)
-                include = string.find(fname, "Include", 1, true) ~= nil
+                if string.find(fname, "Include", 1, true) then mode = 1 end
                 maxParts = tonumber(params.MaxParts) or 0
-            end
-            local out = {}
-            local function listed(inst)
-                for _, f in ipairs(list) do
-                    if f == inst then return true end
-                    local okd, isd = pcall(function() return inst:IsDescendantOf(f) end)
-                    if okd and isd then return true end
-                end
-                return false
-            end
-            local function walk(r)
-                if maxParts > 0 and #out >= maxParts then return end
-                local n = __child_count(r)
-                for i = 1, n do
-                    local ch = __child_at(r, i - 1)
-                    if ch ~= skipRef then
-                        local okb, px, py, pz, sx, sy, sz = pcall(__get_bbox, ch)
-                        if okb and px ~= nil and math.abs(px - cx) <= hx + sx / 2 and math.abs(py - cy) <= hy + sy / 2
-                            and math.abs(pz - cz) <= hz + sz / 2 then
-                            local w = wrap(ch)
-                            local okp, isPart = pcall(function() return w:IsA("BasePart") end)
-                            if okp and isPart and (listed(w) == include or #list == 0 and not include) then
-                                out[#out + 1] = w
-                            end
-                        end
+                local list = params.FilterDescendantsInstances
+                if type(list) == "table" then
+                    for _, inst in ipairs(list) do
+                        local r = type(inst) == "table" and rawget(inst, "__ref") or nil
+                        if r ~= nil then refs[#refs + 1] = r end
                     end
-                    walk(ch)
                 end
             end
-            walk(ref)
+            -- весь перебор деталей — на стороне JS (один вызов), иначе по карте в тысячи объектов FPS падает до нуля
+            local csv = __overlap(mode, maxParts, skipRef or -1, cx, cy, cz, hx, hy, hz, rx, ry, rz, ux, uy, uz, lx, ly, lz, table.unpack(refs))
+            local out = {}
+            for id in string.gmatch(csv, "%d+") do out[#out + 1] = wrap(tonumber(id)) end
             return out
         end
     end
@@ -8552,6 +8535,7 @@ end
         }
         // Отдельный, СЫРОЙ индекс иерархии для Lua-моста — специально НЕ
         let luaByRef = {};          // ref -> {cls, name}
+        let luaByRefVer = 0;        // растёт при любом добавлении/удалении записи (кэши списков деталей)
         let luaParentByRef = {};    // ref -> parentRef
         let luaChildrenByRef = {};  // ref -> [childRef, ...]
         // Instance.new() создаёт объекты без меша/физики — их произвольные
@@ -8675,7 +8659,7 @@ end
         ]);
         function luaCreateVirtualInstance(className) {
             const ref = luaNextVirtualRef--;
-            luaByRef[ref] = { cls: className, name: className };
+            luaByRef[ref] = { cls: className, name: className }; luaByRefVer++;
             luaParentByRef[ref] = -1;
             virtualInstanceProps[ref] = {};
             // Instance.new("TextButton") и т.п.
@@ -8933,7 +8917,7 @@ end
             if (parentRef !== undefined && luaChildrenByRef[parentRef]) {
                 luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef].filter(c => c !== ref);
             }
-            delete luaByRef[ref];
+            delete luaByRef[ref]; luaByRefVer++;
             delete luaParentByRef[ref];
             delete luaChildrenByRef[ref];
             delete virtualInstanceProps[ref];
@@ -9412,6 +9396,73 @@ end
                 const b = luaBoundingBox(lua.lua_tonumber(L2, 1));
                 for (const v of [b.cx, b.cy, b.cz, b.sx, b.sy, b.sz]) lua.lua_pushnumber(L2, v);
                 return 6;
+            });
+            let _overlapPartCls = null, _overlapParts = null;
+            def('__overlap', function (L2) {
+                // (mode 0=Exclude/1=Include, maxParts, skipRef, cx,cy,cz, hx,hy,hz, фильтр-ref...) -> "ref,ref,..."
+                try {
+                    const n = lua.lua_gettop(L2), num = (i) => lua.lua_tonumber(L2, i);
+                    const mode = lua.lua_tointeger(L2, 1), maxParts = lua.lua_tointeger(L2, 2), skip = lua.lua_tointeger(L2, 3);
+                    const cx = num(4), cy = num(5), cz = num(6), hx = num(7), hy = num(8), hz = num(9);
+                    const roots = new Set();
+                    const rx = num(10), ry = num(11), rz = num(12), ux = num(13), uy = num(14), uz = num(15), lx = num(16), ly = num(17), lz = num(18);
+                    // описанный мировой AABB повёрнутого бокса — для быстрого отсева
+                    const wx = Math.abs(rx) * hx + Math.abs(ux) * hy + Math.abs(lx) * hz;
+                    const wy = Math.abs(ry) * hx + Math.abs(uy) * hy + Math.abs(ly) * hz;
+                    const wz = Math.abs(rz) * hx + Math.abs(uz) * hy + Math.abs(lz) * hz;
+                    for (let i = 19; i <= n; i++) roots.add(lua.lua_tointeger(L2, i));
+                    const inFilter = (ref) => {
+                        let cur = ref, g = 0;
+                        while (cur !== undefined && cur !== -1 && g++ < 200) { if (roots.has(cur)) return true; cur = luaParentByRef[cur]; }
+                        return false;
+                    };
+                    const out = [], c = new THREE.Vector3();
+                    const PARTCLS = _overlapPartCls || (_overlapPartCls = new Set(['Part', 'MeshPart', 'WedgePart', 'CornerWedgePart', 'SpawnLocation',
+                        'TrussPart', 'UnionOperation', 'NegateOperation', 'Seat', 'VehicleSeat', 'SpherePart', 'BallPart', 'CylinderPart']));
+                    // список ref-ов деталей кэшируем, пока не изменилось число объектов в luaByRef (клоны/удаления его меняют)
+                    if (!_overlapParts || _overlapParts.n !== luaByRefVer) {
+                        _overlapParts = { n: luaByRefVer, refs: Object.keys(luaByRef).filter(k => luaByRef[k] && PARTCLS.has(luaByRef[k].cls)).map(k => parseInt(k, 10)) };
+                    }
+                    for (const ref of _overlapParts.refs) {
+                        if (ref === skip) continue;
+                        const pp = luaPositionOfRef(ref);
+                        if (!pp) continue;
+                        // размер берём из кэша; тяжёлый luaSizeOfRef (геометрия меша) — только для деталей рядом с запросом
+                        let sz = loadedObjSize[ref];
+                        if (!sz) {
+                            if (Math.abs(pp.x - cx) > wx + 100 || Math.abs(pp.y - cy) > wy + 100 || Math.abs(pp.z - cz) > wz + 100) continue;
+                            sz = luaSizeOfRef(ref);
+                        }
+                        const rad = Math.hypot(sz.x, sz.y, sz.z) / 2;
+                        if (Math.abs(pp.x - cx) > wx + rad || Math.abs(pp.y - cy) > wy + rad || Math.abs(pp.z - cz) > wz + rad) continue;
+                        if (!luaIsUnderWorkspace(ref)) continue;
+                        const M = luaPartMatrix(ref);
+                        let mnx = Infinity, mny = Infinity, mnz = Infinity, mxx = -Infinity, mxy = -Infinity, mxz = -Infinity;
+                        for (let i = 0; i < 8; i++) {
+                            c.set((i & 1 ? 0.5 : -0.5) * sz.x, (i & 2 ? 0.5 : -0.5) * sz.y, (i & 4 ? 0.5 : -0.5) * sz.z).applyMatrix4(M);
+                            if (c.x < mnx) mnx = c.x; if (c.x > mxx) mxx = c.x;
+                            if (c.y < mny) mny = c.y; if (c.y > mxy) mxy = c.y;
+                            if (c.z < mnz) mnz = c.z; if (c.z > mxz) mxz = c.z;
+                        }
+                        if (mxx < cx - wx || mnx > cx + wx || mxy < cy - wy || mny > cy + wy || mxz < cz - wz || mnz > cz + wz) continue;
+                        // ось-за-осью по базису самого бокса: углы детали переводим в его локальные координаты
+                        let lmn = [Infinity, Infinity, Infinity], lmx = [-Infinity, -Infinity, -Infinity];
+                        for (let i = 0; i < 8; i++) {
+                            c.set((i & 1 ? 0.5 : -0.5) * sz.x, (i & 2 ? 0.5 : -0.5) * sz.y, (i & 4 ? 0.5 : -0.5) * sz.z).applyMatrix4(M);
+                            const dx = c.x - cx, dy = c.y - cy, dz = c.z - cz;
+                            const q0 = dx * rx + dy * ry + dz * rz, q1 = dx * ux + dy * uy + dz * uz, q2 = dx * lx + dy * ly + dz * lz;
+                            if (q0 < lmn[0]) lmn[0] = q0; if (q0 > lmx[0]) lmx[0] = q0;
+                            if (q1 < lmn[1]) lmn[1] = q1; if (q1 > lmx[1]) lmx[1] = q1;
+                            if (q2 < lmn[2]) lmn[2] = q2; if (q2 > lmx[2]) lmx[2] = q2;
+                        }
+                        if (lmx[0] < -hx || lmn[0] > hx || lmx[1] < -hy || lmn[1] > hy || lmx[2] < -hz || lmn[2] > hz) continue;
+                        if (mode === 1 ? !inFilter(ref) : (roots.size > 0 && inFilter(ref))) continue;
+                        out.push(ref);
+                        if (maxParts > 0 && out.length >= maxParts) break;
+                    }
+                    lua.lua_pushstring(L2, out.join(','));
+                } catch (e) { console.warn('Overlap:', e); lua.lua_pushstring(L2, ''); }
+                return 1;
             });
             def('__is_key_down', function (L2) {
                 lua.lua_pushboolean(L2, luaKeyIsDown(lua.lua_tojsstring(L2, 1)) ? 1 : 0);
@@ -10664,7 +10715,7 @@ end
             // Сырой индекс иерархии для script.Parent/GetChildren — из
             // /api/all_instances (весь файл, без фильтров Explorer-дерева).
             const allR = await api('GET', '/api/all_instances');
-            luaByRef = {};
+            luaByRef = {}; luaByRefVer++;
             luaParentByRef = {};
             luaChildrenByRef = {};
             luaInitValues = [];
@@ -10680,7 +10731,7 @@ end
             playCamDist = THIRD_PERSON_DIST;
             if (allR && allR.ok && allR.instances) {
                 for (const inst of allR.instances) {
-                    luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
+                    luaByRef[inst.ref] = { cls: inst.cls, name: inst.name }; luaByRefVer++;
                     luaParentByRef[inst.ref] = inst.parent;
                     if (inst.attrs) luaFileAttrs[inst.ref] = inst.attrs;
                     if (inst.tags) luaFileTags[inst.ref] = inst.tags;
@@ -10861,7 +10912,7 @@ end
             luaWaits = [];
             luaSignalWaits = [];
             // luaOutputLines НЕ чистим: Output остаётся после остановки Play (очищается при следующем запуске или кнопкой 🗑)
-            luaByRef = {};
+            luaByRef = {}; luaByRefVer++;
             luaParentByRef = {};
             luaChildrenByRef = {};
             virtualInstanceProps = {};
@@ -12148,7 +12199,7 @@ end
                             MaxActivationDistance: p.maxDistance, RequiresLineOfSight: p.requiresLineOfSight,
                             Enabled: p.enabled, parentRef: p.parentRef,
                         };
-                        if (!luaByRef[p.ref]) luaByRef[p.ref] = { cls: 'ProximityPrompt', name: 'ProximityPrompt' };
+                        if (!luaByRef[p.ref]) { luaByRef[p.ref] = { cls: 'ProximityPrompt', name: 'ProximityPrompt' }; luaByRefVer++; }
                     }
                 }
             } catch (e) { emuWarn('swallow:for:11240', 'for: ' + _errText(e) + ' (подсказок из файла не будет — рантаймовые всё равно подхватятся через хуки)'); }
