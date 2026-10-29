@@ -28,6 +28,16 @@
             meter: 'Context', meter_tip: 'System {s} · editor {e} · history {h} · input {i}\n{used} of {win} tokens (estimate)',
             meter_assumed: 'Model window is unknown, assuming {win} tokens.', meter_trunc: 'Editor context was shortened to fit.',
             meter_drop: 'Old messages left out of the request: {n}.', meter_full: 'Almost full — clear the chat (🗑).',
+            act_play: '▶ Run the game{sec}', act_stop: '⏹ Stop the game', act_play_fail: 'The game did not start', act_nofn: 'Play/Stop is not available here', sec_u: 's',
+            run_on: '▶ Game is running…', run_done: '■ Game stopped. Errors: {e}, warnings: {w}', run_clean: '■ Game stopped, no errors',
+            btn_fix: '🛠 Ask AI to fix', btn_out: '📋 Send output to AI', autofix: 'Auto-fix errors (up to 2 tries)',
+            ctx_output: 'Game output ({state}; E = error, W = warning, P = print):', st_running: 'running', st_stopped: 'stopped',
+            fix_json: 'The rbx-actions block could not be read: {msg}\nResend the complete corrected block. Inside JSON strings newlines must be written as \\n and quotes as \\".',
+            fix_run: 'The patch failed: {msg}\nDone before the error: {done}. Do not repeat what is done; send a corrected block for the rest.',
+            fix_out: 'I ran the game. Errors: {e}, warnings: {w}.\n{lines}\nFind the cause and fix it.',
+            note_fixed: '⚠ The actions block had formatting problems and was repaired automatically — check it before applying.',
+            note_cut: '⚠ The reply was cut off: {n} complete actions recovered, the rest is lost.',
+            q4: 'Game errors', q4p: 'Look at the game output in the context. Find the cause of the errors and fix them.',
             q1: 'Explain the script', q1p: 'Explain what the open script does, step by step.',
             q2: 'Find the bug', q2p: 'Find bugs in the open script and show the fixed code.',
             q3: 'Simplify the code', q3p: 'Simplify and optimize the open script and explain what you changed.'
@@ -55,6 +65,16 @@
             meter: 'Контекст', meter_tip: 'Система {s} · редактор {e} · история {h} · ввод {i}\n{used} из {win} токенов (оценка)',
             meter_assumed: 'Окно модели неизвестно, принято {win} токенов.', meter_trunc: 'Контекст редактора сокращён, чтобы поместиться.',
             meter_drop: 'Старые сообщения не попадают в запрос: {n}.', meter_full: 'Почти заполнен — очисти чат (🗑).',
+            act_play: '▶ Запустить игру{sec}', act_stop: '⏹ Остановить игру', act_play_fail: 'Игра не запустилась', act_nofn: 'Запуск/остановка здесь недоступны', sec_u: 'с',
+            run_on: '▶ Игра запущена…', run_done: '■ Игра остановлена. Ошибок: {e}, предупреждений: {w}', run_clean: '■ Игра остановлена, ошибок нет',
+            btn_fix: '🛠 Попросить ИИ исправить', btn_out: '📋 Отправить вывод ИИ', autofix: 'Авто-исправление ошибок (до 2 раз)',
+            ctx_output: 'Вывод игры ({state}; E — ошибка, W — предупреждение, P — print):', st_running: 'идёт', st_stopped: 'остановлена',
+            fix_json: 'Блок rbx-actions не удалось прочитать: {msg}\nПришли исправленный блок целиком. Внутри строк JSON переводы строк пиши как \\n, кавычки как \\".',
+            fix_run: 'Патч не применился: {msg}\nДо ошибки выполнено: {done}. Не повторяй сделанное — пришли исправленный блок для остального.',
+            fix_out: 'Я запустил игру. Ошибок: {e}, предупреждений: {w}.\n{lines}\nНайди причину и исправь.',
+            note_fixed: '⚠ В блоке действий были ошибки форматирования, он исправлен автоматически — проверь перед применением.',
+            note_cut: '⚠ Ответ оборвался: восстановлено полных действий — {n}, остальное потеряно.',
+            q4: 'Ошибки игры', q4p: 'Посмотри вывод игры в контексте. Найди причину ошибок и исправь их.',
             q1: 'Объясни скрипт', q1p: 'Объясни, что делает открытый скрипт, по шагам.',
             q2: 'Найди ошибку', q2p: 'Найди ошибки в открытом скрипте и покажи исправленный код.',
             q3: 'Упрости код', q3p: 'Упрости и оптимизируй открытый скрипт, объясни что изменил.'
@@ -79,7 +99,7 @@
         ['Polza.ai', 'https://polza.ai/api/v1'],
         [T('custom_addr'), '']
     ];
-    const QUICK = [[T('q1'), T('q1p')], [T('q2'), T('q2p')], [T('q3'), T('q3p')]];
+    const QUICK = [[T('q1'), T('q1p')], [T('q2'), T('q2p')], [T('q3'), T('q3p')], [T('q4'), T('q4p')]];
 
     const css = `
 #ai-panel{--f:calc(13px*var(--fs,1));--b:calc(30px*var(--bs,1));position:fixed;right:12px;bottom:calc(12px + var(--ai-kb,0px));width:400px;max-width:calc(100vw - 24px);
@@ -121,7 +141,8 @@
 .ai-act h5{margin:0 0 4px;font-size:calc(12px*var(--fs,1));color:#93c5fd}
 .ai-act ul{margin:0 0 6px;padding-left:18px}.ai-act li{margin:1px 0;font:calc(12px*var(--fs,1)) 'Fira Code',Consolas,monospace}
 .ai-act .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.ai-act .st{font-size:calc(11px*var(--fs,1));color:#9ca3af}.ai-act .st.ok{color:#6ee7b7}.ai-act .st.bad{color:#fca5a5}
+.ai-act .st{font-size:calc(11px*var(--fs,1));color:#9ca3af}.ai-act .st.ok{color:#6ee7b7}.ai-act .st.bad{color:#fca5a5}.ai-act .st.warn{color:#fcd34d}
+.ai-act .rs{font-size:calc(11px*var(--fs,1));color:#93c5fd}.ai-act .rs.ok{color:#6ee7b7}.ai-act .rs.bad{color:#fca5a5}.ai-act .ai-extra{margin-top:6px}
 #ai-chips{display:flex;gap:6px;padding:0 10px 8px;overflow-x:auto}
 #ai-chips button{background:#111827;border:1px solid #374151;border-radius:99px;color:#9ca3af;white-space:nowrap;min-height:calc(26px*var(--bs,1))}
 #ai-chips button:hover{color:#93c5fd;border-color:#3b82f6;background:#111827}
@@ -177,6 +198,7 @@
   <div id="ai-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${esc(T('meter'))}"><svg id="ai-ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="16" pathLength="100"/><circle id="ai-meter-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 20 20)"/><text id="ai-meter-pct" x="20" y="20.5">0%</text></svg><span id="ai-meter-txt"><span>${esc(T('meter'))}</span><span id="ai-meter-nums"></span></span></div>
   <label><input type="checkbox" id="ai-ctx" checked> ${esc(T('ctx'))}</label>
   <label><input type="checkbox" id="ai-auto" checked> ${esc(T('auto'))}</label>
+  <label><input type="checkbox" id="ai-autofix"> ${esc(T('autofix'))}</label>
   <div class="row"><textarea id="ai-input" placeholder="${esc(T('input_ph'))}"></textarea><button id="ai-send" aria-label="${esc(T('send'))}">▶</button></div>
 </div>`;
     document.body.appendChild(panel);
@@ -281,7 +303,7 @@
     // Контекст уходит частями: сервер сам решает, сколько чего оставить (сцена с ref'ами режется последней)
     async function buildContext() {
         if (!$('ai-ctx').checked) return {};
-        const out = { selection: '', scene: '', script: '' };
+        const out = { selection: '', scene: '', script: '', output: '' };
         try {
             const refs = [], sel = [];
             if (typeof selectedRefs !== 'undefined' && selectedRefs && selectedRefs.size) refs.push(...Array.from(selectedRefs).slice(0, 5));
@@ -300,6 +322,8 @@
                 }
             }
             out.scene = sceneSummary();
+            const od = outputDigest(25, 10), playing = isRunning();
+            if (od.lines.length || playing) out.output = T('ctx_output', { state: T(playing ? 'st_running' : 'st_stopped') }) + '\n' + (od.lines.join('\n') || '(no output)');
         } catch (e) { /* контекст необязателен */ }
         return out;
     }
@@ -384,21 +408,107 @@
         if (/^rbx-actions\b/.test(p)) return true;
         return !!_actList(p.replace(/^[a-zA-Z0-9_+-]*[ \t]*\n/, ''));
     }
+    // Модели часто ломают JSON: настоящие переводы строк внутри "source", неэкранированные кавычки в коде,
+    // запятая перед ], ответ оборван по лимиту токенов. Сначала пробуем как есть, потом чиним, потом показываем
+    // понятную ошибку с фрагментом вокруг позиции.
+    function repairJson(src) {
+        let out = '', inStr = false, esc = false, depth = 0, lastEnd = -1;
+        const n = src.length;
+        for (let i = 0; i < n; i++) {
+            const ch = src[i];
+            if (inStr) {
+                if (esc) {
+                    esc = false;
+                    const ok = '"\\/bfnrt'.indexOf(ch) >= 0 || (ch === 'u' && /^[0-9a-fA-F]{4}$/.test(src.substr(i + 1, 4)));
+                    out += ok ? '\\' + ch : '\\\\' + ch;   // неверный escape (\d, \$) — это буквальный обратный слэш
+                    continue;
+                }
+                if (ch === '\\') { esc = true; continue; }
+                if (ch === '"') {
+                    let j = i + 1; while (j < n && /\s/.test(src[j])) j++;
+                    if (j >= n || ',:}]'.indexOf(src[j]) >= 0) { inStr = false; out += '"'; }
+                    else out += '\\"';   // кавычка внутри кода без экранирования
+                    continue;
+                }
+                if (ch === '\n') out += '\\n'; else if (ch === '\r') out += '\\r'; else if (ch === '\t') out += '\\t';
+                else if (ch < ' ') out += '\\u' + ('000' + ch.charCodeAt(0).toString(16)).slice(-4);
+                else out += ch;
+                continue;
+            }
+            if (ch === '"') { inStr = true; out += ch; continue; }
+            if (ch === '{' || ch === '[') { depth++; out += ch; continue; }
+            if (ch === '}' || ch === ']') {
+                out = out.replace(/,\s*$/, ''); out += ch; depth--;
+                if (ch === '}' && depth === 1) lastEnd = out.length;   // закрылось полное действие верхнего массива
+                continue;
+            }
+            out += ch;
+        }
+        const truncated = inStr || depth !== 0;
+        if (truncated) {
+            if (lastEnd < 0) return { text: out, truncated: true };
+            out = out.slice(0, lastEnd) + ']';   // последнее недописанное действие отбрасываем
+        }
+        return { text: out, truncated: truncated };
+    }
+    function jsonErrorInfo(body, e) {
+        const m = /position (\d+)/.exec((e && e.message) || '');
+        if (!m) return (e && e.message) || String(e);
+        const p = +m[1], fl = x => x.replace(/\r?\n/g, '⏎');
+        return e.message + ' — …' + fl(body.slice(Math.max(0, p - 25), p)) + '⟦!⟧' + fl(body.slice(p, p + 25)) + '…';
+    }
+    function parseBlock(body) {
+        try { const j = JSON.parse(body); return { arr: Array.isArray(j) ? j : [j] }; }
+        catch (e) {
+            const info = jsonErrorInfo(body, e);
+            try {
+                const r = repairJson(body), j = JSON.parse(r.text), arr = Array.isArray(j) ? j : [j];
+                if (arr.length && arr.every(a => a && typeof a === 'object' && typeof a.op === 'string'))
+                    return { arr: arr, note: r.truncated ? T('note_cut', { n: arr.length }) : T('note_fixed'), cut: r.truncated };
+            } catch (e2) { /* ниже — понятная ошибка */ }
+            return { arr: [], err: info };
+        }
+    }
     function parseActions(text) {
-        const list = []; let err = null;
+        const list = []; let err = null, warn = null;
         const parts = String(text).split('```');
         for (let i = 1; i < parts.length; i += 2) {
             const body = parts[i].replace(/^[a-zA-Z0-9_+-]*[ \t]*\n/, '');
             if (/^rbx-actions\b/.test(parts[i])) {
-                try { const j = JSON.parse(body); (Array.isArray(j) ? j : [j]).forEach(a => list.push(a)); }
-                catch (e) { err = e.message; }
+                const r = parseBlock(body);
+                r.arr.forEach(a => list.push(a));
+                if (r.err) err = r.err;
+                if (r.note) warn = r.note;
             } else { const l = _actList(body); if (l) l.forEach(a => list.push(a)); }
         }
         if (!list.length && err === null) {   // голый JSON-массив вне fence
             const m = /\[\s*\{\s*"op"[\s\S]*\}\s*\]/.exec(parts.filter((x, i) => i % 2 === 0).join('\n'));
             const l = m && _actList(m[0]); if (l) l.forEach(a => list.push(a));
         }
-        return { list: list.slice(0, 30), err: err, found: list.length > 0 || err !== null };
+        return { list: list.slice(0, 30), err: err, warn: warn, found: list.length > 0 || err !== null };
+    }
+
+    const runSecs = a => { const n = Math.round(Number(a && a.seconds)); return n > 0 ? Math.min(60, n) : 0; };
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const isRunning = () => typeof isPlaying !== 'undefined' && !!isPlaying;
+
+    // Вывод игры (Output редактора): ошибки/предупреждения важнее print, берём последние строки по каждому виду
+    function outputDigest(maxBad, maxPrint) {
+        const L = (typeof luaOutputLines !== 'undefined' && Array.isArray(luaOutputLines)) ? luaOutputLines : [];
+        let e = 0, w = 0; const bad = [], pr = [];
+        L.forEach((l, i) => {
+            if (l.level === 'error') e += l.count || 1; else if (l.level === 'warn') w += l.count || 1;
+            (l.level === 'print' ? pr : bad).push(i);
+        });
+        const pick = bad.slice(-maxBad).concat(pr.slice(-maxPrint)).sort((x, y) => x - y);
+        const lines = pick.map(i => {
+            const l = L[i], tag = l.level === 'error' ? 'E' : l.level === 'warn' ? 'W' : 'P';
+            let t = '[' + tag + ']' + (l.source ? ' ' + l.source + ':' : '') + ' ' + String(l.text).replace(/\s+/g, ' ').slice(0, 300);
+            if (l.count > 1) t += ' (x' + l.count + ')';
+            if (l.trace && tag !== 'P') t += ' | ' + String(l.trace).split('\n')[0].slice(0, 160);
+            return t;
+        });
+        return { e: e, w: w, lines: lines };
     }
 
     function describe(a) {
@@ -407,6 +517,8 @@
             if (a.op === 'create') return T('act_create', { cls: a.class || 'Part', name: a.name || a.class || 'Part' }) + ((a.source || (a.props && a.props.Source)) ? ' (' + String(a.source || a.props.Source).split('\n').length + ' ' + T('lines') + ')' : '');
             if (a.op === 'move') return '→ ' + nodeName(+a.ref) + ' [' + a.ref + '] ⇒ ' + (a.parent !== undefined ? (isFinite(+a.parent) ? nodeName(+a.parent) : a.parent) : '?');
             if (a.op === 'delete') return T('act_delete', { name: nodeName(+a.ref), ref: a.ref });
+            if (a.op === 'play') return T('act_play', { sec: runSecs(a) ? ' · ' + runSecs(a) + T('sec_u') : '' });
+            if (a.op === 'stop') return T('act_stop');
         } catch (e) { /* ниже общий вариант */ }
         return JSON.stringify(a).slice(0, 80);
     }
@@ -527,15 +639,66 @@
         const acts = parsed.list;
         const hasDelete = acts.some(a => a && a.op === 'delete');
         card.innerHTML = '<h5>' + esc(T('act_title')) + '</h5><ul>' + acts.map(a => '<li>' + esc(describe(a || {})) + '</li>').join('') +
-            '</ul><div class="row"><button type="button" class="ai-do"></button><button type="button" class="ai-undo" style="display:none"></button><span class="st"></span></div>';
+            '</ul><div class="row"><button type="button" class="ai-do"></button><button type="button" class="ai-undo" style="display:none"></button><span class="st"></span></div>' +
+            '<div class="row ai-extra"><button type="button" class="ai-fix" style="display:none"></button><button type="button" class="ai-sendout" style="display:none"></button><span class="rs"></span></div>';
         const doBtn = card.querySelector('.ai-do'), undoBtn = card.querySelector('.ai-undo'), st = card.querySelector('.st');
+        const fixBtn = card.querySelector('.ai-fix'), outBtn = card.querySelector('.ai-sendout'), rs = card.querySelector('.rs');
         doBtn.textContent = T('act_apply'); undoBtn.textContent = T('act_undo');
-        if (parsed.err) { st.textContent = T('act_bad_json', { msg: parsed.err }); st.className = 'st bad'; }
         let undo = [], running = false;
+
+        // Ошибку видит и ИИ: кнопка «исправить» (или авто-отправка с галочкой) + пометка в истории
+        function offerFix(msg) {
+            if (autoSend(msg)) { fixBtn.style.display = 'none'; return; }
+            fixBtn.textContent = T('btn_fix'); fixBtn.style.display = '';
+            fixBtn.onclick = () => { fixBtn.style.display = 'none'; send(msg); };
+        }
+        function noteInHistory(text) {
+            if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content) + '\n[Ошибка патча: ' + String(text).slice(0, 600) + ']';
+        }
+
+        if (parsed.err) {
+            st.textContent = T('act_bad_json', { msg: parsed.err }); st.className = 'st bad';
+            noteInHistory('JSON не прочитан: ' + parsed.err);
+            offerFix(T('fix_json', { msg: parsed.err }));
+        } else if (parsed.warn) { st.textContent = parsed.warn; st.className = 'st warn'; }
+
+        // ---- запуск/остановка игры ----
+        function finishRun() {
+            const d = outputDigest(25, 10);
+            if (!d.e && !d.w) { rs.textContent = T('run_clean'); rs.className = 'rs ok'; return; }
+            rs.textContent = T('run_done', { e: d.e, w: d.w }); rs.className = 'rs bad';
+            const msg = T('fix_out', { e: d.e, w: d.w, lines: d.lines.slice(-25).join('\n') });
+            if (autoSend(msg)) return;
+            outBtn.textContent = T('btn_out'); outBtn.style.display = '';
+            outBtn.onclick = () => { outBtn.style.display = 'none'; send(msg); };
+        }
+        function watchRun(secs) {
+            const t0 = Date.now();
+            const iv = setInterval(() => {
+                if (isRunning() && secs && Date.now() - t0 >= secs * 1000) { try { stopPlay(); } catch (e) { /* уже остановлена */ } }
+                if (!isRunning() || Date.now() - t0 > 600000) { clearInterval(iv); setTimeout(finishRun, 600); }
+            }, 400);
+        }
+        async function runGame(a) {
+            if (a.op === 'stop') {
+                if (isRunning() && typeof stopPlay === 'function') stopPlay();
+                setTimeout(finishRun, 600);
+                return;
+            }
+            if (typeof startPlay !== 'function') { rs.textContent = T('act_nofn'); rs.className = 'rs bad'; return; }
+            try {
+                if (isRunning()) { stopPlay(); await sleep(300); }    // перезапуск: чтобы выполнился новый код
+                if (typeof clearLuaOutput === 'function') clearLuaOutput();
+                await startPlay();
+            } catch (e) { rs.textContent = T('act_play_fail') + ': ' + e.message; rs.className = 'rs bad'; offerFix(T('fix_run', { msg: T('act_play_fail') + ': ' + e.message, done: '—' })); return; }
+            if (!isRunning()) { rs.textContent = T('act_play_fail'); rs.className = 'rs bad'; offerFix(T('fix_run', { msg: T('act_play_fail'), done: '—' })); return; }
+            rs.textContent = T('run_on'); rs.className = 'rs';
+            watchRun(runSecs(a));
+        }
 
         async function run() {
             if (running) return; running = true; doBtn.disabled = true;
-            const touched = new Set(), made = []; let n = 0;
+            const touched = new Set(), made = [], post = []; let n = 0, failMsg = null;
             undo = []; batch.names = {}; batch.last = null;
             try {
                 for (const a of acts) {
@@ -544,15 +707,21 @@
                     else if (a.op === 'create') await doCreate(a, undo, touched, made);
                     else if (a.op === 'delete') await doDelete(a, touched);
                     else if (a.op === 'move') await doMove(a, undo, touched);
+                    else if (a.op === 'play' || a.op === 'stop') post.push(a);   // после обновления дерева, когда сцена уже сохранена
                     else throw bad(String(a.op));
                     n++;
                 }
                 st.textContent = T('act_applied', { n: n }); st.className = 'st ok';
                 if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content) + '\n' + patchSummary(acts, made);
-            } catch (e) { st.textContent = T('act_failed', { msg: e.message }); st.className = 'st bad'; }
+            } catch (e) { failMsg = e.message; st.textContent = T('act_failed', { msg: e.message }); st.className = 'st bad'; }
             await refreshEditor(made, touched);
             if (undo.length) undoBtn.style.display = '';
             doBtn.style.display = 'none'; running = false;
+            if (failMsg !== null) {
+                const done = summaryParts(acts.slice(0, n), made);
+                noteInHistory(failMsg + '. Выполнено ' + n + ' из ' + acts.length + (done ? ': ' + done : ''));
+                offerFix(T('fix_run', { msg: failMsg + ' — ' + describe(acts[n] || {}), done: done || '—' }));
+            } else { for (const a of post) await runGame(a); }
             $('ai-msgs').scrollTop = $('ai-msgs').scrollHeight;
         }
         undoBtn.onclick = async () => {
@@ -567,7 +736,7 @@
         bubble.querySelectorAll('.ai-actmark').forEach(e => e.remove());
         bubble.appendChild(card);
         if (!acts.length) { doBtn.style.display = 'none'; return; }
-        if ($('ai-auto').checked && !hasDelete && !parsed.err) run();
+        if ($('ai-auto').checked && !hasDelete && !parsed.err && !parsed.warn) run();
         else if (hasDelete) { st.textContent = T('act_wait'); st.className = 'st'; }
     }
 
@@ -578,26 +747,38 @@
         return t.trim();
     }
     // Сводка выполненного патча для истории: модель видит, что и с какими ref создано
-    function patchSummary(acts, made) {
+    function summaryParts(acts, made) {
         let mi = 0;
-        const parts = acts.map(a => {
+        return acts.map(a => {
             if (!a) return '?';
             if (a.op === 'create') { const r = made[mi++]; return 'create ' + (a.class || 'Part') + ' "' + (a.name || a.class || 'Part') + '"' + (r !== undefined ? ' ref=' + r : ''); }
             if (a.op === 'set') return 'set ref=' + a.ref + ' ' + a.prop;
             if (a.op === 'move') return 'move ref=' + a.ref + ' → ' + a.parent;
             if (a.op === 'delete') return 'delete ref=' + a.ref;
             return String(a.op);
-        });
-        return '[Патч применён: ' + parts.join('; ').slice(0, 900) + ']';
+        }).join('; ').slice(0, 900);
+    }
+    function patchSummary(acts, made) { return '[Патч применён: ' + summaryParts(acts, made) + ']'; }
+
+    // Автоисправление: ошибку можно отправить ИИ кнопкой, а с галочкой — автоматически (не более 2 раз подряд)
+    let autofixLeft = 2;
+    function autoSend(msg) {
+        if (!$('ai-autofix').checked || autofixLeft <= 0) return false;
+        autofixLeft--;
+        let tries = 0;
+        const go = () => { if (busy && tries++ < 40) return setTimeout(go, 300); send(msg, { auto: true }); };
+        setTimeout(go, 300);
+        return true;
     }
 
-    async function send(textArg) {
+    async function send(textArg, opts) {
         const text = (textArg != null ? textArg : $('ai-input').value).trim();
         if (!text || busy) return;
+        if (!(opts && opts.auto)) autofixLeft = 2;
         busy = true;
         if (textArg == null) $('ai-input').value = '';
         $('ai-chips').style.display = 'none';
-        addMsg('user', text);
+        addMsg('user', (opts && opts.auto ? '🔁 ' : '') + text);
         history.push({ role: 'user', content: text });
         const bubble = addMsg('assistant', '');
         bubble.classList.add('ai-caret');
@@ -775,6 +956,8 @@
 
     try { if (localStorage.getItem('rsw_ai_auto') === '0') $('ai-auto').checked = false; } catch (e) { /* без хранилища */ }
     $('ai-auto').onchange = () => { try { localStorage.setItem('rsw_ai_auto', $('ai-auto').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
+    try { if (localStorage.getItem('rsw_ai_autofix') === '1') $('ai-autofix').checked = true; } catch (e) { /* без хранилища */ }
+    $('ai-autofix').onchange = () => { try { localStorage.setItem('rsw_ai_autofix', $('ai-autofix').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
 
     showEmpty();
     $('ai-ctx').addEventListener('change', updateMeter);

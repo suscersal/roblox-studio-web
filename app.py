@@ -5471,6 +5471,8 @@ _ASSISTANT_ACTIONS_RU = r"""
 {"op":"set","ref":R,"prop":P,"value":V}
 {"op":"move","ref":R,"parent":P}
 {"op":"delete","ref":R}
+{"op":"play","seconds":S?}
+{"op":"stop"}
 R — число из контекста редактора. P — число или имя объекта (в том числе созданного выше в этом же блоке). Для переноса используй move, а не delete+create.
 
 class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript.
@@ -5486,7 +5488,9 @@ props/set: Position, Rotation, Size ([x,y,z]), Color ("#RRGGBB"), Transparency, 
 6. Никогда не выдумывай ref и не используй parent = -1. Нет подходящего объекта в контексте — не указывай parent и скажи в ответе, куда попадёт скрипт.
 
 Чтобы изменить код существующего скрипта: {"op":"set","ref":R,"prop":"Source","value":"новый код целиком"}.
-В JSON переводы строк в source пиши как \n, кавычки экранируй. Максимум 30 действий в блоке.
+В JSON переводы строк в source пиши как \n, кавычки экранируй: настоящих переводов строк внутри строки JSON быть не должно. Держи блок компактным (длина ответа ограничена): без лишних комментариев и дублирования кода. Максимум 30 действий в блоке.
+
+Запуск и проверка игры: play запускает игру (S — 1..60 секунд, потом редактор сам её остановит), stop останавливает. Чтобы проверить свою работу, поставь play ПОСЛЕДНИМ действием блока, например {"op":"play","seconds":8}. Вывод игры (print/warn/error) придёт тебе в блоке «Вывод игры» контекста: найди причину ошибок и исправь. Запускай игру только если пользователь просит запустить/проверить/протестировать или это нужно, чтобы понять ошибку. Пометка [Ошибка патча: ...] в истории значит, что патч применился не полностью: исправь причину и пришли блок только для невыполненной части.
 
 Формат ответа на просьбу изменить сцену: 1–2 фразы о плане, затем сразу блок rbx-actions. Пример (вращающийся куб):
 Создаю куб и скрипт, который его вращает.
@@ -5504,6 +5508,8 @@ Actions:
 {"op":"set","ref":R,"prop":P,"value":V}
 {"op":"move","ref":R,"parent":P}
 {"op":"delete","ref":R}
+{"op":"play","seconds":S?}
+{"op":"stop"}
 R is a number from the editor context. P is a number or an object name (including one created earlier in the same block). To reparent use move, not delete+create.
 
 class: Part, WedgePart, SpherePart, CornerWedgePart, SpawnLocation, Folder, Model, Script, LocalScript, ModuleScript.
@@ -5519,7 +5525,9 @@ Script placement:
 6. Never invent a ref and never use parent = -1. If no suitable object is in the context, omit parent and say in the reply where the script will land.
 
 To change an existing script's code: {"op":"set","ref":R,"prop":"Source","value":"the whole new code"}.
-In JSON write newlines inside source as \n and escape quotes. At most 30 actions per block.
+In JSON write newlines inside source as \n and escape quotes: a JSON string must contain no real line breaks. Keep the block compact (the reply length is limited): no needless comments or duplicated code. At most 30 actions per block.
+
+Running and testing the game: play starts the game (S is 1..60 seconds, then the editor stops it itself), stop stops it. To test your work put play as the LAST action of the block, e.g. {"op":"play","seconds":8}. The game output (print/warn/error) reaches you in the "Game output" part of the context: find the cause of the errors and fix them. Run the game only when the user asks to run/check/test, or when you need it to understand an error. A note [Ошибка патча: ...] in the history means the patch was not fully applied: fix the cause and send a block only for the part that is not done.
 
 Reply format for a scene-change request: 1-2 sentences with the plan, then the rbx-actions block right away. Example (spinning cube):
 Creating a cube and a script that spins it.
@@ -5560,8 +5568,8 @@ _ASSISTANT_SYSTEM = {
 
 
 # ---------- Контекст редактора: бюджет, оценка токенов, окно модели ----------
-_AI_CTX_MAX = {'selection': 2000, 'scene': 4000, 'script': 12000}   # символов
-_AI_CTX_ORDER = ('selection', 'scene', 'script')    # сцена с ref'ами — раньше скрипта: скрипт режем первым
+_AI_CTX_MAX = {'selection': 2000, 'scene': 4000, 'output': 3000, 'script': 12000}   # символов
+_AI_CTX_ORDER = ('selection', 'scene', 'output', 'script')    # сцена с ref'ами — раньше скрипта: скрипт режем первым
 _AI_DEFAULT_WINDOW = 32768       # если провайдер не сообщает размер окна
 _AI_REPLY_RESERVE = 3000         # = max_tokens ответа
 _AI_WIN_CACHE = {}               # (base_url, model) -> (окно | None, время запроса)
@@ -5666,8 +5674,10 @@ def _ai_context(d, window):
             lim = max(800, min(_AI_CTX_MAX[k], total - used))
             v, tr = _ai_cut(v, lim, tail=0.3, note='[script truncated]')
         else:
-            lim = min(_AI_CTX_MAX[k], int(total * (0.12 if k == 'selection' else 0.25)))
-            v, tr = _ai_cut(v, max(300, lim))
+            share = {'selection': 0.12, 'scene': 0.25, 'output': 0.2}[k]
+            lim = min(_AI_CTX_MAX[k], int(total * share))
+            # вывод игры: сохраняем заголовок и ПОСЛЕДНИЕ строки — свежие ошибки важнее старых
+            v, tr = _ai_cut(v, max(300, lim), tail=0.85 if k == 'output' else 0.0)
         truncated = truncated or tr
         used += len(v)
         out.append(v)
