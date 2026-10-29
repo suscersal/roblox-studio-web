@@ -6459,14 +6459,58 @@ local HttpServiceObj = setmetatable({}, { __index = {
 -- стороне (см. updateTweens/__tween_register), тут только конструкция
 -- объекта Tween с Play/Cancel/Pause и событием Completed.
 local __nextTweenId = 1
+local function __enumName(e) if type(e) == "table" then return tostring(e.Name or e) end return tostring(e or "") end
+local function __ease(a, style, dir)
+    style, dir = __enumName(style), __enumName(dir)
+    if string.find(style, "Linear", 1, true) then return a end
+    if string.find(style, "Sine", 1, true) then
+        if string.find(dir, "InOut", 1, true) then return -(math.cos(math.pi * a) - 1) / 2 end
+        if string.find(dir, "Out", 1, true) then return math.sin(a * math.pi / 2) end
+        return 1 - math.cos(a * math.pi / 2)
+    end
+    local pw = 2
+    if string.find(style, "Cubic", 1, true) then pw = 3 elseif string.find(style, "Quart", 1, true) then pw = 4
+    elseif string.find(style, "Quint", 1, true) then pw = 5 end
+    if string.find(dir, "InOut", 1, true) then
+        if a < 0.5 then return (2 ^ (pw - 1)) * a ^ pw end
+        return 1 - ((-2 * a + 2) ^ pw) / 2
+    end
+    if string.find(dir, "Out", 1, true) then return 1 - (1 - a) ^ pw end
+    return a ^ pw
+end
 local TweenMT = { __index = {
     Play = function(self)
+        local cls = __get_class(self.__ref)
+        -- CFrameValue/Vector3Value/Color3Value хранят Value в Lua (JS-твин их не двигает): интерполируем тут, шаг за шагом
+        -- присваивая Value — так срабатывают GetPropertyChangedSignal("Value")/Changed (DoorOpener: CFrameValue -> PivotTo).
+        if (cls == "CFrameValue" or cls == "Vector3Value" or cls == "Color3Value") and self.__props.Value ~= nil then
+            local token = {}
+            self.__running = token
+            task.spawn(function()
+                local inst = __wrap(self.__ref)
+                local from, target = inst.Value, self.__props.Value
+                local dur, t0 = math.max(self.__time or 0, 0), os.clock()
+                while self.__running == token do
+                    local a = dur > 0 and math.min((os.clock() - t0) / dur, 1) or 1
+                    local e = __ease(a, self.__style, self.__dir)
+                    local okv, val = pcall(function() return from:Lerp(target, e) end)
+                    inst.Value = (okv and val) or (a >= 1 and target) or from
+                    if a >= 1 then break end
+                    task.wait()
+                end
+                if self.__running == token then
+                    self.__running = nil
+                    __fire_signal(self.__completedKey, "Event")
+                end
+            end)
+            return
+        end
         for name, target in pairs(self.__props) do
             __tween_register(self.__completedKey, self.__ref, name, target, self.__time)
         end
     end,
     Pause = function(self) end, -- честной паузы нет — покадровый твин на JS-стороне идёт по времени, а не по кадрам
-    Cancel = function(self) end, -- то же самое: остановить конкретный твин посреди пути пока нельзя
+    Cancel = function(self) self.__running = nil end, -- для Value-твинов (Lua) отмена честная; JS-твины остановить пока нельзя
 } }
 local TweenServiceObj = setmetatable({}, { __index = {
     Create = function(self, instance, tweenInfo, props)
@@ -6480,6 +6524,7 @@ local TweenServiceObj = setmetatable({}, { __index = {
         return setmetatable({
             __ref = rawget(instance, "__ref"), __props = props, __time = (tweenInfo and tweenInfo.Time) or 1,
             __completedKey = completedKey, Completed = makeEvent(completedKey, "Event"),
+            __style = tweenInfo and tweenInfo.EasingStyle, __dir = tweenInfo and tweenInfo.EasingDirection,
         }, TweenMT)
     end,
 } })
@@ -6897,6 +6942,9 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 return baseNew(t, "Color", v.Color)
             elseif k == "Value" then
                 __tblVals[ref] = v
+                -- GetPropertyChangedSignal("Value") / Changed: без этого CFrameValue+PivotTo (двери, лифты) не двигали модель
+                __fire_signal(ref, "__prop_Value")
+                __fire_signal(ref, "Changed")
                 return
             elseif k == "WorldPivot" and rawget(v, "R00") ~= nil then
                 __set_world_pivot(ref, v:GetComponents())
