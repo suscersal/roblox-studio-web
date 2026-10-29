@@ -918,17 +918,17 @@ def s_sharedstring(vals):
     return write_interleaved_u32_array([int(v) if v is not None else 0 for v in vals])
 
 def s_uniqueid(vals):
-    buf = bytearray()
+    # Точная обратная пара к t_uniqueid: 16 байт на значение, interleaved.
+    raw = []
     for v in vals:
         if isinstance(v, dict):
-            index = int(v.get('index', 0))
-            time_ = int(v.get('time', 0))
-            random = int(v.get('random', 0))
+            index = int(v.get('index', 0)) & 0xFFFFFFFF
+            time_ = int(v.get('time', 0)) & 0xFFFFFFFF
+            random = int(v.get('random', 0)) & 0xFFFFFFFFFFFFFFFF
         else:
             index = time_ = random = 0
-        val = (index << 96) | (time_ << 64) | random
-        buf.extend(struct.pack('<QQ', val & 0xFFFFFFFFFFFFFFFF, val >> 64))
-    return bytes(buf)
+        raw.append((index << 96) | (time_ << 64) | random)
+    return write_interleaved_array(raw, 16)
 
 def s_capabilities(vals):
     raw = [transform_i64(int(v) if v is not None else 0) for v in vals]
