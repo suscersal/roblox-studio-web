@@ -1126,6 +1126,386 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=Fals
 
 flask_app = Flask(__name__)
 
+# ============ СОВМЕСТНАЯ РАБОТА (2+ человека над одной картой) ============
+# Сервер один и держит единственное состояние карты (state['parsed']); второй
+# человек открывает тот же адрес (http://<ip-хоста>:PORT) и вводит код комнаты.
+# Все правки идут через те же эндпоинты, что и раньше — каждый из них обёрнут в
+# @_collab_track(...): декоратор под общим замком снимает «до»-снимок, пускает
+# правку и пишет в журнал операцию с обратным действием (undo) — отсюда
+# история «кто что поменял» и откат до ревизии. Клиент (collab.js) раз в
+# несколько секунд long-poll'ит /api/collab/poll и перечитывает дерево/сцену.
+# Выключено по умолчанию: пока хост не нажал «Начать» (/api/collab/start),
+# декоратор ничего не пишет и поведение редактора прежнее. Пока комната
+# включена, не-локальные запросы на запись требуют заголовок X-Collab-Token.
+import copy as _copy
+import functools as _functools
+import secrets as _secrets
+import socket as _socket
+import threading as _threading
+
+COLLAB_MAX_OPS = 2000          # длина журнала; старые ревизии выпадают из истории
+COLLAB_MAX_UNDO_BYTES = 65536  # Source скрипта больше этого не снимаем (правка не откатывается)
+COLLAB_PEER_TTL = 15           # секунд без poll — человек считается ушедшим
+
+_collab = {
+    'on': False, 'token': None, 'rev': 0, 'base': 0,
+    'ops': [],      # {rev,t,by,byId,type,ref,name,cls,prop,n,undo,redo}
+    'peers': {},    # id -> {name, seen, sel}
+    'pv': 0,        # версия «присутствия»: меняется, когда кто-то вошёл/сменил выбранный объект
+}
+# Один замок на всё: правка карты + запись в журнал атомарны (а api_add без
+# замка мог бы выдать двум одновременным PUT один и тот же ref); Condition на
+# нём же будит long-poll'ы.
+_collab_cond = _threading.Condition(_threading.RLock())
+_MISSING = object()
+
+
+def _collab_is_local():
+    return request.remote_addr in ('127.0.0.1', '::1', '::ffff:127.0.0.1')
+
+
+def _collab_who():
+    cid = (request.headers.get('X-Collab-Id') or '')[:40]
+    # имя приходит в заголовке через encodeURIComponent (кириллица в заголовках нельзя)
+    name = _urlparse.unquote(request.headers.get('X-Collab-Name') or '').strip()[:32]
+    if not name:
+        name = 'host' if _collab_is_local() else (request.remote_addr or '?')
+    return cid, name
+
+
+def _collab_push(typ, ref=None, name='', cls='', prop='', n=1, undo=None, redo=None):
+    """Дописывает операцию в журнал (вызывать под _collab_cond)."""
+    c = _collab
+    cid, who = _collab_who()
+    last = c['ops'][-1] if c['ops'] else None
+    # подряд идущие правки ОДНОГО свойства одним человеком за 5 с — одна запись
+    # (поле ввода / автосохранение скрипта): undo остаётся самым первым старым значением
+    if (typ == 'set' and last and last['type'] == 'set' and cid and last['byId'] == cid
+            and last['ref'] == ref and last['prop'] == prop and time.time() - last['t'] < 5):
+        c['rev'] += 1
+        last.update(rev=c['rev'], t=time.time(), redo=redo)
+        _collab_cond.notify_all()
+        return
+    c['rev'] += 1
+    c['ops'].append({'rev': c['rev'], 't': time.time(), 'by': who, 'byId': cid,
+                     'type': typ, 'ref': ref, 'name': name, 'cls': cls,
+                     'prop': prop, 'n': n, 'undo': undo, 'redo': redo})
+    if len(c['ops']) > COLLAB_MAX_OPS:
+        drop = len(c['ops']) - COLLAB_MAX_OPS
+        c['base'] = c['ops'][drop - 1]['rev']
+        del c['ops'][:drop]
+    _collab_cond.notify_all()
+
+
+def _collab_reset(typ='reload'):
+    """Открыта/создана другая карта: история старой карты бессмысленна."""
+    c = _collab
+    c['ops'] = []
+    _collab_push(typ)
+    c['base'] = c['rev']
+
+
+# --- примитивные действия, из которых собираются undo/redo ---
+# ('props', ref, {prop: значение | _MISSING})  — вернуть значения свойств
+# ('put',   ref, cls, parent, props)           — создать/восстановить объект
+# ('rm',    ref)                               — удалить объект
+# ('parent', ref, parent)                      — сменить родителя
+
+def _collab_apply(parsed, acts):
+    for a in acts:
+        k = a[0]
+        if k == 'props':
+            if a[1] not in parsed['referent_to_class']:
+                continue
+            p = parsed['props'].setdefault(a[1], {})
+            for prop, val in a[2].items():
+                if val is _MISSING:
+                    p.pop(prop, None)
+                else:
+                    p[prop] = _copy.deepcopy(val)
+        elif k == 'put':
+            parsed['referent_to_class'][a[1]] = a[2]
+            parsed['parent_map'][a[1]] = a[3]
+            parsed['props'][a[1]] = _copy.deepcopy(a[4])
+        elif k == 'rm':
+            for d in ('referent_to_class', 'parent_map', 'props'):
+                parsed[d].pop(a[1], None)
+        elif k == 'parent':
+            if a[1] in parsed['referent_to_class']:
+                parsed['parent_map'][a[1]] = a[2]
+    parsed['_modified'] = True
+    bump_scene_version()
+
+
+def _collab_obj(parsed, ref):
+    """(класс, имя) объекта для подписи в ленте."""
+    cls = parsed['referent_to_class'].get(ref, '')
+    return cls, str(parsed['props'].get(ref, {}).get('Name', ''))[:60]
+
+
+def _collab_snapshot_props(parsed, ref, names):
+    p = parsed['props'].get(ref, {})
+    return {k: (_copy.deepcopy(p[k]) if k in p else _MISSING) for k in names}
+
+
+def _collab_track(kind):
+    """Декоратор правящих эндпоинтов. kind: set | add | del | move | reload | import."""
+    def deco(fn):
+        @_functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            with _collab_cond:
+                if not _collab['on']:
+                    return fn(*args, **kwargs)
+                if kind == 'reload' and not _collab_is_local():
+                    return jsonify({'ok': False, 'error': 'Карту открывает только хост'}), 403
+                parsed = state['parsed']
+                body = request.get_json(silent=True) if request.is_json else None
+                body = body if isinstance(body, dict) else {}
+                pre = None
+                try:
+                    if parsed and kind == 'set' and body.get('prop') is not None:
+                        ref, prop = kwargs.get('ref'), body.get('prop')
+                        names = [prop] + (['CFrame'] if prop in ('Position', 'Rotation') else [])
+                        pre = _collab_snapshot_props(parsed, ref, names)
+                        big = prop == 'Source' and len(str(pre.get('Source'))) > COLLAB_MAX_UNDO_BYTES
+                        pre = None if big else (ref, prop, pre)
+                    elif parsed and kind == 'del':
+                        ref = kwargs.get('ref')
+                        if ref in parsed['referent_to_class']:
+                            cls, nm = _collab_obj(parsed, ref)
+                            pre = (ref, cls, nm, parsed['parent_map'].get(ref, -1),
+                                   _copy.deepcopy(parsed['props'].get(ref, {})))
+                    elif parsed and kind == 'move':
+                        pm = parsed['parent_map']
+                        pre = {r: pm.get(r, -1) for r in (body.get('refs') or [])
+                               if isinstance(r, int)}
+                except Exception:   # снимок не должен ломать саму правку
+                    traceback.print_exc()
+                    pre = None
+                rv = fn(*args, **kwargs)
+                try:
+                    resp = flask_app.make_response(rv)
+                    js = resp.get_json(silent=True) if resp.status_code == 200 else None
+                    if not (isinstance(js, dict) and js.get('ok')):
+                        return rv
+                    parsed = state['parsed']
+                    if kind in ('reload',):
+                        _collab_reset('reload')
+                    elif kind == 'import':
+                        _collab_push('import', n=int(js.get('count') or 0))
+                    elif kind == 'add':
+                        ref = js.get('ref')
+                        cls, nm = _collab_obj(parsed, ref)
+                        snap = (ref, cls, parsed['parent_map'].get(ref, -1),
+                                _copy.deepcopy(parsed['props'].get(ref, {})))
+                        _collab_push('add', ref, nm, cls,
+                                     undo=[('rm', ref)], redo=[('put',) + snap])
+                    elif kind == 'del' and pre:
+                        ref, cls, nm, par, props = pre
+                        _collab_push('del', ref, nm, cls,
+                                     undo=[('put', ref, cls, par, props)], redo=[('rm', ref)])
+                    elif kind == 'set' and pre:
+                        ref, prop, old = pre
+                        cls, nm = _collab_obj(parsed, ref)
+                        new = _collab_snapshot_props(parsed, ref, list(old.keys()))
+                        if ref not in parsed['referent_to_class'] or new == old:
+                            return rv
+                        _collab_push('set', ref, nm, cls, prop=prop or '',
+                                     undo=[('props', ref, old)], redo=[('props', ref, new)])
+                    elif kind == 'move' and pre:
+                        moved = [r for r in (js.get('moved') or []) if r in pre]
+                        if moved:
+                            par = parsed['parent_map']
+                            cls, nm = _collab_obj(parsed, moved[0])
+                            _collab_push('move', moved[0], nm, cls, n=len(moved),
+                                         undo=[('parent', r, pre[r]) for r in moved],
+                                         redo=[('parent', r, par.get(r, -1)) for r in moved])
+                except Exception:
+                    traceback.print_exc()
+                return rv
+        return wrapper
+    return deco
+
+
+@flask_app.before_request
+def _collab_gate():
+    """Пока комната включена: запись и /api/collab/* — только локально или с кодом."""
+    c = _collab
+    if not c['on'] or not request.path.startswith('/api/'):
+        return None
+    is_collab = request.path.startswith('/api/collab/')
+    if request.method in ('GET', 'HEAD', 'OPTIONS') and not (
+            is_collab and request.path != '/api/collab/status'):
+        return None
+    if _collab_is_local():
+        return None
+    tok = request.headers.get('X-Collab-Token') or ''
+    if c['token'] and _secrets.compare_digest(tok, c['token']):
+        return None
+    return jsonify({'ok': False, 'error': 'Нужен код комнаты', 'needToken': True}), 403
+
+
+def _collab_public(op):
+    return {k: op[k] for k in ('rev', 't', 'by', 'byId', 'type', 'ref', 'name', 'cls', 'prop', 'n')}
+
+
+def _collab_peers():
+    now = time.time()
+    return [{'id': i, 'name': p['name'], 'sel': p['sel']}
+            for i, p in _collab['peers'].items() if now - p['seen'] < COLLAB_PEER_TTL]
+
+
+def _collab_touch():
+    cid, who = _collab_who()
+    if cid:
+        sel = request.args.get('sel', type=int)
+        old = _collab['peers'].get(cid)
+        _collab['peers'][cid] = {'name': who, 'seen': time.time(), 'sel': sel}
+        if old is None or old['sel'] != sel or old['name'] != who:
+            _collab['pv'] += 1
+            _collab_cond.notify_all()       # разбудить чужие poll'ы — пусть сразу увидят
+
+
+def _collab_lan_urls():
+    ips = set()
+    try:
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        s.connect(('10.255.255.255', 1))    # пакет не уходит — только выбор интерфейса
+        ips.add(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    ips.discard('127.0.0.1')
+    return ['http://%s:%d' % (ip, PORT) for ip in sorted(ips)]
+
+
+@flask_app.route('/api/collab/status')
+def api_collab_status():
+    c = _collab
+    with _collab_cond:
+        out = {'ok': True, 'on': c['on'], 'rev': c['rev'], 'base': c['base'],
+               'peers': _collab_peers(), 'local': _collab_is_local()}
+        if c['on'] and _collab_is_local():       # код и адреса видит только хост
+            out['token'] = c['token']
+            out['urls'] = _collab_lan_urls()
+        return jsonify(out)
+
+
+@flask_app.route('/api/collab/start', methods=['POST'])
+def api_collab_start():
+    if not _collab_is_local():
+        return jsonify({'ok': False, 'error': 'Комнату запускает только хост'}), 403
+    with _collab_cond:
+        if not _collab['on']:
+            _collab['on'] = True
+            # без похожих символов (0/O, 1/I) — код диктуют голосом
+            _collab['token'] = ''.join(_secrets.choice('ABCDEFGHJKMNPQRSTUVWXYZ23456789') for _ in range(6))
+            _collab_reset('reload')
+        _collab_cond.notify_all()
+    return api_collab_status()
+
+
+@flask_app.route('/api/collab/stop', methods=['POST'])
+def api_collab_stop():
+    if not _collab_is_local():
+        return jsonify({'ok': False, 'error': 'Комнату закрывает только хост'}), 403
+    with _collab_cond:
+        _collab.update({'on': False, 'token': None, 'ops': [], 'peers': {}})
+        _collab['base'] = _collab['rev']
+        _collab_cond.notify_all()
+    return jsonify({'ok': True})
+
+
+@flask_app.route('/api/collab/join', methods=['POST'])
+def api_collab_join():
+    with _collab_cond:
+        if not _collab['on']:
+            return jsonify({'ok': False, 'error': 'Комната не запущена'}), 404
+        _collab_touch()
+        return jsonify({'ok': True, 'rev': _collab['rev'], 'peers': _collab_peers()})
+
+
+@flask_app.route('/api/collab/poll')
+def api_collab_poll():
+    """Long-poll: ждёт ревизию новее since (до wait секунд). Если since больше
+    текущей ревизии (сервер перезапускали) — reset=True, клиент перечитывает всё."""
+    since = request.args.get('since', 0, type=int)
+    wait = min(max(request.args.get('wait', 15, type=float), 0), 25)
+    deadline = time.time() + wait
+    with _collab_cond:
+        _collab_touch()
+        pv0 = _collab['pv']
+        while _collab['on'] and _collab['rev'] <= since and _collab['pv'] == pv0:
+            left = deadline - time.time()
+            if left <= 0:
+                break
+            _collab_cond.wait(min(left, 5))
+            _collab_touch()
+        c = _collab
+        if not c['on']:
+            return jsonify({'ok': True, 'on': False, 'rev': c['rev'], 'ops': [], 'peers': []})
+        reset = since > c['rev'] or since < c['base']
+        ops = [] if reset else [_collab_public(o) for o in c['ops'] if o['rev'] > since]
+        return jsonify({'ok': True, 'on': True, 'rev': c['rev'], 'reset': reset,
+                        'ops': ops, 'peers': _collab_peers()})
+
+
+@flask_app.route('/api/collab/ping')
+def api_collab_ping():
+    """Лёгкая отметка присутствия: клиент зовёт при смене выбранного объекта."""
+    with _collab_cond:
+        if _collab['on']:
+            _collab_touch()
+    return jsonify({'ok': True})
+
+
+@flask_app.route('/api/collab/history')
+def api_collab_history():
+    limit = min(request.args.get('limit', 100, type=int), COLLAB_MAX_OPS)
+    with _collab_cond:
+        ops = _collab['ops'][-limit:][::-1]       # новые сверху
+        return jsonify({'ok': True, 'rev': _collab['rev'], 'base': _collab['base'],
+                        'ops': [dict(_collab_public(o), undoable=o['undo'] is not None) for o in ops]})
+
+
+@flask_app.route('/api/collab/revert', methods=['POST'])
+def api_collab_revert():
+    """Откат карты к состоянию сразу ПОСЛЕ ревизии `rev`: undo всех более поздних
+    операций от новых к старым. История не переписывается — откат сам становится
+    операцией (его тоже можно откатить)."""
+    body = request.get_json(silent=True) or {}
+    try:
+        target = int(body.get('rev'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Нужен rev'}), 400
+    with _collab_cond:
+        c, parsed = _collab, state['parsed']
+        if not c['on'] or not parsed:
+            return jsonify({'ok': False, 'error': 'Нет открытой комнаты/карты'}), 400
+        if target < c['base'] or target > c['rev']:
+            return jsonify({'ok': False, 'error': 'Эта ревизия уже выпала из истории'}), 400
+        later = [o for o in c['ops'] if o['rev'] > target]
+        if not later:
+            return jsonify({'ok': True, 'reverted': 0, 'rev': c['rev']})
+        bad = [o['rev'] for o in later if o['undo'] is None]
+        if bad:
+            return jsonify({'ok': False, 'error': 'Не откатываются операции: %s' % bad[:5]}), 409
+        undo_all = [a for o in reversed(later) for a in o['undo']]
+        redo_all = [a for o in later for a in o['redo']]
+        _collab_apply(parsed, undo_all)
+        _collab_push('revert', n=len(later), prop=str(target), undo=redo_all, redo=undo_all)
+        return jsonify({'ok': True, 'reverted': len(later), 'rev': c['rev']})
+
+
+@flask_app.route('/collab.js')
+def collab_js():
+    try:
+        with open('collab.js', 'r', encoding='utf-8') as f:
+            src = f.read()
+    except OSError:
+        src = '/* collab.js не найден */'
+    return _no_cache(Response(src, mimetype='application/javascript'))
+
 # Откуда качать, если файла ещё нет локально — тот же список, что в
 # setup_termux.sh. Автозагрузка ниже делает сам setup_termux.sh не
 # обязательным: сервер докачивает недостающее по требованию сам.
@@ -1322,6 +1702,7 @@ def api_recents():
 
 
 @flask_app.route('/api/open', methods=['POST'])
+@_collab_track('reload')
 def api_open():
     body = request.json or {}
     path = body.get('path', '')
@@ -1337,6 +1718,7 @@ def api_open():
 
 
 @flask_app.route('/api/open/upload', methods=['POST'])
+@_collab_track('reload')
 def api_open_upload():
     """Открытие .rbxl/.rbxlx, выбранного через ОБЫЧНЫЙ системный файловый
     менеджер (<input type=file> на фронте, см. pickRbxlFileForOpen() в
@@ -1764,6 +2146,7 @@ def api_roblox_experience_places():
 
 
 @flask_app.route('/api/open/place', methods=['POST'])
+@_collab_track('reload')
 def api_open_place():
     """Скачать место с Roblox по Place ID и открыть его в редакторе.
     Тело: {place_id, version?}. Сначала используется вход в аккаунт
@@ -2704,6 +3087,7 @@ def _load_baseplate_into_state():
 
 
 @flask_app.route('/api/new', methods=['POST'])
+@_collab_track('reload')
 def api_new():
     """Новая сцена = шаблон Baseplate (см. _load_baseplate_into_state); если
     он по какой-то причине не загрузился — пустая сцена, как раньше:
@@ -3419,6 +3803,7 @@ def build_rot_matrix_from_deg(rx_deg, ry_deg, rz_deg):
 
 
 @flask_app.route('/api/instance/<int:ref>', methods=['POST'])
+@_collab_track('set')
 def api_set_prop(ref):
     parsed = state['parsed']
     if not parsed:
@@ -3543,6 +3928,7 @@ def api_particles():
 
 
 @flask_app.route('/api/instance', methods=['PUT'])
+@_collab_track('add')
 def api_add():
     parsed = state['parsed']
     if not parsed:
@@ -3581,6 +3967,7 @@ def api_add():
 
 
 @flask_app.route('/api/reparent', methods=['POST'])
+@_collab_track('move')
 def api_reparent():
     """Перенос объектов в другого родителя (drag & drop в Explorer).
     Тело: {"refs": [..], "parent": ref}. Мировые координаты не меняются —
@@ -3630,6 +4017,7 @@ def api_reparent():
 
 
 @flask_app.route('/api/instance/<int:ref>', methods=['DELETE'])
+@_collab_track('del')
 def api_delete(ref):
     parsed = state['parsed']
     if not parsed:
@@ -3810,6 +4198,7 @@ def _finish_rbxm_import(path, parent):
 
 
 @flask_app.route('/api/import/rbxm', methods=['POST'])
+@_collab_track('import')
 def api_import_rbxm():
     """Импорт .rbxm по пути на диске сервера (Android: Kotlin уже скопировал
     выбранный через SAF файл в приватную папку приложения)."""
@@ -3822,6 +4211,7 @@ def api_import_rbxm():
 
 
 @flask_app.route('/api/import/rbxm/upload', methods=['POST'])
+@_collab_track('import')
 def api_import_rbxm_upload():
     """Импорт .rbxm, выбранного обычным <input type=file> (см. /api/open/upload)."""
     import tempfile

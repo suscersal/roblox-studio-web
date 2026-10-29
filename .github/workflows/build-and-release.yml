@@ -11,6 +11,7 @@ on:
       - 'script.js'
       - 'style.css'
       - 'assistant.js'
+      - 'collab.js'
       - 'icons.txt'
       - 'icons/**'
       - 'scripts/**'
