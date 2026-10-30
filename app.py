@@ -4100,7 +4100,8 @@ def api_proximity_prompts():
             'maxDistance': safe_float(props.get('MaxActivationDistance', 10.0), 10.0),
             'requiresLineOfSight': bool(requires_los),
             'enabled': bool(enabled),
-            'style': props.get('Style', 'Default'),
+            'style': props.get('Style', 0),
+            'gamepadKeyCode': props.get('GamepadKeyCode', 1000),
         })
     return jsonify({'ok': True, 'prompts': out})
 

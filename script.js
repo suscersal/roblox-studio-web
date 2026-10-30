@@ -4717,7 +4717,7 @@
             _promptRegistry = {};
             _activePromptRef = null;
             _activePrompt = null;
-            _promptHoldStart = null;
+            _promptHoldStart = null; _promptShownRef = null; _promptHeldRef = null; _promptTriggered = false; _ppsRefCache = null;
             const _promptEl = document.getElementById('proximity-prompt');
             if (_promptEl) _promptEl.style.display = 'none';
             _disposeCharMesh();
@@ -5499,6 +5499,9 @@ local __enumCache = {}
 local __ENUM_VALUES = {
     RenderPriority = { First = 0, Input = 100, Camera = 200, Character = 300, Last = 2000 },
     MouseBehavior = { Default = 0, LockCenter = 1, LockCurrentPosition = 2 },
+    ProximityPromptInputType = { Keyboard = 1, Mouse = 2, Gamepad = 3, Touch = 4 },
+    ProximityPromptStyle = { Default = 0, Custom = 1 },
+    ProximityPromptExclusivity = { OnePerButton = 0, OneGlobally = 1, AlwaysShow = 2 },
     CameraType = { Fixed = 0, Watch = 1, Attach = 2, Track = 3, Follow = 4, Custom = 5, Scriptable = 6, Orbital = 7 },
     UserInputType = { MouseButton1 = 0, MouseButton2 = 1, MouseButton3 = 2, MouseWheel = 3, MouseMovement = 4,
         Touch = 7, Keyboard = 8, Focus = 9, Accelerometer = 10, Gyro = 11, Gamepad1 = 12, Gamepad2 = 13,
@@ -6759,6 +6762,11 @@ local COMPAT = {
     -- честные RBXScriptSignal без срабатывания.
     Triggered = function(t, ref) return makeEvent(ref, "Triggered") end,
     TriggerEnded = function(t, ref) return makeEvent(ref, "TriggerEnded") end,
+    PromptTriggered = function(t, ref) return makeEvent(ref, "PromptTriggered") end,
+    PromptTriggerEnded = function(t, ref) return makeEvent(ref, "PromptTriggerEnded") end,
+    -- prompt:InputHoldBegin()/InputHoldEnd() — программное «нажатие» (кастомный UI зовёт их сам)
+    InputHoldBegin = function(t, ref) return function(self) __prompt_input(ref, true) end end,
+    InputHoldEnd = function(t, ref) return function(self) __prompt_input(ref, false) end end,
     PromptShown = function(t, ref) return makeEvent(ref, "PromptShown") end,
     PromptHidden = function(t, ref) return makeEvent(ref, "PromptHidden") end,
     PromptButtonHoldBegan = function(t, ref) return makeEvent(ref, "PromptButtonHoldBegan") end,
@@ -6845,6 +6853,28 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                                       UserInputState = Enum.UserInputState.Begin }
                 end
                 return out
+            end
+        end
+        -- UserInputService:GetStringForKeyCode(Enum.KeyCode.E) -> "E" (раскладка клиента не известна — отдаём имя клавиши)
+        if k == "GetStringForKeyCode" and __get_class(ref) == "UserInputService" then
+            return function(self, kc)
+                if kc == nil then return "" end
+                local nm = kc.Name
+                if #nm == 1 then return nm end
+                return ({ Zero="0", One="1", Two="2", Three="3", Four="4", Five="5", Six="6", Seven="7", Eight="8", Nine="9" })[nm] or ""
+            end
+        end
+        -- ProximityPrompt.KeyboardKeyCode / GamepadKeyCode — EnumItem (Enum.KeyCode.E), а не голое число из файла
+        if (k == "KeyboardKeyCode" or k == "GamepadKeyCode") and __get_class(ref) == "ProximityPrompt" then
+            local ok, n = pcall(__get_prop, ref, k)
+            if not ok or n == nil then n = (k == "KeyboardKeyCode") and 101 or 1000 end   -- значения по умолчанию из Roblox: E / ButtonX
+            if type(n) == "string" then return Enum.KeyCode[n] end
+            if type(n) == "number" then
+                local nm
+                if n >= 97 and n <= 122 then nm = string.upper(string.char(n))
+                elseif n >= 65 and n <= 90 then nm = string.char(n)
+                else nm = ({ [32]="Space", [13]="Return", [9]="Tab", [1000]="ButtonX", [1001]="ButtonY", [1002]="ButtonA", [1003]="ButtonB" })[n] or "Unknown" end
+                return Enum.KeyCode[nm]
             end
         end
         -- UserInputService:GetLastInputType() — InputCategorizer (Blaster) спрашивает тип последнего ввода при старте
@@ -8607,6 +8637,14 @@ end
                     lua.lua_getglobal(L, '__wrap');
                     lua.lua_pushnumber(L, a.__instanceRef);
                     lua.lua_call(L, 1, 1);
+                } else if (a && typeof a === 'object' && a.__enum) {
+                    // Enum.<Type>.<Name> — тот же кэшированный объект, что видит скрипт
+                    // (сравнение inputType == Enum.ProximityPromptInputType.Touch — по ссылке)
+                    lua.lua_getglobal(L, 'Enum');
+                    lua.lua_getfield(L, -1, a.__enum[0]);
+                    lua.lua_getfield(L, -1, a.__enum[1]);
+                    lua.lua_remove(L, -2);
+                    lua.lua_remove(L, -2);
                 } else if (typeof a === 'number') lua.lua_pushnumber(L, a);
                 else if (typeof a === 'boolean') lua.lua_pushboolean(L, a);
                 else if (a === null || a === undefined) lua.lua_pushnil(L);
@@ -9529,6 +9567,10 @@ end
             });
             // UserInputService.TouchEnabled и т.п.: экранный джойстик есть на
             // сенсорных устройствах, WASD — на устройствах с клавиатурой.
+            def('__prompt_input', function (L2) {
+                window.__promptInput(lua.lua_tonumber(L2, 1), !!lua.lua_toboolean(L2, 2));
+                return 0;
+            });
             def('__is_touch', function (L2) {
                 const touch = (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window);
                 lua.lua_pushboolean(L2, touch ? 1 : 0);
@@ -9770,7 +9812,27 @@ end
                 if (ty === lua.LUA_TNUMBER) value = lua.lua_tonumber(L2, 3);
                 else if (ty === lua.LUA_TBOOLEAN) value = !!lua.lua_toboolean(L2, 3);
                 else if (ty === lua.LUA_TSTRING) value = lua.lua_tojsstring(L2, 3);
-                else if (ty === lua.LUA_TTABLE) value = luaTableToJsPropValue(L2, 3);
+                else if (ty === lua.LUA_TTABLE) {
+                    // EnumItem (prompt.Style = Enum.ProximityPromptStyle.Custom) -> имя; инстанс (gui.Adornee = part) -> ref.
+                    // Раньше оба превращались в null: Style игнорировался, Adornee у BillboardGui терялся.
+                    // rawget — чтобы не дёргать __index инстанса (он пишет «не свойство» в Output).
+                    const raw = (key) => { lua.lua_pushstring(L2, key); lua.lua_rawget(L2, 3); };
+                    raw('EnumType');
+                    const isEnum = lua.lua_isstring(L2, -1);
+                    lua.lua_pop(L2, 1);
+                    if (isEnum) {
+                        raw('Name');
+                        if (lua.lua_isstring(L2, -1)) value = lua.lua_tojsstring(L2, -1);
+                        lua.lua_pop(L2, 1);
+                    } else {
+                        raw('__ref');
+                        const isInst = lua.lua_isnumber(L2, -1);
+                        const iref = isInst ? lua.lua_tonumber(L2, -1) : null;
+                        lua.lua_pop(L2, 1);
+                        if (isInst) value = (name === 'Adornee') ? iref : null;
+                        else value = luaTableToJsPropValue(L2, 3);
+                    }
+                }
                 luaSetGenericProp(ref, name, value);
                 // GetPropertyChangedSignal(name) — стреляем ПОСЛЕ применения
                 fireLuaSignal(ref, '__prop_' + name, []);
@@ -11650,6 +11712,17 @@ end
                 const parentInfo = parentRef !== undefined ? luaByRef[parentRef] : null;
                 const isTemplateUnderStarterGui = parentInfo && parentInfo.cls === 'StarterGui';
                 if (isTemplateUnderStarterGui) continue; // шаблон — не рендерим, рендерим клон в PlayerGui
+                // ScreenGui рисуется в Roblox ТОЛЬКО внутри PlayerGui. Шаблоны, лежащие в ReplicatedStorage / под скриптом /
+                // в ServerStorage (RoundResultsGui и т.п. — скрипт клонирует их сам), раньше рисовались поверх игры сразу.
+                if (props.cls === 'ScreenGui') {
+                    let cur = parentRef, inPG = false, g = 0;
+                    while (cur !== undefined && cur !== -1 && g++ < 60) {
+                        const ci = luaByRef[cur];
+                        if (ci && ci.cls === 'PlayerGui') { inPG = true; break; }
+                        cur = luaParentByRef[cur];
+                    }
+                    if (!inPG) continue;
+                }
                 if (props.Enabled === false) continue; // раньше было props.enabled (маленькая e) — никогда не совпадало, ScreenGui.Enabled=false из плейса игнорировался
                 guiRenderNode(ref, overlay);
                 renderedCount++;
@@ -12234,6 +12307,7 @@ end
                 ActionText: 'Interact', ObjectText: '', KeyboardKeyCode: 69,
                 HoldDuration: 0, MaxActivationDistance: 10, RequiresLineOfSight: true,
                 Enabled: true, parentRef: parentRef !== undefined ? parentRef : -1,
+                Style: 0, GamepadKeyCode: 1000,
             };
         }
         async function loadProximityPrompts() {
@@ -12246,6 +12320,7 @@ end
                             KeyboardKeyCode: p.keyCode, HoldDuration: p.holdDuration,
                             MaxActivationDistance: p.maxDistance, RequiresLineOfSight: p.requiresLineOfSight,
                             Enabled: p.enabled, parentRef: p.parentRef,
+                            Style: p.style, GamepadKeyCode: p.gamepadKeyCode !== undefined ? p.gamepadKeyCode : 1000,
                         };
                         if (!luaByRef[p.ref]) { luaByRef[p.ref] = { cls: 'ProximityPrompt', name: 'ProximityPrompt' }; luaByRefVer++; }
                     }
@@ -12267,11 +12342,74 @@ end
             return null;
         }
         let _activePromptRef = null;
+        let _promptShownRef = null;      // подсказка, для которой уже стрелял PromptShown
+        let _promptHeldRef = null;       // подсказка, у которой сейчас «зажата кнопка»
+        let _promptTriggered = false;    // Triggered уже выстрелил за текущее удержание
+        let _ppsRefCache = null;
+        // Style: из файла приходит числом (1 = Custom), из скрипта — именем Enum
+        function _promptIsCustom(p) {
+            const v = p && p.Style;
+            return v === 1 || v === '1' || v === 'Custom' || (v && v.Name === 'Custom') || /Custom$/.test(String(v));
+        }
+        function _promptInputType() {
+            const touch = (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window);
+            return { __enum: ['ProximityPromptInputType', touch ? 'Touch' : 'Keyboard'] };
+        }
+        // Сигналы самого ProximityPromptService (PromptShown/Hidden/Triggered/...): ref сервиса появляется только
+        // после game:GetService("ProximityPromptService") — до этого слушать некому.
+        function _ppsRef() {
+            if (_ppsRefCache !== null && luaByRef[_ppsRefCache] && luaByRef[_ppsRefCache].cls === 'ProximityPromptService') return _ppsRefCache;
+            for (const k in luaByRef) { if (luaByRef[k] && luaByRef[k].cls === 'ProximityPromptService') { _ppsRefCache = Number(k); return _ppsRefCache; } }
+            return null;
+        }
+        const _PPS_EV = { Triggered: 'PromptTriggered', TriggerEnded: 'PromptTriggerEnded' };
+        function _promptFire(ref, ev, extra) {
+            // сигнал на самом prompt + одноимённый на сервисе (там prompt — первый аргумент, Triggered зовётся PromptTriggered)
+            fireLuaSignal(Number(ref), ev, extra || []);
+            const pps = _ppsRef();
+            if (pps !== null) fireLuaSignal(pps, _PPS_EV[ev] || ev, [{ __instanceRef: Number(ref) }].concat(extra || []));
+        }
+        function _promptHoldBegin(ref) {
+            const p = _promptRegistry[ref];
+            if (!p || _promptHeldRef === ref) return;
+            _promptHeldRef = ref; _promptTriggered = false;
+            _promptHoldStart = performance.now();
+            _promptFire(ref, 'PromptButtonHoldBegan', [{ __instanceRef: luaPlayerRef }]);
+            if (!(p.HoldDuration > 0)) _promptComplete(ref);
+        }
+        function _promptComplete(ref) {
+            if (_promptTriggered) return;
+            _promptTriggered = true;
+            _promptFire(ref, 'Triggered', [{ __instanceRef: luaPlayerRef }]);
+        }
+        function _promptHoldEnd(ref) {
+            if (_promptHeldRef === null || (ref !== undefined && _promptHeldRef !== ref)) return;
+            const r = _promptHeldRef;
+            _promptHeldRef = null; _promptHoldStart = null;
+            _promptFire(r, 'PromptButtonHoldEnded', [{ __instanceRef: luaPlayerRef }]);
+            if (_promptTriggered) _promptFire(r, 'TriggerEnded', [{ __instanceRef: luaPlayerRef }]);
+            _promptTriggered = false;
+            const ring = document.getElementById('proximity-prompt-ring');
+            if (ring) ring.classList.remove('held');
+            const fill = document.getElementById('proximity-prompt-fill');
+            if (fill) fill.style.height = '0%';
+        }
+        window.__promptInput = function (ref, down) { if (down) _promptHoldBegin(ref); else _promptHoldEnd(ref); };
+        function _promptSetShown(ref) {
+            if (_promptShownRef === ref) return;
+            const old = _promptShownRef;
+            _promptShownRef = ref;
+            if (old !== null) {
+                if (_promptHeldRef === old) _promptHoldEnd(old);
+                if (_promptIsCustom(_promptRegistry[old])) _promptFire(old, 'PromptHidden', []);
+            }
+            if (ref !== null && _promptIsCustom(_promptRegistry[ref])) _promptFire(ref, 'PromptShown', [_promptInputType()]);
+        }
         function updateProximityPrompts() {
             const el = document.getElementById('proximity-prompt');
             if (!el) return;
             const refs = Object.keys(_promptRegistry);
-            if (!charBody || !refs.length) { el.style.display = 'none'; _activePromptRef = null; _activePrompt = null; return; }
+            if (!charBody || !refs.length) { el.style.display = 'none'; _activePromptRef = null; _activePrompt = null; _promptSetShown(null); return; }
             let bestRef = null, best = null, bestDist = Infinity;
             for (const refStr of refs) {
                 const p = _promptRegistry[refStr];
@@ -12281,66 +12419,67 @@ end
                 const d = Math.hypot(wp.x - charBody.position.x, wp.y - charBody.position.y, wp.z - charBody.position.z);
                 if (d <= p.MaxActivationDistance && d < bestDist) { best = p; bestRef = refStr; bestDist = d; }
             }
-            if (bestRef !== _activePromptRef) {
-                _promptHoldStart = null; // сменилась цель — сброс удержания
-                const ring = document.getElementById('proximity-prompt-ring');
-                if (ring) ring.classList.remove('held');
-            }
             _activePromptRef = bestRef;
             _activePrompt = best;
-            if (!best) { el.style.display = 'none'; return; }
-            el.style.display = 'flex';
-            document.getElementById('proximity-prompt-key').textContent = _promptKeyLabel(best);
-            document.getElementById('proximity-prompt-action').textContent = best.ActionText || 'Interact';
-            document.getElementById('proximity-prompt-object').textContent = best.ObjectText || '';
-            // Прогресс удержания (HoldDuration=0 — мгновенное срабатывание по тапу,
-            // без кольца заполнения).
+            _promptSetShown(bestRef);   // Hidden у старой / Shown у новой (только Custom), сброс удержания
+            // Style=Custom: стандартную кнопку Roblox НЕ рисуем — подсказку показывает скрипт карты по PromptShown
+            if (!best || _promptIsCustom(best)) { el.style.display = 'none'; }
+            else {
+                el.style.display = 'flex';
+                document.getElementById('proximity-prompt-key').textContent = _promptKeyLabel(best);
+                document.getElementById('proximity-prompt-action').textContent = best.ActionText || 'Interact';
+                document.getElementById('proximity-prompt-object').textContent = best.ObjectText || '';
+            }
             const fill = document.getElementById('proximity-prompt-fill');
-            if (fill) {
-                if (_promptHoldStart !== null && best.HoldDuration > 0) {
-                    const frac = Math.min(1, (performance.now() - _promptHoldStart) / (best.HoldDuration * 1000));
-                    fill.style.height = (frac * 100) + '%';
-                    if (frac >= 1) _triggerActivePrompt();
-                } else {
-                    fill.style.height = '0%';
-                }
+            const heldP = _promptHeldRef !== null ? _promptRegistry[_promptHeldRef] : null;
+            if (heldP && _promptHoldStart !== null && heldP.HoldDuration > 0) {
+                const frac = Math.min(1, (performance.now() - _promptHoldStart) / (heldP.HoldDuration * 1000));
+                if (fill) fill.style.height = (frac * 100) + '%';
+                if (frac >= 1) _promptComplete(_promptHeldRef);
+            } else if (fill) {
+                fill.style.height = '0%';
             }
         }
         function _triggerActivePrompt() {
-            if (!_activePrompt || _activePromptRef === null) return;
-            _promptHoldStart = null;
-            const ring = document.getElementById('proximity-prompt-ring');
-            if (ring) ring.classList.remove('held');
-            const fill = document.getElementById('proximity-prompt-fill');
-            if (fill) fill.style.height = '0%';
-            fireLuaSignal(Number(_activePromptRef), 'Triggered', [{ __instanceRef: luaPlayerRef }]);
+            if (_activePromptRef === null) return;
+            _promptHoldBegin(_activePromptRef);
+            if (!(_activePrompt && _activePrompt.HoldDuration > 0)) _promptHoldEnd(_activePromptRef);
         }
+        function _promptKeyMatches(e, p) {
+            let kc = p.KeyboardKeyCode;
+            if (typeof kc === 'string') { const n = kc.replace(/^KeyCode\.?/, ''); return n.length === 1 ? e.key.toUpperCase() === n.toUpperCase() : e.code === n || e.key === n; }
+            if (kc >= 97 && kc <= 122) kc -= 32;
+            return e.keyCode === kc;
+        }
+        window.addEventListener('keydown', (e) => {
+            if (!isPlaying || e.repeat || _activePromptRef === null || !_activePrompt) return;
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+            if (_promptKeyMatches(e, _activePrompt)) { _promptHoldBegin(_activePromptRef); }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (_promptHeldRef === null) return;
+            const p = _promptRegistry[_promptHeldRef];
+            if (p && _promptKeyMatches(e, p)) _promptHoldEnd(_promptHeldRef);
+        });
         window.addEventListener('load', () => {
             const ring = document.getElementById('proximity-prompt-ring');
-            if (!ring) return;
-            const onDown = (e) => {
-                e.preventDefault();
-                if (!_activePrompt) return;
-                if (_activePrompt.HoldDuration > 0) {
-                    _promptHoldStart = performance.now();
-                    ring.classList.add('held');
-                } else {
-                    _triggerActivePrompt();
-                }
-            };
-            const onUp = () => {
-                if (_activePrompt && _activePrompt.HoldDuration > 0) {
-                    _promptHoldStart = null;
-                    ring.classList.remove('held');
-                    const fill = document.getElementById('proximity-prompt-fill');
-                    if (fill) fill.style.height = '0%';
-                }
-            };
-            ring.addEventListener('touchstart', onDown, { passive: false });
-            ring.addEventListener('mousedown', onDown);
-            ring.addEventListener('touchend', onUp);
-            ring.addEventListener('touchcancel', onUp);
-            ring.addEventListener('mouseup', onUp);
+            const onUp = () => _promptHoldEnd();
+            if (ring) {
+                const onDown = (e) => { e.preventDefault(); if (_activePrompt) _promptHoldBegin(_activePromptRef); };
+                ring.addEventListener('touchstart', onDown, { passive: false });
+                ring.addEventListener('mousedown', onDown);
+            }
+            // Custom: тап/клик по самому BillboardGui подсказки (как ClickablePrompt в Roblox)
+            const ov = document.getElementById('gui-overlay');
+            if (ov) ov.addEventListener('pointerdown', (e) => {
+                if (!isPlaying || !_activePrompt || !_promptIsCustom(_activePrompt) || _activePrompt.ClickablePrompt === false) return;
+                if (e.target.closest && e.target.closest('[data-cls="BillboardGui"]')) _promptHoldBegin(_activePromptRef);
+            }, true);
+            window.addEventListener('pointerup', onUp);
+            window.addEventListener('pointercancel', onUp);
+            window.addEventListener('touchend', onUp);
+            window.addEventListener('mouseup', onUp);
         });
 
         // Enum.CameraType.Scriptable — настоящий Roblox по нему полностью
