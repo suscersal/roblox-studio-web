@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roblox Studio Web — редактор .rbxl в браузере и на Android</title>
+<meta name="description" content="Roblox Studio Web: открывай, смотри в 3D и редактируй .rbxl прямо в браузере или в Android-приложении.">
+<style>
+:root{--bg:#0b1220;--bg2:#111827;--panel:#1f2937;--btn:#374151;--line:#374151;--text:#f3f4f6;--muted:#9ca3af;--accent:#3b82f6;--accent-h:#2563eb;--green:#16a34a;--purple:#7c3aed}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1120px;margin:0 auto;padding:0 18px}
+nav{position:sticky;top:0;z-index:50;background:rgba(11,18,32,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:18px;height:54px}
+nav .logo{font-weight:700;color:var(--text)}
+nav .sp{flex:1}
+nav a.l{color:var(--muted);font-size:14px}
+nav a.l:hover{color:var(--text);text-decoration:none}
+.btn{display:inline-block;padding:10px 18px;border-radius:8px;background:var(--btn);color:var(--text);font-weight:600;font-size:15px;border:0;cursor:pointer}
+.btn:hover{text-decoration:none;filter:brightness(1.15)}
+.btn.p{background:var(--accent)}.btn.g{background:var(--green)}
+.sm{padding:6px 12px;font-size:13px}
+.hero{padding:70px 0 40px;text-align:center;background:radial-gradient(900px 400px at 50% -10%,#1d3a72 0%,transparent 70%)}
+.hero h1{font-size:clamp(32px,6vw,56px);line-height:1.1;margin-bottom:14px}
+.hero h1 span{color:var(--accent)}
+.hero p{max-width:640px;margin:0 auto 26px;color:#cbd5e1;font-size:18px}
+.hero .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+section{padding:46px 0}
+h2{font-size:28px;margin-bottom:8px}
+.sub{color:var(--muted);margin-bottom:22px;max-width:760px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:18px}
+.card h3{font-size:17px;margin-bottom:6px}
+.card p{color:var(--muted);font-size:14px}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.shots a{display:block;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#000}
+.shots img{display:block;width:100%;height:auto;transition:transform .2s}
+.shots a:hover img{transform:scale(1.03)}
+pre,code{font-family:ui-monospace,Menlo,Consolas,monospace}
+pre.cmd{background:#020617;border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:13.5px;color:#a7f3d0;margin:8px 0 4px}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.note{background:#172554;border:1px solid #1e40af;border-radius:10px;padding:12px 14px;font-size:14px;color:#dbeafe;margin-top:16px}
+footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-size:14px;text-align:center}
+
+/* ===== DEMO ===== */
+#studio{border:1px solid #4b5563;border-radius:10px;overflow:hidden;background:#111827;box-shadow:0 20px 60px rgba(0,0,0,.5);user-select:none;-webkit-user-select:none}
+.tb{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:5px 6px;background:#1f2937;border-bottom:1px solid #111827}
+.tb .t{font-weight:700;font-size:13px;margin:0 8px 0 4px}
+.tb button{background:#374151;color:#f3f4f6;border:0;border-radius:4px;padding:5px 9px;font-size:12px;cursor:pointer;font-family:inherit}
+.tb button:hover{background:#4b5563}
+.tb button.gr{background:#166534}.tb button.rd{background:#7f1d1d}.tb button.bl{background:#1d4ed8}.tb button.pu{background:#6d28d9}
+.tb button.on{outline:2px solid #60a5fa}
+.tb .sep{width:1px;height:20px;background:#4b5563;margin:0 3px}
+.main{display:grid;grid-template-columns:200px 1fr 250px;height:520px}
+#explorer,#right{background:#1f2937;overflow:auto;font-size:12px;min-height:0}
+#explorer{border-right:1px solid #111827}
+#right{border-left:1px solid #111827;display:flex;flex-direction:column}
+.ph{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;font-weight:600;font-size:12px;background:#273449;position:sticky;top:0}
+.row{display:flex;align-items:center;gap:5px;padding:2px 6px;cursor:pointer;white-space:nowrap;height:21px}
+.row:hover{background:#2f3d52}
+.row.sel{background:#2563eb}
+.row img{width:16px;height:16px;image-rendering:auto}
+#vp{position:relative;min-width:0;min-height:0;background:#6aa9e0;touch-action:none;cursor:grab}
+#vp:active{cursor:grabbing}
+#vp canvas{display:block;width:100%;height:100%}
+.ov{position:absolute;font-size:11px;background:rgba(0,0,0,.6);color:#e5e7eb;padding:4px 7px;border-radius:5px;pointer-events:none}
+#fps{left:8px;top:8px;color:#4ade80;font-family:ui-monospace,monospace}
+#hint{left:8px;bottom:8px;line-height:1.5}
+#q{position:absolute;right:8px;top:8px;display:flex;gap:2px}
+#q button{background:rgba(31,41,55,.9);color:#fff;border:0;font-size:11px;padding:3px 7px;cursor:pointer;border-radius:3px}
+#q button.on{background:#3b82f6}
+.tabs{display:flex;background:#1f2937;border-bottom:1px solid #111827}
+.tab{flex:1;text-align:center;padding:7px;font-size:12px;cursor:pointer;color:#9ca3af;border-bottom:2px solid transparent}
+.tab.on{color:#fff;border-bottom-color:#3b82f6}
+#props{padding:6px 8px;overflow:auto;flex:1;min-height:0}
+#props .head{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+#props .head img{width:30px;height:30px}
+#props .head b{display:block;font-size:14px}
+#props .head small{color:#9ca3af}
+.sec{font-weight:700;font-size:11px;margin:8px 0 3px;color:#d1d5db;border-bottom:1px solid #374151;padding-bottom:2px}
+.xyz{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.xyz label{display:flex;align-items:center;gap:3px;color:#9ca3af;font-size:11px}
+input.n,input.t{width:100%;min-width:0;background:#374151;color:#f3f4f6;border:1px solid #4b5563;border-radius:3px;padding:3px 4px;font-size:11px;font-family:inherit}
+.pr{display:grid;grid-template-columns:90px 1fr;gap:6px;align-items:center;margin:4px 0;color:#d1d5db;font-size:11px}
+input[type=color]{width:100%;height:22px;border:1px solid #4b5563;background:#374151;border-radius:3px;padding:0}
+#script{display:none;flex:1;flex-direction:column;min-height:0}
+#script pre{flex:1;overflow:auto;padding:8px;font-size:11.5px;color:#d1d5db;white-space:pre;background:#0f172a}
+.k{color:#c084fc}.s{color:#86efac}.c{color:#6b7280}.nm{color:#fbbf24}
+#out{height:92px;background:#0f172a;border-top:2px solid #111827;overflow:auto;font:11px/1.45 ui-monospace,monospace;padding:4px 8px;color:#cbd5e1}
+#out .i{color:#93c5fd}#out .w{color:#fde68a}
+.demo-note{color:var(--muted);font-size:13px;margin-top:10px}
+@media(max-width:860px){
+ .main{grid-template-columns:1fr;height:auto}
+ #vp{height:340px}
+ #explorer{max-height:170px;border-right:0}
+ #right{border-left:0;max-height:300px}
+}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <span class="logo">🎮 RbxStudio Web</span><span class="sp"></span>
+  <a class="l" href="#demo" data-ru="Демо" data-en="Demo">Демо</a>
+  <a class="l" href="#features" data-ru="Возможности" data-en="Features">Возможности</a>
+  <a class="l" href="#install" data-ru="Установка" data-en="Install">Установка</a>
+  <a class="l" href="#" id="lang">🌐 EN</a>
+  <a class="btn sm p" href="https://github.com/suscersal/roblox-studio-web" target="_blank" rel="noopener">GitHub</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <h1>Roblox Studio <span>Web</span></h1>
+  <p data-ru="Открывай, смотри в 3D и редактируй .rbxl прямо в браузере — на ПК и на телефоне. Без установки Roblox Studio."
+     data-en="Open, view in 3D and edit .rbxl files right in the browser — on desktop and on your phone. No Roblox Studio install needed.">Открывай, смотри в 3D и редактируй .rbxl прямо в браузере — на ПК и на телефоне. Без установки Roblox Studio.</p>
+  <div class="row">
+    <a class="btn p" href="#demo" data-ru="▶ Попробовать демо" data-en="▶ Try the demo">▶ Попробовать демо</a>
+    <a class="btn g" href="https://github.com/suscersal/roblox-studio-web/releases" target="_blank" rel="noopener" data-ru="📱 Скачать APK" data-en="📱 Download APK">📱 Скачать APK</a>
+    <a class="btn" href="https://github.com/suscersal/roblox-studio-web" target="_blank" rel="noopener" data-ru="⭐ Исходники" data-en="⭐ Source code">⭐ Исходники</a>
+  </div>
+</div></header>
+
+<section id="demo"><div class="wrap">
+  <h2 data-ru="Попробуй прямо здесь" data-en="Try it right here">Попробуй прямо здесь</h2>
+  <p class="sub" data-ru="Крути сцену, выбирай объекты в Explorer или кликом по 3D, меняй свойства справа, жми ▶ Play."
+     data-en="Rotate the scene, pick objects in Explorer or by clicking in 3D, edit properties on the right, hit ▶ Play.">Крути сцену, выбирай объекты в Explorer или кликом по 3D, меняй свойства справа, жми ▶ Play.</p>
+
+  <div id="studio">
+    <div class="tb">
+      <span class="t">🎮 RbxStudio</span><span class="sep"></span>
+      <button class="gr" id="bAdd">➕ Add</button>
+      <button class="rd" id="bDel">🗑 Delete</button><span class="sep"></span>
+      <button class="gr" id="bPlay">▶ Play</button><span class="sep"></span>
+      <button id="bReset">🏠 Reset</button>
+      <button id="bTop">⬆ Top</button>
+      <button id="bFront">📷 Front</button>
+      <button id="bRight">➡ Right</button>
+      <button id="bGrid" class="on">📏</button>
+    </div>
+    <div class="main">
+      <div id="explorer"><div class="ph"><span>Explorer</span></div><div id="tree"></div></div>
+      <div id="vp">
+        <div class="ov" id="fps">FPS: --</div>
+        <div id="q"><button data-q="0">Low</button><button data-q="1" class="on">Med</button><button data-q="2">High</button></div>
+        <div class="ov" id="hint">🖱 ЛКМ — вращать | ПКМ/Shift — двигать | колесо — зум<br>👆 тач: 1 палец — вращать, 2 — зум</div>
+      </div>
+      <div id="right">
+        <div class="tabs"><div class="tab on" data-t="props">Properties</div><div class="tab" data-t="script">Script</div></div>
+        <div id="props"></div>
+        <div id="script"><div class="ph"><span id="sname">Script</span></div><pre id="code"></pre></div>
+      </div>
+    </div>
+    <div id="out"></div>
+  </div>
+  <p class="demo-note" data-ru="Это упрощённая демо-сцена на three.js. Настоящий редактор открывает реальные .rbxl-файлы — запусти его локально или установи APK."
+     data-en="This is a simplified three.js demo scene. The real editor opens actual .rbxl files — run it locally or install the APK.">Это упрощённая демо-сцена на three.js. Настоящий редактор открывает реальные .rbxl-файлы — запусти его локально или установи APK.</p>
+</div></section>
+
+<section id="features"><div class="wrap">
+  <h2 data-ru="Что умеет" data-en="Features">Что умеет</h2>
+  <p class="sub" data-ru="Самописный бинарный парсер .rbxl (LZ4, interleaved-массивы, delta-referent’ы) и веб-интерфейс на Flask."
+     data-en="Custom binary .rbxl parser (LZ4, interleaved arrays, delta referents) with a Flask web UI.">Самописный бинарный парсер .rbxl (LZ4, interleaved-массивы, delta-referent’ы) и веб-интерфейс на Flask.</p>
+  <div class="grid">
+    <div class="card"><h3>📂 .rbxl</h3><p data-ru="Открытие и сохранение: байтовая копия или полная пересборка файла." data-en="Open and save: byte-for-byte copy or full rebuild.">Открытие и сохранение: байтовая копия или полная пересборка файла.</p></div>
+    <div class="card"><h3>🌳 Explorer</h3><p data-ru="Дерево объектов с иконками классов и поиском." data-en="Object tree with class icons and search.">Дерево объектов с иконками классов и поиском.</p></div>
+    <div class="card"><h3>🧊 3D</h3><p data-ru="Вьюпорт: Part, WedgePart, SpherePart, TrussPart, Seat и другие." data-en="Viewport: Part, WedgePart, SpherePart, TrussPart, Seat and more.">Вьюпорт: Part, WedgePart, SpherePart, TrussPart, Seat и другие.</p></div>
+    <div class="card"><h3>📝 Properties</h3><p data-ru="Инспектор свойств и редактор CFrame." data-en="Property inspector and CFrame editor.">Инспектор свойств и редактор CFrame.</p></div>
+    <div class="card"><h3>💻 Lua</h3><p data-ru="Редактор скриптов с подсветкой Lua (CodeMirror)." data-en="Script editor with Lua highlighting (CodeMirror).">Редактор скриптов с подсветкой Lua (CodeMirror).</p></div>
+    <div class="card"><h3>➕➖ Add / Delete</h3><p data-ru="Добавление и удаление объектов — 33 класса на выбор." data-en="Add and delete objects — 33 classes to choose from.">Добавление и удаление объектов — 33 класса на выбор.</p></div>
+    <div class="card"><h3>▶ Play</h3><p data-ru="Простая физическая симуляция и камера от первого лица (экспериментально)." data-en="Simple physics simulation and first-person camera (experimental).">Простая физическая симуляция и камера от первого лица (экспериментально).</p></div>
+    <div class="card"><h3>☁ Publish</h3><p data-ru="Публикация в Roblox через Open Cloud API." data-en="Publish to Roblox via the Open Cloud API.">Публикация в Roblox через Open Cloud API.</p></div>
+    <div class="card"><h3>📱 Android</h3><p data-ru="APK: WebView + встроенный Python (Chaquopy) и hot-обновления без переустановки." data-en="APK: WebView + embedded Python (Chaquopy) with hot updates, no reinstall.">APK: WebView + встроенный Python (Chaquopy) и hot-обновления без переустановки.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2 data-ru="Скриншоты" data-en="Screenshots">Скриншоты</h2><p class="sub"></p>
+  <div class="shots">
+    <a href="shots/1.jpg" target="_blank"><img loading="lazy" src="shots/1.jpg" alt="Screenshot 1"></a>
+    <a href="shots/2.jpg" target="_blank"><img loading="lazy" src="shots/2.jpg" alt="Screenshot 2"></a>
+    <a href="shots/3.jpg" target="_blank"><img loading="lazy" src="shots/3.jpg" alt="Screenshot 3"></a>
+    <a href="shots/4.jpg" target="_blank"><img loading="lazy" src="shots/4.jpg" alt="Screenshot 4"></a>
+  </div>
+</div></section>
+
+<section id="install"><div class="wrap">
+  <h2 data-ru="Установка" data-en="Install">Установка</h2>
+  <p class="sub" data-ru="Редактору нужен Python-сервер (Flask), поэтому на GitHub Pages сам редактор не запустится — страница только показывает демо. Выбери способ:"
+     data-en="The editor needs a Python (Flask) server, so it can’t run on GitHub Pages itself — this page is just a demo. Pick a way:">Редактору нужен Python-сервер (Flask), поэтому на GitHub Pages сам редактор не запустится — страница только показывает демо. Выбери способ:</p>
+  <div class="steps">
+    <div class="card"><h3>🖥 PC / Termux</h3>
+      <pre class="cmd">git clone https://github.com/suscersal/roblox-studio-web.git
+cd roblox-studio-web
+python3 app.py</pre>
+      <p data-ru="Flask поставится сам при первом запуске. Открой http://localhost:47182" data-en="Flask installs itself on first run. Open http://localhost:47182">Flask поставится сам при первом запуске. Открой http://localhost:47182</p></div>
+    <div class="card"><h3>📱 Android APK</h3>
+      <p data-ru="Скачай последний APK в Releases и установи (разреши установку из неизвестных источников). Обновления прилетают сами." data-en="Grab the latest APK from Releases and install it (allow unknown sources). Updates arrive on their own.">Скачай последний APK в Releases и установи (разреши установку из неизвестных источников). Обновления прилетают сами.</p><br>
+      <a class="btn g sm" href="https://github.com/suscersal/roblox-studio-web/releases" target="_blank" rel="noopener">Releases</a></div>
+    <div class="card"><h3 data-ru="📦 Без git" data-en="📦 No git">📦 Без git</h3>
+      <p data-ru="Скачай архив и распакуй — git не нужен:" data-en="Download the archive and unpack it — no git needed:">Скачай архив и распакуй — git не нужен:</p>
+      <pre class="cmd">curl -L -o rsw.zip https://github.com/suscersal/roblox-studio-web/archive/refs/heads/main.zip
+unzip rsw.zip &amp;&amp; cd roblox-studio-web-main
+python3 app.py</pre>
+      <a class="btn sm" href="https://github.com/suscersal/roblox-studio-web/archive/refs/heads/main.zip">⬇ ZIP</a></div>
+  </div>
+  <div class="note" data-ru="Лицензия: GPL-3.0. Горячие клавиши: Ctrl+O открыть, Ctrl+S сохранить, Delete удалить, F — навести камеру, F5 — обновить сцену." data-en="License: GPL-3.0. Hotkeys: Ctrl+O open, Ctrl+S save, Delete remove, F focus camera, F5 refresh scene.">Лицензия: GPL-3.0. Горячие клавиши: Ctrl+O открыть, Ctrl+S сохранить, Delete удалить, F — навести камеру, F5 — обновить сцену.</div>
+</div></section>
+
+<footer><div class="wrap">Roblox Studio Web · <a href="https://github.com/suscersal/roblox-studio-web" target="_blank" rel="noopener">github.com/suscersal/roblox-studio-web</a> · GPL-3.0<br>
+<small>Неофициальный проект, не связан с Roblox Corporation.</small></div></footer>
+
+<script src="three.min.js"></script>
+<script>
+(function(){
+/* ---------- язык ---------- */
+var lang='ru';
+document.querySelectorAll('[data-ru]').forEach(function(e){e.dataset.ruHtml=e.innerHTML;});
+document.getElementById('lang').addEventListener('click',function(ev){
+  ev.preventDefault();lang=lang==='ru'?'en':'ru';
+  document.documentElement.lang=lang;this.textContent=lang==='ru'?'🌐 EN':'🌐 RU';
+  document.querySelectorAll('[data-en]').forEach(function(e){e.innerHTML=lang==='en'?e.dataset.en:e.dataset.ruHtml;});
+  document.getElementById('hint').innerHTML=lang==='ru'
+   ?'🖱 ЛКМ — вращать | ПКМ/Shift — двигать | колесо — зум<br>👆 тач: 1 палец — вращать, 2 — зум'
+   :'🖱 LMB — rotate | RMB/Shift — pan | wheel — zoom<br>👆 touch: 1 finger — rotate, 2 — zoom';
+});
+
+/* ---------- сцена ---------- */
+var $=function(s){return document.querySelector(s)};
+var vp=$('#vp');
+var renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.shadowMap.enabled=true;
+vp.insertBefore(renderer.domElement,vp.firstChild);
+var scene=new THREE.Scene();scene.background=new THREE.Color(0x6aa9e0);
+scene.add(new THREE.HemisphereLight(0xffffff,0x4a5568,.85));
+var sun=new THREE.DirectionalLight(0xffffff,.9);sun.position.set(10,18,8);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);sun.shadow.bias=-0.0006;sun.shadow.normalBias=0.04;
+['left','right','top','bottom'].forEach(function(k,i){sun.shadow.camera[k]=(i%2?1:-1)*18});
+scene.add(sun);
+var cam=new THREE.PerspectiveCamera(55,1,.1,500);
+var target=new THREE.Vector3(0,1.5,0),theta=.8,phi=1.1,dist=15,auto=true;
+function updCam(){
+  cam.position.set(target.x+dist*Math.sin(phi)*Math.sin(theta),target.y+dist*Math.cos(phi),target.z+dist*Math.sin(phi)*Math.cos(theta));
+  cam.lookAt(target);
+}
+var grid=new THREE.GridHelper(40,40,0x1e3a8a,0x1e3a8a);grid.position.y=.04;grid.material.opacity=.35;grid.material.transparent=true;scene.add(grid);
+
+/* ---------- объекты ---------- */
+var rad=Math.PI/180,parts=[],counter=0,selected=null,box=null,playing=false;
+var geoBox=new THREE.BoxGeometry(1,1,1),geoBall=new THREE.SphereGeometry(.5,28,20),geoCyl=new THREE.CylinderGeometry(.5,.5,1,28);
+var ws=new THREE.Shape();ws.moveTo(-.5,-.5);ws.lineTo(.5,-.5);ws.lineTo(-.5,.5);ws.lineTo(-.5,-.5);
+var geoWedge=new THREE.ExtrudeGeometry(ws,{depth:1,bevelEnabled:false});geoWedge.center();
+var ICON={Part:'Part.png',Wedge:'WedgePart.png',Baseplate:'Part.png'};
+function addPart(name,cls,geo,color,pos,size,rot,anch){
+  var m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:color,roughness:.65,metalness:.05}));
+  m.castShadow=true;m.receiveShadow=true;
+  m.userData={name:name,cls:cls,anchored:!!anch,vy:0};
+  m.position.set(pos[0],pos[1],pos[2]);m.scale.set(size[0],size[1],size[2]);
+  m.rotation.set(rot[0]*rad,rot[1]*rad,rot[2]*rad);
+  m.userData.home={p:m.position.clone(),r:m.rotation.clone()};
+  scene.add(m);parts.push(m);return m;
+}
+addPart('Baseplate','Baseplate',geoBox,0x4ade80,[0,-.5,0],[40,1,40],[0,0,0],true);
+addPart('Cube','Part',geoBox,0x3b82f6,[0,1,0],[2,2,2],[0,20,0]);
+addPart('Ball','Part',geoBall,0xef4444,[4,1,1],[2,2,2],[0,0,0]);
+addPart('Wedge','WedgePart',geoWedge,0xfacc15,[-4,1,2],[2,2,3],[0,90,0]);
+addPart('Cylinder','Part',geoCyl,0xa855f7,[1,1.5,-4],[2,3,2],[0,0,0]);
+var baseTop=0;
+var CODE='<span class="c">-- ServerScriptService.Script</span>\n<span class="k">local</span> part = workspace:<span class="nm">FindFirstChild</span>(<span class="s">"Cube"</span>)\n\n<span class="k">while</span> part <span class="k">do</span>\n    part.Color = Color3.<span class="nm">fromHSV</span>(tick() % <span class="nm">5</span> / <span class="nm">5</span>, <span class="nm">1</span>, <span class="nm">1</span>)\n    <span class="nm">print</span>(<span class="s">"Hello from RbxStudio Web!"</span>)\n    <span class="nm">task</span>.wait(<span class="nm">1</span>)\n<span class="k">end</span>';
+$('#code').innerHTML=CODE;
+
+/* ---------- вывод ---------- */
+function log(t,c){var o=$('#out'),d=document.createElement('div');if(c)d.className=c;
+  d.textContent=new Date().toTimeString().slice(0,8)+'  '+t;o.appendChild(d);o.scrollTop=o.scrollHeight;}
+log('RbxStudio Web demo loaded','i');
+
+/* ---------- Explorer ---------- */
+function ico(n){return '<img src="icons/'+n+'" alt="" onerror="this.style.visibility=\'hidden\'">';}
+function row(label,icon,depth,key){
+  var d=document.createElement('div');d.className='row';d.style.paddingLeft=(6+depth*14)+'px';d.dataset.key=key||'';
+  d.innerHTML=ico(icon)+'<span>'+label+'</span>';return d;
+}
+function buildTree(){
+  var t=$('#tree');t.innerHTML='';
+  t.appendChild(row('Workspace','Workspace.png',0,''));
+  t.appendChild(row('Camera','Camera.png',1,''));
+  t.appendChild(row('Terrain','Terrain.png',1,''));
+  parts.forEach(function(m,i){var r=row(m.userData.name,ICON[m.userData.cls]||'Part.png',1,'p'+i);r.onclick=function(){select(m)};t.appendChild(r);});
+  t.appendChild(row('Lighting','Lighting.png',0,''));
+  t.appendChild(row('ServerScriptService','ServerScriptService.png',0,''));
+  var s=row('Script','Script.png',1,'script');s.onclick=function(){select('script')};t.appendChild(s);
+  hilite();
+}
+function hilite(){
+  document.querySelectorAll('#tree .row').forEach(function(r){
+    var k=r.dataset.key,on=false;
+    if(selected==='script')on=k==='script';
+    else if(selected)on=k==='p'+parts.indexOf(selected);
+    r.classList.toggle('sel',on);
+  });
+}
+
+/* ---------- Properties ---------- */
+function f(v){return Math.round(v*100)/100}
+function xyz(title,key,vals){
+  return '<div class="sec">'+title+'</div><div class="xyz">'+['X','Y','Z'].map(function(a,i){
+    return '<label>'+a+'<input class="n" type="number" step="0.5" data-k="'+key+'" data-i="'+i+'" value="'+f(vals[i])+'"></label>';}).join('')+'</div>';
+}
+function renderProps(){
+  var p=$('#props');
+  if(!selected||selected==='script'){p.innerHTML='<p style="color:#6b7280;font-size:12px;padding:8px">← Select an object</p>';return;}
+  var m=selected,u=m.userData;
+  p.innerHTML='<div class="head">'+ico(ICON[u.cls]||'Part.png')+'<div><b>'+u.cls+'</b><small>ref '+(1000+parts.indexOf(m))+'</small></div></div>'
+   +xyz('Position','pos',[m.position.x,m.position.y,m.position.z])
+   +xyz('Rotation','rot',[m.rotation.x/rad,m.rotation.y/rad,m.rotation.z/rad])
+   +xyz('Size','size',[m.scale.x,m.scale.y,m.scale.z])
+   +'<div class="sec">Data</div>'
+   +'<div class="pr">Name<input class="t" id="pName" value="'+u.name+'"></div>'
+   +'<div class="pr">Color3<input type="color" id="pColor" value="#'+m.material.color.getHexString()+'"></div>'
+   +'<div class="pr">Anchored<input type="checkbox" id="pAnch" '+(u.anchored?'checked':'')+'></div>';
+  p.querySelectorAll('input.n').forEach(function(inp){
+    inp.addEventListener('input',function(){
+      var v=parseFloat(inp.value);if(isNaN(v))return;var i=+inp.dataset.i,k=inp.dataset.k;
+      var ax=['x','y','z'][i];
+      if(k==='pos'){m.position[ax]=v;m.userData.home.p[ax]=v;}
+      else if(k==='rot'){m.rotation[ax]=v*rad;m.userData.home.r[ax]=v*rad;}
+      else m.scale[ax]=Math.max(.1,v);
+    });
+  });
+  $('#pName').addEventListener('input',function(e){u.name=e.target.value;var r=document.querySelector('#tree .row.sel span');if(r)r.textContent=u.name;});
+  $('#pColor').addEventListener('input',function(e){m.material.color.set(e.target.value);});
+  $('#pAnch').addEventListener('change',function(e){u.anchored=e.target.checked;});
+}
+function tab(n){
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.t===n)});
+  $('#props').style.display=n==='props'?'block':'none';
+  $('#script').style.display=n==='script'?'flex':'none';
+}
+document.querySelectorAll('.tab').forEach(function(t){t.onclick=function(){tab(t.dataset.t)}});
+
+function select(o){
+  selected=o;
+  if(box){scene.remove(box);box=null;}
+  if(o&&o!=='script'){box=new THREE.BoxHelper(o,0x60a5fa);scene.add(box);tab('props');log('Selected: '+o.userData.name);}
+  if(o==='script'){tab('script');}
+  hilite();renderProps();
+}
+
+/* ---------- камера: мышь / тач ---------- */
+var el=renderer.domElement,ptrs=new Map(),moved=0;
+function pan(dx,dy){
+  var k=dist*.0016,rx=Math.cos(theta),rz=-Math.sin(theta);
+  target.x-=rx*dx*k;target.z-=rz*dx*k;target.y+=dy*k;
+  target.y=Math.max(-1,Math.min(20,target.y));
+}
+el.addEventListener('contextmenu',function(e){e.preventDefault()});
+el.addEventListener('pointerdown',function(e){
+  el.setPointerCapture(e.pointerId);auto=false;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,b:e.button});moved=0;
+});
+el.addEventListener('pointermove',function(e){
+  var p=ptrs.get(e.pointerId);if(!p)return;
+  var dx=e.clientX-p.x,dy=e.clientY-p.y;
+  if(ptrs.size===1){
+    moved+=Math.abs(dx)+Math.abs(dy);
+    if(p.b===2||e.shiftKey)pan(dx,dy);
+    else{theta-=dx*.008;phi=Math.max(.05,Math.min(Math.PI-.05,phi-dy*.008));}
+  }else if(ptrs.size===2){
+    var o=null;ptrs.forEach(function(v,id){if(id!==e.pointerId)o=v});
+    var d0=Math.hypot(p.x-o.x,p.y-o.y),d1=Math.hypot(e.clientX-o.x,e.clientY-o.y);
+    if(d1>0)dist=Math.max(3,Math.min(60,dist*d0/d1));moved+=10;
+  }
+  p.x=e.clientX;p.y=e.clientY;
+});
+function up(e){
+  var p=ptrs.get(e.pointerId);ptrs.delete(e.pointerId);
+  if(p&&moved<6&&p.b===0&&e.type==='pointerup'&&ptrs.size===0)pick(e);
+}
+el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
+el.addEventListener('wheel',function(e){e.preventDefault();auto=false;dist=Math.max(3,Math.min(60,dist*Math.exp(e.deltaY*.001)));},{passive:false});
+var ray=new THREE.Raycaster(),v2=new THREE.Vector2();
+function pick(e){
+  var r=el.getBoundingClientRect();
+  v2.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);
+  ray.setFromCamera(v2,cam);
+  var h=ray.intersectObjects(parts)[0];
+  select(h?h.object:null);
+}
+function view(t,p){theta=t;phi=p;auto=false;}
+function reset(){theta=.8;phi=1.1;dist=15;target.set(0,1.5,0);auto=false;}
+$('#bReset').onclick=reset;
+$('#bTop').onclick=function(){view(theta,.02)};
+$('#bFront').onclick=function(){view(0,Math.PI/2)};
+$('#bRight').onclick=function(){view(Math.PI/2,Math.PI/2)};
+$('#bGrid').onclick=function(){grid.visible=!grid.visible;this.classList.toggle('on',grid.visible)};
+document.addEventListener('keydown',function(e){
+  if(/INPUT|TEXTAREA/.test((e.target.tagName||'')))return;
+  if(e.key==='f'||e.key==='F'){if(selected&&selected!=='script'){target.copy(selected.position);dist=Math.max(5,selected.scale.length()*2.5);}}
+  if(e.key==='Escape')select(null);
+});
+
+/* ---------- Add / Delete ---------- */
+var cols=[0x38bdf8,0xfb923c,0xf472b6,0x34d399,0xe879f9];
+$('#bAdd').onclick=function(){
+  stop();counter++;
+  var m=addPart('Part'+counter,'Part',[geoBox,geoBall,geoCyl][counter%3],cols[counter%cols.length],[(Math.random()-.5)*10,1.5,(Math.random()-.5)*10],[2,2,2],[0,Math.random()*90,0]);
+  buildTree();select(m);log('Added '+m.userData.name);
+};
+$('#bDel').onclick=function(){
+  if(!selected||selected==='script')return;
+  if(selected.userData.name==='Baseplate'){log('Baseplate нельзя удалить в демо','w');return;}
+  stop();var m=selected;select(null);scene.remove(m);parts.splice(parts.indexOf(m),1);buildTree();log('Deleted '+m.userData.name);
+};
+
+/* ---------- Play ---------- */
+var bPlay=$('#bPlay');
+function start(){
+  playing=true;bPlay.textContent='⏹ Stop';bPlay.className='rd';
+  parts.forEach(function(m){m.userData.vy=0;if(!m.userData.anchored)m.position.y+=6;});
+  log('Play started — Hello from RbxStudio Web!','i');
+}
+function stop(){
+  if(!playing)return;playing=false;bPlay.textContent='▶ Play';bPlay.className='gr';
+  parts.forEach(function(m){m.position.copy(m.userData.home.p);m.rotation.copy(m.userData.home.r);m.userData.vy=0;});
+  log('Play stopped','w');renderProps();
+}
+bPlay.onclick=function(){playing?stop():start()};
+function physics(dt){
+  parts.forEach(function(m){
+    var u=m.userData;if(u.anchored)return;
+    u.vy-=40*dt;m.position.y+=u.vy*dt;
+    var floor=baseTop+m.scale.y/2;
+    if(m.position.y<floor){m.position.y=floor;u.vy=Math.abs(u.vy)>3?-u.vy*.4:0;}
+    if(Math.abs(u.vy)>0.01||m.position.y>floor+.01)m.rotation.y+=dt*.8;
+  });
+}
+
+/* ---------- качество / размер / цикл ---------- */
+var qual=1;
+function setQ(q){
+  qual=q;renderer.setPixelRatio([.6,Math.min(devicePixelRatio,1.5),Math.min(devicePixelRatio,2)][q]);
+  renderer.shadowMap.enabled=q>0;sun.castShadow=q>0;
+  parts.forEach(function(m){m.material.needsUpdate=true});resize();
+  document.querySelectorAll('#q button').forEach(function(b){b.classList.toggle('on',+b.dataset.q===q)});
+}
+document.querySelectorAll('#q button').forEach(function(b){b.onclick=function(){setQ(+b.dataset.q)}});
+function resize(){
+  var w=vp.clientWidth,h=vp.clientHeight;if(!w||!h)return;
+  renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(vp);
+
+var last=performance.now(),frames=0,fl=last,visible=true;
+new IntersectionObserver(function(en){visible=en[0].isIntersecting},{threshold:0}).observe(vp);
+function loop(t){
+  requestAnimationFrame(loop);
+  if(!visible){last=t;return;}
+  var dt=Math.min((t-last)/1000,.05);last=t;
+  if(auto)theta+=dt*.25;
+  if(playing)physics(dt);
+  updCam();if(box)box.update();
+  renderer.render(scene,cam);
+  frames++;if(t-fl>500){$('#fps').textContent='FPS: '+Math.round(frames*1000/(t-fl))+' | '+parts.length+' obj';frames=0;fl=t;}
+}
+buildTree();renderProps();setQ(1);resize();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
