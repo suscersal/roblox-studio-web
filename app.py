@@ -1173,23 +1173,33 @@ def _collab_who():
     return cid, name
 
 
-def _collab_push(typ, ref=None, name='', cls='', prop='', n=1, undo=None, redo=None):
-    """Дописывает операцию в журнал (вызывать под _collab_cond)."""
+def _collab_push(typ, ref=None, name='', cls='', prop='', n=1, undo=None, redo=None,
+                 who=None, remote=False):
+    """Дописывает операцию в журнал (вызывать под _collab_cond). remote=True — правка
+    пришла через git от другого автора (who): в свой журнал пишем, но обратно не отправляем."""
     c = _collab
-    cid, who = _collab_who()
+    cid, me = _collab_who()
+    if remote:
+        cid, who = '', who or '?'
+    else:
+        who = me
     last = c['ops'][-1] if c['ops'] else None
     # подряд идущие правки ОДНОГО свойства одним человеком за 5 с — одна запись
     # (поле ввода / автосохранение скрипта): undo остаётся самым первым старым значением
-    if (typ == 'set' and last and last['type'] == 'set' and cid and last['byId'] == cid
+    if (typ == 'set' and not remote and last and last['type'] == 'set' and cid and last['byId'] == cid
             and last['ref'] == ref and last['prop'] == prop and time.time() - last['t'] < 5):
         c['rev'] += 1
         last.update(rev=c['rev'], t=time.time(), redo=redo)
+        _cg_pending_add(last)
         _collab_cond.notify_all()
         return
     c['rev'] += 1
-    c['ops'].append({'rev': c['rev'], 't': time.time(), 'by': who, 'byId': cid,
-                     'type': typ, 'ref': ref, 'name': name, 'cls': cls,
-                     'prop': prop, 'n': n, 'undo': undo, 'redo': redo})
+    op = {'rev': c['rev'], 't': time.time(), 'by': who, 'byId': cid,
+          'type': typ, 'ref': ref, 'name': name, 'cls': cls,
+          'prop': prop, 'n': n, 'undo': undo, 'redo': redo}
+    c['ops'].append(op)
+    if not remote:
+        _cg_pending_add(op)
     if len(c['ops']) > COLLAB_MAX_OPS:
         drop = len(c['ops']) - COLLAB_MAX_OPS
         c['base'] = c['ops'][drop - 1]['rev']
@@ -1254,9 +1264,9 @@ def _collab_track(kind):
         @_functools.wraps(fn)
         def wrapper(*args, **kwargs):
             with _collab_cond:
-                if not _collab['on']:
+                if not (_collab['on'] or _cg['on']):
                     return fn(*args, **kwargs)
-                if kind == 'reload' and not _collab_is_local():
+                if kind == 'reload' and _collab['on'] and not _collab_is_local():
                     return jsonify({'ok': False, 'error': 'Карту открывает только хост'}), 403
                 parsed = state['parsed']
                 body = request.get_json(silent=True) if request.is_json else None
@@ -1290,6 +1300,8 @@ def _collab_track(kind):
                         return rv
                     parsed = state['parsed']
                     if kind in ('reload',):
+                        if _cg['on']:
+                            _cg_disable('Открыта другая карта — git отключён, подключите заново')
                         _collab_reset('reload')
                     elif kind == 'import':
                         _collab_push('import', n=int(js.get('count') or 0))
@@ -1495,6 +1507,411 @@ def api_collab_revert():
         _collab_apply(parsed, undo_all)
         _collab_push('revert', n=len(later), prop=str(target), undo=redo_all, redo=undo_all)
         return jsonify({'ok': True, 'reverted': len(later), 'rev': c['rev']})
+
+
+# ---------- запасной вариант: правки через git-сервер ----------
+# Когда напрямую не достучаться (разные сети, изоляция клиентов Wi-Fi, закрытые
+# порты), правки ездят через любой git-репозиторий. В репозитории лежит base.rbxl
+# (исходная карта) и ops/<автор>.jsonl — журнал правок КАЖДОГО автора в его
+# собственном файле, поэтому git никогда не видит конфликта слияния. «Синхронизировать»
+# = дописать свои новые правки → fetch+rebase → применить чужие → push.
+# Новые объекты у двоих могут получить один и тот же ref (api_add берёт max+1),
+# поэтому в файле объекты названы каноническими именами: число — объект исходной
+# карты, [автор, ref] — созданный позже; каждый перекладывает их в свои ref'ы.
+import json as _json
+import re as _re
+import shutil as _shutil
+import subprocess as _subprocess
+
+_CG_DIR = os.environ.get('RSW_COLLAB_GIT_DIR') or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'collab-git')
+_cg = {'on': False, 'sync': None, 'err': '', 'last': ''}
+
+
+def _cg_path(*p):
+    return os.path.join(_CG_DIR, *p)
+
+
+def _cg_save():
+    d = dict(_cg['sync'])
+    d['mine'] = sorted(d['mine'])
+    with open(_cg_path('.git', 'rsw-sync.json'), 'w', encoding='utf-8') as f:
+        _json.dump(d, f, ensure_ascii=False)
+
+
+def _cg_restore():
+    """После перезапуска редактора подхватываем уже подключённый репозиторий."""
+    try:
+        with open(_cg_path('.git', 'rsw-sync.json'), encoding='utf-8') as f:
+            d = _json.load(f)
+        d['mine'] = set(d.get('mine', []))
+        _cg['sync'], _cg['on'] = d, True
+    except (OSError, ValueError):
+        pass
+
+
+def _cg_disable(why=''):
+    _cg['on'], _cg['err'] = False, why
+    try:
+        os.remove(_cg_path('.git', 'rsw-sync.json'))
+    except OSError:
+        pass
+
+
+def _cg_git(*args, cwd=None, timeout=90):
+    try:
+        p = _subprocess.run(['git'] + list(args), cwd=cwd or _CG_DIR, capture_output=True,
+                            text=True, timeout=timeout,
+                            env=dict(os.environ, GIT_TERMINAL_PROMPT='0', LC_ALL='C'))
+    except FileNotFoundError:
+        return 127, 'git не найден: установите git и перезапустите редактор'
+    except _subprocess.TimeoutExpired:
+        return 124, 'git: нет ответа (сеть или запрос пароля). Настройте вход заранее: SSH-ключ или токен'
+    return p.returncode, ((p.stdout or '') + (p.stderr or '')).strip()
+
+
+# --- JSON-представление действий (кортежи/«нет свойства» не живут в JSON) ---
+def _cg_enc(v):
+    if v is _MISSING:
+        return {'__m': 1}
+    if isinstance(v, tuple):
+        return {'__t': [_cg_enc(x) for x in v]}
+    if isinstance(v, list):
+        return [_cg_enc(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _cg_enc(x) for k, x in v.items()}
+    return v
+
+
+def _cg_dec(v):
+    if isinstance(v, dict):
+        if '__m' in v:
+            return _MISSING
+        if '__t' in v:
+            return tuple(_cg_dec(x) for x in v['__t'])
+        return {k: _cg_dec(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_cg_dec(x) for x in v]
+    return v
+
+
+def _cg_acts_json(acts):
+    out = []
+    for a in acts:
+        if a[0] == 'props':
+            out.append(['props', a[1], {p: _cg_enc(v) for p, v in a[2].items()}])
+        elif a[0] == 'put':
+            out.append(['put', a[1], a[2], a[3], _cg_enc(a[4])])
+        else:
+            out.append(list(a))
+    return out
+
+
+def _cg_pending_add(op):
+    """Каждая своя правка сразу дописывается на диск — переживёт перезапуск до отправки."""
+    if not _cg['on'] or op['type'] not in ('set', 'add', 'del', 'move', 'revert', 'import'):
+        return
+    rec = {k: op[k] for k in ('t', 'type', 'name', 'cls', 'prop', 'n')}
+    rec['acts'] = _cg_acts_json(op['redo']) if op.get('redo') else None
+    try:
+        with open(_cg_path('.git', 'rsw-pending.jsonl'), 'a', encoding='utf-8') as f:
+            f.write(_json.dumps(rec, ensure_ascii=False) + '\n')
+    except OSError:
+        traceback.print_exc()
+
+
+def _cg_pending_count():
+    try:
+        with open(_cg_path('.git', 'rsw-pending.jsonl'), encoding='utf-8') as f:
+            return sum(1 for l in f if l.strip())
+    except OSError:
+        return 0
+
+
+# --- ref'ы: локальный <-> канонический ---
+def _cg_cref(s, ref):
+    if not isinstance(ref, int) or ref < 0:
+        return ref
+    if str(ref) in s['l2c']:
+        return s['l2c'][str(ref)]
+    if ref in s['mine']:
+        return [s['slug'], ref]
+    return ref
+
+
+def _cg_lref(s, parsed, c, create=False):
+    if isinstance(c, list):
+        slug, r = c
+        if slug == s['slug']:
+            return r
+        key = '%s:%s' % (slug, r)
+        if key in s['c2l']:
+            return s['c2l'][key]
+        if create:
+            new = max(parsed['referent_to_class'], default=0) + 1
+            s['c2l'][key] = new
+            s['l2c'][str(new)] = [slug, r]
+            return new
+        return None
+    return c
+
+
+def _cg_canon_act(s, a):
+    k = a[0]
+    if k == 'props':
+        return ['props', _cg_cref(s, a[1]), a[2]]
+    if k == 'put':
+        return ['put', _cg_cref(s, a[1]), a[2], _cg_cref(s, a[3]), a[4]]
+    if k == 'rm':
+        return ['rm', _cg_cref(s, a[1])]
+    return ['parent', _cg_cref(s, a[1]), _cg_cref(s, a[2])]
+
+
+def _cg_local_act(s, parsed, a):
+    """Действие из файла -> внутренний кортеж с локальными ref'ами (None — объекта у нас нет)."""
+    k = a[0]
+    if k == 'put':
+        ref = _cg_lref(s, parsed, a[1], create=True)
+        par = _cg_lref(s, parsed, a[3])
+        return ('put', ref, a[2], -1 if par is None else par, _cg_dec(a[4]))
+    ref = _cg_lref(s, parsed, a[1])
+    if ref is None or ref not in parsed['referent_to_class']:
+        return None
+    if k == 'props':
+        return ('props', ref, _cg_dec(a[2]))
+    if k == 'rm':
+        return ('rm', ref)
+    par = _cg_lref(s, parsed, a[2])
+    return ('parent', ref, -1 if par is None else par)
+
+
+def _collab_inverse(parsed, a):
+    """Обратное действие для одного действия — снимается ДО его применения."""
+    k, ref = a[0], a[1]
+    r2c = parsed['referent_to_class']
+    if k == 'props':
+        p = parsed['props'].get(ref, {})
+        return [('props', ref, {n: (_copy.deepcopy(p[n]) if n in p else _MISSING) for n in a[2]})]
+    if k in ('put', 'rm') and ref in r2c:
+        return [('put', ref, r2c[ref], parsed['parent_map'].get(ref, -1),
+                 _copy.deepcopy(parsed['props'].get(ref, {})))]
+    if k == 'put':
+        return [('rm', ref)]
+    if k == 'parent':
+        return [('parent', ref, parsed['parent_map'].get(ref, -1))]
+    return []
+
+
+def _cg_export():
+    """Свои новые правки -> ops/<я>.jsonl (с каноническими ref'ами). Возвращает, сколько записано."""
+    s, pf = _cg['sync'], _cg_path('.git', 'rsw-pending.jsonl')
+    if not os.path.exists(pf):
+        return 0
+    with open(pf, encoding='utf-8') as f:
+        raw = [_json.loads(l) for l in f if l.strip()]
+    out = _cg_path('ops', s['slug'] + '.jsonl')
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    try:
+        with open(out, encoding='utf-8') as f:
+            seq = sum(1 for l in f if l.strip())
+    except OSError:
+        seq = 0
+    with open(out, 'a', encoding='utf-8') as f:
+        for o in raw:
+            acts = o.get('acts')
+            if o['type'] == 'add' and acts:
+                s['mine'].add(acts[0][1])          # с этого момента объект — «мой»
+            if acts is not None:
+                acts = [_cg_canon_act(s, a) for a in acts]
+            f.write(_json.dumps({'seq': seq, 't': o['t'], 'by': s['name'], 'type': o['type'],
+                                 'name': o['name'], 'cls': o['cls'], 'prop': o['prop'],
+                                 'n': o['n'], 'acts': acts}, ensure_ascii=False) + '\n')
+            seq += 1
+    os.remove(pf)
+    _cg_save()
+    return len(raw)
+
+
+def _cg_apply_remote():
+    """Применяет чужие правки из ops/*.jsonl, которых мы ещё не видели. -> (применено, пропущено)."""
+    s, parsed = _cg['sync'], state['parsed']
+    ops_dir = _cg_path('ops')
+    done = skipped = 0
+    if not parsed or not os.path.isdir(ops_dir):
+        return 0, 0
+    for fn in sorted(os.listdir(ops_dir)):
+        slug = fn[:-6]
+        if not fn.endswith('.jsonl') or slug == s['slug']:
+            continue
+        with open(os.path.join(ops_dir, fn), encoding='utf-8') as f:
+            lines = [l for l in f.read().split('\n') if l.strip()]
+        cur = s['cursor'].get(slug, 0)
+        for l in lines[cur:]:
+            try:
+                o = _json.loads(l)
+            except ValueError:
+                break                              # недописанная строка — доберём в следующий раз
+            cur += 1
+            if o.get('acts') is None:
+                skipped += 1                       # import и т.п.: из файла не воспроизвести
+                continue
+            undo, redo, first = [], [], None
+            for a in o['acts']:
+                la = _cg_local_act(s, parsed, a)
+                if la is None:
+                    continue
+                undo.append(_collab_inverse(parsed, la))
+                _collab_apply(parsed, [la])
+                redo.append(la)
+                first = la[1] if first is None else first
+            if redo:
+                _collab_push(o['type'], first, o.get('name', ''), o.get('cls', ''), o.get('prop', ''),
+                             o.get('n', 1), undo=[x for u in reversed(undo) for x in u], redo=redo,
+                             who=o.get('by', slug), remote=True)
+                done += 1
+        s['cursor'][slug] = cur
+    _cg_save()
+    return done, skipped
+
+
+def _cg_branch():
+    rc, out = _cg_git('rev-parse', '--abbrev-ref', 'HEAD')
+    return out if rc == 0 and out != 'HEAD' else 'main'
+
+
+def _cg_fail(msg, code=400):
+    _cg['err'] = msg
+    return jsonify({'ok': False, 'error': msg}), code
+
+
+def _cg_host_only():
+    if not _collab_is_local():
+        return jsonify({'ok': False, 'error': 'Git-синхронизацию настраивает только хост'}), 403
+    return None
+
+
+@flask_app.route('/api/collab/git/status')
+def api_cg_status():
+    s = _cg['sync'] or {}
+    return jsonify({'ok': True, 'git': bool(_shutil.which('git')), 'on': _cg['on'],
+                    'remote': s.get('remote', ''), 'name': s.get('name', ''),
+                    'pending': _cg_pending_count() if _cg['on'] else 0,
+                    'err': _cg['err'], 'last': _cg['last'],
+                    'work': (state['file_path'] or '') if _cg['on'] else ''})
+
+
+@flask_app.route('/api/collab/git/setup', methods=['POST'])
+def api_cg_setup():
+    """Подключает репозиторий. Пустой — стартуем с текущей карты (base.rbxl);
+    с base.rbxl внутри — вступаем: открывается карта из репозитория и применяются правки."""
+    bad = _cg_host_only()
+    if bad:
+        return bad
+    body = request.get_json(silent=True) or {}
+    remote = (body.get('remote') or '').strip()
+    name = (body.get('name') or '').strip()[:32] or 'Host'
+    if not remote:
+        return _cg_fail('Укажите адрес репозитория')
+    if not _shutil.which('git'):
+        return _cg_fail('git не найден: установите git и перезапустите редактор')
+    with _collab_cond:
+        if os.path.exists(_CG_DIR):                # прежнюю папку не удаляем — убираем в сторону
+            os.rename(_CG_DIR, _CG_DIR + '.old-%d' % int(time.time()))
+        rc, out = _cg_git('clone', remote, _CG_DIR, cwd=os.path.dirname(_CG_DIR), timeout=180)
+        if rc != 0:
+            return _cg_fail('git clone: ' + out[-400:])
+        joining = os.path.exists(_cg_path('base.rbxl'))
+        slug = _re.sub(r'[^A-Za-z0-9_-]+', '_', name)[:20] + '-' + _secrets.token_hex(2)
+        _cg_git('config', 'user.name', name)
+        _cg_git('config', 'user.email', slug + '@rsw.local')
+        if joining:
+            work = _cg_path('work.rbxl')
+            _shutil.copyfile(_cg_path('base.rbxl'), work)
+            try:
+                parsed = parse_rbxl(work)
+            except Exception as e:
+                return _cg_fail('Не удалось открыть base.rbxl: %s' % e)
+            state['parsed'], state['file_path'] = parsed, work
+            _recents_add_file(work, name='work.rbxl (git)')
+            if _collab['on']:
+                _collab_reset('reload')
+            bump_scene_version()
+        else:
+            parsed, src = state['parsed'], state['file_path']
+            if not parsed or not src or not os.path.isfile(src):
+                return _cg_fail('Сначала откройте карту (с файла на диске)')
+            if parsed.get('_modified'):
+                return _cg_fail('В карте есть несохранённые изменения: сохраните её (Save) и повторите')
+            _shutil.copyfile(src, _cg_path('base.rbxl'))
+            with open(_cg_path('.gitignore'), 'w', encoding='utf-8') as f:
+                f.write('work.rbxl\n')
+            with open(_cg_path('meta.json'), 'w', encoding='utf-8') as f:
+                _json.dump({'format': 1, 'base': 'base.rbxl', 'created_by': name}, f)
+            _cg_git('checkout', '-B', 'main')
+        _cg['sync'] = {'slug': slug, 'name': name, 'remote': remote, 'cursor': {},
+                       'mine': set(), 'c2l': {}, 'l2c': {}}
+        _cg['on'], _cg['err'] = True, ''
+        _cg_save()
+        if not joining:
+            _cg_git('add', '-A')
+            rc, out = _cg_git('commit', '-m', 'Начало совместной работы: исходная карта')
+            rc, out = _cg_git('push', '-u', 'origin', 'main', timeout=180)
+            if rc != 0:
+                return _cg_fail('git push: ' + out[-400:])
+        applied = skipped = 0
+        if joining:
+            applied, skipped = _cg_apply_remote()
+        _cg['last'] = time.strftime('%H:%M:%S')
+        return jsonify({'ok': True, 'joined': joining, 'applied': applied, 'skipped': skipped})
+
+
+@flask_app.route('/api/collab/git/sync', methods=['POST'])
+def api_cg_sync():
+    bad = _cg_host_only()
+    if bad:
+        return bad
+    if not _cg['on']:
+        return _cg_fail('Git не подключён')
+    with _collab_cond:
+        if not state['parsed']:
+            return _cg_fail('Карта не открыта: откройте work.rbxl из папки collab-git')
+        sent = _cg_export()
+        if sent:
+            _cg_git('add', '-A')
+            _cg_git('commit', '-m', 'Правки: %s (+%d)' % (_cg['sync']['name'], sent))
+        branch = _cg_branch()
+        pulled = skipped = 0
+        for attempt in (1, 2):
+            rc, out = _cg_git('fetch', 'origin', timeout=120)
+            if rc != 0:
+                return _cg_fail('git fetch: ' + out[-400:])
+            if _cg_git('rev-parse', '--verify', 'origin/' + branch)[0] == 0:
+                rc, out = _cg_git('rebase', 'origin/' + branch)
+                if rc != 0:
+                    _cg_git('rebase', '--abort')
+                    return _cg_fail('git rebase: ' + out[-400:])
+            d, k = _cg_apply_remote()
+            pulled, skipped = pulled + d, skipped + k
+            rc, out = _cg_git('push', '-u', 'origin', branch, timeout=180)
+            if rc == 0:
+                break
+            if attempt == 2:
+                return _cg_fail('git push: ' + out[-400:])   # правки уже в локальном репозитории
+        _cg['err'], _cg['last'] = '', time.strftime('%H:%M:%S')
+        return jsonify({'ok': True, 'sent': sent, 'pulled': pulled, 'skipped': skipped})
+
+
+@flask_app.route('/api/collab/git/off', methods=['POST'])
+def api_cg_off():
+    bad = _cg_host_only()
+    if bad:
+        return bad
+    with _collab_cond:
+        _cg_disable('')
+    return jsonify({'ok': True})
+
+
+_cg_restore()
 
 
 @flask_app.route('/collab.js')
@@ -5617,7 +6034,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-21 · no-swallow'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-10-29 · door-tween'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

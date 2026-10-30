@@ -1,7 +1,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-21 · no-swallow';
+        const BUILD_LABEL = '2026-10-29 · door-tween';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============

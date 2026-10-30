@@ -44,6 +44,21 @@
             op_script: '{who} изменил(а) скрипт {obj}',
             kept: 'Открыт чужой скрипт был изменён — откройте его заново',
             net: 'Нет связи с сервером',
+            git_title: 'Git — запасной вариант (без общей сети)',
+            git_hint: 'Если напрямую не соединиться: оба указывают один и тот же репозиторий. Первый подключает пустой — стартует с вашей открытой (сохранённой) карты; второй вступает — откроется карта из репозитория.',
+            git_remote: 'Адрес репозитория (https://… или git@…)',
+            git_connect: 'Подключить',
+            git_sync: '⇅ Синхронизировать',
+            git_off: 'Отключить',
+            git_pending: 'Неотправленных правок: {n}',
+            git_last: 'синхр. {t}',
+            git_work: 'Файл открытой карты (сохраняйте его, Ctrl+S):',
+            git_nogit: 'git не найден на этом устройстве — установите его и перезапустите редактор.',
+            git_done: 'Отправлено: {s}, получено: {p}',
+            git_skip: ' (не воспроизводимо: {k})',
+            git_joined: 'Вступили. Применено правок: {n}',
+            git_started: 'Репозиторий подключён, исходная карта отправлена',
+            git_busy: 'Подождите…',
         },
         en: {
             btn_title: 'Collaboration',
@@ -82,6 +97,21 @@
             op_script: '{who} edited script {obj}',
             kept: 'The script you have open was changed — reopen it',
             net: 'No connection to the server',
+            git_title: 'Git — fallback (no shared network)',
+            git_hint: 'If you cannot connect directly: both of you use the same repository. The first one connects an empty repo and starts from the map you have open (saved); the second one joins and gets the map from the repo.',
+            git_remote: 'Repository URL (https://… or git@…)',
+            git_connect: 'Connect',
+            git_sync: '⇅ Sync',
+            git_off: 'Disconnect',
+            git_pending: 'Unsent changes: {n}',
+            git_last: 'synced {t}',
+            git_work: 'File of the open map (save it with Ctrl+S):',
+            git_nogit: 'git was not found on this device — install it and restart the editor.',
+            git_done: 'Sent: {s}, received: {p}',
+            git_skip: ' (cannot be replayed: {k})',
+            git_joined: 'Joined. Changes applied: {n}',
+            git_started: 'Repository connected, the original map was uploaded',
+            git_busy: 'Please wait…',
         },
     };
     function lang() {
@@ -137,7 +167,7 @@
     }
 
     // ---------- состояние ----------
-    const S = { on: false, local: true, joined: false, rev: 0, base: 0, peers: [], feed: [], token: '', urls: [], net: true };
+    const S = { git: null, gitKey: '', gitRemote: '', gitOpen: false, gitBusy: false, gitMsg: '', gitOk: false, on: false, local: true, joined: false, rev: 0, base: 0, peers: [], feed: [], token: '', urls: [], net: true };
     let loopId = 0;
 
     function curSel() {
@@ -309,7 +339,16 @@
                 leave(false);
             }
             renderAll(); updateBadge();
+            if (S.local) refreshGit();
         } catch (e) { /* сервер недоступен — повторим */ }
+    }
+    async function refreshGit() {
+        try {
+            const g = await jget('/api/collab/git/status');
+            if (!g.ok) return;
+            const k = JSON.stringify(g);
+            if (k !== S.gitKey) { S.gitKey = k; S.git = g; renderGit(); }
+        } catch (e) { /* без git-блока */ }
     }
     setInterval(() => { if (!document.hidden && !S.joined) refreshStatus(); }, 6000);
 
@@ -335,6 +374,7 @@
 .co-url{font:calc(12px*var(--fs,1))/1.4 ui-monospace,monospace;color:#93c5fd;user-select:all;word-break:break-all}
 .co-muted{color:#9ca3af}
 .co-msg{color:#fca5a5;min-height:1em}
+.co-msg.co-ok{color:#86efac}
 .co-net{background:#78350f;color:#fde68a;border-radius:4px;padding:4px 8px}
 .co-peer-i{display:flex;gap:6px;align-items:center;padding:2px 0}
 .co-dot{width:8px;height:8px;border-radius:50%;background:#34d399;flex:none}
@@ -345,6 +385,8 @@
 .co-op .co-undo{display:none;margin-top:3px;min-height:calc(22px*var(--bs,1));font-size:.92em}
 .co-op:hover .co-undo,.co-op:focus-within .co-undo{display:inline-block}
 @media (hover:none){.co-op .co-undo{display:inline-block}}
+#co-git summary{cursor:pointer;color:#9ca3af;font-size:calc(11px*var(--fs,1));text-transform:uppercase;letter-spacing:.04em}
+.co-gbody{display:flex;flex-direction:column;gap:6px;margin-top:6px}
 #toolbar-top button#co-btn{position:relative}
 #co-badge{display:none;position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;border-radius:8px;background:#10b981;color:#fff;font:700 10px/16px system-ui,sans-serif;text-align:center;padding:0 3px}
 #tree .co-peer{box-shadow:inset 3px 0 0 #f59e0b;background:rgba(245,158,11,.14)}
@@ -390,7 +432,7 @@
         msgEl = null;
         let h = '';
         if (m === 'host') {
-            h = nameField() + '<button class="pri" id="co-start">' + T('start') + '</button><div class="co-msg" id="co-msg"></div>';
+            h = nameField() + '<button class="pri" id="co-start">' + T('start') + '</button><div class="co-msg" id="co-msg"></div><div id="co-gitbox"></div>';
         } else if (m === 'wait') {
             h = '<div class="co-muted">' + T('no_room') + '</div>';
         } else if (m === 'join') {
@@ -404,10 +446,11 @@
                 + '<div><div class="co-sec">' + T('online') + '</div><div id="co-peers"></div></div>'
                 + '<div><div class="co-sec">' + T('history') + '</div><div class="co-feed" id="co-feed"></div></div>'
                 + (S.local ? '<button class="dng" id="co-stop">' + T('stop') + '</button>' : '')
-                + '<div class="co-msg" id="co-msg"></div>';
+                + '<div class="co-msg" id="co-msg"></div><div id="co-gitbox"></div>';
         }
         body.innerHTML = h;
         msgEl = body.querySelector('#co-msg');
+        renderGit();
         if (msgEl && pendingMsg) { msgEl.textContent = pendingMsg; pendingMsg = ''; }
         wire();
     }
@@ -437,6 +480,43 @@
         };
         const sp = body.querySelector('#co-stop');
         if (sp) sp.onclick = async () => { await jpost('/api/collab/stop'); S.joined = false; loopId++; S.on = false; S.peers = []; markPeers(); await refreshStatus(); };
+    }
+    function renderGit() {
+        const box = body.querySelector('#co-gitbox');
+        if (!box) return;
+        const g = S.git;
+        if (!S.local || !g) { box.innerHTML = ''; return; }
+        let h = '<details id="co-git"' + (S.gitOpen ? ' open' : '') + '><summary>' + T('git_title') + '</summary><div class="co-gbody">';
+        if (!g.git) h += '<div class="co-msg">' + T('git_nogit') + '</div>';
+        else if (!g.on) h += '<div class="co-muted">' + T('git_hint') + '</div><input id="co-gremote" placeholder="' + esc(T('git_remote')) + '" value="' + esc(S.gitRemote) + '"><button class="pri" id="co-gconnect">' + T('git_connect') + '</button>';
+        else h += '<div class="co-url">' + esc(g.remote) + '</div><div>' + T('git_pending', { n: g.pending }) + (g.last ? ' · ' + T('git_last', { t: g.last }) : '') + '</div>'
+            + '<div class="co-row"><button class="pri" id="co-gsync">' + T('git_sync') + '</button><button id="co-goff">' + T('git_off') + '</button></div>'
+            + '<div class="co-muted">' + T('git_work') + '<br>' + esc(g.work) + '</div>';
+        h += '<div class="co-msg' + (S.gitOk ? ' co-ok' : '') + '" id="co-gmsg">' + esc(S.gitMsg || g.err || '') + '</div></div></details>';
+        box.innerHTML = h;
+        const det = box.querySelector('#co-git');
+        det.addEventListener('toggle', () => { S.gitOpen = det.open; });
+        const gm = (t, ok) => { S.gitMsg = t; S.gitOk = !!ok; const e = box.querySelector('#co-gmsg'); if (e) { e.textContent = t; e.classList.toggle('co-ok', !!ok); } };
+        const run = async (btn, url, payload, ok) => {
+            if (S.gitBusy) return;
+            S.gitBusy = true; const lbl = btn.textContent; btn.textContent = T('git_busy'); btn.disabled = true;
+            try {
+                const r = await jpost(url, payload);
+                if (!r.ok) gm(r.error || String(r._status)); else { gm(ok(r), true); if (r.pulled || r.applied || r.joined) fullRefresh(); }
+            } catch (e) { gm(T('net')); }
+            S.gitBusy = false; S.gitKey = ''; await refreshGit();
+        };
+        const con = box.querySelector('#co-gconnect');
+        if (con) {
+            box.querySelector('#co-gremote').oninput = e => { S.gitRemote = e.target.value; };
+            con.onclick = () => run(con, '/api/collab/git/setup', { remote: S.gitRemote.trim(), name: myName || 'Host' },
+                r => r.joined ? T('git_joined', { n: r.applied }) : T('git_started'));
+        }
+        const sy = box.querySelector('#co-gsync');
+        if (sy) sy.onclick = () => run(sy, '/api/collab/git/sync', {},
+            r => T('git_done', { s: r.sent, p: r.pulled }) + (r.skipped ? T('git_skip', { k: r.skipped }) : ''));
+        const off = box.querySelector('#co-goff');
+        if (off) off.onclick = () => run(off, '/api/collab/git/off', {}, () => '');
     }
     function renderPeers() {
         const el = body.querySelector('#co-peers');
