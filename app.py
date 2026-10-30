@@ -1574,6 +1574,8 @@ def _cg_git(*args, cwd=None, timeout=90):
 def _cg_enc(v):
     if v is _MISSING:
         return {'__m': 1}
+    if isinstance(v, (bytes, bytearray)):          # бинарные свойства (Terrain, атрибуты и т.п.)
+        return {'__b': _b64.b64encode(bytes(v)).decode('ascii')}
     if isinstance(v, tuple):
         return {'__t': [_cg_enc(x) for x in v]}
     if isinstance(v, list):
@@ -1587,6 +1589,8 @@ def _cg_dec(v):
     if isinstance(v, dict):
         if '__m' in v:
             return _MISSING
+        if '__b' in v:
+            return _b64.b64decode(v['__b'])
         if '__t' in v:
             return tuple(_cg_dec(x) for x in v['__t'])
         return {k: _cg_dec(x) for k, x in v.items()}
@@ -1702,6 +1706,35 @@ def _collab_inverse(parsed, a):
     return []
 
 
+def _cg_mask(u):
+    """Токен/пароль внутри https-адреса (https://TOKEN@… или user:pass@…) наружу не отдаём."""
+    return _re.sub(r'(https?://)[^/@\s]+@', r'\1***@', u or '')
+
+
+def _cg_lww(s, a, t, who, local=False):
+    """«Последний победил» для props/parent: у каждой пары (объект, свойство) помним
+    (время, автор) последней применённой правки. Порядок (время, автор) общий для всех,
+    поэтому при одновременной правке все приходят к одному значению. local=True — только
+    запомнить свою правку. Возвращает действие (возможно, без устаревших свойств) или None."""
+    if a[0] not in ('props', 'parent'):
+        return a
+    stamp, st, ref = s.setdefault('stamp', {}), (t, who), _json.dumps(a[1])
+    if a[0] == 'parent':
+        k = ref + '|@parent'
+        if not local and tuple(stamp.get(k) or (0, '')) > st:
+            return None
+        stamp[k] = list(st)
+        return a
+    keep = {}
+    for p, v in a[2].items():
+        k = ref + '|' + p
+        if not local and tuple(stamp.get(k) or (0, '')) > st:
+            continue
+        stamp[k] = list(st)
+        keep[p] = v
+    return ['props', a[1], keep] if keep else None
+
+
 def _cg_export():
     """Свои новые правки -> ops/<я>.jsonl (с каноническими ref'ами). Возвращает, сколько записано."""
     s, pf = _cg['sync'], _cg_path('.git', 'rsw-pending.jsonl')
@@ -1723,6 +1756,8 @@ def _cg_export():
                 s['mine'].add(acts[0][1])          # с этого момента объект — «мой»
             if acts is not None:
                 acts = [_cg_canon_act(s, a) for a in acts]
+                for a in acts:
+                    _cg_lww(s, a, o['t'], s['slug'], local=True)
             f.write(_json.dumps({'seq': seq, 't': o['t'], 'by': s['name'], 'type': o['type'],
                                  'name': o['name'], 'cls': o['cls'], 'prop': o['prop'],
                                  'n': o['n'], 'acts': acts}, ensure_ascii=False) + '\n')
@@ -1739,6 +1774,7 @@ def _cg_apply_remote():
     done = skipped = 0
     if not parsed or not os.path.isdir(ops_dir):
         return 0, 0
+    batch, newcur = [], {}
     for fn in sorted(os.listdir(ops_dir)):
         slug = fn[:-6]
         if not fn.endswith('.jsonl') or slug == s['slug']:
@@ -1746,30 +1782,38 @@ def _cg_apply_remote():
         with open(os.path.join(ops_dir, fn), encoding='utf-8') as f:
             lines = [l for l in f.read().split('\n') if l.strip()]
         cur = s['cursor'].get(slug, 0)
-        for l in lines[cur:]:
+        for i, l in enumerate(lines[cur:], cur):
             try:
                 o = _json.loads(l)
             except ValueError:
                 break                              # недописанная строка — доберём в следующий раз
-            cur += 1
-            if o.get('acts') is None:
-                skipped += 1                       # import и т.п.: из файла не воспроизвести
+            batch.append((o.get('t', 0), slug, i, o))
+            cur = i + 1
+        newcur[slug] = cur
+    # правки разных авторов — в порядке времени: так объект (put) раньше правок, которые на него ссылаются
+    batch.sort(key=lambda x: (x[0], x[1], x[2]))
+    for t, slug, _i, o in batch:
+        if o.get('acts') is None:
+            skipped += 1                           # import и т.п.: из файла не воспроизвести
+            continue
+        undo, redo, first = [], [], None
+        for a in o['acts']:
+            a = _cg_lww(s, a, t, slug)
+            if a is None:
+                continue                           # у нас уже есть более свежая правка
+            la = _cg_local_act(s, parsed, a)
+            if la is None:
                 continue
-            undo, redo, first = [], [], None
-            for a in o['acts']:
-                la = _cg_local_act(s, parsed, a)
-                if la is None:
-                    continue
-                undo.append(_collab_inverse(parsed, la))
-                _collab_apply(parsed, [la])
-                redo.append(la)
-                first = la[1] if first is None else first
-            if redo:
-                _collab_push(o['type'], first, o.get('name', ''), o.get('cls', ''), o.get('prop', ''),
-                             o.get('n', 1), undo=[x for u in reversed(undo) for x in u], redo=redo,
-                             who=o.get('by', slug), remote=True)
-                done += 1
-        s['cursor'][slug] = cur
+            undo.append(_collab_inverse(parsed, la))
+            _collab_apply(parsed, [la])
+            redo.append(la)
+            first = la[1] if first is None else first
+        if redo:
+            _collab_push(o['type'], first, o.get('name', ''), o.get('cls', ''), o.get('prop', ''),
+                         o.get('n', 1), undo=[x for u in reversed(undo) for x in u], redo=redo,
+                         who=o.get('by', slug), remote=True)
+            done += 1
+    s['cursor'].update(newcur)
     _cg_save()
     return done, skipped
 
@@ -1780,6 +1824,7 @@ def _cg_branch():
 
 
 def _cg_fail(msg, code=400):
+    msg = _cg_mask(msg)
     _cg['err'] = msg
     return jsonify({'ok': False, 'error': msg}), code
 
@@ -1794,7 +1839,7 @@ def _cg_host_only():
 def api_cg_status():
     s = _cg['sync'] or {}
     return jsonify({'ok': True, 'git': bool(_shutil.which('git')), 'on': _cg['on'],
-                    'remote': s.get('remote', ''), 'name': s.get('name', ''),
+                    'remote': _cg_mask(s.get('remote', '')), 'name': s.get('name', ''),
                     'pending': _cg_pending_count() if _cg['on'] else 0,
                     'err': _cg['err'], 'last': _cg['last'],
                     'work': (state['file_path'] or '') if _cg['on'] else ''})
@@ -1812,12 +1857,14 @@ def api_cg_setup():
     name = (body.get('name') or '').strip()[:32] or 'Host'
     if not remote:
         return _cg_fail('Укажите адрес репозитория')
+    if remote.startswith('-') or any(c in remote for c in '\r\n\x00') or _re.match(r'[A-Za-z][A-Za-z0-9+.-]*::', remote):
+        return _cg_fail('Некорректный адрес репозитория')
     if not _shutil.which('git'):
         return _cg_fail('git не найден: установите git и перезапустите редактор')
     with _collab_cond:
         if os.path.exists(_CG_DIR):                # прежнюю папку не удаляем — убираем в сторону
             os.rename(_CG_DIR, _CG_DIR + '.old-%d' % int(time.time()))
-        rc, out = _cg_git('clone', remote, _CG_DIR, cwd=os.path.dirname(_CG_DIR), timeout=180)
+        rc, out = _cg_git('clone', '--', remote, _CG_DIR, cwd=os.path.dirname(_CG_DIR), timeout=180)
         if rc != 0:
             return _cg_fail('git clone: ' + out[-400:])
         joining = os.path.exists(_cg_path('base.rbxl'))
