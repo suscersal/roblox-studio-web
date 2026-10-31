@@ -1438,6 +1438,16 @@
                     : 'н/д (расширение недоступно)';
                 notify('GPU: ' + gpuInfo, 'warn');
                 console.log('WebGL renderer:', gpuInfo);
+                // То же одной строкой в Output (остаётся на экране, не пропадает как тост): по ней видно,
+                // с какой точностью/глубиной/версией WebView реально работает телефон.
+                const gl = renderer.getContext();
+                const wv = (navigator.userAgent.match(/Chrome\/([\d.]+)/) || [])[1] || '?';
+                const gfxLine = 'GPU: ' + gpuInfo + ' | ' + (renderer.capabilities.isWebGL2 ? 'WebGL2' : 'WebGL1')
+                    + ' | precision ' + renderer.capabilities.precision + ' | depth ' + gl.getParameter(gl.DEPTH_BITS) + ' bit'
+                    + ' | AA ' + (gl.getContextAttributes().antialias ? 'on' : 'off') + ' | DPR ' + window.devicePixelRatio
+                    + ' | quality ' + currentQuality + ' | WebView ' + wv;
+                console.log(gfxLine);
+                setTimeout(() => { try { logLuaOutput('info', gfxLine); } catch (e) { /* Output не готов */ } }, 3000);
             } catch (e) {
                 console.log('Не удалось получить инфо о GPU:', e);
             }
