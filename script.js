@@ -4718,6 +4718,7 @@
             _activePromptRef = null;
             _activePrompt = null;
             _promptHoldStart = null; _promptShownRef = null; _promptHeldRef = null; _promptTriggered = false; _ppsRefCache = null;
+            _activatedTool = null; _hotbarSig = ''; if (_hotbarEl) _hotbarEl.style.display = 'none'; for (const k in _coreGuiOff) delete _coreGuiOff[k];
             const _promptEl = document.getElementById('proximity-prompt');
             if (_promptEl) _promptEl.style.display = 'none';
             _disposeCharMesh();
@@ -5525,7 +5526,7 @@ end })
 
 local InstanceMT = {}
 -- свойство -> тип Enum (значения хранятся на JS-стороне строкой)
-local __ENUM_PROPS = { CameraType = "CameraType", MouseBehavior = "MouseBehavior" }
+local __ENUM_PROPS = { CameraType = "CameraType", MouseBehavior = "MouseBehavior", Material = "Material" }
 
 -- Event:Connect(fn) — функция-колбэк хранится ЦЕЛИКОМ на Lua-стороне (в
 -- обычной Lua-таблице __conns), а не через luaL_ref в JS-реестр — так
@@ -5876,7 +5877,10 @@ InstanceMT.__index = function(t, k)
     end
     -- StarterGui:SetCoreGuiEnabled/SetCore/GetCore... — отключать встроенный CoreGui в эмуляторе нечего: no-op
     if __get_class(ref) == "StarterGui" then
-        if k == "SetCoreGuiEnabled" or k == "SetCore" then return function() end end
+        if k == "SetCoreGuiEnabled" then
+            return function(self, ty, en) __core_gui(ty and ty.Name or tostring(ty), en and true or false) end
+        end
+        if k == "SetCore" then return function() end end
         if k == "GetCoreGuiEnabled" then return function() return true end end
         if k == "GetCore" then return function() return nil end end
     end
@@ -8393,6 +8397,11 @@ end
                 // Pitch — устаревшее (в реальном Roblox давно заменено
                 if (name === 'PlaybackSpeed' || name === 'Pitch') return _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
             }
+            // Sound, чей ассет не загрузился (нет сети/куки) — всё равно «не играет», а не nil (скрипты читают IsPlaying/TimeLength)
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Sound' && !soundElByRef[ref]) {
+                if (name === 'IsPlaying' || name === 'Playing') return false;
+                if (name === 'TimePosition' || name === 'TimeLength' || name === 'Length') return 0;
+            }
             // GUI-объекты — ПЕРЕД virtualInstanceProps:
             if (guiPropsByRef[ref] && name in guiPropsByRef[ref]) {
                 const v = guiPropsByRef[ref][name];
@@ -8403,7 +8412,27 @@ end
             // лежат в обычном JS-объекте, заведённом при создании.
             if (virtualInstanceProps[ref]) {
                 const v = virtualInstanceProps[ref][name];
-                return v !== undefined ? v : null;
+                if (v !== undefined) return v;
+                // клон/Instance.new части без записанного свойства — значения по умолчанию Roblox, а не nil
+                if (name === 'CanCollide' || name === 'CanTouch' || name === 'CanQuery') return true;
+                if (name === 'Anchored' || name === 'Massless') return false;
+                if (name === 'Material' && luaByRef[ref] && /Part|UnionOperation/.test(luaByRef[ref].cls)) return 'Plastic';
+                const vcls = luaByRef[ref] && luaByRef[ref].cls;
+                if (name === 'Transparency' || name === 'Reflectance') {
+                    if (vcls && /Part$|^Part$|MeshPart|UnionOperation|WedgePart|TrussPart|SpawnLocation|Decal|Texture/.test(vcls)) return 0;
+                }
+                if (vcls === 'ProximityPrompt') {
+                    const PD = { HoldDuration: 0, MaxActivationDistance: 10, ActionText: '', ObjectText: '', RequiresLineOfSight: true, Enabled: true, ClickablePrompt: true };
+                    if (name in PD) return PD[name];
+                }
+                return null;
+            }
+            // ProximityPrompt из файла: свойства лежат в реестре подсказок (JS), а не в generic-пропсах
+            if (_promptRegistry[ref]) {
+                const pr = _promptRegistry[ref];
+                if (name in pr && pr[name] !== undefined && name !== 'parentRef') return pr[name];
+                const PD = { HoldDuration: 0, MaxActivationDistance: 10, ActionText: '', ObjectText: '', RequiresLineOfSight: true, Enabled: true, ClickablePrompt: true };
+                if (name in PD) return PD[name];
             }
             const mesh = sceneObjs[ref];
             if (name === 'Transparency') {
@@ -9567,6 +9596,11 @@ end
             });
             // UserInputService.TouchEnabled и т.п.: экранный джойстик есть на
             // сенсорных устройствах, WASD — на устройствах с клавиатурой.
+            def('__core_gui', function (L2) {
+                const nm = lua.lua_tojsstring(L2, 1), en = !!lua.lua_toboolean(L2, 2);
+                _coreGuiOff[nm] = !en; if (nm === 'All') _coreGuiOff.Backpack = !en;
+                return 0;
+            });
             def('__prompt_input', function (L2) {
                 window.__promptInput(lua.lua_tonumber(L2, 1), !!lua.lua_toboolean(L2, 2));
                 return 0;
@@ -12341,6 +12375,89 @@ end
             if (mesh) { const v = new THREE.Vector3(); mesh.matrix.decompose(v, new THREE.Quaternion(), new THREE.Vector3()); return v; }
             return null;
         }
+
+        // ===== Стандартный хотбар Roblox (CoreGui Backpack) + Tool.Activated =====
+        const _coreGuiOff = {};
+        let _hotbarEl = null, _hotbarLast = 0, _hotbarSig = '';
+        function _toolsOf(parentRef) {
+            return (luaChildrenByRef[parentRef] || []).filter(r => luaByRef[r] && luaByRef[r].cls === 'Tool');
+        }
+        function _backpackRef() {
+            for (const k in luaByRef) if (luaByRef[k] && luaByRef[k].cls === 'Backpack') return Number(k);
+            return -1;
+        }
+        function _toggleTool(ref) {
+            const bp = _backpackRef();
+            if (bp === -1 || luaCharacterRef === -1) return;
+            const equipped = luaParentByRef[ref] === luaCharacterRef;
+            for (const t of _toolsOf(luaCharacterRef)) luaSetParent(t, bp);   // одновременно — один Tool в руке
+            if (!equipped) luaSetParent(ref, luaCharacterRef);
+            _hotbarLast = 0;
+        }
+        function _updateDefaultHotbar() {
+            const now = performance.now();
+            if (now - _hotbarLast < 250) return;
+            _hotbarLast = now;
+            const bp = _backpackRef();
+            const tools = (isPlaying && bp !== -1 && luaCharacterRef !== -1 && !_coreGuiOff.Backpack)
+                ? _toolsOf(bp).concat(_toolsOf(luaCharacterRef)).sort((x, y) => x - y) : [];
+            if (!_hotbarEl) {
+                _hotbarEl = document.createElement('div');
+                _hotbarEl.id = 'default-hotbar';
+                _hotbarEl.style.cssText = 'position:absolute;left:50%;bottom:8px;transform:translateX(-50%);display:flex;gap:6px;z-index:60;pointer-events:auto;';
+                const vp = document.getElementById('viewport'); if (!vp) return;
+                vp.appendChild(_hotbarEl);
+            }
+            const sig = tools.map(t => t + ':' + (luaParentByRef[t] === luaCharacterRef ? 1 : 0) + ':' + luaByRef[t].name).join('|');
+            if (sig === _hotbarSig) return;
+            _hotbarSig = sig;
+            _hotbarEl.innerHTML = '';
+            tools.forEach((t, i) => {
+                const b = document.createElement('div');
+                const on = luaParentByRef[t] === luaCharacterRef;
+                b.style.cssText = 'min-width:56px;height:56px;padding:2px 6px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;'
+                    + 'background:' + (on ? 'rgba(255,255,255,.35)' : 'rgba(25,27,29,.75)') + ';border:2px solid ' + (on ? '#fff' : 'rgba(255,255,255,.3)') + ';border-radius:6px;color:#fff;font:12px sans-serif;user-select:none;cursor:pointer;text-align:center;';
+                b.innerHTML = '<span style="opacity:.7;font-size:10px">' + (i + 1) + '</span><span>' + String(luaByRef[t].name).replace(/</g, '&lt;') + '</span>';
+                const act = (e) => { e.preventDefault(); e.stopPropagation(); _toggleTool(t); };
+                b.addEventListener('mousedown', act); b.addEventListener('touchstart', act, { passive: false });
+                _hotbarEl.appendChild(b);
+            });
+            _hotbarEl.style.display = tools.length ? 'flex' : 'none';
+        }
+        window.addEventListener('keydown', (e) => {
+            if (!isPlaying || _coreGuiOff.Backpack || e.repeat) return;
+            const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+            const m = /^Digit([1-9])$/.exec(e.code || ''); if (!m) return;
+            const bp = _backpackRef(); if (bp === -1 || luaCharacterRef === -1) return;
+            const list = _toolsOf(bp).concat(_toolsOf(luaCharacterRef)).sort((x, y) => x - y);
+            const tool = list[Number(m[1]) - 1]; if (tool !== undefined) _toggleTool(tool);
+        });
+        // Tool.Activated / Deactivated: клик или тап по сцене (не по GUI) при экипированном Tool.Enabled ~= false
+        let _activatedTool = null;
+        function _toolPointerDown(e) {
+            if (!isPlaying || luaCharacterRef === -1 || _activatedTool !== null) return;
+            const tg = e.target;
+            if (!tg || !tg.closest || !tg.closest('#viewport')) return;
+            if (tg.closest('#gui-overlay') && tg !== document.getElementById('gui-overlay')) return;
+            if (tg.closest('#default-hotbar') || tg.closest('#proximity-prompt') || tg.closest('.mobile-pad, #mobile-pad, #joystick-zone')) return;
+            if (e.type === 'mousedown' && e.button !== 0) return;
+            const tool = _toolsOf(luaCharacterRef)[0];
+            if (tool === undefined) return;
+            if (luaGetGenericProp(tool, 'Enabled') === false) return;
+            _activatedTool = tool;
+            fireLuaSignal(tool, 'Activated', []);
+        }
+        function _toolPointerUp() {
+            if (_activatedTool === null) return;
+            const t = _activatedTool; _activatedTool = null;
+            fireLuaSignal(t, 'Deactivated', []);
+        }
+        document.addEventListener('mousedown', _toolPointerDown);
+        document.addEventListener('touchstart', _toolPointerDown, { passive: true });
+        document.addEventListener('mouseup', _toolPointerUp);
+        document.addEventListener('touchend', _toolPointerUp, { passive: true });
+        document.addEventListener('touchcancel', _toolPointerUp, { passive: true });
+
         let _activePromptRef = null;
         let _promptShownRef = null;      // подсказка, для которой уже стрелял PromptShown
         let _promptHeldRef = null;       // подсказка, у которой сейчас «зажата кнопка»
@@ -12406,6 +12523,7 @@ end
             if (ref !== null && _promptIsCustom(_promptRegistry[ref])) _promptFire(ref, 'PromptShown', [_promptInputType()]);
         }
         function updateProximityPrompts() {
+            _updateDefaultHotbar();
             const el = document.getElementById('proximity-prompt');
             if (!el) return;
             const refs = Object.keys(_promptRegistry);
