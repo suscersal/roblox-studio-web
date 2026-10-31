@@ -53,7 +53,9 @@
             git_pending: 'Неотправленных правок: {n}',
             git_last: 'синхр. {t}',
             git_work: 'Файл открытой карты (сохраняйте его, Ctrl+S):',
-            git_nogit: 'git не найден на этом устройстве — установите его и перезапустите редактор.',
+            git_nogit: 'На этом устройстве нет git (так в APK) — это не помеха: укажите токен GitHub ниже, синхронизация пойдёт напрямую через интернет.',
+            git_token: 'Токен GitHub (нужен, если нет git)',
+            git_token_help: 'Токен: GitHub → Settings → Developer settings → Fine-grained tokens → доступ только к ОДНОМУ репозиторию, право Contents: Read and write. Репозиторий не пустой (создайте с README). Токен хранится только на этом устройстве.',
             git_done: 'Отправлено: {s}, получено: {p}',
             git_skip: ' (не воспроизводимо: {k})',
             git_joined: 'Вступили. Применено правок: {n}',
@@ -106,7 +108,9 @@
             git_pending: 'Unsent changes: {n}',
             git_last: 'synced {t}',
             git_work: 'File of the open map (save it with Ctrl+S):',
-            git_nogit: 'git was not found on this device — install it and restart the editor.',
+            git_nogit: 'This device has no git (as in the APK) — that is fine: enter a GitHub token below and sync goes straight over the internet.',
+            git_token: 'GitHub token (needed if there is no git)',
+            git_token_help: 'Token: GitHub → Settings → Developer settings → Fine-grained tokens → access to ONE repository only, Contents: Read and write. The repository must not be empty (create it with a README). The token is stored on this device only.',
             git_done: 'Sent: {s}, received: {p}',
             git_skip: ' (cannot be replayed: {k})',
             git_joined: 'Joined. Changes applied: {n}',
@@ -167,7 +171,7 @@
     }
 
     // ---------- состояние ----------
-    const S = { git: null, gitKey: '', gitRemote: '', gitOpen: false, gitBusy: false, gitMsg: '', gitOk: false, on: false, local: true, joined: false, rev: 0, base: 0, peers: [], feed: [], token: '', urls: [], net: true };
+    const S = { git: null, gitKey: '', gitRemote: '', gitOpen: false, gitBusy: false, gitMsg: '', gitOk: false, gitToken: '', on: false, local: true, joined: false, rev: 0, base: 0, peers: [], feed: [], token: '', urls: [], net: true };
     let loopId = 0;
 
     function curSel() {
@@ -487,9 +491,11 @@
         const g = S.git;
         if (!S.local || !g) { box.innerHTML = ''; return; }
         let h = '<details id="co-git"' + (S.gitOpen ? ' open' : '') + '><summary>' + T('git_title') + '</summary><div class="co-gbody">';
-        if (!g.git) h += '<div class="co-msg">' + T('git_nogit') + '</div>';
-        else if (!g.on) h += '<div class="co-muted">' + T('git_hint') + '</div><input id="co-gremote" placeholder="' + esc(T('git_remote')) + '" value="' + esc(S.gitRemote) + '"><button class="pri" id="co-gconnect">' + T('git_connect') + '</button>';
-        else h += '<div class="co-url">' + esc(g.remote) + '</div><div>' + T('git_pending', { n: g.pending }) + (g.last ? ' · ' + T('git_last', { t: g.last }) : '') + '</div>'
+        if (!g.on) h += (!g.git ? '<div class="co-muted">' + T('git_nogit') + '</div>' : '') + '<div class="co-muted">' + T('git_hint') + '</div>'
+            + '<input id="co-gremote" placeholder="' + esc(T('git_remote')) + '" value="' + esc(S.gitRemote) + '">'
+            + '<input id="co-gtoken" type="password" autocomplete="off" placeholder="' + esc(T('git_token')) + '" value="' + esc(S.gitToken) + '">'
+            + '<div class="co-muted">' + T('git_token_help') + '</div><button class="pri" id="co-gconnect">' + T('git_connect') + '</button>';
+        else h += '<div class="co-url">' + esc(g.remote) + (g.api ? ' · API' : '') + '</div><div>' + T('git_pending', { n: g.pending }) + (g.last ? ' · ' + T('git_last', { t: g.last }) : '') + '</div>'
             + '<div class="co-row"><button class="pri" id="co-gsync">' + T('git_sync') + '</button><button id="co-goff">' + T('git_off') + '</button></div>'
             + '<div class="co-muted">' + T('git_work') + '<br>' + esc(g.work) + '</div>';
         h += '<div class="co-msg' + (S.gitOk ? ' co-ok' : '') + '" id="co-gmsg">' + esc(S.gitMsg || g.err || '') + '</div></div></details>';
@@ -509,8 +515,9 @@
         const con = box.querySelector('#co-gconnect');
         if (con) {
             box.querySelector('#co-gremote').oninput = e => { S.gitRemote = e.target.value; };
-            con.onclick = () => run(con, '/api/collab/git/setup', { remote: S.gitRemote.trim(), name: myName || 'Host' },
-                r => r.joined ? T('git_joined', { n: r.applied }) : T('git_started'));
+            box.querySelector('#co-gtoken').oninput = e => { S.gitToken = e.target.value; };
+            con.onclick = () => run(con, '/api/collab/git/setup', { remote: S.gitRemote.trim(), token: S.gitToken.trim(), name: myName || 'Host' },
+                r => { S.gitToken = ''; return r.joined ? T('git_joined', { n: r.applied }) : T('git_started'); });
         }
         const sy = box.querySelector('#co-gsync');
         if (sy) sy.onclick = () => run(sy, '/api/collab/git/sync', {},

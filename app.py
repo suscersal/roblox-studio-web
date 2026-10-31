@@ -1851,10 +1851,211 @@ def _cg_host_only():
     return None
 
 
+# --- транспорт без git: напрямую через GitHub API (для APK, где нет бинарника git) ---
+# Те же файлы (meta.json, base.rbxl, ops/<автор>.jsonl), только вместо clone/push/fetch —
+# запросы к REST API репозитория. Нужен токен с доступом к ОДНОМУ репозиторию
+# (fine-grained, Contents: Read and write); репозиторий не должен быть пустым (хотя бы README).
+import base64 as _b64
+import hashlib as _hashlib
+import urllib.error as _urlerr
+import urllib.request as _urlreq
+
+_GH_API = os.environ.get('RSW_GH_API') or 'https://api.github.com'
+
+
+def _gh_parse(remote):
+    """-> (владелец, репозиторий, токен-из-адреса) или None, если это не адрес GitHub."""
+    m = (_re.match(r'^(?:https?://(?:([^/@\s]+)@)?github\.com/|git@github\.com:|ssh://git@github\.com/|github\.com/)'
+                   r'([\w.-]+)/([\w.-]+?)(?:\.git)?/?$', remote.strip())
+         or _re.match(r'^()([\w.-]+)/([\w.-]+?)(?:\.git)?$', remote.strip()))
+    if not m:
+        return None
+    tok = (m.group(1) or '').split(':')[-1]
+    return m.group(2), m.group(3), tok
+
+
+def _gh_req(method, path, token, body=None, raw=False, timeout=60):
+    """-> (http-код, JSON | bytes | текст ошибки). Код 0 — нет связи."""
+    data = _json.dumps(body).encode('utf-8') if body is not None else None
+    req = _urlreq.Request(_GH_API + path, data=data, method=method)
+    req.add_header('Authorization', 'Bearer ' + token)
+    req.add_header('Accept', 'application/vnd.github.raw+json' if raw else 'application/vnd.github+json')
+    req.add_header('X-GitHub-Api-Version', '2022-11-28')
+    req.add_header('User-Agent', 'roblox-studio-web')
+    if data is not None:
+        req.add_header('Content-Type', 'application/json')
+    try:
+        with _urlreq.urlopen(req, timeout=timeout) as r:
+            payload = r.read()
+            if raw:
+                return r.status, payload
+            return r.status, (_json.loads(payload) if payload else {})
+    except _urlerr.HTTPError as e:
+        try:
+            msg = _json.loads(e.read()).get('message', '')
+        except Exception:
+            msg = ''
+        return e.code, msg or str(e)
+    except (_urlerr.URLError, OSError) as e:
+        return 0, 'нет связи с GitHub (%s)' % e
+
+
+def _gh_err(st, msg):
+    if st == 0:
+        return msg
+    if st == 401:
+        return 'GitHub не принял токен (401): он неверный или истёк'
+    if st in (403, 404):
+        return ('GitHub %d: нет доступа к репозиторию. Проверьте имя и что у токена выбран именно этот '
+                'репозиторий с правом Contents: Read and write (%s)' % (st, msg))
+    if st == 409 and 'empty' in str(msg).lower():
+        return 'Репозиторий пустой: создайте его с файлом README (Add a README file) и повторите'
+    return 'GitHub %d: %s' % (st, msg)
+
+
+def _gh_put(token, g, path, data, message, sha=None):
+    body = {'message': message, 'content': _b64.b64encode(data).decode('ascii'), 'branch': g['branch']}
+    if sha:
+        body['sha'] = sha
+    return _gh_req('PUT', '/repos/%s/%s/contents/%s' % (g['owner'], g['repo'], path), token,
+                   body=body, timeout=180)
+
+
+def _gh_get(token, g, path, raw=False):
+    return _gh_req('GET', '/repos/%s/%s/contents/%s?ref=%s' % (g['owner'], g['repo'], path, g['branch']),
+                   token, raw=raw, timeout=120)
+
+
+def _cg_setup_api(owner, repo, token, name):
+    if not _re.fullmatch(r'[A-Za-z0-9_\-]{10,255}', token):
+        return _cg_fail('Токен выглядит неверно: вставьте его целиком, без пробелов')
+    with _collab_cond:
+        st, info = _gh_req('GET', '/repos/%s/%s' % (owner, repo), token)
+        if st != 200:
+            return _cg_fail(_gh_err(st, info))
+        if (info.get('permissions') or {}).get('push') is False:
+            return _cg_fail('У токена нет права записи: нужен Contents: Read and write')
+        g = {'owner': owner, 'repo': repo, 'branch': info.get('default_branch') or 'main',
+             'sha': {}, 'mine': ''}
+        st, meta = _gh_get(token, g, 'meta.json')
+        if st not in (200, 404):
+            return _cg_fail(_gh_err(st, meta))
+        joining = st == 200
+        slug = _re.sub(r'[^A-Za-z0-9_-]+', '_', name)[:20] + '-' + _secrets.token_hex(2)
+        if joining:
+            st, base = _gh_get(token, g, 'base.rbxl', raw=True)
+            if st != 200:
+                return _cg_fail('Не удалось скачать base.rbxl: ' + _gh_err(st, base))
+        else:
+            parsed, src = state['parsed'], state['file_path']
+            if not parsed or not src or not os.path.isfile(src):
+                return _cg_fail('Сначала откройте карту (с файла на диске)')
+            if parsed.get('_modified'):
+                return _cg_fail('В карте есть несохранённые изменения: сохраните её (Save) и повторите')
+        if os.path.exists(_CG_DIR):                # прежнюю папку не удаляем — убираем в сторону
+            os.rename(_CG_DIR, _CG_DIR + '.old-%d' % int(time.time()))
+        # пустая .git нужна лишь как место для служебных файлов синхронизации (rsw-sync/pending)
+        os.makedirs(_cg_path('.git'))
+        os.makedirs(_cg_path('ops'))
+        if joining:
+            work = _cg_path('work.rbxl')
+            with open(work, 'wb') as f:
+                f.write(base)
+            try:
+                parsed = parse_rbxl(work)
+            except Exception as e:
+                return _cg_fail('Не удалось открыть base.rbxl: %s' % e)
+            state['parsed'], state['file_path'] = parsed, work
+            _recents_add_file(work, name='work.rbxl (git)')
+            if _collab['on']:
+                _collab_reset('reload')
+            bump_scene_version()
+        else:
+            with open(src, 'rb') as f:
+                data = f.read()
+            for path, blob in (('base.rbxl', data),
+                               ('meta.json', _json.dumps({'format': 1, 'base': 'base.rbxl',
+                                                          'created_by': name}).encode('utf-8'))):
+                st, r = _gh_put(token, g, path, blob, 'Начало совместной работы: ' + path)
+                if st not in (200, 201):
+                    return _cg_fail(_gh_err(st, r))
+        _cg['sync'] = {'slug': slug, 'name': name, 'remote': 'github.com/%s/%s' % (owner, repo),
+                       'mode': 'api', 'token': token, 'gh': g, 'cursor': {},
+                       'mine': set(), 'c2l': {}, 'l2c': {}}
+        _cg['on'], _cg['err'] = True, ''
+        _cg_save()
+        applied = skipped = 0
+        if joining:
+            bad = _cg_fetch_api(_cg['sync'])
+            if bad:
+                _cg_save()
+                return _cg_fail(bad)
+            applied, skipped = _cg_apply_remote()
+        _cg['last'] = time.strftime('%H:%M:%S')
+        _cg_save()
+        return jsonify({'ok': True, 'joined': joining, 'applied': applied, 'skipped': skipped})
+
+
+def _cg_fetch_api(s):
+    """Скачивает чужие ops-файлы, изменившиеся с прошлого раза. -> текст ошибки или None."""
+    g, token = s['gh'], s['token']
+    mine = 'ops/%s.jsonl' % s['slug']
+    st, lst = _gh_get(token, g, 'ops')
+    if st == 404:
+        lst = []                                            # пока никто ничего не отправлял
+    elif st != 200 or not isinstance(lst, list):
+        return _gh_err(st, lst)
+    for e in lst:
+        key = 'ops/' + e['name']
+        if not e['name'].endswith('.jsonl') or key == mine or g['sha'].get(key) == e['sha']:
+            continue
+        st, raw = _gh_get(token, g, key, raw=True)
+        if st != 200:
+            return _gh_err(st, raw)
+        with open(_cg_path(key), 'wb') as f:
+            f.write(raw)
+        g['sha'][key] = e['sha']
+    return None
+
+
+def _cg_sync_api():
+    """Отправить свой ops-файл, скачать изменившиеся чужие, применить (вызывать под _collab_cond)."""
+    s = _cg['sync']
+    g, token = s['gh'], s['token']
+    sent = _cg_export()          # свои правки -> локальный ops/<я>.jsonl (отправка ниже идемпотентна)
+    mine = 'ops/%s.jsonl' % s['slug']
+    if os.path.exists(_cg_path(mine)):
+        with open(_cg_path(mine), 'rb') as f:
+            data = f.read()
+        h = _hashlib.sha256(data).hexdigest()
+        if h != g.get('mine'):
+            for attempt in (1, 2):
+                st, r = _gh_put(token, g, mine, data, 'Правки: %s' % s['name'], sha=g['sha'].get(mine))
+                if st in (200, 201):
+                    g['sha'][mine], g['mine'] = r['content']['sha'], h
+                    break
+                if st in (409, 422) and attempt == 1:       # потеряли sha (например, файл уже есть)
+                    st2, meta = _gh_get(token, g, mine)
+                    if st2 == 200 and isinstance(meta, dict):
+                        g['sha'][mine] = meta.get('sha')
+                        continue
+                _cg_save()
+                return _cg_fail(_gh_err(st, r))
+    bad = _cg_fetch_api(s)
+    if bad:
+        _cg_save()
+        return _cg_fail(bad)
+    pulled, skipped = _cg_apply_remote()
+    _cg['err'], _cg['last'] = '', time.strftime('%H:%M:%S')
+    _cg_save()
+    return jsonify({'ok': True, 'sent': sent, 'pulled': pulled, 'skipped': skipped})
+
+
 @flask_app.route('/api/collab/git/status')
 def api_cg_status():
     s = _cg['sync'] or {}
     return jsonify({'ok': True, 'git': bool(_shutil.which('git')), 'on': _cg['on'],
+                    'api': s.get('mode') == 'api',
                     'remote': _cg_mask(s.get('remote', '')), 'name': s.get('name', ''),
                     'pending': _cg_pending_count() if _cg['on'] else 0,
                     'err': _cg['err'], 'last': _cg['last'],
@@ -1875,8 +2076,13 @@ def api_cg_setup():
         return _cg_fail('Укажите адрес репозитория')
     if remote.startswith('-') or any(c in remote for c in '\r\n\x00') or _re.match(r'[A-Za-z][A-Za-z0-9+.-]*::', remote):
         return _cg_fail('Некорректный адрес репозитория')
+    gh = _gh_parse(remote)
+    token = (body.get('token') or '').strip() or (gh[2] if gh else '')
+    if gh and token and (body.get('api') or not _shutil.which('git')):
+        return _cg_setup_api(gh[0], gh[1], token, name)      # без git: через GitHub API
     if not _shutil.which('git'):
-        return _cg_fail('git не найден: установите git и перезапустите редактор')
+        return _cg_fail('git на этом устройстве нет (так в APK). Укажите токен GitHub — тогда синхронизация '
+                        'пойдёт напрямую через интернет, без git')
     with _collab_cond:
         if os.path.exists(_CG_DIR):                # прежнюю папку не удаляем — убираем в сторону
             os.rename(_CG_DIR, _CG_DIR + '.old-%d' % int(time.time()))
@@ -1938,6 +2144,8 @@ def api_cg_sync():
     with _collab_cond:
         if not state['parsed']:
             return _cg_fail('Карта не открыта: откройте work.rbxl из папки collab-git')
+        if _cg['sync'].get('mode') == 'api':
+            return _cg_sync_api()
         sent = _cg_export()
         if sent:
             _cg_git('add', '-A')
