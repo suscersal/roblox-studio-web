@@ -1420,7 +1420,10 @@
             renderer = new THREE.WebGLRenderer({
                 antialias: qualitySettings.antialias,
                 powerPreference: currentQuality === 'high' ? "high-performance" : "low-power",
-                precision: currentQuality === 'high' ? "highp" : "mediump"
+                // highp на всех пресетах: mediump (16 бит) на мобильных GPU даёт мерцание/«помехи»
+                // на моделях с анимацией и текстурами (аватар), а выигрыша по FPS почти нет.
+                // Если GPU highp в шейдерах не умеет, three сам откатится на mediump.
+                precision: "highp"
             });
             // ФИКС ЧЁТКОСТИ НА ТЕЛЕФОНЕ:
             applyPixelRatio();
