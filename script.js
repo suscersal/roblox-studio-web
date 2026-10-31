@@ -4364,6 +4364,7 @@
                 const m = materials.materials[key];
                 m.side = THREE.DoubleSide;
                 m.transparent = false; m.opacity = 1; m.alphaTest = 0;
+                _fixAvatarNormalMap(m);
                 m.needsUpdate = true;
             }
             const objLoader = new THREE.OBJLoader(manager);
@@ -4385,6 +4386,21 @@
             const fitted = _fitToCharHeight(object);
             fitted.userData.shared = true; // шаблон общий для всех Play-сессий — не dispose'им
             return fitted;
+        }
+
+        // ФИКС ЗЕРНИСТОСТИ АВАТАРА: Roblox кладёт в `map_Bump` НОРМАЛЬ-карту (синеватая, среднее ~128,128,245),
+        // а MTLLoader (three r128) грузит её как bumpMap — карту высот. Производные от яркости
+        // нормаль-карты дают шумный «рельеф» с мерцающими бликами. Переносим её в normalMap.
+        function _fixAvatarNormalMap(m) {
+            if (!m || !m.bumpMap) return;
+            m.normalMap = m.bumpMap;
+            m.normalMap.encoding = THREE.LinearEncoding;
+            m.normalMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            m.normalMap.needsUpdate = true;
+            m.bumpMap = null;
+            m.bumpScale = 1;
+            if (m.normalScale) m.normalScale.set(1, 1);
+            m.needsUpdate = true;
         }
 
         function _loadPlayAvatarTemplate(userId) {
@@ -15381,6 +15397,7 @@ end
                 m.transparent = false;
                 m.opacity = 1;
                 m.alphaTest = 0;
+                _fixAvatarNormalMap(m);
                 m.needsUpdate = true;
             }
 
