@@ -2368,13 +2368,28 @@
             return null;
         }
 
+        // Нулевые/NaN-нормали: normalize(0) в GLSL не определён. Десктопные GPU обычно дают 0
+        // (деталь просто чуть темнее), а Mali — NaN: чёрные треугольники и «помехи» только на телефоне.
+        // Если у меша есть хоть одна негодная нормаль — пересчитываем их все.
+        function _sanitizeNormals(geo) {
+            const a = geo.attributes.normal;
+            if (!a) { geo.computeVertexNormals(); return; }
+            const n = a.array;
+            for (let i = 0; i + 2 < n.length; i += 3) {
+                if (!(n[i] * n[i] + n[i + 1] * n[i + 1] + n[i + 2] * n[i + 2] > 1e-6)) {   // ловит и 0, и NaN
+                    geo.computeVertexNormals();
+                    return;
+                }
+            }
+        }
+
         function _buildGeometryFromParsed(parsed) {
             const geo = new THREE.BufferGeometry();
             geo.setAttribute('position', new THREE.BufferAttribute(parsed.positions, 3));
             geo.setAttribute('normal', new THREE.BufferAttribute(parsed.normals, 3));
             geo.setAttribute('uv', new THREE.BufferAttribute(parsed.uvs, 2));
             if (parsed.indices) geo.setIndex(new THREE.BufferAttribute(parsed.indices, 1));
-            if (!parsed.normals.some(n => n !== 0)) geo.computeVertexNormals();
+            _sanitizeNormals(geo);
             geo.computeBoundingBox();
             const bb = geo.boundingBox;
             const size = {
@@ -2733,6 +2748,7 @@
                     const geo = new THREE.BufferGeometry();
                     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(d.position), 3));
                     geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(d.normal), 3));
+                    _sanitizeNormals(geo);
                     geo.computeBoundingBox();
                     geo.computeBoundingSphere();
                     geo.userData.sharedMesh = true; // не dispose при очистке сцены (общий кэш)
