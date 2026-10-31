@@ -11268,15 +11268,15 @@ end
                     // поле просто "не принимает ввод". Пока элемент в
                     // фокусе, доверяем тому, что уже введено в DOM.
                     if (document.activeElement !== el) {
-                        el.textContent = props.Text != null ? String(props.Text) : '';
+                        _setElText(el, props.Text != null ? String(props.Text) : '');
                     }
                 } else {
-                    el.textContent = props.Text != null ? String(props.Text) : '';
+                    _setElText(el, props.Text != null ? String(props.Text) : '');
                 }
                 _fitScaledText(el, props);
             } else if (cls === 'ImageLabel' || cls === 'ImageButton') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
-                el.textContent = '';
+                _setElText(el, '');
                 // Раньше Image просто складывался в title (всплывающая
                 // thumb=1: если без входа в Roblox assetdelivery отвечает 401/403 — сервер отдаст публичную миниатюру ассета
                 const _pu = rbxAssetIdToProxyUrl(props.Image);
@@ -11306,6 +11306,17 @@ end
             applyGuiElementStyle = function (el, props) { _ages(el, props); if (el && el._gridCell) _applyGridCell(el); };
         }
 
+        // Текст GUI-элемента без затирания вложенных GUI-элементов: el.textContent = ... удаляет ВСЕХ детей, а у ImageLabel/TextLabel
+        // в Roblox бывают дочерние элементы (Druns_PP: ButtonText внутри ImageLabel Button — иконка с «E»/«TAP» пропадала после первой перекраски).
+        function _setElText(el, text) {
+            let first = null;
+            for (const n of Array.from(el.childNodes)) {
+                if (n.nodeType === 3) { if (first === null) first = n; else el.removeChild(n); }
+            }
+            if (text === '' || text == null) { if (first) el.removeChild(first); return; }
+            if (first) { if (first.nodeValue !== text) first.nodeValue = text; }
+            else el.insertBefore(document.createTextNode(text), el.firstChild);
+        }
         function domInputTypeName(e, isMove) {
             if (e.touches !== undefined || (e.type && e.type.indexOf('touch') === 0)) return 'Touch';
             if (isMove) return 'MouseMovement';
@@ -12588,11 +12599,33 @@ end
                 ring.addEventListener('touchstart', onDown, { passive: false });
                 ring.addEventListener('mousedown', onDown);
             }
-            // Custom: тап/клик по самому BillboardGui подсказки (как ClickablePrompt в Roblox)
-            const ov = document.getElementById('gui-overlay');
-            if (ov) ov.addEventListener('pointerdown', (e) => {
-                if (!isPlaying || !_activePrompt || !_promptIsCustom(_activePrompt) || _activePrompt.ClickablePrompt === false) return;
-                if (e.target.closest && e.target.closest('[data-cls="BillboardGui"]')) _promptHoldBegin(_activePromptRef);
+            // Custom: тап/клик по BillboardGui подсказки (как ClickablePrompt в Roblox). Элементы Druns_PP имеют Active=false, то есть
+            // pointer-events:none — event.target туда не попадает, поэтому проверяем попадание точки в прямоугольник билборда.
+            const _inRelated = (a, b) => {   // a — потомок b или b — потомок a (Adornee может быть деталью внутри модели с промптом)
+                for (let c = a, g = 0; c !== undefined && c !== -1 && g++ < 80; c = luaParentByRef[c]) if (c === b) return true;
+                for (let c = b, g = 0; c !== undefined && c !== -1 && g++ < 80; c = luaParentByRef[c]) if (c === a) return true;
+                return false;
+            };
+            document.addEventListener('pointerdown', (e) => {
+                if (!isPlaying || _activePromptRef === null || !_activePrompt || !_promptIsCustom(_activePrompt) || _activePrompt.ClickablePrompt === false) return;
+                if (_promptHeldRef !== null) return;
+                const tg = e.target;
+                if (!tg || !tg.closest || !tg.closest('#viewport')) return;
+                if (tg.closest('#mobile-pad, #default-hotbar, #proximity-prompt, button')) return;
+                if (tg.closest('#gui-overlay') && tg !== document.getElementById('gui-overlay')) return;   // настоящая GUI-кнопка карты
+                for (const ref in guiPropsByRef) {
+                    const gp = guiPropsByRef[ref];
+                    if (!gp || gp.cls !== 'BillboardGui' || gp.Enabled === false) continue;
+                    const bel = guiDomByRef[ref];
+                    if (!bel || !bel.isConnected || bel.style.display === 'none') continue;
+                    const ad = gp.Adornee;
+                    if (ad === undefined || ad === null || ad === -1 || !_inRelated(Number(ad), Number(_activePrompt.parentRef))) continue;
+                    const r = bel.getBoundingClientRect();
+                    if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+                        _promptHoldBegin(_activePromptRef);
+                        return;
+                    }
+                }
             }, true);
             window.addEventListener('pointerup', onUp);
             window.addEventListener('pointercancel', onUp);
