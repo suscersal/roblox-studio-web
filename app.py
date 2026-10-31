@@ -1379,16 +1379,32 @@ def _collab_touch():
 
 
 def _collab_lan_urls():
+    """Адреса ЭТОГО устройства во всех сетях. Гостю нужен тот, что из его сети: дома это
+    обычно 192.168.x.x, а 10.x — часто VPN/виртуальный адаптер или корпоративная сеть."""
     ips = set()
+    # интерфейс маршрута по умолчанию и по одному «пробному» адресу из каждой частной сети:
+    # пакет не уходит — ОС лишь выбирает интерфейс (так находятся и виртуальные адаптеры)
+    for probe in ('8.8.8.8', '192.168.255.255', '172.16.255.255', '10.255.255.255'):
+        try:
+            s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            s.connect((probe, 1))
+            ips.add(s.getsockname()[0])
+            s.close()
+        except OSError:
+            pass
     try:
-        s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-        s.connect(('10.255.255.255', 1))    # пакет не уходит — только выбор интерфейса
-        ips.add(s.getsockname()[0])
-        s.close()
+        ips.update(i[4][0] for i in _socket.getaddrinfo(_socket.gethostname(), None, _socket.AF_INET))
     except OSError:
         pass
-    ips.discard('127.0.0.1')
-    return ['http://%s:%d' % (ip, PORT) for ip in sorted(ips)]
+    ips = {ip for ip in ips if not ip.startswith(('127.', '169.254.', '0.'))}
+
+    def rank(ip):
+        if ip.startswith('192.168.'):
+            return 0
+        if _re.match(r'172\.(1[6-9]|2\d|3[01])\.', ip):
+            return 1
+        return 2 if ip.startswith('10.') else 3
+    return ['http://%s:%d' % (ip, PORT) for ip in sorted(ips, key=lambda x: (rank(x), x))]
 
 
 @flask_app.route('/api/collab/status')
