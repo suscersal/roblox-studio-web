@@ -102,7 +102,10 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
             pass
 
     rsw_app.flask_app.run(
-        host="127.0.0.1",
+        # 0.0.0.0, как в десктопной версии: иначе комната (collab) недоступна
+        # другим устройствам. Чувствительные эндпоинты в app.py и так
+        # принимают только loopback, а запись гостей требует X-Collab-Token.
+        host="0.0.0.0",
         port=actual_port,
         debug=False,
         use_reloader=False,
