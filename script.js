@@ -4571,8 +4571,58 @@
             }
 
             physicsWorld = new CANNON.World();
+            // cannon.js 0.6.2: ArrayCollisionMatrix.reset() на КАЖДОМ шаге обнуляет N²/2 ячеек (N = все тела мира, а у нас в мир
+            // кладётся вся статичная геометрия). После спавна комнат (612 -> 1200+ объектов) шаг физики дорожал в разы
+            // и FPS проваливался. Разреженная матрица держит только реально соприкасающиеся пары: reset = clear().
+            {
+                const mkSparse = () => {
+                    const set = new Set();
+                    const key = (a, b) => { let i = a.index, j = b.index; if (j > i) { const t = j; j = i; i = t; } return i * 1048576 + j; };
+                    return {
+                        matrix: set,
+                        get(a, b) { return set.has(key(a, b)) ? 1 : 0; },
+                        set(a, b, v) { if (v) set.add(key(a, b)); else set.delete(key(a, b)); },
+                        reset() { set.clear(); },
+                        setNumObjects() { /* размер не зависит от числа тел */ },
+                    };
+                };
+                physicsWorld.collisionMatrix = mkSparse();
+                physicsWorld.collisionMatrixPrevious = mkSparse();
+            }
             physicsWorld.gravity.set(0, GRAVITY_STUDS, 0);
-            physicsWorld.broadphase = new CANNON.SAPBroadphase(physicsWorld);
+            // SAPBroadphase сортирует и прогоняет ВСЕ тела мира каждый шаг — а почти все они статичные (карта), друг с другом
+            // не сталкиваются. Шаг физики стоил 2.9 мс на 481 теле и 7–9 мс на 943 (после спавна комнат), а за кадр их до 20
+            // (PHYSICS_MAX_TICKS × PHYSICS_SUBSTEPS) — FPS падал с 60 до ~9. Здесь пары строятся только от подвижных тел
+            // (персонаж, динамические детали) к остальным: стоимость ~ (число подвижных) × (число тел), в 5–8 раз дешевле.
+            {
+                const STATIC = CANNON.Body.STATIC;
+                const DynStaticBroadphase = function (world) { CANNON.Broadphase.call(this); this.world = world; this.useBoundingBoxes = false; };
+                DynStaticBroadphase.prototype = Object.create(CANNON.Broadphase.prototype);
+                DynStaticBroadphase.prototype.constructor = DynStaticBroadphase;
+                DynStaticBroadphase.prototype.collisionPairs = function (world, p1, p2) {
+                    const bs = world.bodies, n = bs.length;
+                    for (let i = 0; i < n; i++) {
+                        const bi = bs[i];
+                        if (bi.type === STATIC) continue;
+                        for (let j = 0; j < n; j++) {
+                            const bj = bs[j];
+                            if (bj === bi) continue;
+                            if (j < i && bj.type !== STATIC) continue;   // пара подвижных тел — один раз
+                            if (!this.needBroadphaseCollision(bi, bj)) continue;
+                            this.intersectionTest(bi, bj, p1, p2);
+                        }
+                    }
+                };
+                DynStaticBroadphase.prototype.aabbQuery = function (world, aabb, result) {
+                    result = result || [];
+                    for (const b of world.bodies) {
+                        if (b.aabbNeedsUpdate) b.computeAABB();
+                        if (b.aabb.overlaps(aabb)) result.push(b);
+                    }
+                    return result;
+                };
+                physicsWorld.broadphase = CANNON.Broadphase ? new DynStaticBroadphase(physicsWorld) : new CANNON.SAPBroadphase(physicsWorld);
+            }
             physicsWorld.solver.iterations = 10;
             physicsWorld.allowSleep = true;
             // friction = 0 обязательно:
@@ -6753,8 +6803,8 @@ local COMPAT = {
     -- Model:GetBoundingBox() -> CFrame центра, Vector3 размер (оси мира, как у модели без PrimaryPart);
     -- для детали — её CFrame и Size.
     GetBoundingBox = function(t, ref) return function(self)
-        local cx, cy, cz, sx, sy, sz = __get_bbox(ref)
-        return CFrame.new(cx, cy, cz), Vector3.new(sx, sy, sz)
+        local cx, cy, cz, sx, sy, sz, r00, r01, r02, r10, r11, r12, r20, r21, r22 = __get_bbox(ref)
+        return CFrame.new(cx, cy, cz, r00, r01, r02, r10, r11, r12, r20, r21, r22), Vector3.new(sx, sy, sz)
     end end,
     GetExtentsSize = function(t, ref) return function(self)
         local _, _, _, sx, sy, sz = __get_bbox(ref)
@@ -7426,9 +7476,16 @@ end
         }
 
         // Габаритный ящик (оси мира): по 8 углам каждой детали внутри Model/Folder.
+        // Model:GetBoundingBox(): бокс ориентирован по PIVOT модели (PrimaryPart или WorldPivot), а не по осям мира — как в Roblox.
+        // Раньше был мировой AABB: у повёрнутой двери size.X оказывался толщиной вместо ширины, и скрипт, который ставит петлю как
+        // bbox * CFrame.new(size.X/2, 0, 0) (DoorOpener), вращал створку вокруг центра, игнорируя pivot. У детали — её собственный CFrame.
         function luaBoundingBox(ref) {
-            const refs = (luaIsPartRef(ref) && !(luaChildrenByRef[ref] && luaChildrenByRef[ref].length))
-                ? [ref] : luaCollectParts(ref, []);
+            const leaf = luaIsPartRef(ref) && !(luaChildrenByRef[ref] && luaChildrenByRef[ref].length);
+            const refs = leaf ? [ref] : luaCollectParts(ref, []);
+            let R = new THREE.Matrix4();   // только вращение ориентации бокса
+            if (leaf) R.extractRotation(luaPartMatrix(ref));
+            else if (!luaIsCharRef(ref) && !luaIsCameraRef(ref)) { try { R.extractRotation(luaGetPivotMatrix(ref)); } catch (e) { R = new THREE.Matrix4(); } }
+            const Rinv = R.clone().invert();
             const mn = new THREE.Vector3(Infinity, Infinity, Infinity), mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
             const c = new THREE.Vector3();
             for (const pr of refs) {
@@ -7436,13 +7493,15 @@ end
                 if (!sz) continue;
                 const M = luaPartMatrix(pr);
                 for (let i = 0; i < 8; i++) {
-                    c.set((i & 1 ? 0.5 : -0.5) * sz.x, (i & 2 ? 0.5 : -0.5) * sz.y, (i & 4 ? 0.5 : -0.5) * sz.z).applyMatrix4(M);
+                    c.set((i & 1 ? 0.5 : -0.5) * sz.x, (i & 2 ? 0.5 : -0.5) * sz.y, (i & 4 ? 0.5 : -0.5) * sz.z).applyMatrix4(M).applyMatrix4(Rinv);
                     mn.min(c); mx.max(c);
                 }
             }
-            if (!isFinite(mn.x)) { const p = luaPositionOfRef(ref) || { x: 0, y: 0, z: 0 }; return { cx: p.x, cy: p.y, cz: p.z, sx: 0, sy: 0, sz: 0 }; }
-            return { cx: (mn.x + mx.x) / 2, cy: (mn.y + mx.y) / 2, cz: (mn.z + mx.z) / 2,
-                     sx: mx.x - mn.x, sy: mx.y - mn.y, sz: mx.z - mn.z };
+            const e = R.elements;
+            const rot = [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];   // R00 R01 R02 / R10 R11 R12 / R20 R21 R22
+            if (!isFinite(mn.x)) { const p = luaPositionOfRef(ref) || { x: 0, y: 0, z: 0 }; return { cx: p.x, cy: p.y, cz: p.z, sx: 0, sy: 0, sz: 0, rot }; }
+            const lc = new THREE.Vector3((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2).applyMatrix4(R);   // центр обратно в мир
+            return { cx: lc.x, cy: lc.y, cz: lc.z, sx: mx.x - mn.x, sy: mx.y - mn.y, sz: mx.z - mn.z, rot };
         }
 
         // ClickDetector: клик/тап по детали (или по детали внутри Model, у которой он есть)
@@ -9512,8 +9571,8 @@ end
             });
             def('__get_bbox', function (L2) {
                 const b = luaBoundingBox(lua.lua_tonumber(L2, 1));
-                for (const v of [b.cx, b.cy, b.cz, b.sx, b.sy, b.sz]) lua.lua_pushnumber(L2, v);
-                return 6;
+                for (const v of [b.cx, b.cy, b.cz, b.sx, b.sy, b.sz].concat(b.rot)) lua.lua_pushnumber(L2, v);
+                return 15;
             });
             let _overlapPartCls = null, _overlapParts = null;
             def('__overlap', function (L2) {
