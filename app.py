@@ -290,9 +290,16 @@ def find_special_mesh(ref, children_by_parent, all_props, referent_to_class):
     искали по номеру referent (ref+1 / ref+2) — это работало только пока
     меш лежал в файле сразу после детали."""
     for child in children_by_parent.get(ref, ()):
-        if referent_to_class.get(child) == 'SpecialMesh':
+        c = referent_to_class.get(child)
+        if c == 'SpecialMesh':
             return all_props.get(child, {})
+        if c in _LEGACY_MESH_TYPE:
+            # BlockMesh/CylinderMesh — старые классы того же вида (Scale/Offset), тип зашит в класс
+            return dict(all_props.get(child, {}), MeshType=_LEGACY_MESH_TYPE[c])
     return None
+
+
+_LEGACY_MESH_TYPE = {'BlockMesh': 6, 'CylinderMesh': 4}
 
 
 def get_pos(cf):
@@ -3835,6 +3842,66 @@ _REF_PROP_CLASSES = ('RigidConstraint', 'WeldConstraint', 'Weld', 'ManualWeld', 
                     'NoCollisionConstraint', 'AnimationConstraint', 'HingeConstraint', 'SpringConstraint')
 
 
+# Классы, чьи свойства из файла раньше НЕ долетали до Lua (скрипт читал nil + предупреждение эмулятора):
+# новый Audio API (AudioPlayer/Wire/...), пост-эффекты Lighting, Atmosphere/Clouds, Beam, Smoke/Sparkles,
+# констрейнты, Highlight. Берём ВСЕ свойства из файла, кроме служебных.
+_FILE_PROP_CLASSES = frozenset((
+    'AudioPlayer', 'AudioFader', 'AudioCompressor', 'AudioEqualizer', 'AudioEmitter', 'AudioListener',
+    'AudioDeviceOutput', 'AudioReverb', 'AudioEcho', 'AudioDistortion', 'AudioFlanger', 'AudioChorus',
+    'AudioPitchShifter', 'AudioLimiter', 'AudioTextToSpeech', 'AudioFilter', 'Wire', 'HapticEffect',
+    'BloomEffect', 'DepthOfFieldEffect', 'SunRaysEffect', 'ColorCorrectionEffect', 'BlurEffect',
+    'Atmosphere', 'Clouds', 'Beam', 'Smoke', 'Sparkles', 'Highlight',
+    'PrismaticConstraint', 'HingeConstraint', 'ReverbSoundEffect', 'EqualizerSoundEffect',
+    'CompressorSoundEffect', 'DistortionSoundEffect', 'EchoSoundEffect', 'ChorusSoundEffect',
+    'FlangeSoundEffect', 'TremoloSoundEffect',
+))
+# Terrain в файле несёт сотни свойств Part — берём только водные.
+_TERRAIN_PROPS = ('WaterColor', 'WaterReflectance', 'WaterTransparency', 'WaterWaveSize', 'WaterWaveSpeed', 'Decoration')
+_FILE_PROP_SKIP = frozenset((
+    'AttributesSerialize', 'Capabilities', 'DefinesCapabilities', 'HistoryId', 'SerializedOverrides',
+    'SourceAssetId', 'Tags', 'UniqueId', 'Name', 'Transparency', 'Color3', 'Color3uint8',
+))
+# Имя в бинарном файле -> имя в Lua-API (где они расходятся)
+_FILE_PROP_RENAME = {('AudioPlayer', 'Asset'): 'AssetId'}
+
+
+def _file_props_for_client(cls, q, r2c):
+    """-> (gprops, tprops) для Lua-моста.
+    gprops: скаляры (bool/число/строка) — кладутся в «общий ящик» свойств;
+    tprops: типизированные — [kind, a, b, c]: c3 (Color3), v3 (Vector3), ref (ссылка на объект, -1 = nil)."""
+    g, t = {}, {}
+    if cls == 'Terrain':
+        keys = [k for k in _TERRAIN_PROPS if k in q]
+    else:
+        keys = [k for k in q if k not in _FILE_PROP_SKIP]
+    for k in keys:
+        v = q[k]
+        name = _FILE_PROP_RENAME.get((cls, k), k)
+        if isinstance(v, bool):
+            g[name] = v
+        elif isinstance(v, int):
+            # ссылка на другой объект файла (Wire.SourceInstance, Beam.Attachment0, ...) или обычное число/enum
+            if k in ('SourceInstance', 'TargetInstance', 'Attachment0', 'Attachment1', 'PositionInstance',
+                     'Adornee', 'Player', 'Part0', 'Part1'):
+                t[name] = ['ref', v if v in r2c else -1]
+            else:
+                g[name] = v
+        elif isinstance(v, float):
+            if v != v or v in (float('inf'), float('-inf')):
+                g[name] = 1e308 if v > 0 else -1e308
+            else:
+                g[name] = v
+        elif isinstance(v, str):
+            if len(v) <= 2048 and '\x00' not in v:
+                g[name] = v
+        elif isinstance(v, dict):
+            if all(c in v for c in ('r', 'g', 'b')):
+                t[name] = ['c3', float(v['r']), float(v['g']), float(v['b'])]
+            elif all(c in v for c in ('x', 'y', 'z')):
+                t[name] = ['v3', float(v['x']), float(v['y']), float(v['z'])]
+    return g, t
+
+
 def _attachment_cf(q):
     """Attachment.CFrame из свойств файла -> [x, y, z, R00..R22] (row-major, как CFrame:GetComponents())."""
     import math as _m
@@ -4048,6 +4115,17 @@ def api_all_instances():
             val = _value_for_client(cls, pr.get(ref, {}).get('Value'))
             if val is not None:
                 item['value'] = val
+        if cls == 'Beam':
+            # Color — ColorSequence: для ленты берём цвет первой ключевой точки
+            _bc = _pp.get('Color')
+            if isinstance(_bc, list) and _bc and isinstance(_bc[0], dict):
+                item['beamColor'] = [float(_bc[0].get('r', 1)), float(_bc[0].get('g', 1)), float(_bc[0].get('b', 1))]
+        if cls in _FILE_PROP_CLASSES or cls == 'Terrain':
+            _g, _t = _file_props_for_client(cls, pr.get(ref, {}), r2c)
+            if _g:
+                item.setdefault('gprops', {}).update(_g)
+            if _t:
+                item['tprops'] = _t
         out.append(item)
     return jsonify({'ok': True, 'instances': out})
 

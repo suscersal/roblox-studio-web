@@ -1772,6 +1772,11 @@
                 _reportFrameError('particles', e);
             }
             try {
+                updateBeams();
+            } catch (e) {
+                _reportFrameError('beams', e);
+            }
+            try {
                 renderer.render(scene, camera);
             } catch (e) {
                 _reportFrameError('render', e);
@@ -3583,6 +3588,87 @@
 
         const _psTmpC = [1, 1, 1];
 
+        // ============ BEAM: лента между двумя Attachment ============
+        // Лазер выстрела в Laser Tag (laserBeamEffect): клон LaserBeam с Beam + Tween позиции Attachment.
+        // Рисуем цветную аддитивную ленту к камере; текстура Beam не накладывается.
+        const luaBeamRefs = new Set();
+        const luaBeamColor = {};      // ref -> [r,g,b] (первая точка ColorSequence)
+        const _beamMeshes = {};       // ref -> THREE.Mesh
+        let _beamTmpA = null, _beamTmpB = null;   // THREE ещё не загружен при инициализации скрипта — создаём лениво
+        let _beamWsRef = -1;
+        function _beamUnderWorkspace(ref) {
+            let r = ref, n = 0;
+            while (r !== undefined && r !== -1 && n++ < 64) {
+                if (r === _beamWsRef) return true;
+                r = luaParentByRef[r];
+            }
+            return false;
+        }
+        function _beamResolveAtt(ref, key) {
+            const rp = luaRefProps[ref];
+            let a = rp ? rp[key] : undefined;
+            if (a === undefined || a === -1) return -1;
+            // Beam-клон ссылается на Attachment оригинала — берём одноимённого клона среди соседей
+            if (luaCloneSource[ref] !== undefined) {
+                const sibs = luaChildrenByRef[luaParentByRef[ref]] || [];
+                for (const x of sibs) if (luaCloneSource[x] === a) { a = x; rp[key] = x; break; }
+            }
+            return a;
+        }
+        function _beamDispose(ref) {
+            const m = _beamMeshes[ref];
+            if (!m) return;
+            scene.remove(m); m.geometry.dispose(); m.material.dispose();
+            delete _beamMeshes[ref];
+        }
+        function resetBeams() {
+            for (const r of Object.keys(_beamMeshes)) _beamDispose(r);
+            luaBeamRefs.clear();
+            for (const k of Object.keys(luaBeamColor)) delete luaBeamColor[k];
+        }
+        function updateBeams() {
+            if (!luaBeamRefs.size || !scene || !camera) return;
+            if (!_beamTmpA) { _beamTmpA = new THREE.Vector3(); _beamTmpB = new THREE.Vector3(); }
+            if (_beamWsRef === -1 || !luaByRef[_beamWsRef]) _beamWsRef = luaWorkspaceRef();
+            for (const ref of luaBeamRefs) {
+                const info = luaByRef[ref];
+                if (!info) { luaBeamRefs.delete(ref); _beamDispose(ref); continue; }
+                const gp = luaGenericPropsByRef[ref] || {};
+                let show = gp.Enabled !== false && _beamUnderWorkspace(ref);
+                if (show) {
+                    const a0 = _beamResolveAtt(ref, 'Attachment0'), a1 = _beamResolveAtt(ref, 'Attachment1');
+                    show = a0 !== -1 && a1 !== -1 && _bbAnchorWorld(a0, _beamTmpA) && _bbAnchorWorld(a1, _beamTmpB);
+                }
+                if (!show) { if (_beamMeshes[ref]) _beamMeshes[ref].visible = false; continue; }
+                let m = _beamMeshes[ref];
+                if (!m) {
+                    const g = new THREE.BufferGeometry();
+                    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+                    g.setIndex([0, 1, 2, 2, 1, 3]);
+                    const col = luaBeamColor[ref] || [1, 1, 1];
+                    const mat = new THREE.MeshBasicMaterial({
+                        color: new THREE.Color(col[0], col[1], col[2]), side: THREE.DoubleSide,
+                        transparent: true, depthWrite: false, fog: false,
+                        blending: (gp.LightEmission || 0) > 0.5 ? THREE.AdditiveBlending : THREE.NormalBlending,
+                    });
+                    m = new THREE.Mesh(g, mat);
+                    m.frustumCulled = false;
+                    scene.add(m);
+                    _beamMeshes[ref] = m;
+                }
+                m.visible = true;
+                const w0 = (typeof gp.Width0 === 'number' ? gp.Width0 : 1) / 2, w1 = (typeof gp.Width1 === 'number' ? gp.Width1 : 1) / 2;
+                const dir = _beamTmpB.clone().sub(_beamTmpA);
+                const toCam = camera.position.clone().sub(_beamTmpA.clone().add(_beamTmpB).multiplyScalar(0.5));
+                const side = new THREE.Vector3().crossVectors(dir, toCam);
+                if (side.lengthSq() < 1e-10) side.set(0, 1, 0).cross(dir);
+                side.normalize();
+                const P = m.geometry.attributes.position.array;
+                const put = (i, v, off) => { P[i * 3] = v.x + side.x * off; P[i * 3 + 1] = v.y + side.y * off; P[i * 3 + 2] = v.z + side.z * off; };
+                put(0, _beamTmpA, -w0); put(1, _beamTmpA, w0); put(2, _beamTmpB, -w1); put(3, _beamTmpB, w1);
+                m.geometry.attributes.position.needsUpdate = true;
+            }
+        }
         function updateParticles(nowMs) {
             if (!PS.list.length) { PS.lastT = nowMs; return; }
             let dt = (nowMs - PS.lastT) / 1000;
@@ -4795,6 +4881,7 @@
         }
 
         function stopPlay() {
+            try { resetBeams(); } catch (e) { /* сцена уже разобрана */ }
             isPlaying = false;
             _updateTouchControlsVisibility(); // возвращаем джойстик/кнопку — она могла остаться скрытой, если скрипт вызвал Disable() и не успел/не стал явно включать обратно
             cameraIsScriptable = false;
@@ -6353,7 +6440,7 @@ InstanceMT.__index = function(t, k)
     -- no-op — там реально нечему играть.
     if k == "Play" or k == "play" or k == "Stop" or k == "stop"
         or k == "Pause" or k == "pause" or k == "Resume" or k == "resume" then
-        if __get_class(ref) == "Sound" then
+        if __get_class(ref) == "Sound" or __get_class(ref) == "AudioPlayer" then
             local action = (k == "Play" or k == "play") and "play"
                 or (k == "Stop" or k == "stop") and "stop"
                 or (k == "Pause" or k == "pause") and "pause"
@@ -6896,6 +6983,15 @@ function __init_value(ref, kind, a, b, c, ...)
     elseif kind == "ref" then __tblVals[ref] = __wrap(a)
     end
 end
+-- Типизированные свойства объектов ИЗ ФАЙЛА (Color3/Vector3: Atmosphere.Color, ColorCorrection.TintColor, ...).
+-- Глобальная таблица, а не local: у чанка prelude уже почти исчерпан лимит в 200 локальных переменных.
+__tblProps = {}
+function __init_prop(ref, name, kind, a, b, c)
+    local t = __tblProps[ref]
+    if not t then t = {}; __tblProps[ref] = t end
+    if kind == "v3" then t[name] = Vector3.new(a, b, c)
+    elseif kind == "c3" then t[name] = Color3.new(a, b, c) end
+end
 local COMPAT_PROPS = {
     AssemblyLinearVelocity = true, Velocity = true, AssemblyAngularVelocity = true, RotVelocity = true,
 }
@@ -6990,6 +7086,13 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             if k == "GamepadEnabled" then return false end
             return not touch   -- Keyboard/Mouse: только когда нет сенсорного экрана
         end
+        do
+            local tpp = __tblProps[ref]
+            if tpp then
+                local pv = tpp[k]
+                if pv ~= nil then return pv end
+            end
+        end
         if k == "Value" then
             local v = __tblVals[ref]
             if v ~= nil then return v end
@@ -6998,7 +7101,8 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             local rx, ry, rz = cf:ToOrientation()
             return Vector3.new(math.deg(rx), math.deg(ry), math.deg(rz))
         end
-        if k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1" or k == "PrimaryPart" then
+        if k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1" or k == "PrimaryPart"
+           or k == "SourceInstance" or k == "TargetInstance" or k == "PositionInstance" then
             local rr = __refprop_get(ref, k)
             if rr ~= nil then
                 if rr == -1 then return nil end   -- -1 = nil; у клонов ref тоже отрицательные (виртуальные)
@@ -7047,16 +7151,23 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
         if (k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1") and (v == nil or (type(v) == "table" and rawget(v, "__ref") ~= nil)) then
             local cls0 = __get_class(ref)
             if cls0 == "RigidConstraint" or cls0 == "WeldConstraint" or cls0 == "Weld" or cls0 == "ManualWeld" or cls0 == "Motor6D" or cls0 == "Motor"
-               or cls0 == "BallSocketConstraint" or cls0 == "NoCollisionConstraint" or cls0 == "AnimationConstraint" then
+               or cls0 == "BallSocketConstraint" or cls0 == "NoCollisionConstraint" or cls0 == "AnimationConstraint"
+               or cls0 == "Beam" or cls0 == "HingeConstraint" or cls0 == "PrismaticConstraint" then
                 __refprop_set(ref, k, v == nil and -1 or rawget(v, "__ref"))
                 return
             end
+        end
+        if (k == "SourceInstance" or k == "TargetInstance" or k == "PositionInstance") and (v == nil or (type(v) == "table" and rawget(v, "__ref") ~= nil)) then
+            __refprop_set(ref, k, v == nil and -1 or rawget(v, "__ref"))
+            return
         end
         if k == "PrimaryPart" and (v == nil or (type(v) == "table" and rawget(v, "__ref") ~= nil)) then
             __refprop_set(ref, k, v == nil and -1 or rawget(v, "__ref"))
             return
         end
         if type(v) == "table" then
+            local tpp = __tblProps[ref]
+            if tpp and tpp[k] ~= nil then tpp[k] = v; return end
             if k == "Position" and rawget(v, "X") ~= nil and __get_class(ref) == "Attachment" then
                 __att_set(ref, v.X, v.Y, v.Z)
                 return
@@ -8487,13 +8598,23 @@ end
         let luaCloneOrigin = {}; // ref клона -> ref оригинала из файла (Clone() аксессуаров и т.п.)
         let luaCloneSource = {}; // ref клона -> ref того, что клонировали (непосредственный источник)
         let luaAttCF = {};   // ref вложения (Attachment) -> [x,y,z,R00..R22]: Position/CFrame, в т.ч. записанные скриптами
+        let luaInitProps = [];  // [{ref, name, kind, a, b, c}] — типизированные свойства из файла (Color3/Vector3), заливаются в Lua после prelude
         let luaInitValues = []; // [{ref, value:{k,v}}] — табличные Value из файла, заливаются в Lua после prelude
         let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
 
+        // AudioPlayer (новый Audio API) играет через тот же <audio>, что и Sound; различаются только имена свойств
+        function luaSoundLikeCls(ref) { const c = luaByRef[ref] && luaByRef[ref].cls; return (c === 'Sound' || c === 'AudioPlayer') ? c : null; }
+        function luaSoundPropAlias(ref, name) {
+            if (luaByRef[ref] && luaByRef[ref].cls === 'AudioPlayer') {
+                if (name === 'AssetId') return 'SoundId';
+                if (name === 'Looping') return 'Looped';
+            }
+            return name;
+        }
         function luaGetGenericProp(ref, name) {
             if (name === 'Name' && luaByRef[ref]) return luaByRef[ref].name;
             // Sound — живое состояние реального <audio>, а не то, что
-            if (luaByRef[ref] && luaByRef[ref].cls === 'Sound' && soundElByRef[ref]) {
+            if (luaSoundLikeCls(ref) && soundElByRef[ref]) {
                 const a = soundElByRef[ref];
                 if (name === 'TimePosition') return a.currentTime || 0;
                 if (name === 'IsPlaying' || name === 'Playing') return !a.paused && !a.ended;
@@ -8502,7 +8623,7 @@ end
                 if (name === 'PlaybackSpeed' || name === 'Pitch') return _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
             }
             // Sound, чей ассет не загрузился (нет сети/куки) — всё равно «не играет», а не nil (скрипты читают IsPlaying/TimeLength)
-            if (luaByRef[ref] && luaByRef[ref].cls === 'Sound' && !soundElByRef[ref]) {
+            if (luaSoundLikeCls(ref) && !soundElByRef[ref]) {
                 if (name === 'IsPlaying' || name === 'Playing') return false;
                 if (name === 'TimePosition' || name === 'TimeLength' || name === 'Length') return 0;
             }
@@ -8529,6 +8650,8 @@ end
                     const PD = { HoldDuration: 0, MaxActivationDistance: 10, ActionText: '', ObjectText: '', RequiresLineOfSight: true, Enabled: true, ClickablePrompt: true };
                     if (name in PD) return PD[name];
                 }
+                // свойства, скопированные Clone()-ом из файлового оригинала (Beam.Enabled, AudioPlayer.AssetId, ...)
+                if (luaGenericPropsByRef[ref] && name in luaGenericPropsByRef[ref]) return luaGenericPropsByRef[ref][name];
                 return null;
             }
             // ProximityPrompt из файла: свойства лежат в реестре подсказок (JS), а не в generic-пропсах
@@ -8623,20 +8746,21 @@ end
                 return;
             }
             // Sound — до GUI/virtualInstanceProps веток:
-            if (luaByRef[ref] && luaByRef[ref].cls === 'Sound') {
-                if (name === 'SoundId') {
+            if (luaSoundLikeCls(ref)) {
+                const pn = luaSoundPropAlias(ref, name);
+                if (pn === 'SoundId') {
                     const url = rbxAssetIdToProxyUrl(value);
                     const a = getOrCreateSoundEl(ref);
                     if (url) a.src = url;
-                } else if (name === 'Volume') {
+                } else if (pn === 'Volume') {
                     getOrCreateSoundEl(ref).volume = Math.max(0, Math.min(1, Number(value) || 0));
-                } else if (name === 'Looped') {
+                } else if (pn === 'Looped') {
                     getOrCreateSoundEl(ref).loop = !!value;
-                } else if (name === 'PlaybackSpeed' || name === 'Pitch') {
+                } else if (pn === 'PlaybackSpeed' || pn === 'Pitch') {
                     // Оба свойства — один и тот же множитель (см.
                     _soundBaseSpeed[ref] = Number(value) || 1;
                     _applySoundRate(ref);
-                } else if (name === 'TimePosition') {
+                } else if (pn === 'TimePosition') {
                     getOrCreateSoundEl(ref).currentTime = Number(value) || 0;
                 }
                 // Падаем ДАЛЬШЕ (не return) — значение всё равно кладём в
@@ -8881,6 +9005,7 @@ end
             luaByRef[ref] = { cls: className, name: className }; luaByRefVer++;
             luaParentByRef[ref] = -1;
             virtualInstanceProps[ref] = {};
+            if (className === 'Beam') luaBeamRefs.add(ref);
             // Instance.new("TextButton") и т.п.
             if (GUI_CLASS_NAMES.has(className)) {
                 guiPropsByRef[ref] = { ref, cls: className, Name: className, parent: -1 };
@@ -8982,7 +9107,11 @@ end
             // sound:Clone():Play() молчал, а luaSoundControl тихо выходил с «SoundId ещё не задан».
             // свойства «мусорного ящика» (Tool.TextureId/ToolTip из файла и т.п.) копируются у любого класса, не только у Sound
             if (luaGenericPropsByRef[ref]) luaGenericPropsByRef[newRef] = Object.assign({}, luaGenericPropsByRef[ref]);
-            if (cls === 'Sound') {
+            if (cls === 'Beam') {
+                if (luaBeamColor[ref]) luaBeamColor[newRef] = luaBeamColor[ref];
+                if (luaRefProps[ref]) luaRefProps[newRef] = Object.assign({}, luaRefProps[ref]);
+            }
+            if (cls === 'Sound' || cls === 'AudioPlayer') {
                 const sa = soundElByRef[ref];
                 if (sa) {
                     const na = getOrCreateSoundEl(newRef);
@@ -10044,6 +10173,16 @@ end
                     });
                     return 0;
                 }
+                // Attachment.Position — плавно меняем локальный сдвиг (раньше composite-твин просто прыгал в конец)
+                if (propName === 'Position' && lua.lua_type(L2, 4) === lua.LUA_TTABLE && luaByRef[ref] && luaByRef[ref].cls === 'Attachment') {
+                    const gq = (f) => { lua.lua_getfield(L2, 4, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
+                    const a0 = luaAttCF[ref] || [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1];
+                    activeTweens.push({
+                        ref, attPos: true, from: [a0[0], a0[1], a0[2]], to: [gq('X'), gq('Y'), gq('Z')],
+                        duration, startTime: performance.now(), completedRef: completedKey,
+                    });
+                    return 0;
+                }
                 const ty = lua.lua_type(L2, 4);
                 let composite = false, toVal;
                 if (ty === lua.LUA_TTABLE) { toVal = luaTableToJsPropValue(L2, 4); composite = true; }
@@ -10967,6 +11106,8 @@ end
             luaParentByRef = {};
             luaChildrenByRef = {};
             luaInitValues = [];
+            luaInitProps = [];
+            resetBeams();
             luaPartXform = {};
             luaAttCF = {};
             luaRefProps = {};
@@ -10988,6 +11129,26 @@ end
                     if (inst.cls === 'Team') luaTeamInfo[inst.ref] = { color: inst.teamColor, auto: inst.autoAssignable !== false };
                     if (inst.att) luaAttCF[inst.ref] = inst.att;
                     if (inst.refs) luaRefProps[inst.ref] = inst.refs;
+                    // Свойства классов, которых раньше не было в Lua (Audio API, Beam, пост-эффекты, Atmosphere, констрейнты)
+                    if (inst.cls === 'Beam') { luaBeamRefs.add(inst.ref); if (inst.beamColor) luaBeamColor[inst.ref] = inst.beamColor; }
+                    if (inst.tprops) {
+                        for (const [pn, pv] of Object.entries(inst.tprops)) {
+                            if (pv[0] === 'ref') (luaRefProps[inst.ref] = luaRefProps[inst.ref] || {})[pn] = pv[1];
+                            else luaInitProps.push({ ref: inst.ref, name: pn, kind: pv[0], a: pv[1], b: pv[2], c: pv[3] });
+                        }
+                    }
+                    // AudioPlayer, уже лежащий В ФАЙЛЕ: тот же <audio>, что и у Sound (Asset/Volume/Looping/PlaybackSpeed)
+                    if (inst.cls === 'AudioPlayer' && inst.gprops && inst.gprops.AssetId) {
+                        const a = getOrCreateSoundEl(inst.ref);
+                        const url = rbxAssetIdToProxyUrl(inst.gprops.AssetId);
+                        if (url) a.src = url;
+                        if (typeof inst.gprops.Volume === 'number') a.volume = Math.max(0, Math.min(1, inst.gprops.Volume));
+                        if (inst.gprops.Looping) a.loop = true;
+                        if (typeof inst.gprops.PlaybackSpeed === 'number' && inst.gprops.PlaybackSpeed !== 1) {
+                            _soundBaseSpeed[inst.ref] = inst.gprops.PlaybackSpeed;
+                            _applySoundRate(inst.ref);
+                        }
+                    }
                     // ValueBase.Value, заданное в самом файле (IntValue = 10, CFrameValue, ...)
                     if (inst.value !== undefined && inst.value !== null) {
                         if (typeof inst.value === 'object') luaInitValues.push({ ref: inst.ref, value: inst.value });
@@ -11048,6 +11209,12 @@ end
                         '__init_value(' + iv.ref + ',"' + iv.value.k + '",' + iv.value.v.join(',') + ')').join('\n');
                     const ivStatus = doLuaString(L, ivCode, 'initvalues');
                     if (ivStatus !== lua.LUA_OK) logLuaOutput('warn', 'initvalues (' + label + '): ' + luaErrToString(L));
+                }
+                if (luaInitProps.length) {
+                    const ipCode = luaInitProps.map(ip =>
+                        '__init_prop(' + ip.ref + ',' + JSON.stringify(ip.name) + ',"' + ip.kind + '",' + ip.a + ',' + ip.b + ',' + ip.c + ')').join('\n');
+                    const ipStatus = doLuaString(L, ipCode, 'initprops');
+                    if (ipStatus !== lua.LUA_OK) logLuaOutput('warn', 'initprops (' + label + '): ' + luaErrToString(L));
                 }
             }
 
@@ -12149,6 +12316,13 @@ end
                     cm.decompose(cp, cq, cs);
                     luaApplyPartMatrix(t.ref, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), cq, new THREE.Vector3(1, 1, 1)));
                     fireLuaSignal(t.ref, '__prop_CFrame', []); fireLuaSignal(t.ref, '__prop_Position', []);
+                    if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
+                    else stillActive.push(t);
+                    continue;
+                }
+                if (t.attPos) {
+                    const a = luaAttCF[t.ref] || (luaAttCF[t.ref] = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
+                    for (let i = 0; i < 3; i++) a[i] = t.from[i] + (t.to[i] - t.from[i]) * p;
                     if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
                     else stillActive.push(t);
                     continue;
