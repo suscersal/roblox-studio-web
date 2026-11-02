@@ -4569,6 +4569,268 @@ def build_rot_matrix_from_deg(rx_deg, ry_deg, rz_deg):
     ]
 
 
+# ---- Трансформации (инструменты Move/Rotate/Scale/Pivot) --------------------------------------------------
+# Канонический CFrame, который понимает и сцена (get_pos/get_rot_matrix), и сохранение (s_cframe):
+# {'matrix': [R00..R22 по строкам], 'position': {x,y,z}}. Раньше правка Position/Rotation писала 12-элементную
+# матрицу с позицией внутри — s_cframe читал из неё только первые 9 чисел и терял позицию при сохранении.
+_IDENT3 = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def _m3_to_euler_deg(m):
+    """Обратное к build_rot_matrix_from_deg (R = Rx*Ry*Rz) -> (rx, ry, rz) в градусах."""
+    r00, r01, r02, r10, r11, r12, r20, r21, r22 = m
+    ry = math.asin(max(-1.0, min(1.0, r02)))
+    if abs(r02) < 0.99999:
+        rx = math.atan2(-r12, r22)
+        rz = math.atan2(-r01, r00)
+    else:
+        rx = math.atan2(r21, r11)
+        rz = 0.0
+    return math.degrees(rx), math.degrees(ry), math.degrees(rz)
+
+
+def _cf_read(cf, fallback_pos=None):
+    """CFrame-словарь -> (pos[3], rot[9])."""
+    if isinstance(cf, dict) and ('position' in cf or 'matrix' in cf):
+        pos = list(get_pos(cf))
+        if fallback_pos is not None and pos == [0.0, 0.0, 0.0]:
+            pos = list(fallback_pos)
+        return pos, [float(v) for v in get_rot_matrix(cf)]
+    return list(fallback_pos or (0.0, 0.0, 0.0)), list(_IDENT3)
+
+
+def _cf_make(pos, rot):
+    return {'matrix': [float(v) for v in rot], 'position': {'x': float(pos[0]), 'y': float(pos[1]), 'z': float(pos[2])}}
+
+
+def _part_pose(props):
+    p = props.get('Position')
+    fb = (safe_float(p.get('x', 0)), safe_float(p.get('y', 0)), safe_float(p.get('z', 0))) if isinstance(p, dict) else None
+    return _cf_read(props.get('CFrame'), fb)
+
+
+def _part_set_size(props, size):
+    """Size в файле хранится под бинарным именем 'size' (его и пишет сериализатор), 'Size' — производное
+    поле для панели: правка только 'Size' при сохранении терялась."""
+    v = {'x': float(size[0]), 'y': float(size[1]), 'z': float(size[2])}
+    props['Size'] = v
+    props['size'] = dict(v)
+
+
+def _part_set_pose(props, pos, rot):
+    """Единая запись позы детали: CFrame + вспомогательные Position/Rotation (их читает панель Properties)."""
+    props['CFrame'] = _cf_make(pos, rot)
+    props['Position'] = {'x': float(pos[0]), 'y': float(pos[1]), 'z': float(pos[2])}
+    rx, ry, rz = _m3_to_euler_deg(rot)
+    props['Rotation'] = {'x': rx, 'y': ry, 'z': rz}
+
+
+_TRANSFORM_PROP_NAMES = ['CFrame', 'Position', 'Rotation', 'Size', 'PivotOffset', 'WorldPivotData']
+
+
+def _subtree_refs(parsed, root):
+    kids = {}
+    for c, p in parsed['parent_map'].items():
+        kids.setdefault(p, []).append(c)
+    out, stack = [], [root]
+    while stack:
+        r = stack.pop()
+        out.append(r)
+        stack.extend(kids.get(r, ()))
+    return out
+
+
+def _vec3(v, default=(0.0, 0.0, 0.0)):
+    try:
+        return [float(v[0]), float(v[1]), float(v[2])]
+    except (TypeError, ValueError, IndexError, KeyError):
+        return list(default)
+
+
+def _mat9(v):
+    try:
+        m = [float(x) for x in v]
+        return m if len(m) == 9 else list(_IDENT3)
+    except (TypeError, ValueError):
+        return list(_IDENT3)
+
+
+def _obb_corners(pos, rot, size):
+    hx, hy, hz = size[0] / 2.0, size[1] / 2.0, size[2] / 2.0
+    out = []
+    for sx in (-hx, hx):
+        for sy in (-hy, hy):
+            for sz in (-hz, hz):
+                v = _m3_vec(rot, [sx, sy, sz])
+                out.append([pos[0] + v[0], pos[1] + v[1], pos[2] + v[2]])
+    return out
+
+
+def _part_size(props):
+    sz = props.get('Size', props.get('size'))
+    if isinstance(sz, dict):
+        return [max(0.05, safe_float(sz.get(a, 1), 1)) for a in ('x', 'y', 'z')]
+    return [1.0, 1.0, 1.0]
+
+
+def _part_pivot(props):
+    """Мировой pivot детали = CFrame * PivotOffset -> (pos, rot)."""
+    pos, rot = _part_pose(props)
+    po = props.get('PivotOffset')
+    if isinstance(po, dict):
+        pp, pr = _cf_read(po)
+        off = _m3_vec(rot, pp)
+        return [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]], _m3_mul(rot, pr)
+    return pos, rot
+
+
+@flask_app.route('/api/transform_info')
+def api_transform_info():
+    """Для гизмо: pivot, габариты и (для детали) размер/поза выбранных объектов."""
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False}), 400
+    r2c = parsed['referent_to_class']
+    out = {}
+    for tok in (request.args.get('refs') or '').split(','):
+        try:
+            ref = int(tok)
+        except ValueError:
+            continue
+        if ref not in r2c:
+            continue
+        lo, hi, n = [1e30] * 3, [-1e30] * 3, 0
+        for r in _subtree_refs(parsed, ref):
+            if r2c.get(r) not in PART_CLASSES:
+                continue
+            pr = parsed['props'].get(r, {})
+            if pr.get('Visible') is False:
+                pass
+            pos, rot = _part_pose(pr)
+            for c in _obb_corners(pos, rot, _part_size(pr)):
+                for i in range(3):
+                    lo[i] = min(lo[i], c[i])
+                    hi[i] = max(hi[i], c[i])
+            n += 1
+        item = {'cls': r2c[ref], 'n': n}
+        if n:
+            item['min'], item['max'] = lo, hi
+        props = parsed['props'].get(ref, {})
+        if r2c[ref] in PART_CLASSES:
+            pos, rot = _part_pose(props)
+            ppos, prot = _part_pivot(props)
+            item.update({'pivot': {'p': ppos, 'r': prot}, 'cf': {'p': pos, 'r': rot},
+                         'size': _part_size(props), 'hasPivotOffset': isinstance(props.get('PivotOffset'), dict)})
+        else:
+            wp = props.get('WorldPivotData')
+            pp = props.get('PrimaryPart')
+            if isinstance(wp, dict):
+                p, r = _cf_read(wp)
+                item['pivot'] = {'p': p, 'r': r}
+                item['explicitPivot'] = True
+            elif isinstance(pp, int) and not isinstance(pp, bool) and pp in r2c and r2c[pp] in PART_CLASSES:
+                p, r = _part_pivot(parsed['props'].get(pp, {}))
+                item['pivot'] = {'p': p, 'r': r}
+            elif n:
+                item['pivot'] = {'p': [(lo[i] + hi[i]) / 2.0 for i in range(3)], 'r': list(_IDENT3)}
+        out[str(ref)] = item
+    return jsonify({'ok': True, 'refs': out})
+
+
+@flask_app.route('/api/transform', methods=['POST'])
+def api_transform():
+    """Пакетная правка трансформаций (один запрос на весь жест в редакторе).
+    ops: [{ref, delta:{r:[9], t:[3], pivot:[3], k}}           — жёсткий сдвиг/поворот/равномерный масштаб ref и ВСЕХ его деталей-потомков,
+          {ref, cframe:{p:[3], r:[9]}, size:[3]}              — абсолютная поза/размер одной детали,
+          {ref, pivotOffset:{p,r}|null}                        — PivotOffset детали (null = сбросить),
+          {ref, worldPivot:{p,r}}                              — WorldPivot модели}"""
+    parsed = state['parsed']
+    if not parsed:
+        return jsonify({'ok': False}), 400
+    ops = (request.json or {}).get('ops')
+    if not isinstance(ops, list) or not ops:
+        return jsonify({'ok': False, 'error': 'ops'}), 400
+    r2c = parsed['referent_to_class']
+    changed = {}     # ref -> снимок «до»
+
+    def touch(ref):
+        if ref not in changed:
+            changed[ref] = _collab_snapshot_props(parsed, ref, _TRANSFORM_PROP_NAMES) if _collab['on'] or _cg['on'] else None
+        return parsed['props'].setdefault(ref, {})
+
+    with _collab_cond:
+        for op in ops:
+            ref = op.get('ref') if isinstance(op, dict) else None
+            if ref not in r2c:
+                continue
+            d = op.get('delta')
+            if isinstance(d, dict):
+                R = _mat9(d.get('r'))
+                T = _vec3(d.get('t'))
+                C = _vec3(d.get('pivot'))
+                k = float(d.get('k', 1.0) or 1.0)
+                for r in _subtree_refs(parsed, ref):
+                    cls = r2c.get(r)
+                    if cls in PART_CLASSES:
+                        pr = touch(r)
+                        pos, rot = _part_pose(pr)
+                        rel = [pos[i] - C[i] for i in range(3)]
+                        rr = _m3_vec(R, rel)
+                        npos = [C[i] + k * rr[i] + T[i] for i in range(3)]
+                        _part_set_pose(pr, npos, _m3_mul(R, rot))
+                        if k != 1.0:
+                            sz = pr.get('Size')
+                            if isinstance(sz, dict):
+                                _part_set_size(pr, [safe_float(sz.get(a, 1), 1) * k for a in ('x', 'y', 'z')])
+                            po = pr.get('PivotOffset')
+                            if isinstance(po, dict):
+                                pp, prr = _cf_read(po)
+                                pr['PivotOffset'] = _cf_make([v * k for v in pp], prr)
+                    wp = parsed['props'].get(r, {}).get('WorldPivotData')
+                    if isinstance(wp, dict):
+                        pr = touch(r)
+                        pos, rot = _cf_read(wp)
+                        rel = [pos[i] - C[i] for i in range(3)]
+                        rr = _m3_vec(R, rel)
+                        pr['WorldPivotData'] = _cf_make([C[i] + k * rr[i] + T[i] for i in range(3)], _m3_mul(R, rot))
+                continue
+            pr = None
+            cf = op.get('cframe')
+            if isinstance(cf, dict) and r2c.get(ref) in PART_CLASSES:
+                pr = touch(ref)
+                _part_set_pose(pr, _vec3(cf.get('p')), _mat9(cf.get('r')))
+            sz = op.get('size')
+            if sz is not None and r2c.get(ref) in PART_CLASSES:
+                pr = touch(ref)
+                v = _vec3(sz, (1.0, 1.0, 1.0))
+                _part_set_size(pr, [max(0.05, v[0]), max(0.05, v[1]), max(0.05, v[2])])
+            if 'pivotOffset' in op and r2c.get(ref) in PART_CLASSES:
+                pr = touch(ref)
+                po = op.get('pivotOffset')
+                if po is None:
+                    pr.pop('PivotOffset', None)
+                else:
+                    pr['PivotOffset'] = _cf_make(_vec3(po.get('p')), _mat9(po.get('r')))
+            wpv = op.get('worldPivot')
+            if isinstance(wpv, dict):
+                pr = touch(ref)
+                pr['WorldPivotData'] = _cf_make(_vec3(wpv.get('p')), _mat9(wpv.get('r')))
+        if not changed:
+            return jsonify({'ok': True, 'changed': []})
+        parsed['_modified'] = True
+        bump_scene_version()
+        if (_collab['on'] or _cg['on']):
+            try:
+                refs = list(changed)
+                undo = [('props', r, changed[r]) for r in refs if changed[r] is not None]
+                redo = [('props', r, _collab_snapshot_props(parsed, r, _TRANSFORM_PROP_NAMES)) for r in refs if changed[r] is not None]
+                cls, nm = _collab_obj(parsed, refs[0])
+                _collab_push('set', refs[0], nm, cls, prop='Transform', n=len(refs), undo=undo, redo=redo)
+            except Exception:
+                traceback.print_exc()
+    return jsonify({'ok': True, 'changed': list(changed)})
+
+
 @flask_app.route('/api/instance/<int:ref>', methods=['POST'])
 @_collab_track('set')
 def api_set_prop(ref):
@@ -4584,47 +4846,17 @@ def api_set_prop(ref):
         parsed['_modified'] = True
         bump_scene_version()
 
-        # CFrame в make_scene_objects имеет приоритет над Position/Rotation —
-        # если объект уже содержит CFrame, правка этих полей визуально
-        # ничего не меняла (сцена всё равно бралась из старого CFrame).
-        # Синхронизируем оба случая.
+        # CFrame в make_scene_objects имеет приоритет над Position/Rotation — синхронизируем,
+        # и пишем в каноническом виде (см. _part_set_pose), иначе позиция терялась при сохранении.
+        if prop == 'Size' and isinstance(val, dict):
+            _part_set_size(props, [safe_float(val.get('x', 1), 1), safe_float(val.get('y', 1), 1), safe_float(val.get('z', 1), 1)])
         if prop == 'Position' and isinstance(val, dict):
-            x = safe_float(val.get('x', 0))
-            y = safe_float(val.get('y', 0))
-            z = safe_float(val.get('z', 0))
-            cf = props.get('CFrame')
-            if isinstance(cf, dict) and isinstance(cf.get('matrix'), (list, tuple)) and len(cf['matrix']) >= 12:
-                mat = list(cf['matrix'])
-                mat[3], mat[7], mat[11] = x, y, z
-                cf['matrix'] = mat
-            elif isinstance(cf, dict) and 'position' in cf:
-                cf['position'] = {'x': x, 'y': y, 'z': z}
-            else:
-                # CFrame отсутствовал — создаём с единичным поворотом
-                props['CFrame'] = {
-                    'matrix': [1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z]
-                }
+            _pos, _rot = _part_pose(props)
+            _part_set_pose(props, [safe_float(val.get('x', 0)), safe_float(val.get('y', 0)), safe_float(val.get('z', 0))], _rot)
         elif prop == 'Rotation' and isinstance(val, dict):
-            rx = safe_float(val.get('x', 0))
-            ry = safe_float(val.get('y', 0))
-            rz = safe_float(val.get('z', 0))
-            r00, r01, r02, r10, r11, r12, r20, r21, r22 = build_rot_matrix_from_deg(
-                rx, ry, rz)
-            cf = props.get('CFrame')
-            if isinstance(cf, dict) and isinstance(cf.get('matrix'), (list, tuple)) and len(cf['matrix']) >= 12:
-                mat = list(cf['matrix'])
-                px, py, pz = mat[3], mat[7], mat[11]
-            else:
-                pos = props.get('Position', {})
-                px = safe_float(pos.get('x', 0)) if isinstance(
-                    pos, dict) else 0
-                py = safe_float(pos.get('y', 0)) if isinstance(
-                    pos, dict) else 0
-                pz = safe_float(pos.get('z', 0)) if isinstance(
-                    pos, dict) else 0
-            props['CFrame'] = {
-                'matrix': [r00, r01, r02, px, r10, r11, r12, py, r20, r21, r22, pz]
-            }
+            _pos, _rot = _part_pose(props)
+            _part_set_pose(props, _pos, build_rot_matrix_from_deg(
+                safe_float(val.get('x', 0)), safe_float(val.get('y', 0)), safe_float(val.get('z', 0))))
     return jsonify({'ok': True})
 
 
@@ -6384,7 +6616,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-10-29 · door-tween'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-11-01 · transform-tools'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

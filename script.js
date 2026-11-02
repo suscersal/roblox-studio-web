@@ -1,7 +1,551 @@
+        // ============ ИНСТРУМЕНТЫ ТРАНСФОРМАЦИИ: Move / Rotate / Scale / Pivot ============
+        // Как в Roblox Studio: стрелки (перемещение по осям), кольца (поворот), ручки граней (размер), режим Pivot
+        // (правка PivotOffset детали / WorldPivot модели), World/Local и привязка к шагу. Во время жеста меши
+        // двигаются живьём (без перезагрузки сцены), а по отпусканию уходит ОДИН запрос /api/transform.
+        const _gzT = (ru, en) => (LANG === 'ru' ? ru : en);
+        const GZ = {
+            tool: 'select', pivotMode: false, local: false, snap: true, centered: false,
+            step: { move: 1, rot: 45, scale: 1 },
+            info: {}, anchor: null, single: null, sig: '', ui: false,
+            built: false, root: null, scl: null, pivotMark: null, hitsMove: [], hitsRot: [], hitsScl: [],
+            drag: null, undo: [], redo: [], busy: false,
+        };
+        try { Object.assign(GZ.step, JSON.parse(localStorage.getItem('rbxstudio-gz-step') || '{}')); } catch (e) { emuWarn('swallow:gz-step', 'gz step: ' + _errText(e)); }
+
+        const _GZ_COLORS = [0xef4444, 0x22c55e, 0x3b82f6];
+        function gzM3Quat(r) {
+            const m = new THREE.Matrix4().set(r[0], r[1], r[2], 0, r[3], r[4], r[5], 0, r[6], r[7], r[8], 0, 0, 0, 0, 1);
+            return new THREE.Quaternion().setFromRotationMatrix(m);
+        }
+        function gzQuatM3(q) {
+            const e = new THREE.Matrix4().makeRotationFromQuaternion(q).elements;
+            return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
+        }
+        function gzSnapV(v, step) { return GZ.snap && step > 0 ? Math.round(v / step) * step : v; }
+
+        function gzBuild() {
+            if (GZ.built || typeof THREE === 'undefined' || !scene) return;
+            GZ.built = true;
+            const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+            const mk = (c, op) => new THREE.MeshBasicMaterial({ color: c, depthTest: false, transparent: true, opacity: op === undefined ? 0.95 : op });
+            const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false });
+            const root = new THREE.Group();
+            root.visible = false; root.renderOrder = 1000;
+            const addVis = (grp, geo, mat, pos, quat) => {
+                const m = new THREE.Mesh(geo, mat);
+                if (pos) m.position.copy(pos);
+                if (quat) m.quaternion.copy(quat);
+                m.renderOrder = 1000; m.frustumCulled = false;
+                grp.add(m); return m;
+            };
+            // --- стрелки перемещения (ось Y по умолчанию -> поворачиваем на нужную) ---
+            const mvG = new THREE.Group(), rtG = new THREE.Group();
+            for (let i = 0; i < 3; i++) {
+                const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axes[i]);
+                const g = new THREE.Group(); g.quaternion.copy(q);
+                const mat = mk(_GZ_COLORS[i]);
+                addVis(g, new THREE.CylinderGeometry(0.022, 0.022, 0.74, 8), mat, new THREE.Vector3(0, 0.37, 0));
+                addVis(g, new THREE.ConeGeometry(0.075, 0.24, 14), mat, new THREE.Vector3(0, 0.86, 0));
+                const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.1, 6), hitMat);
+                hit.position.set(0, 0.58, 0); hit.userData.h = { type: 'move', axis: i };
+                g.add(hit); GZ.hitsMove.push(hit);
+                mvG.add(g);
+                // --- кольцо поворота (тор лежит в плоскости XY, ось Z) ---
+                const qr = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), axes[i]);
+                const rg = new THREE.Group(); rg.quaternion.copy(qr);
+                addVis(rg, new THREE.TorusGeometry(0.9, 0.016, 6, 72), mk(_GZ_COLORS[i]));
+                const rh = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.085, 6, 36), hitMat);
+                rh.userData.h = { type: 'rot', axis: i };
+                rg.add(rh); GZ.hitsRot.push(rh);
+                rtG.add(rg);
+            }
+            root.add(mvG); root.add(rtG);
+            GZ.mvG = mvG; GZ.rtG = rtG;
+            scene.add(root);
+            GZ.root = root;
+            // --- метка pivot ---
+            const pm = new THREE.Group(); pm.visible = false;
+            addVis(pm, new THREE.SphereGeometry(0.07, 12, 8), mk(0xfacc15, 1));
+            GZ.pivotMark = pm; root.add(pm);
+            // --- ручки размера: 6 граней + центр (позиции задаются каждый кадр) ---
+            const scl = new THREE.Group(); scl.visible = false;
+            GZ.sclFaces = [];
+            for (let i = 0; i < 3; i++) for (const sg of [1, -1]) {
+                const h = new THREE.Group();
+                addVis(h, new THREE.BoxGeometry(0.11, 0.11, 0.11), mk(_GZ_COLORS[i]));
+                const hit = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), hitMat);
+                hit.userData.h = { type: 'scale', axis: i, sign: sg };
+                h.add(hit); GZ.hitsScl.push(hit);
+                scl.add(h); GZ.sclFaces.push({ g: h, axis: i, sign: sg });
+            }
+            const cen = new THREE.Group();
+            addVis(cen, new THREE.BoxGeometry(0.15, 0.15, 0.15), mk(0xf3f4f6));
+            const ch = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), hitMat);
+            ch.userData.h = { type: 'uscale' };
+            cen.add(ch); GZ.hitsScl.push(ch);
+            scl.add(cen); GZ.sclCenter = cen;
+            scene.add(scl);
+            GZ.scl = scl;
+        }
+
+        // ---- UI ----
+        function gzBuildUI() {
+            const vp = document.getElementById('viewport');
+            if (!vp || GZ.ui) return;
+            GZ.ui = true;
+            const bar = document.createElement('div');
+            bar.id = 'tf-bar';
+            const btn = (id, label, title, fn) => {
+                const b = document.createElement('button');
+                b.id = id; b.textContent = label; b.title = title;
+                b.addEventListener('click', (e) => { e.stopPropagation(); fn(); gzSyncUI(); });
+                b.addEventListener('mousedown', (e) => e.stopPropagation());
+                b.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+                bar.appendChild(b); return b;
+            };
+            btn('tf-select', '⬚', _gzT('Выбор', 'Select'), () => gzSetTool('select'));
+            btn('tf-move', '✥', _gzT('Перемещение (Move)', 'Move'), () => gzSetTool('move'));
+            btn('tf-rotate', '⟳', _gzT('Поворот (Rotate)', 'Rotate'), () => gzSetTool('rotate'));
+            btn('tf-scale', '⤢', _gzT('Размер (Scale)', 'Scale'), () => gzSetTool('scale'));
+            btn('tf-pivot', '📍', _gzT('Правка pivot', 'Edit pivot'), () => {
+                GZ.pivotMode = !GZ.pivotMode;
+                if (GZ.pivotMode && (GZ.tool === 'select' || GZ.tool === 'scale')) GZ.tool = 'move';
+            });
+            btn('tf-space', '🌐', _gzT('Оси: мировые / локальные', 'Axes: World / Local'), () => { GZ.local = !GZ.local; });
+            btn('tf-snap', '🧲', _gzT('Привязка к шагу', 'Snap to step'), () => { GZ.snap = !GZ.snap; });
+            btn('tf-center', '⟷', _gzT('Размер от центра', 'Scale from center'), () => { GZ.centered = !GZ.centered; });
+            btn('tf-undo', '↶', _gzT('Отменить (Ctrl+Z)', 'Undo (Ctrl+Z)'), () => gzUndo());
+            btn('tf-redo', '↷', _gzT('Повторить (Ctrl+Y)', 'Redo (Ctrl+Y)'), () => gzRedo());
+            btn('tf-resetpivot', '↺📍', _gzT('Сбросить pivot', 'Reset pivot'), () => gzResetPivot());
+            btn('tf-gear', '⚙', _gzT('Шаги привязки', 'Snap steps'), () => { GZ.stepsOpen = !GZ.stepsOpen; });
+            const steps = document.createElement('div');
+            steps.id = 'tf-steps';
+            const mkStep = (key, label, title) => {
+                const w = document.createElement('label'); w.title = title; w.textContent = label;
+                const inp = document.createElement('input');
+                inp.type = 'number'; inp.min = '0'; inp.step = 'any'; inp.value = GZ.step[key]; inp.inputMode = 'decimal';
+                inp.addEventListener('change', () => {
+                    const v = parseFloat(inp.value);
+                    GZ.step[key] = isFinite(v) && v >= 0 ? v : GZ.step[key];
+                    try { localStorage.setItem('rbxstudio-gz-step', JSON.stringify(GZ.step)); } catch (e) { emuWarn('swallow:gz-step-save', 'gz step: ' + _errText(e)); }
+                });
+                ['mousedown', 'touchstart', 'click', 'keydown'].forEach(ev => inp.addEventListener(ev, (e) => e.stopPropagation()));
+                w.appendChild(inp); steps.appendChild(w);
+            };
+            mkStep('move', '✥', _gzT('Шаг перемещения, стад', 'Move step, studs'));
+            mkStep('rot', '⟳', _gzT('Шаг поворота, °', 'Rotate step, °'));
+            mkStep('scale', '⤢', _gzT('Шаг размера, стад', 'Scale step, studs'));
+            bar.appendChild(steps);
+            vp.appendChild(bar);
+            // Жесты на ручках — в capture-фазе вьюпорта, раньше орбиты камеры и выбора по тапу.
+            vp.addEventListener('mousedown', gzOnMouseDown, true);
+            vp.addEventListener('touchstart', gzOnTouchStart, { capture: true, passive: false });
+            window.addEventListener('keydown', gzOnKey);
+            gzSyncUI();
+        }
+        function gzSyncUI() {
+            const on = (id, v) => { const el = document.getElementById(id); if (el) el.classList.toggle('active', !!v); };
+            on('tf-select', GZ.tool === 'select'); on('tf-move', GZ.tool === 'move');
+            on('tf-rotate', GZ.tool === 'rotate'); on('tf-scale', GZ.tool === 'scale');
+            on('tf-pivot', GZ.pivotMode); on('tf-snap', GZ.snap); on('tf-center', GZ.centered); on('tf-space', GZ.local);
+            const sp = document.getElementById('tf-space'); if (sp) sp.textContent = GZ.local ? '📦' : '🌐';
+            const stp = document.getElementById('tf-steps'); if (stp) stp.style.display = GZ.stepsOpen ? 'flex' : 'none';
+            on('tf-gear', GZ.stepsOpen);
+            const rp = document.getElementById('tf-resetpivot'); if (rp) rp.style.display = GZ.pivotMode ? '' : 'none';
+            const ce = document.getElementById('tf-center'); if (ce) ce.style.display = GZ.tool === 'scale' ? '' : 'none';
+            const un = document.getElementById('tf-undo'); if (un) un.disabled = !GZ.undo.length;
+            const re = document.getElementById('tf-redo'); if (re) re.disabled = !GZ.redo.length;
+        }
+        function gzSetTool(t) {
+            GZ.tool = t;
+            if (t === 'select' || t === 'scale') GZ.pivotMode = false;
+        }
+
+        // ---- выбор и данные ----
+        function gzTopRefs() {
+            const sel = new Set(selectedRefs);
+            return [...sel].filter(r => {
+                let p = parentByRef[r], g = 0;
+                while (p !== undefined && p !== null && p !== -1 && g++ < 200) { if (sel.has(p)) return false; p = parentByRef[p]; }
+                return true;
+            });
+        }
+        function gzFindNode(ref, nodes) {
+            for (const n of (nodes || treeData)) {
+                if (n.ref === ref) return n;
+                const c = gzFindNode(ref, n.children || []);
+                if (c) return c;
+            }
+            return null;
+        }
+        // Детали выделения, которые сейчас есть в сцене (потомки моделей тоже).
+        function gzParts() {
+            const out = [];
+            const walk = (n) => {
+                const m = sceneObjs[n.ref];
+                if (m && m.userData && m.userData.cfRot) out.push({ ref: n.ref, mesh: m });
+                for (const c of (n.children || [])) walk(c);
+            };
+            for (const r of gzTopRefs()) { const n = gzFindNode(r); if (n) walk(n); }
+            return out;
+        }
+        async function gzRefreshInfo() {
+            const refs = gzTopRefs();
+            if (!refs.length || isPlaying) { GZ.anchor = null; GZ.single = null; return; }
+            const sig = GZ.sig;
+            const r = await api('GET', '/api/transform_info?refs=' + refs.join(','));
+            if (!r.ok || sig !== GZ.sig) return;
+            GZ.info = r.refs || {};
+            gzComputeAnchor();
+        }
+        function gzComputeAnchor() {
+            const refs = gzTopRefs().filter(r => GZ.info[r]);
+            GZ.anchor = null; GZ.single = null;
+            if (!refs.length) return;
+            const V = (a) => new THREE.Vector3(a[0], a[1], a[2]);
+            const mainRef = GZ.info[selectedRef] && refs.includes(selectedRef) ? selectedRef : refs[0];
+            const main = GZ.info[mainRef];
+            if (refs.length === 1) {
+                if (main.pivot) GZ.anchor = { p: V(main.pivot.p), q: gzM3Quat(main.pivot.r) };
+                if (main.cf) GZ.single = { ref: refs[0], cf: main.cf, size: main.size, hasPO: !!main.hasPivotOffset, pivot: main.pivot };
+                else if (main.pivot) GZ.single = { ref: refs[0], model: true, explicit: !!main.explicitPivot, pivot: main.pivot };
+                return;
+            }
+            const lo = [1e30, 1e30, 1e30], hi = [-1e30, -1e30, -1e30];
+            let any = false;
+            for (const r of refs) {
+                const it = GZ.info[r];
+                if (!it || !it.min) continue;
+                any = true;
+                for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], it.min[i]); hi[i] = Math.max(hi[i], it.max[i]); }
+            }
+            if (!any) return;
+            GZ.anchor = { p: new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2), q: main.pivot ? gzM3Quat(main.pivot.r) : new THREE.Quaternion() };
+        }
+
+        // ---- покадровое обновление (из animate) ----
+        function gzTick() {
+            if (!GZ.ui) gzBuildUI();
+            if (typeof THREE === 'undefined' || !scene || !camera) return;
+            const bar = document.getElementById('tf-bar');
+            if (bar) bar.style.display = isPlaying ? 'none' : 'flex';
+            const selKey = [...selectedRefs].join(',');
+            if (selKey !== GZ.selKey) { GZ.selKey = selKey; GZ.anchor = null; GZ.single = null; }
+            if (selKey !== GZ.sig) { GZ.sig = selKey; if (!GZ.drag) gzRefreshInfo(); }
+            gzBuild();
+            if (!GZ.root) return;
+            const a = GZ.drag && GZ.drag.anchorLive ? GZ.drag.anchorLive : GZ.anchor;
+            const show = !isPlaying && GZ.tool !== 'select' && a && selectedRefs.size > 0;
+            const isMR = GZ.tool === 'move' || GZ.tool === 'rotate';
+            GZ.root.visible = !!(show && isMR);
+            GZ.scl.visible = !!(show && GZ.tool === 'scale');
+            if (!show) return;
+            const s = Math.max(0.05, camera.position.distanceTo(a.p) * 0.17);
+            GZ.root.position.copy(a.p);
+            if (GZ.local) GZ.root.quaternion.copy(a.q); else GZ.root.quaternion.identity();
+            GZ.root.scale.set(s, s, s);
+            GZ.mvG.visible = GZ.tool === 'move';
+            GZ.rtG.visible = GZ.tool === 'rotate';
+            GZ.pivotMark.visible = GZ.pivotMode;
+            GZ.root.updateMatrixWorld(true);
+            if (GZ.tool === 'scale') {
+                const sg = GZ.single && GZ.single.cf && !GZ.pivotMode ? GZ.single : null;
+                const live = GZ.drag && GZ.drag.sclLive ? GZ.drag.sclLive : null;
+                for (const f of GZ.sclFaces) {
+                    f.g.visible = !!sg;
+                    if (!sg) continue;
+                    const cfp = live ? live.p : sg.cf.p, cfr = live ? live.r : sg.cf.r, size = live ? live.size : sg.size;
+                    const col = new THREE.Vector3(cfr[f.axis], cfr[3 + f.axis], cfr[6 + f.axis]);
+                    f.g.position.set(cfp[0], cfp[1], cfp[2]).addScaledVector(col, f.sign * (size[f.axis] / 2 + s * 0.09));
+                    f.g.scale.set(s, s, s);
+                }
+                GZ.sclCenter.position.copy(a.p);
+                GZ.sclCenter.scale.set(s, s, s);
+                GZ.scl.updateMatrixWorld(true);
+            }
+        }
+
+        // ---- ввод ----
+        const _gzRC = { rc: null, v: null };
+        function gzRay(cx, cy) {
+            const vp = document.getElementById('viewport');
+            const rect = vp.getBoundingClientRect();
+            if (!_gzRC.rc) { _gzRC.rc = new THREE.Raycaster(); _gzRC.v = new THREE.Vector2(); }
+            _gzRC.v.set(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
+            _gzRC.rc.setFromCamera(_gzRC.v, camera);
+            return _gzRC.rc.ray;
+        }
+        function gzHit(cx, cy) {
+            if (isPlaying || GZ.tool === 'select' || !GZ.anchor || !GZ.root || GZ.drag) return null;
+            const list = GZ.tool === 'move' ? GZ.hitsMove : GZ.tool === 'rotate' ? GZ.hitsRot
+                : (GZ.single && GZ.single.cf && !GZ.pivotMode ? GZ.hitsScl : GZ.hitsScl.filter(h => h.userData.h.type === 'uscale'));
+            gzRay(cx, cy);
+            const hits = _gzRC.rc.intersectObjects(list, false);
+            return hits.length ? hits[0].object.userData.h : null;
+        }
+        function gzAxisParam(ray, o, dir) {
+            const w0 = o.clone().sub(ray.origin);
+            const b = dir.dot(ray.direction), d = dir.dot(w0), e = ray.direction.dot(w0);
+            const den = 1 - b * b;
+            if (Math.abs(den) < 1e-5) return null;
+            return (b * e - d) / den;
+        }
+        function gzOnMouseDown(e) {
+            if (e.button !== 0) return;
+            const h = gzHit(e.clientX, e.clientY);
+            if (!h) return;
+            e.stopPropagation(); e.preventDefault();
+            gzBegin(h, e.clientX, e.clientY);
+            const mm = (ev) => { ev.stopPropagation(); gzUpdate(ev.clientX, ev.clientY); };
+            const mu = (ev) => {
+                ev.stopPropagation();
+                window.removeEventListener('mousemove', mm, true); window.removeEventListener('mouseup', mu, true);
+                gzEnd();
+            };
+            window.addEventListener('mousemove', mm, true);
+            window.addEventListener('mouseup', mu, true);
+        }
+        function gzOnTouchStart(e) {
+            if (e.targetTouches.length !== 1) return;
+            const t0 = e.targetTouches[0];
+            const h = gzHit(t0.clientX, t0.clientY);
+            if (!h) return;
+            e.stopPropagation(); e.preventDefault();
+            const id = t0.identifier;
+            gzBegin(h, t0.clientX, t0.clientY);
+            const find = (ev) => Array.from(ev.touches).find(t => t.identifier === id);
+            const tm = (ev) => { const t = find(ev); if (!t) return; ev.preventDefault(); ev.stopPropagation(); gzUpdate(t.clientX, t.clientY); };
+            const te = (ev) => {
+                if (find(ev)) return;     // палец ещё на экране (отпустили другой)
+                ev.stopPropagation();
+                window.removeEventListener('touchmove', tm, true); window.removeEventListener('touchend', te, true); window.removeEventListener('touchcancel', te, true);
+                _lastTouchEndT = performance.now();    // не считать хвост жеста тапом выбора
+                gzEnd();
+            };
+            window.addEventListener('touchmove', tm, { capture: true, passive: false });
+            window.addEventListener('touchend', te, true);
+            window.addEventListener('touchcancel', te, true);
+        }
+
+        function gzBegin(h, cx, cy) {
+            const a = GZ.anchor;
+            const frameQ = GZ.local ? a.q.clone() : new THREE.Quaternion();
+            const parts = GZ.pivotMode ? [] : gzParts().map(p => ({ ref: p.ref, mesh: p.mesh, M0: p.mesh.matrix.clone(), cf0: { p: p.mesh.userData.cfPos.slice(), r: p.mesh.userData.cfRot.slice() } }));
+            const d = { h, tool: h.type, o: a.p.clone(), frameQ, parts, x0: cx, cur: { T: new THREE.Vector3(), Q: new THREE.Quaternion(), k: 1 }, anchorLive: { p: a.p.clone(), q: a.q.clone() } };
+            const ray = gzRay(cx, cy);
+            if (h.type === 'move') {
+                d.dir = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)][h.axis].applyQuaternion(frameQ);
+                d.t0 = gzAxisParam(ray, d.o, d.dir);
+            } else if (h.type === 'rot') {
+                d.dir = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)][h.axis].applyQuaternion(frameQ);
+                const ref = Math.abs(d.dir.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+                d.b1 = new THREE.Vector3().crossVectors(d.dir, ref).normalize();
+                d.b2 = new THREE.Vector3().crossVectors(d.dir, d.b1);
+                d.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(d.dir, d.o);
+                d.last = null; d.acc = 0;
+                gzRotAngle(d, ray);
+            } else if (h.type === 'scale') {
+                const sg = GZ.single;
+                const r = sg.cf.r;
+                d.axisDir = new THREE.Vector3(r[h.axis], r[3 + h.axis], r[6 + h.axis]).multiplyScalar(h.sign);
+                d.size0 = sg.size.slice();
+                d.c0 = new THREE.Vector3(sg.cf.p[0], sg.cf.p[1], sg.cf.p[2]);
+                d.faceP = d.c0.clone().addScaledVector(d.axisDir, sg.size[h.axis] / 2);
+                d.t0 = gzAxisParam(ray, d.faceP, d.axisDir);
+            }
+            GZ.drag = d;
+        }
+        function gzRotAngle(d, ray) {
+            const q = ray.intersectPlane(d.plane, new THREE.Vector3());
+            if (!q) return;
+            q.sub(d.o);
+            const ang = Math.atan2(q.dot(d.b2), q.dot(d.b1));
+            if (d.last === null) { d.last = ang; return; }
+            let dl = ang - d.last;
+            while (dl > Math.PI) dl -= 2 * Math.PI;
+            while (dl < -Math.PI) dl += 2 * Math.PI;
+            d.acc += dl; d.last = ang;
+        }
+        function gzDeltaMatrix(o, Q, T, k) {
+            return new THREE.Matrix4().makeTranslation(o.x + T.x, o.y + T.y, o.z + T.z)
+                .multiply(new THREE.Matrix4().makeRotationFromQuaternion(Q))
+                .multiply(new THREE.Matrix4().makeScale(k, k, k))
+                .multiply(new THREE.Matrix4().makeTranslation(-o.x, -o.y, -o.z));
+        }
+        function gzSetMesh(mesh, M) {
+            mesh.matrix.copy(M);
+            mesh.position.set(M.elements[12], M.elements[13], M.elements[14]);
+            mesh.matrixWorldNeedsUpdate = true;
+        }
+        function gzUpdate(cx, cy) {
+            const d = GZ.drag;
+            if (!d) return;
+            const ray = gzRay(cx, cy);
+            const cur = d.cur;
+            if (d.tool === 'move') {
+                const t = gzAxisParam(ray, d.o, d.dir);
+                if (t === null || d.t0 === null) return;
+                cur.T.copy(d.dir).multiplyScalar(gzSnapV(t - d.t0, GZ.step.move));
+            } else if (d.tool === 'rot') {
+                gzRotAngle(d, ray);
+                const stepRad = GZ.step.rot * Math.PI / 180;
+                cur.Q.setFromAxisAngle(d.dir, gzSnapV(d.acc, stepRad));
+            } else if (d.tool === 'uscale') {
+                cur.k = Math.max(0.05, 1 + (cx - d.x0) / 160);
+            } else if (d.tool === 'scale') {
+                const t = gzAxisParam(ray, d.faceP, d.axisDir);
+                if (t === null || d.t0 === null) return;
+                const i = d.h.axis;
+                let dl = t - d.t0;
+                let ns = d.size0[i] + dl * (GZ.centered ? 2 : 1);
+                ns = Math.max(0.05, GZ.snap && GZ.step.scale > 0 ? Math.round(ns / GZ.step.scale) * GZ.step.scale : ns);
+                if (ns < 0.05) ns = 0.05;
+                d.newSize = d.size0.slice(); d.newSize[i] = ns;
+                d.shift = GZ.centered ? 0 : (ns - d.size0[i]) / 2;
+                const sg = GZ.single, r = sg.cf.r;
+                const c = d.c0.clone().addScaledVector(d.axisDir, d.shift);
+                d.sclLive = { p: [c.x, c.y, c.z], r, size: d.newSize };
+                const part = d.parts[0];
+                if (part) {
+                    const S = new THREE.Matrix4().makeScale(i === 0 ? ns / d.size0[0] : 1, i === 1 ? ns / d.size0[1] : 1, i === 2 ? ns / d.size0[2] : 1);
+                    const Mn = new THREE.Matrix4().makeTranslation(d.axisDir.x * d.shift, d.axisDir.y * d.shift, d.axisDir.z * d.shift).multiply(part.M0).multiply(S);
+                    gzSetMesh(part.mesh, Mn);
+                }
+                gzUpdateSelBox();
+                return;
+            }
+            if (GZ.pivotMode) {
+                d.anchorLive.p.copy(d.o).add(cur.T);
+                d.anchorLive.q.copy(cur.Q).multiply(GZ.anchor.q);
+                return;
+            }
+            const D = gzDeltaMatrix(d.o, cur.Q, cur.T, cur.k);
+            for (const p of d.parts) gzSetMesh(p.mesh, D.clone().multiply(p.M0));
+            d.anchorLive.p.copy(d.o).add(cur.T);
+            if (d.tool === 'rot') d.anchorLive.q.copy(cur.Q).multiply(GZ.anchor.q);
+            gzUpdateSelBox();
+        }
+        function gzUpdateSelBox() {
+            if (window._selBox) for (const b of window._selBox.children) { try { b.update(); } catch (e) { emuWarn('swallow:gz-selbox', 'selbox: ' + _errText(e)); } }
+        }
+
+        // ---- коммит ----
+        const _gzNear = (v) => Math.abs(v) < 1e-9;
+        async function gzEnd() {
+            const d = GZ.drag;
+            GZ.drag = null;
+            if (!d) return;
+            const cur = d.cur;
+            let ops = null, inv = null, needReload = false;
+            const tl = cur.T.toArray();
+            if (GZ.pivotMode && d.tool !== 'uscale') {
+                if (_gzNear(cur.T.lengthSq()) && Math.abs(cur.Q.w) > 0.999999999) return;
+                const sg = GZ.single;
+                if (!sg) return;
+                const newP = d.anchorLive.p, newR = gzQuatM3(d.anchorLive.q);
+                const oldP = GZ.anchor.p, oldR = gzQuatM3(GZ.anchor.q);
+                if (sg.cf) {
+                    const toOff = (pw, rw) => {
+                        const R = sg.cf.r, rel = [pw.x - sg.cf.p[0], pw.y - sg.cf.p[1], pw.z - sg.cf.p[2]];
+                        const lp = [R[0] * rel[0] + R[3] * rel[1] + R[6] * rel[2], R[1] * rel[0] + R[4] * rel[1] + R[7] * rel[2], R[2] * rel[0] + R[5] * rel[1] + R[8] * rel[2]];
+                        const lr = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+                        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) lr[i * 3 + j] += R[k * 3 + i] * rw[k * 3 + j];
+                        return { p: lp, r: lr };
+                    };
+                    ops = [{ ref: sg.ref, pivotOffset: toOff(newP, newR) }];
+                    inv = [{ ref: sg.ref, pivotOffset: sg.hasPO ? toOff(oldP, oldR) : null }];
+                } else {
+                    ops = [{ ref: sg.ref, worldPivot: { p: newP.toArray(), r: newR } }];
+                    inv = [{ ref: sg.ref, worldPivot: { p: oldP.toArray(), r: oldR } }];
+                }
+            } else if (d.tool === 'scale') {
+                if (!d.newSize) return;
+                const sg = GZ.single, c = d.sclLive.p;
+                ops = [{ ref: sg.ref, cframe: { p: c, r: sg.cf.r }, size: d.newSize }];
+                inv = [{ ref: sg.ref, cframe: { p: sg.cf.p, r: sg.cf.r }, size: sg.size }];
+                needReload = true;
+            } else {
+                const trivial = _gzNear(cur.T.lengthSq()) && Math.abs(cur.Q.w) > 0.999999999 && Math.abs(cur.k - 1) < 1e-9;
+                if (trivial) return;
+                const R = gzQuatM3(cur.Q);
+                const Rt = [R[0], R[3], R[6], R[1], R[4], R[7], R[2], R[5], R[8]];
+                const tops = gzTopRefs();
+                ops = tops.map(ref => ({ ref, delta: { r: R, t: tl, pivot: d.o.toArray(), k: cur.k } }));
+                const o2 = d.o.clone().add(cur.T);
+                inv = tops.map(ref => ({ ref, delta: { r: Rt, t: [-tl[0], -tl[1], -tl[2]], pivot: o2.toArray(), k: 1 / cur.k } }));
+                needReload = cur.k !== 1;
+                // кэш поз мешей — для следующего жеста без перезагрузки сцены
+                if (!needReload) {
+                    for (const p of d.parts) {
+                        const D = p.mesh.matrix.clone().multiply(p.M0.clone().invert());
+                        const cf = new THREE.Matrix4().set(p.cf0.r[0], p.cf0.r[1], p.cf0.r[2], p.cf0.p[0], p.cf0.r[3], p.cf0.r[4], p.cf0.r[5], p.cf0.p[1], p.cf0.r[6], p.cf0.r[7], p.cf0.r[8], p.cf0.p[2], 0, 0, 0, 1);
+                        const e = D.multiply(cf).elements;
+                        p.mesh.userData.cfPos = [e[12], e[13], e[14]];
+                        p.mesh.userData.cfRot = [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
+                    }
+                }
+            }
+            if (!ops) return;
+            const ok = await gzPost(ops);
+            if (!ok) { await reloadScene(); gzRefreshInfo(); return; }
+            GZ.undo.push({ ops, inv }); if (GZ.undo.length > 100) GZ.undo.shift();
+            GZ.redo = [];
+            gzSyncUI();
+            if (needReload) await reloadScene();
+            highlightSelected(selectedRef);
+            GZ.sig += '*';              // принудительно перечитать pivot/габариты
+            gzRefreshPanel();
+        }
+        async function gzPost(ops) {
+            const r = await api('POST', '/api/transform', { ops });
+            if (!r.ok) notify(r.error || t('notify_error'), 'err');
+            return !!r.ok;
+        }
+        async function gzRefreshPanel() {
+            if (selectedRef === null) return;
+            const r = await api('GET', '/api/instance/' + selectedRef);
+            if (r.ok && r.props && r.props.Position) renderProps(r);
+        }
+        async function gzUndo() {
+            if (GZ.busy || !GZ.undo.length || isPlaying) return;
+            GZ.busy = true;
+            const e = GZ.undo.pop();
+            if (await gzPost(e.inv)) { GZ.redo.push(e); await reloadScene(); highlightSelected(selectedRef); GZ.sig += '*'; gzRefreshPanel(); }
+            GZ.busy = false; gzSyncUI();
+        }
+        async function gzRedo() {
+            if (GZ.busy || !GZ.redo.length || isPlaying) return;
+            GZ.busy = true;
+            const e = GZ.redo.pop();
+            if (await gzPost(e.ops)) { GZ.undo.push(e); await reloadScene(); highlightSelected(selectedRef); GZ.sig += '*'; gzRefreshPanel(); }
+            GZ.busy = false; gzSyncUI();
+        }
+        async function gzResetPivot() {
+            const sg = GZ.single;
+            if (!sg || !sg.cf || !GZ.anchor) { notify(_gzT('Pivot сбрасывается у одной детали', 'Reset works on a single part'), 'warn'); return; }
+            const R = sg.cf.r, a = GZ.anchor;
+            const rel = [a.p.x - sg.cf.p[0], a.p.y - sg.cf.p[1], a.p.z - sg.cf.p[2]];
+            const q = gzQuatM3(a.q);
+            const lr = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+            for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) lr[i * 3 + j] += R[k * 3 + i] * q[k * 3 + j];
+            const old = { p: [R[0] * rel[0] + R[3] * rel[1] + R[6] * rel[2], R[1] * rel[0] + R[4] * rel[1] + R[7] * rel[2], R[2] * rel[0] + R[5] * rel[1] + R[8] * rel[2]], r: lr };
+            const ops = [{ ref: sg.ref, pivotOffset: null }], inv = [{ ref: sg.ref, pivotOffset: sg.hasPO ? old : null }];
+            if (await gzPost(ops)) { GZ.undo.push({ ops, inv }); GZ.redo = []; GZ.sig += '*'; await reloadScene(); highlightSelected(selectedRef); }
+            gzSyncUI();
+        }
+        function gzOnKey(e) {
+            const tg = e.target;
+            if (tg && (/^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName) || (tg.closest && tg.closest('.cm-editor')) || tg.isContentEditable)) return;
+            if (!(e.ctrlKey || e.metaKey) || isPlaying) return;
+            const k = (e.key || '').toLowerCase();
+            if (k === 'z' && !e.shiftKey) { if (GZ.undo.length) { e.preventDefault(); gzUndo(); } }
+            else if (k === 'y' || (k === 'z' && e.shiftKey)) { if (GZ.redo.length) { e.preventDefault(); gzRedo(); } }
+        }
+
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-10-29 · door-tween';
+        const BUILD_LABEL = '2026-11-01 · transform-tools';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -1777,6 +2321,11 @@
                 _reportFrameError('beams', e);
             }
             try {
+                gzTick();
+            } catch (e) {
+                _reportFrameError('transformTools', e);
+            }
+            try {
                 renderer.render(scene, camera);
             } catch (e) {
                 _reportFrameError('render', e);
@@ -1928,7 +2477,8 @@
         function onMU(e) {
             if (performance.now() - _lastTouchEndT < 700) return;
             if (!isDragging && (e.button === 0 || e.button === 2) && isPlaying && luaClickDetectorAt(e.clientX, e.clientY, e.button === 2, false)) return;
-            if (!isDragging && e.button === 0) {
+            // В Play объекты мышью не выбираются (как в настоящей игре): иначе клик по экрану/инвентарю выделял деталь за ним
+            if (!isDragging && e.button === 0 && !isPlaying) {
                 pick(e.clientX, e.clientY, { additive: e.ctrlKey || e.metaKey || multiSelectMode });
             }
         }
@@ -2010,7 +2560,7 @@
                 const t = e.changedTouches[0];
                 if (Math.abs(t.clientX - _ts.x) < 8 && Math.abs(t.clientY - _ts.y) < 8) {
                     if (isPlaying && luaClickDetectorAt(t.clientX, t.clientY, false, true)) return;
-                    pick(t.clientX, t.clientY, { additive: multiSelectMode });
+                    if (!isPlaying) pick(t.clientX, t.clientY, { additive: multiSelectMode });
                 }
             }
         }
@@ -3301,6 +3851,9 @@
             mesh.userData.cls = o.class;
             mesh.userData.shape = o.shape;
             mesh.userData.pivotOffset = o.pivotOffset || null; // PivotOffset детали (GetPivot/PivotTo)
+            // Поза самой детали (без SpecialMesh.Offset) — от неё инструменты трансформации считают жесты
+            mesh.userData.cfPos = [o.px || 0, o.py || 0, o.pz || 0];
+            mesh.userData.cfRot = (o.rot && o.rot.length >= 9) ? o.rot.slice(0, 9) : [1, 0, 0, 0, 1, 0, 0, 0, 1];
             mesh.userData.sx = o.sx || 1;
             mesh.userData.sy = o.sy || 1;
             mesh.userData.sz = o.sz || 1;

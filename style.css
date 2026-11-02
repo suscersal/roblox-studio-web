@@ -260,7 +260,7 @@
         }
 
         /* Метка сборки: script.js сверяет её со своей и с app.py (см. checkBuildConsistency) */
-        :root { --css-build: "2026-10-29 · door-tween"; }
+        :root { --css-build: "2026-11-01 · transform-tools"; }
 
         /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
         #gui-overlay {
@@ -1384,4 +1384,67 @@ body.tree-dragging, body.tree-dragging * { user-select: none !important; -webkit
     #start-screen .st-search { flex: 1 1 100%; max-width: none; margin-right: 0; }
     #start-screen .st-top { justify-content: flex-start; }
     #start-screen .st-top .st-btn { padding: 7px 12px; font-size: 13px; }
+}
+
+/* Инструменты трансформации (Move/Rotate/Scale/Pivot) — плавающая панель во вьюпорте */
+#tf-bar {
+    position: absolute;
+    top: 66px;
+    left: 8px;
+    z-index: 6;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    max-width: calc(100% - 16px);
+    align-items: center
+}
+
+#tf-bar button {
+    background: rgba(31, 41, 55, 0.9);
+    border: 1px solid #4b5563;
+    color: #fff;
+    min-width: 30px;
+    height: 30px;
+    padding: 0 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 15px;
+    backdrop-filter: blur(4px);
+    touch-action: manipulation
+}
+
+#tf-bar button.active {
+    background: #3b82f6;
+    border-color: #60a5fa
+}
+
+#tf-bar button:disabled {
+    opacity: 0.35
+}
+
+#tf-steps {
+    display: none;
+    gap: 3px
+}
+
+#tf-steps label {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    color: #fff;
+    background: rgba(31, 41, 55, 0.9);
+    border: 1px solid #4b5563;
+    border-radius: 6px;
+    padding: 0 4px;
+    height: 30px
+}
+
+#tf-steps input {
+    width: 44px;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 13px;
+    outline: none
 }
