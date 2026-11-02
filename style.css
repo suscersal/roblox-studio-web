@@ -826,6 +826,7 @@
         }
 
         #mobile-pad {
+            --joy: 112px;   /* размер стика; JS (initJoystick/layout) подгоняет под размер вьюпорта */
             position: absolute;
             bottom: 10px;
             left: 16px;
@@ -852,15 +853,15 @@
             position: absolute;
             left: 0;
             bottom: 0;
-            width: 112px;
-            height: 240px;
-            pointer-events: all;
+            width: var(--joy);
+            height: calc(var(--joy) * 2);
+            pointer-events: none;   /* касания ловит initJoystick на уровне вьюпорта — зона не закрывает кнопки игры */
             touch-action: none;
         }
 
         #joy-base {
-            width: 112px;
-            height: 112px;
+            width: var(--joy);
+            height: var(--joy);
             border-radius: 50%;
             background: rgba(31, 41, 55, 0.55);
             border: 1px solid #4b5563;
@@ -872,8 +873,8 @@
         }
 
         #joy-thumb {
-            width: 46px;
-            height: 46px;
+            width: calc(var(--joy) * 0.41);
+            height: calc(var(--joy) * 0.41);
             border-radius: 50%;
             background: rgba(59, 130, 246, 0.85);
             border: 1px solid #93c5fd;
@@ -895,13 +896,13 @@
         }
 
         .pad-btn {
-            width: 52px;
-            height: 52px;
+            width: max(36px, calc(var(--joy) * 0.46));
+            height: max(36px, calc(var(--joy) * 0.46));
             background: rgba(31, 41, 55, 0.85);
             border: 1px solid #4b5563;
             border-radius: 10px;
             color: #fff;
-            font-size: 20px;
+            font-size: calc(var(--joy) * 0.18);
             cursor: pointer;
             user-select: none;
             -webkit-user-select: none;

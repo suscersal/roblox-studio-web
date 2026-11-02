@@ -2067,10 +2067,25 @@
             const zone = document.getElementById('joy-zone');
             const base = document.getElementById('joy-base');
             const thumb = document.getElementById('joy-thumb');
-            if (!zone || !base || !thumb) return;
-            const maxR = 30;   // px, максимальный вылет ручки стика от центра base
-            const deadZone = 6; // px — маленький дрожащий сдвиг пальца не должен давать ход
+            const pad = document.getElementById('mobile-pad');
+            const vp = document.getElementById('viewport');
+            if (!zone || !base || !thumb || !pad || !vp) return;
+            let maxR = 30;       // px, максимальный вылет ручки стика от центра base
+            let deadZone = 6;    // px — маленький дрожащий сдвиг пальца не должен давать ход
             let touchId = null;
+
+            // Размер стика зависит от вьюпорта: на узком телефонном окне 112px круг + зона 240px закрывали
+            // полэкрана и кнопки игры под ними. Диапазон 56..112 px, всё остальное (ручка, вылет, кнопки E/Q) — пропорционально.
+            function layout() {
+                const r = vp.getBoundingClientRect();
+                const size = Math.max(56, Math.min(112, Math.round(Math.min(r.width, r.height) * 0.22)));
+                pad.style.setProperty('--joy', size + 'px');
+                maxR = size * 0.27;
+                deadZone = size * 0.054;
+            }
+            layout();
+            if (typeof ResizeObserver !== 'undefined') new ResizeObserver(layout).observe(vp);
+            window.addEventListener('resize', layout);
 
             function setThumb(dx, dy) {
                 thumb.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
@@ -2079,8 +2094,7 @@
             // "Всплывающий" стик: на touchstart сам круг базы переезжает
             function placeBase(clientX, clientY) {
                 const zr = zone.getBoundingClientRect();
-                // база квадратная 112×112, центрируем её на пальце, но не
-                const half = 56;
+                const half = base.offsetWidth / 2;
                 let localCX = clientX - zr.left;
                 let localCY = clientY - zr.top;
                 localCX = Math.max(half, Math.min(zr.width - half, localCX));
@@ -2121,34 +2135,64 @@
                 base.style.bottom = '0px';
             }
 
-            zone.addEventListener('touchstart', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                const t = e.changedTouches[0];
-                touchId = t.identifier;
-                placeBase(t.clientX, t.clientY);
-                handleMove(t.clientX, t.clientY);
-            }, { passive: false });
+            // Под пальцем кнопка/поле/список игры — это её касание, стик не перехватывает (раньше невидимая зона
+            // с pointer-events:all закрывала любую GUI-кнопку в левом нижнем углу). Зона сама pointer-events:none,
+            // поэтому нажатие и так дойдёт до кнопки; здесь только решаем, начинать ли стик.
+            // true — под пальцем НЕ стик: кнопка/поле/список игры, кнопки E/Q или что-то вне вьюпорта (диалог, Explorer).
+            // Плавающая панель Output (в портрете она лежит поверх зоны) для этого решения «прозрачна»: стик
+            // по-прежнему выигрывает у неё, как и раньше, когда зона была выше панели по z-index.
+            function guiControlAt(x, y) {
+                for (const el of document.elementsFromPoint(x, y)) {
+                    if (el.closest('#bottom-panel')) continue;
+                    if (el.closest('.pad-btn')) return true;
+                    if (!el.closest('#viewport')) return true;
+                    if (el.closest('#gui-overlay') &&
+                        el.closest('[data-cls="TextButton"],[data-cls="ImageButton"],[data-cls="TextBox"],[data-cls="ScrollingFrame"]')) return true;
+                    if (el.closest('#joy-zone, #mobile-pad, #gui-overlay, canvas, #viewport')) return false;
+                }
+                return false;
+            }
+            function inZone(x, y) {
+                const zr = zone.getBoundingClientRect();
+                return zr.width > 0 && x >= zr.left && x <= zr.right && y >= zr.top && y <= zr.bottom;
+            }
 
-            zone.addEventListener('touchmove', e => {
-                e.preventDefault();
-                e.stopPropagation();
+            document.addEventListener('touchstart', e => {
+                if (touchId !== null) return;
+                for (const t of e.changedTouches) {
+                    if (!inZone(t.clientX, t.clientY) || guiControlAt(t.clientX, t.clientY)) continue;
+                    if (typeof gzHit === 'function' && gzHit(t.clientX, t.clientY)) continue;   // ручка гизмо важнее стика
+                    e.preventDefault();
+                    e.stopPropagation();
+                    touchId = t.identifier;
+                    placeBase(t.clientX, t.clientY);
+                    handleMove(t.clientX, t.clientY);
+                    break;
+                }
+            }, { capture: true, passive: false });
+
+            document.addEventListener('touchmove', e => {
+                if (touchId === null) return;
                 for (const t of e.changedTouches) {
                     if (t.identifier === touchId) {
+                        e.preventDefault();
+                        e.stopPropagation();
                         handleMove(t.clientX, t.clientY);
                         break;
                     }
                 }
-            }, { passive: false });
+            }, { capture: true, passive: false });
 
-            ['touchend', 'touchcancel'].forEach(ev => zone.addEventListener(ev, e => {
+            ['touchend', 'touchcancel'].forEach(ev => document.addEventListener(ev, e => {
+                if (touchId === null) return;
                 for (const t of e.changedTouches) {
                     if (t.identifier === touchId) {
+                        e.stopPropagation();
                         resetJoy();
                         break;
                     }
                 }
-            }));
+            }, true));
         }
 
         function updateHelpers() {
@@ -3420,6 +3464,45 @@
             _trackLoad(p);
         }
 
+        // MeshPart с проёмом (рамка двери, арка, кольцо): физика по умолчанию — сплошной бокс по Size, и в проём
+        // не пройти. Если у настоящей геометрии есть сквозное отверстие (луч через центр вдоль какой-то оси
+        // ничего не задевает), статичная деталь получает коллайдер-Trimesh по самому мешу — как у юнионов.
+        // Для динамических деталей (mass>0) остаётся бокс: в cannon.js 0.6 нет столкновения «бокс — trimesh».
+        function _meshPartHasHole(geo) {
+            geo.computeBoundingBox();
+            const bb = geo.boundingBox, size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+            const tmp = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+            tmp.updateMatrixWorld(true);
+            const rc = new THREE.Raycaster();
+            const axes = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+            try {
+                for (let i = 0; i < 3; i++) {
+                    const len = size.length() + 2;
+                    rc.set(c.clone().addScaledVector(axes[i], -len), axes[i]);
+                    rc.far = len * 2;
+                    if (!rc.intersectObject(tmp, false).length) return true;
+                }
+            } finally { tmp.material.dispose(); }
+            return false;
+        }
+        function maybeMeshPartTrimesh(o, mesh, geo, scale) {
+            try {
+                if (!geo || !geo.attributes || !geo.attributes.position || mesh.userData.anchoredFlag === false) return;
+                const pa = geo.attributes.position, idx = geo.index;
+                const tri = idx ? idx.count / 3 : pa.count / 3;
+                if (tri < 4 || tri > 10000) return;      // индексы Trimesh в cannon — Int16
+                if (geo.userData.hasHole === undefined) geo.userData.hasHole = _meshPartHasHole(geo);   // общая геометрия у многих деталей — считаем один раз
+                if (!geo.userData.hasHole) return;
+                const verts = new Array(tri * 9);
+                for (let t = 0; t < tri * 3; t++) {
+                    const i = idx ? idx.getX(t) : t;
+                    verts[t * 3] = pa.getX(i) * scale.x; verts[t * 3 + 1] = pa.getY(i) * scale.y; verts[t * 3 + 2] = pa.getZ(i) * scale.z;
+                }
+                mesh.userData.unionTrimeshVerts = verts;        // подхватит и addPhysicsBodyForObj, если тела ещё нет
+                applyUnionTrimesh(physicsBodies[o.ref], mesh);
+            } catch (e) { emuWarn('swallow:meshpart-trimesh', 'MeshPart trimesh: ' + _errText(e)); }
+        }
+
         // ref полых юнионов + «призрак»: пока центр игрока внутри габаритов юниона,
         // его тело не сталкивается с персонажем (иначе сфера игрока вылетает из полости).
         const luaHollowUnions = new Set();
@@ -3478,6 +3561,7 @@
                 // с физикой пересобирает матрицу каждый кадр и раньше сбрасывал его в (1,1,1), из-за чего меши
                 // с родным размером != Size (торс, шляпы и прочие аксессуары) рисовались «очень большими».
                 mesh.userData.partScale = scale.clone();
+                if (!o.meshScale) maybeMeshPartTrimesh(o, mesh, result.geometry, scale);
                 // matrixAutoUpdate=false → three.js сам НЕ пересчитает
                 // matrixWorld после первого кадра; без этого флага новый
                 // масштаб (и вообще любая правка mesh.matrix) не применялась.
