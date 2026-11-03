@@ -896,8 +896,8 @@
         }
 
         .pad-btn {
-            width: max(36px, calc(var(--joy) * 0.46));
-            height: max(36px, calc(var(--joy) * 0.46));
+            width: clamp(40px, calc(var(--joy) * 0.4), 54px);
+            height: clamp(40px, calc(var(--joy) * 0.4), 54px);
             background: rgba(31, 41, 55, 0.85);
             border: 1px solid #4b5563;
             border-radius: 10px;
@@ -1654,8 +1654,8 @@ body.m-ui #vp-label { display: none }
 /* ландшафт телефона: тонкие верхняя и нижняя панели, чтобы вьюпорту осталась высота */
 @media (max-height: 520px) {
     body.m-ui {
-        --m-bar-h: 40px;
-        --m-nav-h: 40px
+        --m-bar-h: 38px;
+        --m-nav-h: 36px
     }
 
     body.m-ui #toolbar-top button { min-height: 36px; padding: 2px 12px }
@@ -1664,13 +1664,22 @@ body.m-ui #vp-label { display: none }
 
 /* кнопки инструментов — под палец (на Poco X6 Pro 30 css-px ≈ 5 мм, мало): 44px */
 body.m-ui #tf-bar button {
-    min-width: 44px;
-    height: 44px;
-    font-size: 18px
+    min-width: 38px;
+    height: 38px;
+    padding: 0 6px;
+    font-size: 16px
 }
 
-body.m-ui #tf-steps label { height: 44px }
-body.m-ui #tf-steps input { width: 52px; font-size: 15px }
+body.m-ui #tf-steps label { height: 38px }
+body.m-ui #tf-steps input { width: 48px; font-size: 14px }
 
 /* плавающая кнопка 🐞 (консоль отладки) в «Панелях» налезала на поля свойств — там есть вкладка «Вывод» */
 body.m-ui.m-panels button[style*="z-index:1000000"] { display: none !important }
+
+/* ландшафт: инструменты ещё компактнее (правила ниже базовых, иначе их перебивают) */
+@media (max-height: 520px) {
+    body.m-ui #tf-bar { top: 36px; gap: 2px }
+    body.m-ui #tf-bar button { min-width: 32px; height: 32px; padding: 0 4px; font-size: 15px }
+    body.m-ui #tf-steps label { height: 32px }
+    body.m-ui #quality-selector { top: 4px }
+}

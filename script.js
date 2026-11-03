@@ -2222,7 +2222,7 @@
             // полэкрана и кнопки игры под ними. Диапазон 56..112 px, всё остальное (ручка, вылет, кнопки E/Q) — пропорционально.
             function layout() {
                 const r = vp.getBoundingClientRect();
-                const size = Math.max(56, Math.min(112, Math.round(Math.min(r.width, r.height) * 0.22)));
+                const size = Math.max(72, Math.min(140, Math.round(Math.min(r.width, r.height) * 0.42)));
                 pad.style.setProperty('--joy', size + 'px');
                 maxR = size * 0.27;
                 deadZone = size * 0.054;
