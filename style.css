@@ -1619,13 +1619,13 @@ body.m-ui.m-playing #m-out-toggle {
     top: 66px;
     right: 6px;
     z-index: 95;
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 15px;
     border: 1px solid #4b5563;
     background: rgba(31, 41, 55, .85);
     color: #fff;
-    font-size: 16px
+    font-size: 13px
 }
 
 body.m-ui.m-playing:not(.m-out-open) #bottom-panel { display: none !important }
@@ -1683,3 +1683,6 @@ body.m-ui.m-panels button[style*="z-index:1000000"] { display: none !important }
     body.m-ui #tf-steps label { height: 32px }
     body.m-ui #quality-selector { top: 4px }
 }
+
+/* Play: в покое стик почти прозрачный (как DynamicThumbstick в Roblox) и не закрывает GUI игры; при касании — яркий */
+body.m-ui.m-playing #joy-base:not(.active) { opacity: .3 }

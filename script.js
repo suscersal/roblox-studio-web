@@ -594,7 +594,7 @@
             document.body.appendChild(nav);
             // в Play панели недоступны — отдельная кнопка показывает/прячет плавающий Output
             const out = document.createElement('button');
-            out.id = 'm-out-toggle'; out.textContent = '📟';
+            out.id = 'm-out-toggle';
             out.addEventListener('click', () => document.body.classList.toggle('m-out-open'));
             document.body.appendChild(out);
             muiRelabel();
@@ -603,6 +603,7 @@
             MUI.lang = LANG;
             const nm = { scene: _gzT('🎬 Сцена', '🎬 Scene'), panels: _gzT('📋 Панели', '📋 Panels') };
             const pn = { explorer: _gzT('🌳 Объекты', '🌳 Objects'), props: _gzT('🧩 Свойства', '🧩 Properties'), script: _gzT('📜 Скрипт', '📜 Script'), output: _gzT('📟 Вывод', '📟 Output') };
+            const ot = document.getElementById('m-out-toggle'); if (ot) { ot.textContent = _gzT('Лог', 'Log'); ot.title = _gzT('Показать/скрыть вывод (Output)', 'Show/hide Output'); }
             document.querySelectorAll('#m-nav button').forEach(b => { b.textContent = nm[b.dataset.m]; });
             document.querySelectorAll('#m-subtabs button').forEach(b => { b.textContent = pn[b.dataset.p]; });
         }
@@ -2270,7 +2271,8 @@
             }
 
             function resetJoy() {
-                touchId = null;
+                touchId = joyTouchId = null;
+                base.classList.remove('active');
                 joyVector.x = 0;
                 joyVector.y = 0;
                 setThumb(0, 0);
@@ -2290,8 +2292,9 @@
                     if (el.closest('#bottom-panel')) continue;
                     if (el.closest('.pad-btn')) return true;
                     if (!el.closest('#viewport')) return true;
-                    if (el.closest('#gui-overlay') &&
-                        el.closest('[data-cls="TextButton"],[data-cls="ImageButton"],[data-cls="TextBox"],[data-cls="ScrollingFrame"]')) return true;
+                    // elementsFromPoint уже исключает pointer-events:none, т.е. всё, что осталось внутри #gui-overlay, —
+                    // кнопка, TextBox, ScrollingFrame, Active-Frame или Frame со скриптом на InputBegan и т.п.
+                    if (el.closest('#gui-overlay') && el.id !== 'gui-overlay') return true;
                     if (el.closest('#joy-zone, #mobile-pad, #gui-overlay, canvas, #viewport')) return false;
                 }
                 return false;
@@ -2308,7 +2311,8 @@
                     if (typeof gzHit === 'function' && gzHit(t.clientX, t.clientY)) continue;   // ручка гизмо важнее стика
                     e.preventDefault();
                     e.stopPropagation();
-                    touchId = t.identifier;
+                    touchId = joyTouchId = t.identifier;
+                    base.classList.add('active');
                     placeBase(t.clientX, t.clientY);
                     handleMove(t.clientX, t.clientY);
                     break;
@@ -2701,15 +2705,21 @@
         let _tch = [];
         let _td = 0;
         let _ts = null;
+        // id пальца, который сейчас держит джойстик (initJoystick). Зона стика не владеет касанием (pointer-events:none),
+        // поэтому этот палец тоже числится в targetTouches канваса — камера должна его пропускать, иначе стик
+        // и поворот камеры одновременно не работают (камера видит «два пальца» и считает это щипком).
+        let joyTouchId = null;
+        function camTouches(e) { return Array.from(e.targetTouches).filter(t => t.identifier !== joyTouchId); }
 
         function onTS(e) {
             e.preventDefault();
-            // targetTouches — только касания НА ЭТОМ элементе (вьюпорт).
-            _tch = Array.from(e.targetTouches);
+            // targetTouches — только касания НА ЭТОМ элементе (вьюпорт), без пальца джойстика.
+            const ct = camTouches(e);
+            _tch = ct;
             _ts = _tch[0] ? { x: _tch[0].clientX, y: _tch[0].clientY } : null;
-            if (e.targetTouches.length === 2) {
-                const dx = e.targetTouches[0].clientX - e.targetTouches[1].clientX;
-                const dy = e.targetTouches[0].clientY - e.targetTouches[1].clientY;
+            if (ct.length === 2) {
+                const dx = ct[0].clientX - ct[1].clientX;
+                const dy = ct[0].clientY - ct[1].clientY;
                 _td = Math.sqrt(dx * dx + dy * dy);
             }
         }
@@ -2718,28 +2728,29 @@
             e.preventDefault();
             if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — та же блокировка, что и для мыши (onMM)
             if (isPlaying && cameraIsScriptable) return; // то же для касаний (Scriptable-камеру не крутим)
-            if (e.targetTouches.length === 1) {
-                const t = e.targetTouches[0];
+            const ct = camTouches(e);
+            if (ct.length === 1) {
+                const t = ct[0];
                 if (!_tch[0]) { _tch = [t]; return; }
                 const dx = t.clientX - _tch[0].clientX;
                 const dy = t.clientY - _tch[0].clientY;
-                _tch = Array.from(e.targetTouches);
+                _tch = ct;
                 spherical.theta -= dx * .005;
                 spherical.phi = Math.max(.05, Math.min(Math.PI - .05, spherical.phi - dy * .005));
                 updateCamera();
-            } else if (e.targetTouches.length === 2) {
-                const dx = e.targetTouches[0].clientX - e.targetTouches[1].clientX;
-                const dy = e.targetTouches[0].clientY - e.targetTouches[1].clientY;
+            } else if (ct.length === 2) {
+                const dx = ct[0].clientX - ct[1].clientX;
+                const dy = ct[0].clientY - ct[1].clientY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 if (isPlaying) {
                     if (_td > 0 && dist > 0) applyPlayZoom(PINCH_SPREAD_ZOOMS_IN ? _td / dist : dist / _td);
                     _td = dist;
-                    _tch = Array.from(e.targetTouches);
+                    _tch = ct;
                     return;
                 }
                 spherical.r = Math.max(1, Math.min(500, spherical.r + (dist - _td) * .05));
                 _td = dist;
-                _tch = Array.from(e.targetTouches);
+                _tch = ct;
                 updateCamera();
             }
         }
