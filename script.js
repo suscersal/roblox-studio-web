@@ -542,6 +542,150 @@
             else if (k === 'y' || (k === 'z' && e.shiftKey)) { if (GZ.redo.length) { e.preventDefault(); gzRedo(); } }
         }
 
+        // ============ МОБИЛЬНЫЙ ИНТЕРФЕЙС: два режима — «Сцена» и «Панели» ============
+        // Десктопная раскладка (3 колонки + Output) на телефоне оставляла 3D-вьюпорту ~17% экрана, а Properties
+        // уезжали за край. На телефоне (touch + короткая сторона экрана ≤ 700px) включается класс body.m-ui:
+        // «Сцена» — вьюпорт на весь экран, «Панели» — Объекты / Свойства / Скрипт / Вывод на весь экран.
+        // Все существующие кнопки и обработчики те же, меняется только раскладка. ?mobile=1 / ?mobile=0 — принудительно.
+        const MUI = { on: false, mode: 'scene', panel: 'explorer', fullH: 0, fullW: 0, built: false, lang: '' };
+        function muiIsPhone() {
+            const q = new URLSearchParams(location.search).get('mobile');
+            if (q === '1') return true;
+            if (q === '0') return false;
+            return matchMedia('(pointer: coarse)').matches && Math.min(screen.width || innerWidth, screen.height || innerHeight) <= 700;
+        }
+        function muiBuild() {
+            if (MUI.built) return;
+            MUI.built = true;
+            const tb = document.getElementById('toolbar-top');
+            const main = document.getElementById('main');
+            // ☰ — раскрывает все остальные кнопки верхней панели
+            const menu = document.createElement('button');
+            menu.id = 'm-menu-btn'; menu.className = 'm-keep'; menu.textContent = '☰';
+            menu.addEventListener('click', (e) => { e.stopPropagation(); document.body.classList.toggle('m-menu-open'); });
+            tb.insertBefore(menu, tb.firstChild);
+            for (const el of [document.getElementById('play-btn'), tb.querySelector('button[onclick="saveFile()"]')]) if (el) el.classList.add('m-keep');
+            // нажатие любой кнопки в раскрытом меню закрывает его (кроме «Файл» — у неё свой выпадающий список)
+            tb.addEventListener('click', (e) => {
+                const b = e.target.closest('button');
+                if (!b || b.id === 'm-menu-btn' || b.id === 'file-menu-btn') return;
+                setTimeout(() => document.body.classList.remove('m-menu-open'), 0);
+            });
+            document.addEventListener('click', (e) => {
+                if (document.body.classList.contains('m-menu-open') && !e.target.closest('#toolbar-top, #file-menu')) document.body.classList.remove('m-menu-open');
+            }, true);
+            // подвкладки режима «Панели»
+            const sub = document.createElement('div');
+            sub.id = 'm-subtabs';
+            for (const p of ['explorer', 'props', 'script', 'output']) {
+                const b = document.createElement('button'); b.dataset.p = p;
+                b.addEventListener('click', () => muiSetPanel(p));
+                sub.appendChild(b);
+            }
+            main.appendChild(sub);
+            // нижняя навигация: Сцена / Панели
+            const nav = document.createElement('div');
+            nav.id = 'm-nav';
+            for (const m of ['scene', 'panels']) {
+                const b = document.createElement('button'); b.dataset.m = m;
+                b.addEventListener('click', () => muiSetMode(m));
+                nav.appendChild(b);
+            }
+            document.body.appendChild(nav);
+            // в Play панели недоступны — отдельная кнопка показывает/прячет плавающий Output
+            const out = document.createElement('button');
+            out.id = 'm-out-toggle'; out.textContent = '📟';
+            out.addEventListener('click', () => document.body.classList.toggle('m-out-open'));
+            document.body.appendChild(out);
+            muiRelabel();
+        }
+        function muiRelabel() {
+            MUI.lang = LANG;
+            const nm = { scene: _gzT('🎬 Сцена', '🎬 Scene'), panels: _gzT('📋 Панели', '📋 Panels') };
+            const pn = { explorer: _gzT('🌳 Объекты', '🌳 Objects'), props: _gzT('🧩 Свойства', '🧩 Properties'), script: _gzT('📜 Скрипт', '📜 Script'), output: _gzT('📟 Вывод', '📟 Output') };
+            document.querySelectorAll('#m-nav button').forEach(b => { b.textContent = nm[b.dataset.m]; });
+            document.querySelectorAll('#m-subtabs button').forEach(b => { b.textContent = pn[b.dataset.p]; });
+        }
+        function muiApply() {
+            const c = document.body.classList;
+            c.toggle('m-ui', MUI.on);
+            c.toggle('m-scene', MUI.on && MUI.mode === 'scene');
+            c.toggle('m-panels', MUI.on && MUI.mode === 'panels');
+            for (const p of ['explorer', 'props', 'script', 'output']) c.toggle('m-p-' + p, MUI.on && MUI.panel === p);
+            document.querySelectorAll('#m-nav button').forEach(b => b.classList.toggle('active', b.dataset.m === MUI.mode));
+            document.querySelectorAll('#m-subtabs button').forEach(b => b.classList.toggle('active', b.dataset.p === MUI.panel));
+            if (!MUI.on) { c.remove('m-menu-open', 'm-kb', 'm-playing', 'm-out-open'); document.body.style.removeProperty('--m-vh'); document.body.style.removeProperty('--m-top'); }
+        }
+        function muiSetMode(m) {
+            if (MUI.mode === m) return;
+            MUI.mode = m;
+            document.body.classList.remove('m-menu-open');
+            muiApply();
+            if (m === 'panels') muiSetPanel(MUI.panel);
+            else window.dispatchEvent(new Event('resize'));        // вьюпорт снова виден — пусть пересчитает размер канваса
+            muiMeasure();
+        }
+        function muiSetPanel(p) {
+            MUI.panel = p;
+            if (p === 'props' || p === 'script') switchTab(p);     // сам rightpanel один — показывает нужную из двух вкладок
+            muiApply();
+            if (p === 'script') refreshCM();
+            if (p === 'output') renderLuaOutput();
+            muiMeasure();
+        }
+        // Клавиатура: раньше всё «съезжало» — браузер панорамирует визуальную область, а fixed/100dvh-раскладка остаётся.
+        // Тело страницы привязываем к visualViewport: в «Панелях» оно ужимается до видимой области (поля свойств/скрипт
+        // остаются над клавиатурой), в «Сцене»/Play высота не меняется (клавиатура просто накрывает низ, 3D не сплющивается).
+        function muiMeasure() {
+            if (!MUI.on) return;
+            const vv = window.visualViewport;
+            const h = vv ? vv.height : innerHeight, w = vv ? vv.width : innerWidth, top = vv ? vv.offsetTop : 0;
+            const ae = document.activeElement;
+            const editing = !!(ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable || (ae.closest && ae.closest('.cm-editor'))));
+            if (!editing || !MUI.fullH || Math.abs(w - MUI.fullW) > 40) { MUI.fullH = Math.round(h); MUI.fullW = Math.round(w); }
+            const kb = editing && h < MUI.fullH - 100;
+            const shrink = kb && MUI.mode === 'panels';
+            document.body.classList.toggle('m-kb', !!kb);
+            document.body.style.setProperty('--m-vh', (shrink ? Math.round(h) : MUI.fullH) + 'px');
+            document.body.style.setProperty('--m-top', Math.round(top) + 'px');
+            if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+        }
+        function muiDetect() {
+            const on = muiIsPhone();
+            if (on) muiBuild();
+            if (on !== MUI.on) { MUI.on = on; muiApply(); }
+            muiMeasure();
+        }
+        function muiTick() {
+            if (!MUI.on) return;
+            const was = document.body.classList.contains('m-playing');
+            document.body.classList.toggle('m-playing', !!isPlaying);
+            // панели скрылись/вернулись — вьюпорт изменил размер без события resize: пересчитать канвас и GUI
+            if (was !== !!isPlaying) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
+            if (isPlaying && MUI.mode !== 'scene') muiSetMode('scene');
+            if (MUI.lang !== LANG) muiRelabel();
+        }
+        // switchTab (в т.ч. из selectRef(скрипт)) запоминает выбранную подвкладку и в режиме «Панели» переключает её
+        const _muiSwitchTab = switchTab;
+        switchTab = function (n) {
+            _muiSwitchTab.apply(this, arguments);
+            if (MUI.on && (n === 'props' || n === 'script')) { MUI.panel = n; if (MUI.mode === 'panels') muiApply(); }
+        };
+        // Запуск — после выполнения всего скрипта (здесь ниже по файлу ещё не объявлены LANG и другие const)
+        setTimeout(() => {
+            muiDetect();
+            window.addEventListener('resize', muiDetect);
+            window.addEventListener('orientationchange', () => {
+                const ae = document.activeElement;
+                if (!(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) MUI.fullH = 0;   // при открытой клавиатуре высоту «без неё» не теряем
+                setTimeout(muiDetect, 300);
+            });
+            if (window.visualViewport) { window.visualViewport.addEventListener('resize', muiMeasure); window.visualViewport.addEventListener('scroll', muiMeasure); }
+            document.addEventListener('focusin', () => { muiMeasure(); setTimeout(muiMeasure, 350); });
+            document.addEventListener('focusout', () => setTimeout(muiMeasure, 150));
+            setInterval(muiTick, 250);
+        }, 0);
+
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
@@ -2232,7 +2376,9 @@
             const guiOverlayEl = document.getElementById('gui-overlay');
             // В Play зажимаем вьюпорт к 16:9 (letterbox чёрными полосами
             let cssW = vp.clientWidth, cssH = vp.clientHeight, offX = 0, offY = 0;
-            if (typeof isPlaying !== 'undefined' && isPlaying) {
+            // На телефоне (m-ui) letterbox не нужен: Roblox на мобильном тоже занимает весь экран, а 16:9-полоса
+            // в портрете оставляла игре ~393×221 и сдвигала раскладку GUI (хотбар переносился на 2 строки).
+            if (typeof isPlaying !== 'undefined' && isPlaying && !document.body.classList.contains('m-ui')) {
                 const targetAspect = 16 / 9;
                 const boxAspect = vp.clientWidth / Math.max(vp.clientHeight, 1);
                 if (boxAspect > targetAspect) {

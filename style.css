@@ -1449,3 +1449,228 @@ body.tree-dragging, body.tree-dragging * { user-select: none !important; -webkit
     font-size: 13px;
     outline: none
 }
+
+/* ===== Мобильный интерфейс (body.m-ui): режимы «Сцена» и «Панели» ===== */
+#m-nav, #m-subtabs, #m-menu-btn, #m-out-toggle { display: none }
+
+body.m-ui {
+    --m-bar-h: 48px;
+    --m-nav-h: 52px;
+    position: fixed;
+    top: var(--m-top, 0px);
+    left: 0;
+    width: 100%;
+    height: var(--m-vh, 100dvh);
+    padding-top: calc(var(--m-bar-h) + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(var(--m-nav-h) + env(safe-area-inset-bottom, 0px));
+    overscroll-behavior: none
+}
+
+body.m-ui.m-playing,
+body.m-ui.m-kb { padding-bottom: 0 }
+
+body.m-ui.m-playing { padding-top: 0 }
+
+/* верхняя строка: ☰, Play, Save; остальное раскрывается по ☰ */
+body.m-ui #toolbar-top {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 90;
+    height: calc(var(--m-bar-h) + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 8px 0;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow: hidden
+}
+
+body.m-ui #toolbar-top > .title,
+body.m-ui #toolbar-top > .sep,
+body.m-ui #toolbar-top > *:not(.m-keep) { display: none }
+
+body.m-ui #toolbar-top > .m-keep { display: inline-flex; align-items: center }
+
+body.m-ui #toolbar-top button {
+    min-height: 40px;
+    padding: 4px 14px;
+    font-size: 15px
+}
+
+body.m-ui.m-menu-open #toolbar-top {
+    height: auto;
+    max-height: 72dvh;
+    flex-wrap: wrap;
+    overflow-y: auto;
+    align-content: flex-start;
+    padding: calc(4px + env(safe-area-inset-top, 0px)) 8px 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .6)
+}
+
+body.m-ui.m-menu-open #toolbar-top > button { display: inline-flex; align-items: center }
+
+/* раскладка: всё накладывается друг на друга, показывается нужное по режиму */
+body.m-ui #main {
+    display: block;
+    position: relative;
+    flex: 1;
+    min-height: 0
+}
+
+body.m-ui .resizer,
+body.m-ui .resizer-h { display: none !important }
+
+body.m-ui #viewport {
+    position: absolute;
+    inset: 0;
+    width: auto !important;
+    min-width: 0
+}
+
+body.m-ui #explorer,
+body.m-ui #rightpanel {
+    position: absolute;
+    inset: 44px 0 0 0;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none;
+    display: none;
+    z-index: 20
+}
+
+body.m-ui #tabs { display: none }
+body.m-ui #bottom-panel { display: none }
+
+body.m-ui.m-panels #viewport {
+    visibility: hidden;
+    pointer-events: none
+}
+
+body.m-ui.m-panels.m-p-explorer #explorer { display: flex }
+body.m-ui.m-panels.m-p-props #rightpanel,
+body.m-ui.m-panels.m-p-script #rightpanel { display: flex }
+
+body.m-ui.m-panels.m-p-output #bottom-panel {
+    display: flex;
+    position: fixed;
+    top: calc(var(--m-bar-h) + 44px + env(safe-area-inset-top, 0px));
+    left: 0;
+    right: 0;
+    bottom: calc(var(--m-nav-h) + env(safe-area-inset-bottom, 0px));
+    height: auto !important;
+    max-height: none;
+    z-index: 20
+}
+
+body.m-ui.m-panels.m-kb.m-p-output #bottom-panel { bottom: 0 }
+
+body.m-ui.m-panels #m-subtabs {
+    display: flex;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 44px;
+    z-index: 30;
+    background: #111827;
+    border-bottom: 1px solid #374151
+}
+
+#m-subtabs button,
+#m-nav button {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    color: #9ca3af;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    touch-action: manipulation
+}
+
+#m-subtabs button { border-bottom: 2px solid transparent }
+#m-subtabs button.active { color: #fff; border-bottom-color: #3b82f6 }
+
+body.m-ui #m-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(var(--m-nav-h) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: #111827;
+    border-top: 1px solid #374151;
+    z-index: 90
+}
+
+#m-nav button { font-size: 15px; border-top: 2px solid transparent }
+#m-nav button.active { color: #fff; border-top-color: #3b82f6; background: #1f2937 }
+
+body.m-ui.m-playing #m-nav,
+body.m-ui.m-kb #m-nav { display: none }
+
+/* Play: панели недоступны; Output — по кнопке 📟 */
+body.m-ui.m-playing #m-out-toggle {
+    display: block;
+    position: fixed;
+    top: 66px;
+    right: 6px;
+    z-index: 95;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid #4b5563;
+    background: rgba(31, 41, 55, .85);
+    color: #fff;
+    font-size: 16px
+}
+
+body.m-ui.m-playing:not(.m-out-open) #bottom-panel { display: none !important }
+
+/* вьюпорт: панели инструментов в одну строку с прокруткой, не налезая друг на друга */
+body.m-ui #quality-selector {
+    top: 8px;
+    right: 8px;
+    left: auto;
+    max-width: calc(100% - 16px);
+    flex-wrap: nowrap;
+    overflow-x: auto
+}
+
+body.m-ui #tf-bar {
+    top: 44px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: calc(100% - 16px)
+}
+
+body.m-ui #tf-steps { flex-shrink: 0 }
+body.m-ui #tf-bar button { flex-shrink: 0 }
+body.m-ui #vp-label { display: none }
+
+/* ландшафт телефона: тонкие верхняя и нижняя панели, чтобы вьюпорту осталась высота */
+@media (max-height: 520px) {
+    body.m-ui {
+        --m-bar-h: 40px;
+        --m-nav-h: 40px
+    }
+
+    body.m-ui #toolbar-top button { min-height: 36px; padding: 2px 12px }
+    #m-nav button { font-size: 14px }
+}
+
+/* кнопки инструментов — под палец (на Poco X6 Pro 30 css-px ≈ 5 мм, мало): 44px */
+body.m-ui #tf-bar button {
+    min-width: 44px;
+    height: 44px;
+    font-size: 18px
+}
+
+body.m-ui #tf-steps label { height: 44px }
+body.m-ui #tf-steps input { width: 52px; font-size: 15px }
+
+/* плавающая кнопка 🐞 (консоль отладки) в «Панелях» налезала на поля свойств — там есть вкладка «Вывод» */
+body.m-ui.m-panels button[style*="z-index:1000000"] { display: none !important }
