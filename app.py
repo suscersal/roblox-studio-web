@@ -6982,7 +6982,15 @@ _ASSISTANT_SYSTEM = {
 _AI_CTX_MAX = {'selection': 2000, 'scene': 4000, 'output': 3000, 'script': 12000}   # символов
 _AI_CTX_ORDER = ('selection', 'scene', 'output', 'script')    # сцена с ref'ами — раньше скрипта: скрипт режем первым
 _AI_DEFAULT_WINDOW = 32768       # если провайдер не сообщает размер окна
-_AI_REPLY_RESERVE = 3000         # = max_tokens ответа
+_AI_REPLY_RESERVE = 3000         # минимальный запас под ответ (если окно неизвестно — см. _ai_reply_tokens)
+_AI_REPLY_MAX = 12000            # потолок max_tokens: код в rbx-actions + reasoning-токены не влезали в 3000
+
+
+def _ai_reply_tokens(window):
+    """Сколько токенов просить у модели на ответ: до 12k, но не больше четверти окна."""
+    if window:
+        return max(_AI_REPLY_RESERVE, min(_AI_REPLY_MAX, window // 4))
+    return 6000
 _AI_WIN_CACHE = {}               # (base_url, model) -> (окно | None, время запроса)
 _AI_CALIB = {}                   # model -> поправка оценки по реальному usage провайдера
 _AI_WIN_KEYS = ('context_length', 'context_window', 'max_model_len', 'max_context_length', 'n_ctx')
@@ -7137,7 +7145,7 @@ def _ai_prepare(d, cfg):
     dropped = 0
     if window:
         k = _AI_CALIB.get(cfg.get('model'), 1.0)
-        limit = int(window * 0.9) - _AI_REPLY_RESERVE
+        limit = int(window * 0.9) - _ai_reply_tokens(window)
         while len(msgs) > 1 and _ai_raw_tokens(system, msgs) * k > limit:
             msgs.pop(0)
             dropped += 1
@@ -7263,8 +7271,10 @@ def assistant_chat():
             {'type': 'text', 'text': msgs[-1]['content'] + note},
             {'type': 'image_url', 'image_url': {'url': img}}]}]
 
-    def make(messages, reasoning):
-        pl = {'model': cfg['model'], 'stream': True, 'temperature': 0.3, 'max_tokens': 3000, 'messages': messages}
+    reply_mt = _ai_reply_tokens(p['window'])
+
+    def make(messages, reasoning, mt=None):
+        pl = {'model': cfg['model'], 'stream': True, 'temperature': 0.3, 'max_tokens': mt or reply_mt, 'messages': messages}
         if reasoning:
             pl['reasoning'] = {'effort': 'low'}   # бесплатные reasoning-модели иначе думают минутами до первого токена
         return pl
@@ -7279,6 +7289,8 @@ def assistant_chat():
     variants.append((make(plain_msgs, is_or), False))
     if is_or:
         variants.append((make(plain_msgs, False), False))
+    if reply_mt > 3000:     # провайдер не принял большой max_tokens — последняя попытка со старым лимитом
+        variants.append((make(plain_msgs, False, 3000), False))
     resp, last_err, sent_image = None, None, False
     for pl, with_img in variants:
         try:
