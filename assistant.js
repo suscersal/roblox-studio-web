@@ -112,8 +112,8 @@
 #ai-panel button:hover{background:#4b5563}
 #ai-panel :focus-visible{outline:2px solid #3b82f6;outline-offset:1px}
 #ai-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid #374151;background:#111827}
-#ai-head strong{flex:1;font-size:calc(14px*var(--fs,1))}
-#ai-chip{font:calc(11px*var(--fs,1)) ui-monospace,Consolas,monospace;background:#1e3a5f;color:#93c5fd;padding:2px 8px;border-radius:99px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ai-head strong{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:calc(14px*var(--fs,1))}
+#ai-chip{font:calc(11px*var(--fs,1)) ui-monospace,Consolas,monospace;background:#1e3a5f;color:#93c5fd;padding:2px 8px;border-radius:99px;flex:0 1 auto;min-width:0;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #ai-head button{padding:0 8px}
 #ai-settings{display:none;flex-direction:column;gap:6px;padding:8px;border-bottom:1px solid #374151;background:#111827}
 #ai-settings.open{display:flex}
@@ -144,7 +144,8 @@
 .ai-act .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .ai-act .st{font-size:calc(11px*var(--fs,1));color:#9ca3af}.ai-act .st.ok{color:#6ee7b7}.ai-act .st.bad{color:#fca5a5}.ai-act .st.warn{color:#fcd34d}
 .ai-act .rs{font-size:calc(11px*var(--fs,1));color:#93c5fd}.ai-act .rs.ok{color:#6ee7b7}.ai-act .rs.bad{color:#fca5a5}.ai-act .ai-extra{margin-top:6px}
-#ai-chips{display:flex;gap:6px;padding:0 10px 8px;overflow-x:auto}
+#ai-chips{display:flex;gap:6px;padding:0 10px 8px;overflow-x:auto;scrollbar-width:none}
+#ai-chips::-webkit-scrollbar{display:none}
 #ai-chips button{background:#111827;border:1px solid #374151;border-radius:99px;color:#9ca3af;white-space:nowrap;min-height:calc(26px*var(--bs,1))}
 #ai-chips button:hover{color:#93c5fd;border-color:#3b82f6;background:#111827}
 #ai-foot{position:relative;display:flex;flex-direction:column;gap:5px;padding:8px;border-top:1px solid #374151;background:#111827}
@@ -854,14 +855,15 @@
     });
     // ===== Перетаскивание панели за заголовок (как debug-консоль); позиция запоминается, двойной тап по заголовку — сброс =====
     (function () {
-        const head = $('ai-head'), KEY = 'rsw_ai_panel_pos';
+        const head = $('ai-head'), KEY = 'rsw_ai_panel_pos2';   // pos2: старые сохранённые размеры были урезаны перетаскиванием
         head.style.touchAction = 'none'; head.style.cursor = 'move'; head.title = head.title || '';
         // Видимая область: когда открыта экранная клавиатура, она меньше window.innerHeight (или layout-viewport)
         const vv = window.visualViewport;
         const visH = () => (vv ? vv.height : window.innerHeight);
         const clamp = (l, t, w, h) => ({
             left: Math.max(0, Math.min(l, window.innerWidth - Math.min(w, window.innerWidth))),
-            top: Math.max(0, Math.min(t, visH() - 40))
+            // нижний край — предел: панель не уезжает вниз и не сжимается (раньше высота урезалась и так сохранялась)
+            top: Math.max(0, Math.min(t, visH() - Math.min(h, visH())))
         });
         // Желаемая позиция/размер (то, что выбрал пользователь). На resize панель пересчитывается ОТ НЕЁ,
         // а не от текущего прямоугольника: раньше клавиатура ужимала панель, и она так и оставалась маленькой.
@@ -883,7 +885,7 @@
         function reset() {
             want = null;
             ['left', 'top', 'right', 'bottom', 'width', 'height', 'max-width', 'max-height'].forEach(k => panel.style.removeProperty(k));
-            try { localStorage.removeItem(KEY); } catch (e) { /* без хранилища */ }
+            try { localStorage.removeItem(KEY); localStorage.removeItem('rsw_ai_panel_pos'); } catch (e) { /* без хранилища */ }
         }
         try {
             const sv = JSON.parse(localStorage.getItem(KEY) || 'null');
@@ -909,8 +911,8 @@
         const end = () => {
             if (drag && drag.moved) {
                 const r = panel.getBoundingClientRect();
-                want = { left: r.left, top: r.top, w: r.width, h: r.height };
-                try { localStorage.setItem(KEY, JSON.stringify({ left: r.left, top: r.top, w: r.width, h: r.height })); } catch (e) { /* без хранилища */ }
+                want = { left: r.left, top: r.top, w: drag.w, h: drag.h };
+                try { localStorage.setItem(KEY, JSON.stringify({ left: r.left, top: r.top, w: drag.w, h: drag.h })); } catch (e) { /* без хранилища */ }
             }
             drag = null;
         };
