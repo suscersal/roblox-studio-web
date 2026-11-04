@@ -12226,11 +12226,35 @@ end
                     applyCornerRadius(parentEl, [cr, cr, cr, cr]);
                 }
             } else if (decoProps.cls === 'UIStroke') {
-                if (decoProps.Enabled === false) return;
+                if (decoProps.Enabled === false) {
+                    parentEl.style.boxShadow = '';
+                    parentEl.style.textShadow = '';
+                    return;
+                }
                 const thickness = (typeof decoProps.Thickness === 'number' ? decoProps.Thickness : 1);
-                // inset box-shadow вместо border — обводка не съедает
-                parentEl.style.boxShadow = 'inset 0 0 0 ' + thickness + 'px ' +
-                    color3ToCss(decoProps.Color, decoProps.Transparency);
+                const col = color3ToCss(decoProps.Color, decoProps.Transparency);
+                const isTextEl = parentEl.dataset.cls === 'TextLabel' || parentEl.dataset.cls === 'TextButton' || parentEl.dataset.cls === 'TextBox';
+                const mode = decoProps.ApplyStrokeMode;   // 0 Contextual, 1 Border
+                if (isTextEl && mode !== 1 && mode !== 'Border') {
+                    // Contextual на тексте — обводка БУКВ (а не рамка элемента): кольцо text-shadow вокруг глифов
+                    const sh = [];
+                    for (const r of (thickness > 1.5 ? [thickness, thickness / 2] : [thickness])) {
+                        for (let i = 0; i < 12; i++) {
+                            const a = i * Math.PI / 6;
+                            sh.push((Math.cos(a) * r).toFixed(2) + 'px ' + (Math.sin(a) * r).toFixed(2) + 'px 0 ' + col);
+                        }
+                    }
+                    parentEl.style.textShadow = sh.join(',');
+                    parentEl.style.boxShadow = '';
+                } else {
+                    // BorderStrokePosition: 0 Outer (по умолчанию — обводка СНАРУЖИ, слот не сжимается), 1 Center, 2 Inner
+                    const pos = decoProps.BorderStrokePosition;
+                    const inner = (pos === 2 || pos === 'Inner');
+                    const center = (pos === 1 || pos === 'Center');
+                    parentEl.style.boxShadow = center
+                        ? '0 0 0 ' + (thickness / 2) + 'px ' + col + ', inset 0 0 0 ' + (thickness / 2) + 'px ' + col
+                        : (inner ? 'inset ' : '') + '0 0 0 ' + thickness + 'px ' + col;
+                }
             }
         }
 
@@ -12361,6 +12385,11 @@ end
                 _fitScaledText(el, props);
             } else if (cls === 'ImageLabel' || cls === 'ImageButton') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
+                if (cls === 'ImageButton') {
+                    // у <button> по умолчанию рамка 2px outset («фаска» на слотах хотбара) — рисуем только BorderSizePixel
+                    const bspB = (props.BorderSizePixel === undefined || props.BorderSizePixel === null) ? 1 : Number(props.BorderSizePixel);
+                    el.style.border = bspB > 0 ? bspB + 'px solid ' + color3ToCss(props.BorderColor3) : 'none';
+                }
                 _setElText(el, '');
                 // Раньше Image просто складывался в title (всплывающая
                 // thumb=1: если без входа в Roblox assetdelivery отвечает 401/403 — сервер отдаст публичную миниатюру ассета
@@ -12482,16 +12511,26 @@ end
                 if (!(w > 0 && h > 0)) return;
                 const lines = String(el.textContent || '').split('\n');
                 if (!_fitCtx) _fitCtx = document.createElement('canvas').getContext('2d');
-                let size = Math.max(4, Math.min(100, (h / lines.length) * 0.95));
+                // UITextSizeConstraint (дочерний): ограничивает итоговый размер шрифта TextScaled-текста [Min, Max]
+                let tMin = 4, tMax = 100;
+                for (const k of (guiChildrenByRef[el.dataset.ref] || [])) {
+                    const cp = guiPropsByRef[k];
+                    if (cp && cp.cls === 'UITextSizeConstraint') {
+                        if (typeof cp.MinTextSize === 'number') tMin = Math.max(1, cp.MinTextSize);
+                        if (typeof cp.MaxTextSize === 'number') tMax = Math.max(tMin, cp.MaxTextSize);
+                        break;
+                    }
+                }
+                let size = Math.max(tMin, Math.min(tMax, (h / lines.length) * 0.95));
                 _fitCtx.font = size + 'px sans-serif';
                 const widest = Math.max(...lines.map(l => _fitCtx.measureText(l).width), 1);
-                if (widest > w) size = Math.max(4, size * (w / widest) * 0.98);
+                if (widest > w) size = Math.max(tMin, size * (w / widest) * 0.98);
                 el.style.fontSize = size + 'px';
                 el.style.whiteSpace = 'nowrap';
                 el.style.lineHeight = 'normal';
                 // Канвас меряет другим шрифтом, чем DOM (и по-разному в разных WebView) — добиваем по реальному переполнению
-                for (let i = 0; i < 12 && size > 4 && el.scrollWidth > w + 1; i++) {
-                    size = Math.max(4, size * 0.9); el.style.fontSize = size + 'px';
+                for (let i = 0; i < 12 && size > tMin && el.scrollWidth > w + 1; i++) {
+                    size = Math.max(tMin, size * 0.9); el.style.fontSize = size + 'px';
                 }
             };
             run();
