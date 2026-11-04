@@ -5065,20 +5065,39 @@ def api_save():
 
 @flask_app.route('/api/publish', methods=['POST'])
 def api_publish():
-    if not state['file_path']:
+    """Публикация в Roblox через Open Cloud (POST universes/{id}/places/{id}/versions).
+    Раньше уходил файл, лежащий на ДИСКЕ (state['file_path']): правки, не сохранённые кнопкой «Сохранить»,
+    в публикацию не попадали, а у нового проекта без файла публикация вообще не работала. Теперь
+    публикуется ТЕКУЩАЯ сцена: она сериализуется во временный .rbxl (локальный файл не трогаем)."""
+    parsed = state['parsed']
+    if not parsed:
         return jsonify({'ok': False, 'error': 'Файл не загружен'}), 400
     data = request.json or {}
+    universe_id = str(data.get('universe_id', '')).strip()
+    place_id = str(data.get('place_id', '')).strip()
+    api_key = (data.get('api_key') or '').strip() or _roblox_api_key() or ''
+    version_type = data.get('version_type', 'Published')
+    if not universe_id.isdigit() or not place_id.isdigit():
+        return jsonify({'ok': False, 'error': 'Universe ID и Place ID должны быть числами'}), 400
+    if not api_key:
+        return jsonify({'ok': False, 'error': 'Нет API-ключа: введите его в окне или сохраните в «Аккаунт»'}), 400
+    if version_type not in ('Published', 'Saved'):
+        version_type = 'Published'
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(suffix='.rbxl')
+    os.close(fd)
     try:
-        status, text = publish_place(
-            state['file_path'],
-            data.get('universe_id', ''),
-            data.get('place_id', ''),
-            data.get('api_key', ''),
-            data.get('version_type', 'Published'),
-        )
+        save_rbxl(parsed, tmp_path)
+        status, text = publish_place(tmp_path, universe_id, place_id, api_key, version_type)
         return jsonify({'ok': status == 200, 'status': status, 'text': text})
     except Exception as e:
+        traceback.print_exc()
         return jsonify({'ok': False, 'error': str(e)}), 500
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 @flask_app.route('/api/save/download')

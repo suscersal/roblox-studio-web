@@ -1583,6 +1583,11 @@ def parse_rbxl(path):
             
             if isinstance(cf, dict) and 'matrix' in cf:
                 matrix = cf['matrix']
+                # Канонический вид (его пишут сохранение и инструменты трансформации): 9 чисел поворота + отдельная
+                # 'position'. Приводим к 12-элементной раскладке ниже, иначе Position/Rotation читались как нули.
+                if len(matrix) == 9 and isinstance(cf.get('position'), dict):
+                    _pp = cf['position']
+                    matrix = [*matrix[0:3], _pp.get('x', 0.0), *matrix[3:6], _pp.get('y', 0.0), *matrix[6:9], _pp.get('z', 0.0)]
                 
                 # Безопасно извлекаем позицию
                 position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
@@ -1834,14 +1839,14 @@ def publish_place(rbxl_path, universe_id, place_id, api_key, version_type="Publi
         data = f.read()
     try:
         import requests
-        resp = requests.post(url, params=params, headers=headers, data=data)
+        resp = requests.post(url, params=params, headers=headers, data=data, timeout=300)
         return resp.status_code, resp.text
     except ImportError:
         import urllib.request, urllib.parse
         full_url = url + "?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(full_url, data=data, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=300) as resp:
                 return resp.status, resp.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
