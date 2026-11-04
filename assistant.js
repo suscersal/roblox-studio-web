@@ -14,7 +14,7 @@
             saved: 'Saved', key_removed: 'Key removed', error: 'Error', no_model: 'no model selected',
             loading_models: 'Loading model list…', models_n: 'Models: {n}. Start typing the name in the “Model” field.',
             models_fail: 'Failed: {msg}', no_server: 'Could not reach the server: {msg}',
-            ctx: 'Send the selected object and the open script', input_ph: 'Ask about a script or an object…', send: 'Send',
+            ctx: 'Send the selected object and the open script', opts: 'Options', input_ph: 'Ask about a script or an object…', send: 'Send',
             empty: 'Ask about the open script or the selected object. The assistant sees them while the checkbox below is on.',
             copy: 'copy', copied: 'copied', err_prefix: 'Error: {msg}', empty_reply: '(empty reply — try another model)', thinking: '💭 thinking…', patch_prep: '⚙ preparing patch…',
             ctx_obj: 'Selected object: ref={ref}, {name} ({cls}), properties: {props}', ctx_script: 'Open script {name} ({cls}):',
@@ -50,7 +50,7 @@
             saved: 'Сохранено', key_removed: 'Ключ удалён', error: 'Ошибка', no_model: 'модель не выбрана',
             loading_models: 'Загружаю список моделей…', models_n: 'Моделей: {n}. Начни вводить название в поле «Модель».',
             models_fail: 'Не получилось: {msg}', no_server: 'Не удалось связаться с сервером: {msg}',
-            ctx: 'Передавать выбранный объект и открытый скрипт', input_ph: 'Спроси про скрипт или объект…', send: 'Отправить',
+            ctx: 'Передавать выбранный объект и открытый скрипт', opts: 'Настройки отправки', input_ph: 'Спроси про скрипт или объект…', send: 'Отправить',
             empty: 'Спроси про открытый скрипт или выбранный объект. Ассистент видит их, пока включена галочка внизу.',
             copy: 'копировать', copied: 'скопировано', err_prefix: 'Ошибка: {msg}', empty_reply: '(пустой ответ — попробуй другую модель)', thinking: '💭 думаю…', patch_prep: '⚙ формирую патч…',
             ctx_obj: 'Выбран объект: ref={ref}, {name} ({cls}), свойства: {props}', ctx_script: 'Открыт скрипт {name} ({cls}):',
@@ -146,26 +146,32 @@
 #ai-chips{display:flex;gap:6px;padding:0 10px 8px;overflow-x:auto}
 #ai-chips button{background:#111827;border:1px solid #374151;border-radius:99px;color:#9ca3af;white-space:nowrap;min-height:calc(26px*var(--bs,1))}
 #ai-chips button:hover{color:#93c5fd;border-color:#3b82f6;background:#111827}
-#ai-foot{display:flex;flex-direction:column;gap:5px;padding:8px;border-top:1px solid #374151;background:#111827}
-#ai-foot label{display:flex;gap:6px;align-items:center;font-size:calc(11px*var(--fs,1));color:#9ca3af}
-#ai-foot .row{display:flex;gap:6px}
-#ai-input{flex:1;background:#374151;border:1px solid #4b5563;border-radius:6px;padding:6px 8px;resize:none;height:calc(50px*var(--bs,1));outline:none}
+#ai-foot{position:relative;display:flex;flex-direction:column;gap:5px;padding:8px;border-top:1px solid #374151;background:#111827}
+#ai-foot .row{display:flex;gap:6px;align-items:stretch}
+#ai-menu{position:absolute;left:8px;right:8px;bottom:calc(100% - 4px);display:flex;flex-direction:column;gap:2px;padding:6px;background:#1f2937;border:1px solid #4b5563;border-radius:8px;box-shadow:0 -6px 20px rgba(0,0,0,.5);z-index:2}
+#ai-menu[hidden]{display:none}
+#ai-menu label{display:flex;gap:8px;align-items:center;font-size:calc(12px*var(--fs,1));color:#e5e7eb;padding:6px 4px;border-radius:4px;cursor:pointer}
+#ai-menu label:hover{background:#374151}
+#ai-menu input{flex:none;width:18px;height:18px}
+#ai-opts{font-size:calc(18px*var(--fs,1));font-weight:700;padding:0 10px!important}
+#ai-opts[aria-expanded="true"]{background:#3b82f6}
+#ai-input{flex:1;min-width:0;background:#374151;border:1px solid #4b5563;border-radius:6px;padding:6px 8px;resize:none;height:calc(50px*var(--bs,1));outline:none}
 #ai-input::placeholder{color:#9ca3af}
 #ai-send{background:#3b82f6!important;font-weight:700;padding:0 14px!important}#ai-send:hover{background:#2563eb!important}
-#ai-meter{display:flex;align-items:center;gap:8px;font-size:calc(11px*var(--fs,1));color:#9ca3af;cursor:help}
-#ai-ring{flex:none;width:calc(38px*var(--fs,1));height:calc(38px*var(--fs,1))}
+#ai-meter{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;width:calc(58px*var(--fs,1));font-size:calc(10px*var(--fs,1));color:#9ca3af;cursor:help}
+#ai-ring{flex:none;width:calc(34px*var(--fs,1));height:calc(34px*var(--fs,1))}
 #ai-ring circle{fill:none;stroke-width:4}
 #ai-ring .bg{stroke:#374151}
 #ai-meter-fill{stroke:#3b82f6;stroke-linecap:round;transition:stroke-dasharray .3s,stroke .3s}
 #ai-meter.warn #ai-meter-fill{stroke:#f59e0b}#ai-meter.crit #ai-meter-fill{stroke:#ef4444}
 #ai-meter-pct{fill:#e5e7eb;font:700 9.5px system-ui,sans-serif;text-anchor:middle;dominant-baseline:central}
-#ai-meter-txt{display:flex;flex-direction:column;line-height:1.3}#ai-meter-nums{color:#e5e7eb}
+#ai-meter-nums{color:#e5e7eb;white-space:nowrap;line-height:1.1}
 @media (prefers-reduced-motion:reduce){#ai-meter-fill{transition:none}}
 @media (max-width:700px) and (min-height:561px){
 #ai-panel{left:0;right:0;bottom:var(--ai-kb,0px);width:auto;max-width:none;height:60vh;max-height:calc(var(--ai-vh,100vh) - 8px);border-radius:8px 8px 0 0;border-width:1px 0 0}}
 @media (max-height:560px){
 #ai-panel{top:44px;bottom:var(--ai-kb,0px);right:0;left:auto;height:auto;max-height:none;width:min(48%,420px);border-radius:0;border-width:0 0 0 1px}
-#ai-input{height:calc(36px*var(--bs,1))}#ai-foot{padding:6px 8px}#ai-chips{padding-bottom:6px}}
+#ai-input{height:calc(36px*var(--bs,1))}#ai-foot{padding:5px 8px}#ai-chips{padding-bottom:5px}#ai-ring{width:calc(28px*var(--fs,1));height:calc(28px*var(--fs,1))}}
 @media (max-height:300px){#ai-panel{top:4px}}
 @media (prefers-reduced-motion:reduce){.ai-caret::after{animation:none}}
 `;
@@ -195,11 +201,17 @@
 <div id="ai-msgs" aria-live="polite"></div>
 <div id="ai-chips">${QUICK.map((q, i) => `<button type="button" data-q="${i}">${esc(q[0])}</button>`).join('')}</div>
 <div id="ai-foot">
-  <div id="ai-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${esc(T('meter'))}"><svg id="ai-ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="16" pathLength="100"/><circle id="ai-meter-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 20 20)"/><text id="ai-meter-pct" x="20" y="20.5">0%</text></svg><span id="ai-meter-txt"><span>${esc(T('meter'))}</span><span id="ai-meter-nums"></span></span></div>
-  <label><input type="checkbox" id="ai-ctx" checked> ${esc(T('ctx'))}</label>
-  <label><input type="checkbox" id="ai-auto" checked> ${esc(T('auto'))}</label>
-  <label><input type="checkbox" id="ai-autofix"> ${esc(T('autofix'))}</label>
-  <div class="row"><textarea id="ai-input" placeholder="${esc(T('input_ph'))}"></textarea><button id="ai-send" aria-label="${esc(T('send'))}">▶</button></div>
+  <div id="ai-menu" hidden>
+    <label><input type="checkbox" id="ai-ctx" checked> ${esc(T('ctx'))}</label>
+    <label><input type="checkbox" id="ai-auto" checked> ${esc(T('auto'))}</label>
+    <label><input type="checkbox" id="ai-autofix"> ${esc(T('autofix'))}</label>
+  </div>
+  <div class="row">
+    <div id="ai-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${esc(T('meter'))}" title="${esc(T('meter'))}"><svg id="ai-ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="16" pathLength="100"/><circle id="ai-meter-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 20 20)"/><text id="ai-meter-pct" x="20" y="20.5">0%</text></svg><span id="ai-meter-nums"></span></div>
+    <textarea id="ai-input" placeholder="${esc(T('input_ph'))}"></textarea>
+    <button id="ai-opts" type="button" title="${esc(T('opts'))}" aria-haspopup="true" aria-expanded="false">⋮</button>
+    <button id="ai-send" aria-label="${esc(T('send'))}">▶</button>
+  </div>
 </div>`;
     document.body.appendChild(panel);
 
@@ -958,6 +970,12 @@
     $('ai-auto').onchange = () => { try { localStorage.setItem('rsw_ai_auto', $('ai-auto').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
     try { if (localStorage.getItem('rsw_ai_autofix') === '1') $('ai-autofix').checked = true; } catch (e) { /* без хранилища */ }
     $('ai-autofix').onchange = () => { try { localStorage.setItem('rsw_ai_autofix', $('ai-autofix').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
+
+    // выпадающее меню с галочками: закрывается по клику вне и по Esc
+    const setMenu = open => { $('ai-menu').hidden = !open; $('ai-opts').setAttribute('aria-expanded', open ? 'true' : 'false'); };
+    $('ai-opts').onclick = e => { e.stopPropagation(); setMenu($('ai-menu').hidden); };
+    panel.addEventListener('click', e => { if (!e.target.closest('#ai-menu') && !e.target.closest('#ai-opts')) setMenu(false); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
 
     showEmpty();
     $('ai-ctx').addEventListener('change', updateMeter);
