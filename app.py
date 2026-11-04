@@ -592,7 +592,9 @@ def get_chunk_index():
         # 300 студов длиной попадёт только в одну ячейку по своему
         # центру и не найдётся, когда игрок стоит в соседней, хотя
         # физически стена прямо перед ним.
-        objs = chunk_large_objects(build_all_scene_objects())
+        # Детали из ServerStorage/ReplicatedStorage/StarterPack (nw) в мире не существуют — в сцену не попадают;
+        # их данные для Clone() отдаёт отдельная ручка /api/scene?nw=1.
+        objs = chunk_large_objects([o for o in build_all_scene_objects() if not o.get('nw')])
         index = {}
         for o in objs:
             # Полуразмер по X/Z (без учёта поворота — консервативная
@@ -1086,7 +1088,8 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=Fals
     parsed = state['parsed']
     if not parsed:
         return [], 0
-    objs = build_all_scene_objects()
+    # nw-детали (ServerStorage/ReplicatedStorage/StarterPack) не рисуем и не считаем в limit/total
+    objs = [o for o in build_all_scene_objects() if not o.get('nw')]
 
     if chunk:
         objs = chunk_large_objects(objs)
