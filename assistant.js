@@ -14,7 +14,7 @@
             saved: 'Saved', key_removed: 'Key removed', error: 'Error', no_model: 'no model selected',
             loading_models: 'Loading model list…', models_n: 'Models: {n}. Start typing the name in the “Model” field.',
             models_fail: 'Failed: {msg}', no_server: 'Could not reach the server: {msg}',
-            ctx: 'Send the selected object and the open script', opts: 'Options', input_ph: 'Ask about a script or an object…', send: 'Send',
+            ctx: 'Send the selected object and the open script', opts: 'Options', shot: 'Send a scene screenshot (needs a vision model)', shot_fail: 'Could not capture the scene — sent without a screenshot.', input_ph: 'Ask about a script or an object…', send: 'Send',
             empty: 'Ask about the open script or the selected object. The assistant sees them while the checkbox below is on.',
             copy: 'copy', copied: 'copied', err_prefix: 'Error: {msg}', empty_reply: '(empty reply — try another model)', thinking: '💭 thinking…', patch_prep: '⚙ preparing patch…',
             ctx_obj: 'Selected object: ref={ref}, {name} ({cls}), properties: {props}', ctx_script: 'Open script {name} ({cls}):',
@@ -50,7 +50,7 @@
             saved: 'Сохранено', key_removed: 'Ключ удалён', error: 'Ошибка', no_model: 'модель не выбрана',
             loading_models: 'Загружаю список моделей…', models_n: 'Моделей: {n}. Начни вводить название в поле «Модель».',
             models_fail: 'Не получилось: {msg}', no_server: 'Не удалось связаться с сервером: {msg}',
-            ctx: 'Передавать выбранный объект и открытый скрипт', opts: 'Настройки отправки', input_ph: 'Спроси про скрипт или объект…', send: 'Отправить',
+            ctx: 'Передавать выбранный объект и открытый скрипт', opts: 'Настройки отправки', shot: 'Передавать скриншот сцены (нужна модель с картинками)', shot_fail: 'Не удалось снять сцену — отправлено без скриншота.', input_ph: 'Спроси про скрипт или объект…', send: 'Отправить',
             empty: 'Спроси про открытый скрипт или выбранный объект. Ассистент видит их, пока включена галочка внизу.',
             copy: 'копировать', copied: 'скопировано', err_prefix: 'Ошибка: {msg}', empty_reply: '(пустой ответ — попробуй другую модель)', thinking: '💭 думаю…', patch_prep: '⚙ формирую патч…',
             ctx_obj: 'Выбран объект: ref={ref}, {name} ({cls}), свойства: {props}', ctx_script: 'Открыт скрипт {name} ({cls}):',
@@ -132,6 +132,7 @@
 .ai-m.err{background:#7f1d1d;border-color:#7f1d1d}
 .ai-m code{font:calc(12px*var(--fs,1)) 'Fira Code',Consolas,monospace;background:#374151;padding:0 4px;border-radius:3px}
 .ai-m pre{position:relative;margin:6px 0 2px;padding:26px 10px 9px;background:#0f172a;border:1px solid #374151;border-radius:6px;overflow-x:auto;white-space:pre;font:calc(12px*var(--fs,1))/1.55 'Fira Code',Consolas,monospace}
+.ai-shot-img{display:block;max-width:180px;max-height:110px;margin-top:6px;border-radius:4px;border:1px solid #4b5563}
 .ai-m pre code{background:none;padding:0}\n.ai-modlist{flex:none;min-height:40px;max-height:180px;overflow-y:auto;border:1px solid #374151;border-radius:6px;background:#111827;margin:4px 0}.ai-modlist[hidden]{display:none}.ai-mod{padding:8px 10px;font-size:13px;border-bottom:1px solid #1f2937;word-break:break-all;cursor:pointer}.ai-mod:active{background:#1d4ed8}\n.ai-m .ai-h{display:block;margin-top:4px;color:#93c5fd}.ai-m a{color:#60a5fa}.ai-m hr{border:0;border-top:1px solid #374151;margin:6px 0}
 .ai-m pre .ai-copy{position:absolute;top:4px;right:4px;font-size:calc(11px*var(--fs,1));min-height:0;padding:1px 7px}
 .ai-caret::after{content:"";display:inline-block;width:7px;height:1em;background:#3b82f6;margin-left:2px;vertical-align:-2px;animation:ai-b 1s steps(2) infinite}
@@ -205,6 +206,7 @@
     <label><input type="checkbox" id="ai-ctx" checked> ${esc(T('ctx'))}</label>
     <label><input type="checkbox" id="ai-auto" checked> ${esc(T('auto'))}</label>
     <label><input type="checkbox" id="ai-autofix"> ${esc(T('autofix'))}</label>
+    <label><input type="checkbox" id="ai-shot"> ${esc(T('shot'))}</label>
   </div>
   <div class="row">
     <div id="ai-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="${esc(T('meter'))}" title="${esc(T('meter'))}"><svg id="ai-ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="16" pathLength="100"/><circle id="ai-meter-fill" cx="20" cy="20" r="16" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 20 20)"/><text id="ai-meter-pct" x="20" y="20.5">0%</text></svg><span id="ai-meter-nums"></span></div>
@@ -347,7 +349,7 @@
         if (busy || !panel.classList.contains('open') || document.hidden) return;
         const seq = ++meterSeq;
         try {
-            const r = await jpost('/api/assistant/usage', { messages: history, draft: $('ai-input').value, ctx: await buildContext() });
+            const r = await jpost('/api/assistant/usage', { messages: history, draft: $('ai-input').value, ctx: await buildContext(), has_image: $('ai-shot').checked });
             if (seq !== meterSeq || !r || !r.ok) return;
             const pct = Math.max(0, r.percent), m = $('ai-meter');
             $('ai-meter-fill').setAttribute('stroke-dasharray', Math.min(100, pct).toFixed(1) + ' 100');
@@ -790,8 +792,15 @@
         busy = true;
         if (textArg == null) $('ai-input').value = '';
         $('ai-chips').style.display = 'none';
-        addMsg('user', (opts && opts.auto ? '🔁 ' : '') + text);
+        let shot = null, shotFailed = false;
+        if ($('ai-shot').checked) {
+            shot = (typeof window.rswCaptureScene === 'function') ? window.rswCaptureScene(1024, 0.8) : null;
+            shotFailed = !shot;
+        }
+        const um = addMsg('user', (opts && opts.auto ? '🔁 ' : '') + (shot ? '📷 ' : '') + text);
+        if (shot) { const im = document.createElement('img'); im.className = 'ai-shot-img'; im.src = shot; im.alt = ''; um.appendChild(im); }
         history.push({ role: 'user', content: text });
+        if (shotFailed) { const n = document.createElement('div'); n.className = 'ai-actmark'; n.textContent = T('shot_fail'); $('ai-msgs').appendChild(n); }
         const bubble = addMsg('assistant', '');
         bubble.classList.add('ai-caret');
         bubble.textContent = T('thinking');
@@ -800,7 +809,7 @@
             for (let attempt = 0; attempt < 2 && !shown(acc); attempt++) {   // бесплатный роутер иногда отдаёт пустой ответ — пробуем ещё раз
                 const resp = await fetch('/api/assistant/chat', {
                     method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, HDR),
-                    body: JSON.stringify({ messages: history, ctx: await buildContext() })
+                    body: JSON.stringify({ messages: history, ctx: await buildContext(), image: shot || undefined })
                 });
                 if (!resp.ok || (resp.headers.get('content-type') || '').includes('application/json')) {
                     const j = await resp.json().catch(() => ({}));
@@ -970,6 +979,9 @@
     $('ai-auto').onchange = () => { try { localStorage.setItem('rsw_ai_auto', $('ai-auto').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
     try { if (localStorage.getItem('rsw_ai_autofix') === '1') $('ai-autofix').checked = true; } catch (e) { /* без хранилища */ }
     $('ai-autofix').onchange = () => { try { localStorage.setItem('rsw_ai_autofix', $('ai-autofix').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
+
+    try { if (localStorage.getItem('rsw_ai_shot') === '1') $('ai-shot').checked = true; } catch (e) { /* без хранилища */ }
+    $('ai-shot').onchange = () => { try { localStorage.setItem('rsw_ai_shot', $('ai-shot').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } updateMeter(); };
 
     // выпадающее меню с галочками: закрывается по клику вне и по Esc
     const setMenu = open => { $('ai-menu').hidden = !open; $('ai-opts').setAttribute('aria-expanded', open ? 'true' : 'false'); };

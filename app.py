@@ -7221,6 +7221,8 @@ def assistant_usage():
     parts = {'system': int((_ai_est_tokens(p['base_system']) + 8) * k),
              'editor': int(_ai_est_tokens(p['ctx_text']) * k),
              'history': int(hist * k), 'input': int(inp * k)}
+    if d.get('has_image'):
+        parts['image'] = 1100     # скриншот ≤1024 px — порядка 1k токенов у большинства vision-моделей
     used = sum(parts.values())
     window = p['window'] or _AI_DEFAULT_WINDOW
     return jsonify({'ok': True, 'used': used, 'window': window, 'assumed': not p['window'],
@@ -7246,23 +7248,54 @@ def assistant_chat():
     est_raw = _ai_raw_tokens(system, msgs)
 
     base = cfg['base_url'].rstrip('/')
-    payload = {'model': cfg['model'], 'stream': True, 'temperature': 0.3, 'max_tokens': 3000,
-               'messages': [{'role': 'system', 'content': system}] + msgs}
     is_or = 'openrouter.ai' in base
+    # скриншот сцены (только в последнее user-сообщение; в историю он не попадает)
+    img = d.get('image')
+    if not (isinstance(img, str) and len(img) < 6000000 and img.startswith(
+            ('data:image/jpeg;base64,', 'data:image/png;base64,', 'data:image/webp;base64,'))):
+        img = None
+    plain_msgs = [{'role': 'system', 'content': system}] + msgs
+    img_msgs = None
+    if img and msgs[-1]['role'] == 'user':
+        note = _alang("\n\n[К сообщению приложен скриншот сцены (вид из редактора/игры).]",
+                      "\n\n[A screenshot of the scene (editor/game view) is attached.]")
+        img_msgs = plain_msgs[:-1] + [{'role': 'user', 'content': [
+            {'type': 'text', 'text': msgs[-1]['content'] + note},
+            {'type': 'image_url', 'image_url': {'url': img}}]}]
+
+    def make(messages, reasoning):
+        pl = {'model': cfg['model'], 'stream': True, 'temperature': 0.3, 'max_tokens': 3000, 'messages': messages}
+        if reasoning:
+            pl['reasoning'] = {'effort': 'low'}   # бесплатные reasoning-модели иначе думают минутами до первого токена
+        return pl
+
+    # варианты запроса по порядку: с картинкой (+reasoning), с картинкой без reasoning,
+    # без картинки (+reasoning), без картинки без reasoning. Переходим дальше только на 400/404/422.
+    variants = []
+    if img_msgs:
+        variants.append((make(img_msgs, is_or), True))
+        if is_or:
+            variants.append((make(img_msgs, False), True))
+    variants.append((make(plain_msgs, is_or), False))
     if is_or:
-        # бесплатные reasoning-модели (nemotron и др.) иначе думают минутами до первого токена
-        payload['reasoning'] = {'effort': 'low'}
-    try:
+        variants.append((make(plain_msgs, False), False))
+    resp, last_err, sent_image = None, None, False
+    for pl, with_img in variants:
         try:
-            resp = _assistant_http(base + '/chat/completions', cfg['api_key'], payload)
+            resp = _assistant_http(base + '/chat/completions', cfg['api_key'], pl)
+            sent_image = with_img
+            break
         except _urlerr.HTTPError as e:
-            if is_or and e.code in (400, 404, 422):   # модель не принимает параметр reasoning — повторяем без него
-                payload.pop('reasoning', None)
-                resp = _assistant_http(base + '/chat/completions', cfg['api_key'], payload)
-            else:
-                raise
-    except Exception as e:
-        return jsonify({'ok': False, 'error': _assistant_error(e)}), 502
+            last_err = e
+            if e.code not in (400, 404, 422):
+                return jsonify({'ok': False, 'error': _assistant_error(e)}), 502
+        except Exception as e:
+            return jsonify({'ok': False, 'error': _assistant_error(e)}), 502
+    if resp is None:
+        return jsonify({'ok': False, 'error': _assistant_error(last_err)}), 502
+    img_dropped = bool(img_msgs) and not sent_image
+    msg_noimg = _alang('📷 [Модель не принимает изображения — запрос отправлен без скриншота. Выбери модель с поддержкой картинок.]\n\n',
+                       '📷 [This model does not accept images — sent without the screenshot. Pick a vision model.]\n\n')
 
     # сообщения готовим заранее: внутри генератора контекста запроса уже нет
     msg_prov = _alang('\n\n[Ошибка провайдера: %s]', '\n\n[Provider error: %s]')
@@ -7272,6 +7305,8 @@ def assistant_chat():
         # \x1f — служебный «пульс»: модель думает (reasoning-токены наружу не отдаём),
         # клиент показывает «думаю…» и не выглядит зависшим
         last_ping = 0.0
+        if img_dropped:
+            yield msg_noimg
         try:
             with resp:
                 for raw in resp:
@@ -7289,7 +7324,7 @@ def assistant_chat():
                         yield msg_prov % json.dumps(j['error'], ensure_ascii=False)[:300]
                         break
                     usage = j.get('usage')
-                    if isinstance(usage, dict) and isinstance(usage.get('prompt_tokens'), int):
+                    if (not sent_image) and isinstance(usage, dict) and isinstance(usage.get('prompt_tokens'), int):
                         _ai_calibrate(model, usage['prompt_tokens'], est_raw)
                     delta = ((j.get('choices') or [{}])[0].get('delta')) or {}
                     t = delta.get('content')

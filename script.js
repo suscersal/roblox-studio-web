@@ -2102,6 +2102,26 @@
             blobShadow.position.z = z;
         }
 
+        // Снимок текущего кадра вьюпорта для ИИ-ассистента (редактор и Play). Рендерим и читаем канвас в одной
+        // задаче — без preserveDrawingBuffer буфер иначе уже очищен. Уменьшаем до maxSide, отдаём JPEG data-URL.
+        window.rswCaptureScene = function (maxSide, quality) {
+            try {
+                if (!renderer || !scene || !camera) return null;
+                renderer.render(scene, camera);
+                const src = renderer.domElement;
+                if (!src.width || !src.height) return null;
+                const k = Math.min(1, (maxSide || 1024) / Math.max(src.width, src.height));
+                const c = document.createElement('canvas');
+                c.width = Math.max(1, Math.round(src.width * k));
+                c.height = Math.max(1, Math.round(src.height * k));
+                const g = c.getContext('2d');
+                g.fillStyle = '#000';
+                g.fillRect(0, 0, c.width, c.height);
+                g.drawImage(src, 0, 0, c.width, c.height);
+                return c.toDataURL('image/jpeg', quality || 0.8);
+            } catch (e) { return null; }
+        };
+
         // ============ THREE.JS INIT ============
         function initThree() {
             const vp = document.getElementById('viewport');
