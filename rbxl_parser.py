@@ -1861,7 +1861,7 @@ def publish_place(rbxl_path, universe_id, place_id, api_key, version_type="Publi
 #     2) normals     count * vec3 f32   (уникальные нормали)
 #     3) пустой канал (UV; если непустой — формат не разобран)
 #     4) канал X     count * vec3 f32   (в образцах везде (1,0,0), для рендера не нужен)
-#     5) index_pos    3*N значений: signed LEB128 дельты -> индекс в positions
+#     5) index_pos    3*N значений: signed LEB128 дельты (большие шаги — 80/FF + int16 BE) -> индекс в positions
 #     6) index_normal 3*N значений: то же -> индекс в normals
 #     7) пустой канал
 #     8) index_x      3*N значений (для рендера не нужен)
@@ -1907,7 +1907,13 @@ def decode_solid_mesh(blob):
         nonlocal pos
         out, prev = [], 0
         for _ in range(n):
-            d, pos = _sleb128(blob, pos)
+            # Большие шаги (|дельта| >= 64) кодируются 3 байтами: маркер 0x80 или 0xFF + знаковый int16 big-endian
+            # (80 00 BA = +186, FF FF 06 = -250). Остальные — обычный signed LEB128.
+            if blob[pos] in (0x80, 0xFF):
+                d = struct.unpack_from('>h', blob, pos + 1)[0]
+                pos += 3
+            else:
+                d, pos = _sleb128(blob, pos)
             prev += d
             out.append(prev)
         return out
