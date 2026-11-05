@@ -9992,6 +9992,28 @@ end
                 if (guiPropsByRef[childRef]) cloneGuiSubtreeInto(childRef, newChildRef);
             }
         }
+        // DescendantAdded: в Roblox стреляет на КАЖДОМ предке при появлении потомка (и для всего поддерева вставленного
+        // объекта). Раньше стрелял только ChildAdded на прямом родителе, поэтому workspace.DescendantAdded не срабатывал
+        // никогда: Druns_PP вешал PromptShown только на промпты, существовавшие на старте (первая дверь), а промпты
+        // остальных дверей и клонов комнат оставались без кастомного UI. Обходим только если у предков есть подписчики.
+        function luaFireDescendantAdded(ref, parentRef) {
+            const listeners = [];
+            for (let c = parentRef, g = 0; c !== undefined && c !== -1 && g++ < 200; c = luaParentByRef[c]) {
+                const l = luaSignalsByKey[c + '|DescendantAdded'];
+                if (l && l.length) listeners.push(c);
+            }
+            if (!listeners.length) return;
+            const nodes = [], stack = [ref];
+            while (stack.length && nodes.length < 20000) {
+                const r0 = stack.pop();
+                nodes.push(r0);
+                const ch = luaChildrenByRef[r0];
+                if (ch) for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);   // обратный порядок -> прямой обход дерева
+            }
+            for (const anc of listeners) {
+                for (const n of nodes) fireLuaSignal(anc, 'DescendantAdded', [{ __instanceRef: n }]);
+            }
+        }
         function luaSetParent(ref, parentRef) {
             const oldParent = luaParentByRef[ref];
             if (oldParent !== undefined && luaChildrenByRef[oldParent]) {
@@ -10046,6 +10068,7 @@ end
             if (parentRef !== -1 && parentRef !== oldParent) {
                 fireLuaSignal(parentRef, 'ChildAdded', [{ __instanceRef: ref }]);
             }
+            if (parentRef !== -1 && parentRef !== oldParent) luaFireDescendantAdded(ref, parentRef);
             // Tool перешёл в персонажа / вышел из него — Equipped / Unequipped (как в Roblox; на этом строится хотбар)
             if (luaByRef[ref] && luaByRef[ref].cls === 'Tool' && luaCharacterRef !== -1) {
                 if (parentRef === luaCharacterRef && oldParent !== luaCharacterRef) fireLuaSignal(ref, 'Equipped', []);
