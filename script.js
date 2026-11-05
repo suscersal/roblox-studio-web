@@ -3524,6 +3524,8 @@
         }
         let _unionGeoCache = {}; // ref -> Promise<BufferGeometry|null>; сбрасывается в reloadScene
         function loadUnionGeometry(ref) {
+            // клон юниона (комната/холодильник из шаблона) — виртуальный ref, на сервере его нет: берём меш оригинала
+            if (typeof luaCloneOrigin !== 'undefined' && luaCloneOrigin[ref] !== undefined) ref = luaCloneOrigin[ref];
             if (_unionGeoCache[ref]) return _unionGeoCache[ref];
             const p = (async () => {
                 try {
@@ -7895,6 +7897,13 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 return Enum.KeyCode[nm]
             end
         end
+        -- ProximityPrompt.Style — EnumItem (Enum.ProximityPromptStyle.Custom), а не число/строка из реестра подсказок
+        if k == "Style" and __get_class(ref) == "ProximityPrompt" then
+            local ok, v = pcall(__get_prop, ref, k)
+            if ok and type(v) == "number" then v = (v == 1) and "Custom" or "Default" end
+            if not ok or type(v) ~= "string" or v == "" then v = "Default" end
+            return Enum.ProximityPromptStyle[v] or Enum.ProximityPromptStyle.Default
+        end
         -- UserInputService:GetLastInputType() — InputCategorizer (Blaster) спрашивает тип последнего ввода при старте
         if k == "GetLastInputType" and __get_class(ref) == "UserInputService" then
             return function(self)
@@ -8785,6 +8794,30 @@ end
             fireLuaSignal(ref, '__prop_CFrame', []);
             fireLuaSignal(ref, '__prop_Position', []);
         }
+        // Сохранённый пивот контейнера (Model/Folder): явно заданный/закэшированный или WorldPivotData из файла; иначе null.
+        function _storedModelPivot(d) {
+            if (_modelPivots[d]) return _modelPivots[d];
+            const fp = luaFilePivots[d];
+            if (!fp) return null;
+            const r = fp.r, p = fp.p;
+            const fm = new THREE.Matrix4();
+            fm.set(r[0], r[1], r[2], p[0], r[3], r[4], r[5], p[1], r[6], r[7], r[8], p[2], 0, 0, 0, 1);
+            return fm;
+        }
+        // PivotTo переносит жёстко ВСЮ иерархию, включая WorldPivot вложенных Model: раньше пивот вложенной
+        // модели (DoorSwing внутри повёрнутой комнаты-клона) оставался «старым», и GetBoundingBox/PivotTo
+        // двери считались в неверной ориентации — створка вращалась не вокруг петли.
+        function luaShiftNestedPivots(root, delta) {
+            const stack = (luaChildrenByRef[root] || []).slice();
+            let g = 0;
+            while (stack.length && g++ < 100000) {
+                const d = stack.pop();
+                for (const c of (luaChildrenByRef[d] || [])) stack.push(c);
+                if (luaIsPartRef(d) || luaIsCharRef(d) || luaIsCameraRef(d)) continue;
+                const st = _storedModelPivot(d);
+                if (st) _modelPivots[d] = delta.clone().multiply(st);
+            }
+        }
         // PivotTo: деталь — с учётом PivotOffset; Model/Folder — жёстким
         // переносом всех деталей внутри; персонаж — телепорт charBody.
         function luaSetPivotMatrix(ref, M) {
@@ -8820,6 +8853,7 @@ end
                     luaApplyPartMatrix(pr, deltaP.clone().multiply(kidMats[i]));
                     luaFirePoseSignals(pr);
                 });
+                luaShiftNestedPivots(ref, deltaP);
                 return;
             }
             const old = luaGetPivotMatrix(ref);
@@ -8828,6 +8862,7 @@ end
                 luaApplyPartMatrix(pr, delta.clone().multiply(luaPartMatrix(pr)));
                 luaFirePoseSignals(pr);
             }
+            luaShiftNestedPivots(ref, delta);
             _modelPivots[ref] = M.clone();
         }
         // part.CFrame = cf — задаёт именно CFrame детали (без PivotOffset)
@@ -9459,6 +9494,7 @@ end
             // Instance.new() — нет меша/тела вообще, все свойства просто
             // лежат в обычном JS-объекте, заведённом при создании.
             if (virtualInstanceProps[ref]) {
+                if (_promptRegistry[ref] && name in _promptRegistry[ref] && name !== 'parentRef' && _promptRegistry[ref][name] !== undefined) return _promptRegistry[ref][name];
                 const v = virtualInstanceProps[ref][name];
                 if (v !== undefined) return v;
                 // клон/Instance.new части без записанного свойства — значения по умолчанию Roblox, а не nil
@@ -9470,6 +9506,8 @@ end
                     if (vcls && /Part$|^Part$|MeshPart|UnionOperation|WedgePart|TrussPart|SpawnLocation|Decal|Texture/.test(vcls)) return 0;
                 }
                 if (vcls === 'ProximityPrompt') {
+                    const rp = _promptRegistry[ref];   // живой реестр — источник истины (клон из файла, свойства из скрипта)
+                    if (rp && name in rp && rp[name] !== undefined && name !== 'parentRef') return rp[name];
                     const PD = { HoldDuration: 0, MaxActivationDistance: 10, ActionText: '', ObjectText: '', RequiresLineOfSight: true, Enabled: true, ClickablePrompt: true };
                     if (name in PD) return PD[name];
                 }
@@ -9945,6 +9983,11 @@ end
                     if (_soundPitchOctave[ref] != null) _soundPitchOctave[newRef] = _soundPitchOctave[ref];
                     _applySoundRate(newRef);
                 }
+            }
+            // Клон ProximityPrompt (сундук/комната из шаблона) обязан унаследовать ВСЕ настройки: раньше он приходил с
+            // умолчаниями (текст пустой, дистанция 10, Style не Custom) и подсказка «странно работала». parentRef проставит luaSetParent.
+            if (cls === 'ProximityPrompt' && _promptRegistry[ref]) {
+                _promptRegistry[newRef] = Object.assign({}, _promptRegistry[ref], { parentRef: -1 });
             }
             const p = luaPositionOfRef(ref);
             if (p) luaSetPositionOfRef(newRef, p.x, p.y, p.z);
@@ -13535,7 +13578,7 @@ end
                             KeyboardKeyCode: p.keyCode, HoldDuration: p.holdDuration,
                             MaxActivationDistance: p.maxDistance, RequiresLineOfSight: p.requiresLineOfSight,
                             Enabled: p.enabled, parentRef: p.parentRef,
-                            Style: p.style, GamepadKeyCode: p.gamepadKeyCode !== undefined ? p.gamepadKeyCode : 1000,
+                            Style: (p.style === 1 || p.style === '1' || p.style === 'Custom') ? 'Custom' : 'Default', GamepadKeyCode: p.gamepadKeyCode !== undefined ? p.gamepadKeyCode : 1000,
                         };
                         if (!luaByRef[p.ref]) { luaByRef[p.ref] = { cls: 'ProximityPrompt', name: 'ProximityPrompt' }; luaByRefVer++; }
                     }
@@ -13548,12 +13591,16 @@ end
             return 'E';
         }
         function _promptWorldPos(p) {
-            // Позиция родителя (Part/Model) — та же логика, что и для обычных
-            // объектов: физика, если есть, иначе текущая матрица меша.
-            const body = physicsBodies[p.parentRef];
+            // Подсказка работает только внутри Workspace (шаблоны в ServerStorage и удалённые комнаты не показываются —
+            // раньше такие «призрачные» подсказки висели на старых местах).
+            const pr = p.parentRef;
+            if (pr === undefined || pr === -1 || !luaIsUnderWorkspace(pr)) return null;
+            // Позиция родителя: физика, если есть, иначе матрица меша; Attachment/Model — через общий luaPositionOfRef.
+            const body = physicsBodies[pr];
             if (body) return body.position;
-            const mesh = sceneObjs[p.parentRef];
+            const mesh = sceneObjs[pr];
             if (mesh) { const v = new THREE.Vector3(); mesh.matrix.decompose(v, new THREE.Quaternion(), new THREE.Vector3()); return v; }
+            try { const q = luaPositionOfRef(pr); if (q && isFinite(q.x)) return new THREE.Vector3(q.x, q.y, q.z); } catch (e) { /* нет позиции — подсказка недоступна */ }
             return null;
         }
 
@@ -13751,7 +13798,8 @@ end
                 if (!p.Enabled || p.parentRef === -1 || p.parentRef === undefined) continue;
                 const wp = _promptWorldPos(p);
                 if (!wp) continue;
-                const d = Math.hypot(wp.x - charBody.position.x, wp.y - charBody.position.y, wp.z - charBody.position.z);
+                // дистанция — от HumanoidRootPart настоящего R15 (на R15_HRP_ABOVE_GROUND над землёй), а не от центра сферы-коллайдера
+                const d = Math.hypot(wp.x - charBody.position.x, wp.y - (charBody.position.y + (R15_HRP_ABOVE_GROUND - CHAR_RADIUS)), wp.z - charBody.position.z);
                 if (d <= p.MaxActivationDistance && d < bestDist) { best = p; bestRef = refStr; bestDist = d; }
             }
             _activePromptRef = bestRef;
