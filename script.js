@@ -2339,12 +2339,15 @@
                 }
             }, { capture: true, passive: false });
 
+            // Браузер присылает ОДИН touchmove на все сдвинувшиеся пальцы на одном элементе. Раньше стик делал
+            // stopPropagation всегда, и камера (палец на канвасе) не получала событие, пока двигался и палец стика.
+            // Теперь глотаем событие только если в нём нет чужих пальцев; чужие палец стика пропускают через joyTouchId.
             document.addEventListener('touchmove', e => {
                 if (touchId === null) return;
                 for (const t of e.changedTouches) {
                     if (t.identifier === touchId) {
                         e.preventDefault();
-                        e.stopPropagation();
+                        if (e.changedTouches.length === 1) e.stopPropagation();
                         handleMove(t.clientX, t.clientY);
                         break;
                     }
@@ -2355,7 +2358,10 @@
                 if (touchId === null) return;
                 for (const t of e.changedTouches) {
                     if (t.identifier === touchId) {
-                        e.stopPropagation();
+                        if (e.changedTouches.length === 1) e.stopPropagation();
+                        // палец стика ещё числится «своим» до конца этого события (камера/тап в нём же его пропускают)
+                        joyEndingId = t.identifier;
+                        setTimeout(() => { joyEndingId = null; }, 0);
                         resetJoy();
                         break;
                     }
@@ -2729,7 +2735,9 @@
         // поэтому этот палец тоже числится в targetTouches канваса — камера должна его пропускать, иначе стик
         // и поворот камеры одновременно не работают (камера видит «два пальца» и считает это щипком).
         let joyTouchId = null;
-        function camTouches(e) { return Array.from(e.targetTouches).filter(t => t.identifier !== joyTouchId); }
+        let joyEndingId = null;   // палец стика, который закончился в текущем touchend (joyTouchId к этому моменту уже сброшен)
+        const isJoyTouch = t => t.identifier === joyTouchId || t.identifier === joyEndingId;
+        function camTouches(e) { return Array.from(e.targetTouches).filter(t => !isJoyTouch(t)); }
 
         function onTS(e) {
             e.preventDefault();
@@ -2777,8 +2785,9 @@
 
         function onTE(e) {
             _lastTouchEndT = performance.now();
-            if (e.changedTouches.length === 1 && _ts) {
-                const t = e.changedTouches[0];
+            const _ended = Array.from(e.changedTouches).filter(t => !isJoyTouch(t));
+            if (_ended.length === 1 && _ts) {
+                const t = _ended[0];
                 if (Math.abs(t.clientX - _ts.x) < 8 && Math.abs(t.clientY - _ts.y) < 8) {
                     if (isPlaying && luaClickDetectorAt(t.clientX, t.clientY, false, true)) return;
                     if (!isPlaying) pick(t.clientX, t.clientY, { additive: multiSelectMode });
@@ -5714,7 +5723,7 @@
             _activePromptRef = null;
             _activePrompt = null;
             _promptHoldStart = null; _promptShownRef = null; _promptHeldRef = null; _promptTriggered = false; _ppsRefCache = null;
-            _activatedTool = null; _hotbarSig = ''; if (_hotbarEl) _hotbarEl.style.display = 'none'; for (const k in _coreGuiOff) delete _coreGuiOff[k];
+            _activatedTool = null; _toolTouch = null; _hotbarSig = ''; if (_hotbarEl) _hotbarEl.style.display = 'none'; for (const k in _coreGuiOff) delete _coreGuiOff[k];
             const _promptEl = document.getElementById('proximity-prompt');
             if (_promptEl) _promptEl.style.display = 'none';
             _disposeCharMesh();
@@ -12563,7 +12572,14 @@ end
             }
         }
         function domInputXY(e) {
-            const t = e.touches && e.touches[0] || (e.changedTouches && e.changedTouches[0]);
+            // Для тач-событий берём палец, который это событие вызвал (changedTouches), а не touches[0]: при зажатом
+            // джойстике touches[0] — это он, и тап по слоту инвентаря получал координаты стика (mouse.X/Y → «слот не нажат»).
+            let t = null;
+            if (e.changedTouches && e.changedTouches.length) {
+                t = Array.from(e.changedTouches).find(x => !isJoyTouch(x)) || e.changedTouches[0];
+            } else if (e.touches && e.touches.length) {
+                t = e.touches[0];
+            }
             return t ? _clientToGui(t.clientX, t.clientY) : _clientToGui(e.clientX, e.clientY);
         }
 
@@ -13599,16 +13615,22 @@ end
         });
         // Tool.Activated / Deactivated: клик или тап по сцене (не по GUI) при экипированном Tool.Enabled ~= false
         let _activatedTool = null;
-        function _toolPointerDown(e) {
-            if (!isPlaying || luaCharacterRef === -1 || _activatedTool !== null) return;
-            const tg = e.target;
-            if (!tg || !tg.closest || !tg.closest('#viewport')) return;
-            if (tg.closest('#gui-overlay') && tg !== document.getElementById('gui-overlay')) return;
-            if (tg.closest('#default-hotbar') || tg.closest('#proximity-prompt') || tg.closest('.mobile-pad, #mobile-pad, #joystick-zone')) return;
-            if (e.type === 'mousedown' && e.button !== 0) return;
+        let _toolTouch = null;   // {id, x, y} — палец, который пока может оказаться тапом по сцене (не драгом камеры)
+        function _toolForScenePointer(tg) {
+            if (!isPlaying || luaCharacterRef === -1) return undefined;
+            if (!tg || !tg.closest || !tg.closest('#viewport')) return undefined;
+            if (tg.closest('#gui-overlay') && tg !== document.getElementById('gui-overlay')) return undefined;
+            if (tg.closest('#default-hotbar') || tg.closest('#proximity-prompt') || tg.closest('.mobile-pad, #mobile-pad, #joy-zone, #joystick-zone')) return undefined;
             const tool = _toolsOf(luaCharacterRef)[0];
+            if (tool === undefined) return undefined;
+            if (luaGetGenericProp(tool, 'Enabled') === false) return undefined;
+            return tool;
+        }
+        function _toolPointerDown(e) {   // только мышь
+            if (_activatedTool !== null || e.button !== 0) return;
+            if (performance.now() - _lastTouchEndT < 700) return;   // эмулированный после тапа mousedown
+            const tool = _toolForScenePointer(e.target);
             if (tool === undefined) return;
-            if (luaGetGenericProp(tool, 'Enabled') === false) return;
             _activatedTool = tool;
             fireLuaSignal(tool, 'Activated', []);
         }
@@ -13618,10 +13640,40 @@ end
             fireLuaSignal(t, 'Deactivated', []);
         }
         document.addEventListener('mousedown', _toolPointerDown);
-        document.addEventListener('touchstart', _toolPointerDown, { passive: true });
         document.addEventListener('mouseup', _toolPointerUp);
-        document.addEventListener('touchend', _toolPointerUp, { passive: true });
-        document.addEventListener('touchcancel', _toolPointerUp, { passive: true });
+        // Тач: Activated стреляет при ТАПЕ (палец не уехал дальше ~12px). Так свайп камеры не «стреляет» предметом,
+        // а второй палец (тап) работает при зажатом джойстике — свой id у каждого пальца.
+        document.addEventListener('touchstart', (e) => {
+            if (!isPlaying || luaCharacterRef === -1 || _toolTouch) return;
+            for (const t of e.changedTouches) {
+                if (isJoyTouch(t)) continue;
+                if (_toolForScenePointer(t.target) === undefined) continue;
+                _toolTouch = { id: t.identifier, x: t.clientX, y: t.clientY };
+                break;
+            }
+        }, { passive: true });
+        document.addEventListener('touchmove', (e) => {
+            if (!_toolTouch) return;
+            for (const t of e.changedTouches) {
+                if (t.identifier === _toolTouch.id && Math.hypot(t.clientX - _toolTouch.x, t.clientY - _toolTouch.y) > 12) { _toolTouch = null; break; }
+            }
+        }, { passive: true });
+        function _toolTouchEnd(e, ok) {
+            if (!_toolTouch) return;
+            for (const t of e.changedTouches) {
+                if (t.identifier !== _toolTouch.id) continue;
+                _toolTouch = null;
+                if (!ok || !isPlaying || luaCharacterRef === -1 || _activatedTool !== null) return;
+                const tool = _toolsOf(luaCharacterRef)[0];
+                if (tool === undefined || luaGetGenericProp(tool, 'Enabled') === false) return;
+                _activatedTool = tool;
+                fireLuaSignal(tool, 'Activated', []);
+                _toolPointerUp();
+                return;
+            }
+        }
+        document.addEventListener('touchend', (e) => _toolTouchEnd(e, true), { passive: true });
+        document.addEventListener('touchcancel', (e) => _toolTouchEnd(e, false), { passive: true });
 
         let _activePromptRef = null;
         let _promptShownRef = null;      // подсказка, для которой уже стрелял PromptShown
