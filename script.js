@@ -10268,6 +10268,14 @@ end
             if (parentRef !== -1) { luaRealizeClonedParts(ref); luaStartClonedScripts(ref); }
         }
         function luaDestroyRef(ref) {
+            // Destroy в Roblox убирает и ВСЕХ потомков. Раньше чистился только сам ref: после g:Destroy() у модели «Кнопка Z»
+            // (подобранной у сундука) её деталь-меш оставалась в сцене, видимой и с физтелом — предмет «не пропадал».
+            for (const c of (luaChildrenByRef[ref] || []).slice()) luaDestroyRef(c);
+            if (_promptRegistry[ref]) {   // подсказка уничтожена — не оставляем в реестре (иначе утекает и ловит PromptShown/Hidden)
+                if (_promptHeldRef === String(ref) || _promptHeldRef === ref) _promptHoldEnd();
+                delete _promptRegistry[ref];
+                if (_activePromptRef === String(ref) || _activePromptRef === ref) { _activePromptRef = null; _activePrompt = null; }
+            }
             if (playOnlyRefs.has(ref)) {
                 removePhysicsBodyForRef(ref);
             } else {
@@ -12854,6 +12862,9 @@ end
                 if (luaIsPartRef(r0)) { const p = luaPositionOfRef(r0); out.set(p.x, p.y, p.z); return true; }
                 for (const c of (luaChildrenByRef[r0] || [])) stack.push(c);
             }
+            // скриптовая деталь без меша (FloatRoot у «Кнопки Z»): позиция по соседним деталям модели
+            const anc = (info.cls === 'Part' || info.cls === 'MeshPart') ? _anchorFromAncestors(ref) : null;
+            if (anc) { out.copy(anc); return true; }
             return false;
         }
         function _bbOccluded(ref, anchorRef, camPos, target) {
@@ -13729,16 +13740,48 @@ end
             if (typeof p.KeyboardKeyCode === 'string' && p.KeyboardKeyCode) return p.KeyboardKeyCode.replace(/^KeyCode\.?/, '').slice(0, 3) || 'E';
             return 'E';
         }
+        // Известная позиция детали (без дефолта 0,0,0): физтело, меш, позиция из файла/клона. null — позиции нет.
+        function _promptKnownPos(ref) {
+            const body = physicsBodies[ref];
+            if (body) return new THREE.Vector3(body.position.x, body.position.y, body.position.z);
+            const lp = loadedObjPos[ref];
+            if (lp) return new THREE.Vector3(lp.x, lp.y, lp.z);
+            const mesh = sceneObjs[ref];
+            if (mesh) { const v = new THREE.Vector3(); mesh.matrix.decompose(v, new THREE.Quaternion(), new THREE.Vector3()); return v; }
+            const dd = luaDormantData(ref);
+            if (dd) return new THREE.Vector3(dd.px, dd.py, dd.pz);
+            return null;
+        }
+        // Позиция для объекта без собственной (скриптовая невидимая деталь без меша/физтела): среднее по известным деталям
+        // ближайшего предка. Используется и подсказкой (ProximityPrompt), и BillboardGui с Adornee на такую деталь.
+        function _anchorFromAncestors(ref) {
+            for (let a = luaParentByRef[ref], g = 0; a !== undefined && a !== -1 && g++ < 40; a = luaParentByRef[a]) {
+                const sum = new THREE.Vector3(); let n = 0;
+                const stack = [a];
+                while (stack.length && n < 200) {
+                    const r = stack.pop();
+                    const v = _promptKnownPos(r);
+                    if (v) { sum.add(v); n++; }
+                    for (const c of (luaChildrenByRef[r] || [])) stack.push(c);
+                }
+                if (n > 0) return sum.multiplyScalar(1 / n);
+            }
+            return null;
+        }
         function _promptWorldPos(p) {
             // Подсказка работает только внутри Workspace (шаблоны в ServerStorage и удалённые комнаты не показываются —
             // раньше такие «призрачные» подсказки висели на старых местах).
             const pr = p.parentRef;
             if (pr === undefined || pr === -1 || !luaIsUnderWorkspace(pr)) return null;
-            // Позиция родителя: физика, если есть, иначе матрица меша; Attachment/Model — через общий luaPositionOfRef.
-            const body = physicsBodies[pr];
-            if (body) return body.position;
-            const mesh = sceneObjs[pr];
-            if (mesh) { const v = new THREE.Vector3(); mesh.matrix.decompose(v, new THREE.Quaternion(), new THREE.Vector3()); return v; }
+            // Позиция родителя: физика, если есть, иначе матрица меша.
+            const own = _promptKnownPos(pr);
+            if (own) return own;
+            // У созданной скриптом невидимой детали (Instance.new("Part") с Transparency=1, как FloatRoot у «Кнопки Z» из
+            // сундука) ни физтела, ни меша нет — позиция раньше бралась как (0,0,0), дистанция до игрока была ~90 и подсказку
+            // подобрать было нельзя. Берём ближайшего предка (Model) с известными деталями: среднее по их позициям.
+            const anc = _anchorFromAncestors(pr);
+            if (anc) return anc;
+            // Attachment/Model — через общий luaPositionOfRef.
             try { const q = luaPositionOfRef(pr); if (q && isFinite(q.x)) return new THREE.Vector3(q.x, q.y, q.z); } catch (e) { /* нет позиции — подсказка недоступна */ }
             return null;
         }
@@ -14024,6 +14067,15 @@ end
             window.addEventListener('pointercancel', onUp);
             window.addEventListener('touchend', onUp);
             window.addEventListener('mouseup', onUp);
+        });
+
+        // Долгое нажатие по кастомной подсказке/GUI в Play выделяло текст и открывало системное меню — гасим.
+        document.addEventListener('selectstart', (e) => {
+            const t = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
+            if (isPlaying && t && t.closest && t.closest('#viewport') && !t.closest('input, textarea, [contenteditable="true"]')) e.preventDefault();
+        });
+        document.addEventListener('contextmenu', (e) => {
+            if (isPlaying && e.target && e.target.closest && e.target.closest('#viewport')) e.preventDefault();
         });
 
         // Enum.CameraType.Scriptable — настоящий Roblox по нему полностью

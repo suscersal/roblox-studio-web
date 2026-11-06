@@ -1686,3 +1686,9 @@ body.m-ui.m-panels button[style*="z-index:1000000"] { display: none !important }
 
 /* Play: в покое стик почти прозрачный (как DynamicThumbstick в Roblox) и не закрывает GUI игры; при касании — яркий */
 body.m-ui.m-playing #joy-base:not(.active) { opacity: .3 }
+
+/* Долгое нажатие по подсказкам/GUI в Play не должно выделять текст и вызывать системное меню */
+#viewport, #viewport *:not(input):not(textarea) {
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
