@@ -10268,6 +10268,7 @@ end
             if (parentRef !== -1) { luaRealizeClonedParts(ref); luaStartClonedScripts(ref); }
         }
         function luaDestroyRef(ref) {
+            const _wasHeldTool = luaCharacterRef !== -1 && luaParentByRef[ref] === luaCharacterRef && luaByRef[ref] && luaByRef[ref].cls === 'Tool';
             // Destroy в Roblox убирает и ВСЕХ потомков. Раньше чистился только сам ref: после g:Destroy() у модели «Кнопка Z»
             // (подобранной у сундука) её деталь-меш оставалась в сцене, видимой и с физтелом — предмет «не пропадал».
             for (const c of (luaChildrenByRef[ref] || []).slice()) luaDestroyRef(c);
@@ -10305,6 +10306,7 @@ end
             delete luaParentByRef[ref];
             delete luaChildrenByRef[ref];
             delete virtualInstanceProps[ref];
+            if (_wasHeldTool) scheduleCharacterTool();   // tool:Destroy() в руке — убираем и модель в руке (смены родителя тут нет)
         }
 
         function installLuaBridge(L) {
@@ -14204,8 +14206,25 @@ end
             }
         }
 
+        // Глобально friction=0 (чтобы персонаж не цеплялся за стены), поэтому свободные тела (кусочки мяса в холодильнике,
+        // выброшенные полки, любые Anchored=false) раз начав скользить по полу НИКОГДА не останавливались и не засыпали:
+        // после открытия холодильника 36 «Meat» ездили со скоростью до 20 студов/с, cannon.step вырос в ~6 раз (FPS падал).
+        // Для не-персонажных динамических тел: затухание скорости (как трение о пол) и более быстрый сон.
+        let _bodyTuneTick = 0;
+        function _tuneLooseBodies() {
+            if ((_bodyTuneTick++ % 20) !== 0 || typeof CANNON === 'undefined') return;
+            for (const b of physicsWorld.bodies) {
+                if (b._tuned || b === charBody || b.type !== CANNON.Body.DYNAMIC) continue;
+                b._tuned = true;
+                b.linearDamping = 0.6;
+                b.angularDamping = 0.6;
+                b.sleepSpeedLimit = 0.5;
+                b.sleepTimeLimit = 0.4;
+            }
+        }
         function stepPhysics() {
             if (!isPlaying || !physicsWorld) return;
+            _tuneLooseBodies();
             // Физика идёт по РЕАЛЬНОМУ времени, как в Roblox (WalkSpeed 16 студов/с — именно в секунду, а не
             // «за кадр»): накопитель + фиксированный шаг 1/60. Раньше на каждый кадр делался ровно один шаг,
             // и при 7 FPS мир шёл в ~8 раз медленнее. За кадр не больше PHYSICS_MAX_TICKS шагов, иначе на
