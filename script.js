@@ -5190,6 +5190,7 @@
         function _disposeCharMesh() {
             if (!charMesh) return;
             _clearOutfit(charMesh);
+            _clearHeldTool(charMesh);
             scene.remove(charMesh);
             _disposeObj(charMesh);
             charMesh = null;
@@ -5475,6 +5476,123 @@
             mesh.matrixWorldNeedsUpdate = true;
             mesh.userData.shared = true;
             return mesh;
+        }
+
+        // ============ TOOL В РУКЕ ============
+        // Tool, перешедший в Character (humanoid:EquipTool / хотбар), рисуем в правой руке: данные деталей — с сервера
+        // (/api/tool_item/<ref оригинала>), хват — как RightGrip в Roblox (R6: C0 = (0,-1,0) + поворот, C1 = Tool.Grip).
+        // Рука при этом поднимается вперёд, как в стандартной анимации toolhold. Координаты — как у костюма (спереди -Z).
+        const _toolInfoCache = {};
+        let _toolHoldTimer = null;
+        const HOLD_ARM_ANGLE = Math.PI / 2;   // рука вперёд
+        function _fetchToolInfo(originRef) {
+            if (!_toolInfoCache[originRef]) _toolInfoCache[originRef] = api('GET', '/api/tool_item/' + originRef).catch(() => null);
+            return _toolInfoCache[originRef];
+        }
+        function scheduleCharacterTool() {
+            if (_toolHoldTimer) return;
+            _toolHoldTimer = setTimeout(() => { _toolHoldTimer = null; refreshCharacterTool(); }, 0);
+        }
+        function _setRightArmRaised(group, raised) {
+            const body = group && group.userData.body;
+            if (!body) return;
+            body.traverse(n => {
+                if (!n.userData || n.userData.limb !== 'RightArm') return;
+                if (!n.userData.armBase) n.userData.armBase = { y: n.position.y, z: n.position.z };
+                const b = n.userData.armBase;
+                if (raised) {   // поворот вокруг плеча (y плеча = центр руки + 1)
+                    n.rotation.x = HOLD_ARM_ANGLE;
+                    n.position.y = b.y + 1 - Math.cos(HOLD_ARM_ANGLE);
+                    n.position.z = b.z - Math.sin(HOLD_ARM_ANGLE);
+                } else {
+                    n.rotation.x = 0; n.position.y = b.y; n.position.z = b.z;
+                }
+            });
+        }
+        function _clearHeldTool(group) {
+            if (!group) return;
+            const root = group.userData.toolRoot;
+            if (root) {
+                root.traverse(n => { if (n.material) n.material.dispose(); });
+                group.remove(root);
+                group.userData.toolRoot = null;
+            }
+            group.userData.toolSig = '';
+            _setRightArmRaised(group, false);
+        }
+        async function _buildToolPartMesh(p) {
+            const m = p.mesh || { kind: 'box' };
+            let geo, scale = new THREE.Vector3(1, 1, 1), mat;
+            const off = new THREE.Matrix4();
+            const opac = 1 - (p.transparency || 0);
+            if (m.kind === 'special' || m.kind === 'meshpart') {
+                const res = await loadRealMeshGeometry(m.meshId);
+                if (!res) return null;
+                geo = res.geometry;
+                if (m.kind === 'special') {
+                    scale.set(m.scale[0], m.scale[1], m.scale[2]);
+                    off.makeTranslation(m.offset[0], m.offset[1], m.offset[2]);
+                } else {
+                    scale.set(p.size[0] / res.size.x, p.size[1] / res.size.y, p.size[2] / res.size.z);
+                }
+                mat = new THREE.MeshLambertMaterial({
+                    color: m.textureId ? '#ffffff' : (p.color || '#a3a2a5'),
+                    map: m.textureId ? getOrLoadPartTexture(m.textureId) : null,
+                    side: THREE.DoubleSide, alphaTest: m.textureId ? 0.5 : 0,
+                    transparent: opac < 1, opacity: opac,
+                });
+            } else {
+                if (p.shape === 'sphere') { geo = new THREE.SphereGeometry(0.5, 16, 12); scale.set(p.size[0], p.size[1], p.size[2]); }
+                else if (p.shape === 'cylinder') { geo = makeCylinderXGeometry(p.size[0], p.size[1], p.size[2], 16); }
+                else geo = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
+                mat = new THREE.MeshLambertMaterial({ color: p.color || '#a3a2a5', transparent: opac < 1, opacity: opac });
+            }
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.matrixAutoUpdate = false;
+            mesh.matrix.copy(_cf12ToMatrix(p.cf)).multiply(off).multiply(new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z));
+            mesh.matrixWorldNeedsUpdate = true;
+            mesh.userData.shared = true;   // геометрия — из кэша мешей
+            return mesh;
+        }
+        async function refreshCharacterTool() {
+            const group = charMesh;
+            if (!isPlaying || !group || luaCharacterRef === -1) return;
+            const tool = (luaChildrenByRef[luaCharacterRef] || []).find(k => luaByRef[k] && luaByRef[k].cls === 'Tool');
+            const sig = tool === undefined ? '' : String(tool);
+            if (sig === group.userData.toolSig && (sig === '' || group.userData.toolRoot)) return;
+            _clearHeldTool(group);
+            group.userData.toolSig = sig;
+            const token = group.userData.toolToken = (group.userData.toolToken || 0) + 1;
+            if (tool === undefined) return;
+            const origin = luaCloneOrigin[tool] !== undefined ? luaCloneOrigin[tool] : tool;
+            if (origin < 0) return;   // создан скриптом — данных в файле нет
+            const info = await _fetchToolInfo(origin);
+            if (charMesh !== group || group.userData.toolToken !== token || !info || !info.ok) return;
+            const root = new THREE.Group();
+            root.position.y = -CHAR_RADIUS;
+            root.rotation.y = PLAY_AVATAR_YAW_OFFSET;
+            // Handle = Arm * C0 * C1^-1; Arm — рука, поднятая вперёд вокруг плеча (1.5, 4, 0)
+            const C0 = new THREE.Matrix4().set(1, 0, 0, 0,   0, 0, 1, -1,   0, -1, 0, 0,   0, 0, 0, 1);
+            const grip = info.grip ? _cf12ToMatrix(info.grip) : new THREE.Matrix4();
+            const arm = new THREE.Matrix4().makeTranslation(1.5, 4, 0)
+                .multiply(new THREE.Matrix4().makeRotationX(HOLD_ARM_ANGLE))
+                .multiply(new THREE.Matrix4().makeTranslation(0, -1, 0));
+            const H = arm.multiply(C0).multiply(grip.invert());
+            const held = new THREE.Group();
+            held.matrixAutoUpdate = false;
+            held.matrix.copy(H);
+            for (const p of info.parts) {
+                try {
+                    const mesh = await _buildToolPartMesh(p);
+                    if (charMesh !== group || group.userData.toolToken !== token) { mesh && mesh.material.dispose(); return; }
+                    if (mesh) held.add(mesh);
+                } catch (e) { logLuaOutput('warn', 'Tool: ' + (p.name || '?') + ' — ' + (e && e.message || e)); }
+            }
+            if (charMesh !== group || group.userData.toolToken !== token) return;
+            root.add(held);
+            group.add(root);
+            group.userData.toolRoot = root;
+            _setRightArmRaised(group, true);
         }
 
         async function setupPlayerAvatar(group) {
@@ -9929,24 +10047,44 @@ end
                 catch (e) { console.warn('Clone: меш/физика клона не построены:', e); }
             }
         }
+        // LocalScript выполняется на клиенте: в Backpack/Character игрока, PlayerGui, PlayerScripts
+        function luaIsUnderClientContainer(ref) {
+            let cur = ref, g = 0;
+            while (cur !== undefined && cur !== -1 && g++ < 200) {
+                if (cur === luaCharacterRef) return true;
+                const i = luaByRef[cur];
+                if (i && (i.cls === 'Backpack' || i.cls === 'PlayerGui' || i.cls === 'PlayerScripts')) return true;
+                cur = luaParentByRef[cur];
+            }
+            return false;
+        }
+        // Script-ы клона запускаются в серверной VM, LocalScript-ы клона — в клиентской. Раньше LocalScript-ы клонов вообще
+        // не стартовали: ClientActivate/ClientLogic у Tool из StarterPack при старте Play запускались на ОРИГИНАЛЕ в
+        // StarterPack (script.Parent = он), tool.Activated/Equipped вешались на него — а у клона в Backpack/руке слушателей
+        // не было, и тап по экрану с предметом в руке ничего не делал.
         function luaStartClonedScripts(root) {
-            if (!luaServerL || !luaIsUnderServerContainer(root)) return;
+            const server = !!luaServerL && luaIsUnderServerContainer(root);
+            const client = !!luaClientL && luaIsUnderClientContainer(root);
+            if (!server && !client) return;
             const stack = [root];
             while (stack.length) {
                 const r0 = stack.pop();
                 for (const c of (luaChildrenByRef[r0] || [])) stack.push(c);
                 const info = luaByRef[r0];
-                if (!info || info.cls !== 'Script' || luaStartedClonedScripts.has(r0)) continue;
+                if (!info || luaStartedClonedScripts.has(r0)) continue;
+                const isLocal = info.cls === 'LocalScript';
+                if (isLocal ? !client : !(info.cls === 'Script' && server)) continue;
                 const origin = luaCloneOrigin[r0];
                 const scr = origin !== undefined ? luaScriptsByRef[origin] : undefined;
                 if (!scr || scr.disabled) continue;
                 luaStartedClonedScripts.add(r0);
-                const runAs = Object.assign({}, scr, { ref: r0, cls: 'Script' });
+                const runAs = Object.assign({}, scr, { ref: r0, cls: info.cls });
                 // отложенно: как в Roblox, скрипт клона стартует после того, как текущий код доработал до yield
                 setTimeout(() => {
-                    if (!isPlaying || !luaServerL) return;
-                    try { runLuaScript(runAs, luaServerL); }
-                    catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, 'Script'); }
+                    const L = isLocal ? luaClientL : luaServerL;
+                    if (!isPlaying || !L) return;
+                    try { runLuaScript(runAs, L); }
+                    catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, info.cls); }
                 }, 0);
             }
         }
@@ -10125,6 +10263,7 @@ end
             if (luaByRef[ref] && luaByRef[ref].cls === 'Tool' && luaCharacterRef !== -1) {
                 if (parentRef === luaCharacterRef && oldParent !== luaCharacterRef) fireLuaSignal(ref, 'Equipped', []);
                 else if (oldParent === luaCharacterRef && parentRef !== luaCharacterRef) fireLuaSignal(ref, 'Unequipped', []);
+                if (parentRef === luaCharacterRef || oldParent === luaCharacterRef) scheduleCharacterTool();   // предмет в руке
             }
             if (parentRef !== -1) { luaRealizeClonedParts(ref); luaStartClonedScripts(ref); }
         }
@@ -12171,7 +12310,7 @@ end
             // После запуска скриптов overlay перерисовывается начисто (renderGuiOverlayFromClient ниже) уже с их правками.
             try { renderGuiOverlayFromClient(); } catch (e) { console.warn('early GUI render:', e); }
             for (const scr of r.scripts) {
-                if (!_isClientScript(scr) || _underCharacterScripts(scr.ref)) continue;
+                if (!_isClientScript(scr) || _underCharacterScripts(scr.ref) || _inServerStorage(scr.ref)) continue;
                 const clonedRef = refMap[scr.ref];
                 const runAs = Object.assign({}, scr, { cls: 'LocalScript' }, clonedRef !== undefined ? { ref: clonedRef } : {});
                 try { runLuaScript(runAs, luaClientL); }

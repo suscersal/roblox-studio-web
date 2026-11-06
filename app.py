@@ -6547,6 +6547,75 @@ def api_outfit_item(ref):
                     'color': get_part_color(hp), 'weld': weld, 'attachment': att})
 
 
+@flask_app.route('/api/tool_item/<int:ref>')
+def api_tool_item(ref):
+    """Внешний вид Tool ИЗ ФАЙЛА для отрисовки в руке персонажа: все видимые детали Tool (Handle и остальное)
+    с CFrame относительно Handle + Tool.Grip. Клиент по ref оригинала строит модель и крепит к правой руке."""
+    parsed = state.get('parsed')
+    if not parsed:
+        return jsonify({'ok': False, 'error': 'карта не открыта'})
+    r2c, props = parsed['referent_to_class'], parsed['props']
+    if r2c.get(ref) != 'Tool':
+        return jsonify({'ok': False, 'error': 'не Tool'})
+    kids = _children_of(parsed)
+    BASE = ('Part', 'MeshPart', 'WedgePart', 'CornerWedgePart', 'TrussPart')
+    parts, stack = [], list(kids.get(ref, []))
+    while stack and len(parts) < 80:
+        k = stack.pop(0)
+        stack = list(kids.get(k, [])) + stack
+        if r2c.get(k) in BASE and isinstance(props.get(k, {}).get('CFrame'), dict):
+            parts.append(k)
+    handle = next((k for k in kids.get(ref, []) if r2c.get(k) in BASE and props[k].get('Name') == 'Handle'),
+                  parts[0] if parts else None)
+    if handle is None:
+        return jsonify({'ok': False, 'error': 'у Tool нет Handle'})
+    hcf = props[handle]['CFrame']
+    hp, hr = get_pos(hcf), get_rot_matrix(hcf)
+
+    def rel_cf(cf):  # Handle^-1 * part -> [x, y, z, r00..r22]
+        pp, pr = get_pos(cf), get_rot_matrix(cf)
+        d = [pp[i] - hp[i] for i in range(3)]
+        pos = [sum(hr[r * 3 + i] * d[r] for r in range(3)) for i in range(3)]
+        rot = [sum(hr[r * 3 + i] * pr[r * 3 + j] for r in range(3)) for i in range(3) for j in range(3)]
+        return [float(v) for v in pos + rot]
+
+    out = []
+    for k in parts:
+        pr = props[k]
+        tr = safe_float(pr.get('Transparency', 0), 0)
+        if tr >= 0.99:
+            continue  # невидимый Handle
+        sz = pr.get('Size') if isinstance(pr.get('Size'), dict) else {}
+        size = [safe_float(sz.get('x', 1), 1), safe_float(sz.get('y', 1), 1), safe_float(sz.get('z', 1), 1)]
+        mesh = {'kind': 'box'}
+        if r2c[k] == 'MeshPart':
+            mid = _rbxassetid_num(pr.get('MeshId'))
+            if mid:
+                mesh = {'kind': 'meshpart', 'meshId': mid,
+                        'textureId': _rbxassetid_num(pr.get('TextureID') or pr.get('TextureId'))}
+        else:
+            for c in kids.get(k, []):
+                if r2c.get(c) == 'SpecialMesh':
+                    sp = props[c]
+                    mid = _rbxassetid_num(sp.get('MeshId'))
+                    if mid:
+                        sc, of = sp.get('Scale') or {}, sp.get('Offset') or {}
+                        mesh = {'kind': 'special', 'meshId': mid,
+                                'textureId': _rbxassetid_num(sp.get('TextureId')),
+                                'scale': [safe_float(sc.get('x', 1), 1), safe_float(sc.get('y', 1), 1), safe_float(sc.get('z', 1), 1)],
+                                'offset': [safe_float(of.get('x', 0), 0), safe_float(of.get('y', 0), 0), safe_float(of.get('z', 0), 0)]}
+                    break
+        shape = pr.get('shape', pr.get('Shape'))
+        out.append({'name': pr.get('Name'), 'size': size, 'color': get_part_color(pr), 'transparency': tr,
+                    'shape': {0: 'sphere', 2: 'cylinder'}.get(shape, 'box') if r2c[k] == 'Part' else 'box',
+                    'mesh': mesh, 'cf': rel_cf(pr['CFrame'])})
+    if not out:
+        return jsonify({'ok': False, 'error': 'у Tool нет видимых деталей'})
+    grip = props[ref].get('Grip')
+    return jsonify({'ok': True, 'cls': 'Tool', 'name': props[ref].get('Name'), 'parts': out,
+                    'grip': _cf12(grip) if isinstance(grip, dict) else None})
+
+
 @flask_app.route('/api/roblox/me')
 def api_roblox_me():
     """Ник/ID аккаунта, под которым выполнен вход (кука .ROBLOSECURITY).
