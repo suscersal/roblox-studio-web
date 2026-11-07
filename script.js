@@ -10009,6 +10009,18 @@ end
         // ServerScriptService — его Script-ы запускаются (script.Parent = склонированный контейнер).
         let luaScriptsByRef = {};            // ref скрипта из файла -> {ref,name,cls,source,...} (из /api/scripts)
         let luaStartedClonedScripts = new Set();
+        // Подписчики на AncestryChanged (ref -> есть соединение). Раньше AncestryChanged объявлялся, но не стрелял никогда, и
+        // кастомный инвентарь (tool.AncestryChanged) не узнавал, что Tool уничтожен/убран из Backpack — слот оставался в хотбаре.
+        let luaAncestryRefs = new Set();
+        function luaFireAncestryChanged(ref, newParentRef) {
+            if (!luaAncestryRefs.size) return;
+            const arg = [{ __instanceRef: ref }, (newParentRef === undefined || newParentRef === -1) ? null : { __instanceRef: newParentRef }];
+            for (const r of Array.from(luaAncestryRefs)) {
+                let cur = r, hit = false, g = 0;
+                while (cur !== undefined && cur !== -1 && g++ < 200) { if (cur === ref) { hit = true; break; } cur = luaParentByRef[cur]; }
+                if (hit) fireLuaSignal(r, 'AncestryChanged', arg);
+            }
+        }
         function luaIsUnderServerContainer(ref) {
             let cur = ref, g = 0, viaBackpack = false;
             while (cur !== undefined && cur !== -1 && g++ < 200) {
@@ -10259,6 +10271,7 @@ end
                 fireLuaSignal(parentRef, 'ChildAdded', [{ __instanceRef: ref }]);
             }
             if (parentRef !== -1 && parentRef !== oldParent) luaFireDescendantAdded(ref, parentRef);
+            if (parentRef !== oldParent) luaFireAncestryChanged(ref, parentRef);
             // Tool перешёл в персонажа / вышел из него — Equipped / Unequipped (как в Roblox; на этом строится хотбар)
             if (luaByRef[ref] && luaByRef[ref].cls === 'Tool' && luaCharacterRef !== -1) {
                 if (parentRef === luaCharacterRef && oldParent !== luaCharacterRef) fireLuaSignal(ref, 'Equipped', []);
@@ -10267,11 +10280,15 @@ end
             }
             if (parentRef !== -1) { luaRealizeClonedParts(ref); luaStartClonedScripts(ref); }
         }
-        function luaDestroyRef(ref) {
+        function luaDestroyRef(ref, _inner) {
+            if (!_inner) {
+                fireLuaSignal(ref, 'Destroying', []);
+                luaFireAncestryChanged(ref, -1);
+            }
             const _wasHeldTool = luaCharacterRef !== -1 && luaParentByRef[ref] === luaCharacterRef && luaByRef[ref] && luaByRef[ref].cls === 'Tool';
             // Destroy в Roblox убирает и ВСЕХ потомков. Раньше чистился только сам ref: после g:Destroy() у модели «Кнопка Z»
             // (подобранной у сундука) её деталь-меш оставалась в сцене, видимой и с физтелом — предмет «не пропадал».
-            for (const c of (luaChildrenByRef[ref] || []).slice()) luaDestroyRef(c);
+            for (const c of (luaChildrenByRef[ref] || []).slice()) luaDestroyRef(c, true);
             if (_promptRegistry[ref]) {   // подсказка уничтожена — не оставляем в реестре (иначе утекает и ловит PromptShown/Hidden)
                 if (_promptHeldRef === String(ref) || _promptHeldRef === ref) _promptHoldEnd();
                 delete _promptRegistry[ref];
@@ -11274,6 +11291,7 @@ end
                 }
                 const key = ref + '|' + evName;
                 (luaSignalsByKey[key] = luaSignalsByKey[key] || []).push(id);
+                if (evName === 'AncestryChanged') luaAncestryRefs.add(ref);
                 return 0;
             });
             def('__unregister_conn', function (L2) {
@@ -12258,7 +12276,7 @@ end
 
             // ModuleScript-исходники по ref — require() ищет тут (см.
             luaScriptsByRef = {};
-            luaStartedClonedScripts = new Set();
+            luaStartedClonedScripts = new Set(); luaAncestryRefs = new Set();
             for (const scr of r.scripts) luaScriptsByRef[scr.ref] = scr;
             luaModuleSourceByRef = {};
             luaModuleNameByRef = {};
@@ -12373,7 +12391,7 @@ end
             luaCharacterRef = -1;
             luaPlayerRef = -1;
             luaScriptsByRef = {};
-            luaStartedClonedScripts = new Set();
+            luaStartedClonedScripts = new Set(); luaAncestryRefs = new Set();
             luaControlsDisabled = false;
             luaReleaseAllKeys();
             luaHollowUnions.clear(); luaGhostedUnions.clear();
