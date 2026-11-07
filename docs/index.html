@@ -19,6 +19,7 @@ nav .logo{font-weight:700;color:var(--text)}
 nav .sp{flex:1}
 nav a.l{color:var(--muted);font-size:14px}
 nav a.l:hover{color:var(--text);text-decoration:none}
+@media(max-width:560px){nav .wrap{gap:12px}nav a.l[href^="#"]:not(#lang){display:none}}
 .btn{display:inline-block;padding:10px 18px;border-radius:8px;background:var(--btn);color:var(--text);font-weight:600;font-size:15px;border:0;cursor:pointer}
 .btn:hover{text-decoration:none;filter:brightness(1.15)}
 .btn.p{background:var(--accent)}.btn.g{background:var(--green)}
@@ -46,57 +47,97 @@ pre.cmd{background:#020617;border:1px solid var(--line);border-radius:8px;paddin
 footer{border-top:1px solid var(--line);padding:26px 0;color:var(--muted);font-size:14px;text-align:center}
 
 /* ===== DEMO ===== */
-#studio{border:1px solid #4b5563;border-radius:10px;overflow:hidden;background:#111827;box-shadow:0 20px 60px rgba(0,0,0,.5);user-select:none;-webkit-user-select:none}
-.tb{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:5px 6px;background:#1f2937;border-bottom:1px solid #111827}
-.tb .t{font-weight:700;font-size:13px;margin:0 8px 0 4px}
-.tb button{background:#374151;color:#f3f4f6;border:0;border-radius:4px;padding:5px 9px;font-size:12px;cursor:pointer;font-family:inherit}
-.tb button:hover{background:#4b5563}
-.tb button.gr{background:#166534}.tb button.rd{background:#7f1d1d}.tb button.bl{background:#1d4ed8}.tb button.pu{background:#6d28d9}
-.tb button.on{outline:2px solid #60a5fa}
-.tb .sep{width:1px;height:20px;background:#4b5563;margin:0 3px}
-.main{display:grid;grid-template-columns:200px 1fr 250px;height:520px}
-#explorer,#right{background:#1f2937;overflow:auto;font-size:12px;min-height:0}
-#explorer{border-right:1px solid #111827}
-#right{border-left:1px solid #111827;display:flex;flex-direction:column}
-.ph{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;font-weight:600;font-size:12px;background:#273449;position:sticky;top:0}
-.row{display:flex;align-items:center;gap:5px;padding:2px 6px;cursor:pointer;white-space:nowrap;height:21px}
-.row:hover{background:#2f3d52}
-.row.sel{background:#2563eb}
-.row img{width:16px;height:16px;image-rendering:auto}
-#vp{position:relative;min-width:0;min-height:0;background:#6aa9e0;touch-action:none;cursor:grab}
+#studio{--ui:1;border:1px solid #374151;border-radius:10px;overflow:hidden;background:#111827;box-shadow:0 20px 60px rgba(0,0,0,.5);user-select:none;-webkit-user-select:none;position:relative;font-size:13px}
+#studio button,#studio input,#studio select{font-family:inherit}
+.zm{zoom:var(--ui)}
+#tbt{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px 8px;min-height:40px;background:#1f2937;border-bottom:1px solid #374151}
+#tbt .t{font-weight:700;font-size:14px;margin-right:6px;white-space:nowrap}
+#tbt button{background:#374151;color:#fff;border:0;border-radius:4px;padding:4px 10px;font-size:13px;height:30px;cursor:pointer;white-space:nowrap}
+#tbt button:hover{filter:brightness(1.2)}
+#tbt .green{background:#065f46}#tbt .red{background:#7f1d1d}#tbt .blue{background:#1e3a8a}#tbt .acc{background:#2563eb}#tbt .stop{background:#991b1b}
+#hamb{display:none}
+.pop{position:absolute;z-index:40;background:#1f2937;border:1px solid #4b5563;border-radius:8px;padding:4px;box-shadow:0 10px 30px rgba(0,0,0,.55);display:none;min-width:160px}
+.pop.show{display:block}
+.pop button,.pop label{display:flex;width:100%;align-items:center;gap:8px;text-align:left;background:transparent;color:#f3f4f6;border:0;padding:6px 10px;border-radius:5px;font-size:13px;cursor:pointer}
+.pop button:hover{background:#374151}
+.pop select{margin-left:auto;background:#374151;color:#fff;border:1px solid #4b5563;border-radius:4px;padding:2px 4px;font-size:12px}
+.main{display:grid;grid-template-columns:var(--exw,220px) 6px minmax(0,1fr) 6px var(--rtw,260px);height:540px}
+.pane{background:#1f2937;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.sp{background:#111827;display:flex;align-items:center;justify-content:center;touch-action:none}
+.sp.v{cursor:col-resize}.sp.h{cursor:row-resize;height:6px}
+.sp::after{content:"";background:#4b5563;border-radius:2px}
+.sp.v::after{width:2px;height:30px}.sp.h::after{height:2px;width:36px}
+#exh{background:#111827;height:34px;display:flex;align-items:center;gap:4px;padding:0 8px;font-weight:700;font-size:13px;flex:none}
+#exh span{flex:1}
+#exh button{width:28px;height:24px;background:#374151;color:#fff;border:0;border-radius:4px;cursor:pointer;font-size:12px}
+#exh button.on{background:#3b82f6}
+#search{margin:4px;flex:none;background:#374151;color:#fff;border:1px solid #4b5563;border-radius:4px;padding:3px 8px;font-size:12px;min-width:0}
+#tree{overflow:auto;flex:1;min-height:0}
+.row{display:flex;align-items:center;gap:4px;height:26px;padding-right:6px;cursor:pointer;white-space:nowrap;font-size:13px}
+.row:hover{background:#2f3d52}.row.sel{background:#2563eb}
+.row .ar{width:14px;flex:none;text-align:center;color:#9ca3af;font-size:9px}
+.row img{width:16px;height:16px;flex:none}
+#vp{position:relative;min-width:0;min-height:0;background:#6aa9e0;touch-action:none;cursor:grab;overflow:hidden}
 #vp:active{cursor:grabbing}
 #vp canvas{display:block;width:100%;height:100%}
-.ov{position:absolute;font-size:11px;background:rgba(0,0,0,.6);color:#e5e7eb;padding:4px 7px;border-radius:5px;pointer-events:none}
-#fps{left:8px;top:8px;color:#4ade80;font-family:ui-monospace,monospace}
+.ov{position:absolute;font-size:11px;background:rgba(0,0,0,.65);color:#e5e7eb;padding:4px 8px;border-radius:5px;pointer-events:none}
+#fps{left:8px;top:8px;color:#4ade80;font-family:ui-monospace,monospace;white-space:nowrap}
 #hint{left:8px;bottom:8px;line-height:1.5}
-#q{position:absolute;right:8px;top:8px;display:flex;gap:2px}
-#q button{background:rgba(31,41,55,.9);color:#fff;border:0;font-size:11px;padding:3px 7px;cursor:pointer;border-radius:3px}
+#q{position:absolute;right:8px;top:8px;display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end;max-width:60%}
+#q button{background:rgba(31,41,55,.92);color:#fff;border:0;font-size:11px;padding:4px 8px;cursor:pointer;border-radius:3px}
 #q button.on{background:#3b82f6}
-.tabs{display:flex;background:#1f2937;border-bottom:1px solid #111827}
-.tab{flex:1;text-align:center;padding:7px;font-size:12px;cursor:pointer;color:#9ca3af;border-bottom:2px solid transparent}
+#xf{position:absolute;left:8px;top:40px;display:flex;gap:3px;flex-wrap:wrap;max-width:calc(100% - 16px)}
+#xf button{width:32px;height:32px;border:0;border-radius:6px;background:rgba(31,41,55,.92);color:#fff;font-size:15px;cursor:pointer;line-height:1;padding:0}
+#xf button.on{background:#3b82f6}#xf button:disabled{opacity:.45;cursor:default}
+#xf button:not(:disabled):hover{filter:brightness(1.25)}
+#joy,#jb{display:none}
+#vp.play #joy{display:block;position:absolute;left:14px;bottom:14px;width:116px;height:116px;border-radius:50%;background:rgba(55,65,81,.55);border:2px solid rgba(31,41,55,.7);touch-action:none}
+#joy i{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;background:#3b82f6;border:2px solid #fff3}
+#vp.play #jb{display:flex;flex-direction:column;gap:6px;position:absolute;right:14px;bottom:14px}
+#jb button{width:48px;height:48px;border:0;border-radius:8px;background:rgba(31,41,55,.92);color:#fff;font-size:20px;cursor:pointer}
+.tabs{display:flex;background:#1f2937;border-bottom:1px solid #111827;flex:none}
+.tab{flex:1;text-align:center;padding:8px;font-size:13px;cursor:pointer;color:#9ca3af;border-bottom:2px solid transparent}
 .tab.on{color:#fff;border-bottom-color:#3b82f6}
-#props{padding:6px 8px;overflow:auto;flex:1;min-height:0}
+#props{padding:8px;overflow:auto;flex:1;min-height:0}
 #props .head{display:flex;gap:8px;align-items:center;margin-bottom:8px}
 #props .head img{width:30px;height:30px}
 #props .head b{display:block;font-size:14px}
 #props .head small{color:#9ca3af}
-.sec{font-weight:700;font-size:11px;margin:8px 0 3px;color:#d1d5db;border-bottom:1px solid #374151;padding-bottom:2px}
+.sec{font-weight:700;font-size:11px;margin:10px 0 4px;color:#d1d5db;border-bottom:1px solid #374151;padding-bottom:2px}
 .xyz{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
 .xyz label{display:flex;align-items:center;gap:3px;color:#9ca3af;font-size:11px}
-input.n,input.t{width:100%;min-width:0;background:#374151;color:#f3f4f6;border:1px solid #4b5563;border-radius:3px;padding:3px 4px;font-size:11px;font-family:inherit}
-.pr{display:grid;grid-template-columns:90px 1fr;gap:6px;align-items:center;margin:4px 0;color:#d1d5db;font-size:11px}
-input[type=color]{width:100%;height:22px;border:1px solid #4b5563;background:#374151;border-radius:3px;padding:0}
+input.n,input.t{width:100%;min-width:0;background:#374151;color:#f3f4f6;border:1px solid #4b5563;border-radius:3px;padding:3px 4px;font-size:12px}
+.pr{display:grid;grid-template-columns:84px 1fr;gap:6px;align-items:center;margin:5px 0;color:#d1d5db;font-size:12px}
+input[type=color]{width:100%;height:24px;border:1px solid #4b5563;background:#374151;border-radius:3px;padding:0}
 #script{display:none;flex:1;flex-direction:column;min-height:0}
+#script .ph{padding:6px 8px;font-weight:600;font-size:12px;background:#273449}
 #script pre{flex:1;overflow:auto;padding:8px;font-size:11.5px;color:#d1d5db;white-space:pre;background:#0f172a}
 .k{color:#c084fc}.s{color:#86efac}.c{color:#6b7280}.nm{color:#fbbf24}
-#out{height:92px;background:#0f172a;border-top:2px solid #111827;overflow:auto;font:11px/1.45 ui-monospace,monospace;padding:4px 8px;color:#cbd5e1}
+#outw{background:#0f172a}
+#outh{display:flex;align-items:center;gap:6px;padding:4px 10px;font-weight:700;font-size:12px;color:#e5e7eb}
+#outh span{flex:1}
+#outh select{background:#1f2937;color:#fff;border:1px solid #374151;border-radius:4px;padding:2px 6px;font-size:12px}
+#outh button{background:transparent;border:0;color:#9ca3af;cursor:pointer;font-size:14px}
+#out{height:var(--outh,92px);overflow:auto;font:11.5px/1.45 ui-monospace,monospace;padding:2px 10px 6px;color:#cbd5e1}
 #out .i{color:#93c5fd}#out .w{color:#fde68a}
+#out[data-f="i"] div:not(.i){display:none}#out[data-f="w"] div:not(.w){display:none}
+#mtabs{display:none;background:#1f2937;border-top:1px solid #374151}
+#mtabs button{flex:1;padding:11px 0;background:transparent;border:0;color:#9ca3af;font-size:14px;cursor:pointer;border-top:2px solid transparent}
+#mtabs button.on{color:#fff;background:#111827;border-top-color:#3b82f6}
 .demo-note{color:var(--muted);font-size:13px;margin-top:10px}
 @media(max-width:860px){
  .main{grid-template-columns:1fr;height:auto}
+ .sp{display:none}
  #vp{height:340px}
- #explorer{max-height:170px;border-right:0}
- #right{border-left:0;max-height:300px}
+ #explorer{height:240px}
+ #right{height:320px}
+ #studio[data-m="scene"] #explorer,#studio[data-m="scene"] #right{display:none}
+ #studio[data-m="panels"] #vp{display:none}
+ #tbt .t{display:none}
+ #hamb{display:inline-block}
+ #tbt button.x{display:none}
+ #tbt.open button.x{display:inline-block}
+ #mtabs{display:flex}
 }
 </style>
 </head>
@@ -124,38 +165,87 @@ input[type=color]{width:100%;height:22px;border:1px solid #4b5563;background:#37
 
 <section id="demo"><div class="wrap">
   <h2 data-ru="Попробуй прямо здесь" data-en="Try it right here">Попробуй прямо здесь</h2>
-  <p class="sub" data-ru="Крути сцену, выбирай объекты в Explorer или кликом по 3D, меняй свойства справа, жми ▶ Play."
-     data-en="Rotate the scene, pick objects in Explorer or by clicking in 3D, edit properties on the right, hit ▶ Play.">Крути сцену, выбирай объекты в Explorer или кликом по 3D, меняй свойства справа, жми ▶ Play.</p>
+  <p class="sub" data-ru="Выбирай объекты в Explorer или кликом по 3D, двигай ✥, вращай ⟳ и масштабируй ⤢ их гизмо, включай привязку 🧲, отменяй ↶, меняй свойства справа и жми ▶ Play."
+     data-en="Pick objects in Explorer or by clicking in 3D, move ✥, rotate ⟳ and scale ⤢ them with gizmos, toggle snapping 🧲, undo ↶, edit properties on the right and hit ▶ Play.">Выбирай объекты в Explorer или кликом по 3D, двигай ✥, вращай ⟳ и масштабируй ⤢ их гизмо, включай привязку 🧲, отменяй ↶, меняй свойства справа и жми ▶ Play.</p>
 
-  <div id="studio">
-    <div class="tb">
-      <span class="t">🎮 RbxStudio</span><span class="sep"></span>
-      <button class="gr" id="bAdd">➕ Add</button>
-      <button class="rd" id="bDel">🗑 Delete</button><span class="sep"></span>
-      <button class="gr" id="bPlay">▶ Play</button><span class="sep"></span>
-      <button id="bReset">🏠 Reset</button>
-      <button id="bTop">⬆ Top</button>
-      <button id="bFront">📷 Front</button>
-      <button id="bRight">➡ Right</button>
-      <button id="bGrid" class="on">📏</button>
+  <div id="studio" data-m="scene">
+    <div id="tbt" class="zm">
+      <button id="hamb" title="Menu">☰</button><span class="t">🎮 RbxStudio</span>
+      <button id="bFile" class="x">📁 File ▾</button>
+      <button id="bSave" class="green">💾 Save</button>
+      <button id="bAdd" class="x">➕ Add</button>
+      <button id="bDel" class="red x">🗑 Delete</button>
+      <button id="bRef" class="x">🔄 Refresh</button>
+      <button id="bPub" class="blue x">☁ Publish</button>
+      <button id="bAcc" class="acc x">👤 Account</button>
+      <button id="bUI" class="x">🎚 UI</button>
+      <button id="bLang" class="x">🌐 EN</button>
+      <button id="bPlay" class="green">▶ Play</button>
+      <button id="bView" class="x">👤 View</button>
+      <button id="bReset" class="x">🏠 Reset</button>
+      <button id="bTop" class="x">⬆ Top</button>
+      <button id="bFront" class="x">📷 Front</button>
+      <button id="bRight" class="x">➡ Right</button>
+    </div>
+    <div class="pop" id="mFile">
+      <button data-a="open">📂 Open .rbxl…</button>
+      <button data-a="saveas">💾 Save as…</button>
+      <button data-a="newp">🆕 New place</button>
+      <button data-a="resetdemo">🔁 Reset demo scene</button>
+    </div>
+    <div class="pop" id="mAdd">
+      <button data-g="box">🟦 Part</button>
+      <button data-g="ball">🔴 Ball</button>
+      <button data-g="cyl">🟣 Cylinder</button>
+      <button data-g="wedge">🔺 WedgePart</button>
     </div>
     <div class="main">
-      <div id="explorer"><div class="ph"><span>Explorer</span></div><div id="tree"></div></div>
+      <div id="explorer" class="pane zm">
+        <div id="exh"><span>Explorer</span><button id="exStub" class="on" title="Camera / Terrain">☑</button><button id="exOpen" title="Expand all">◢</button><button id="exClose" title="Collapse all">◣</button></div>
+        <input id="search" type="text" placeholder="🔍 Search...">
+        <div id="tree"></div>
+      </div>
+      <div class="sp v" id="spL"></div>
       <div id="vp">
         <div class="ov" id="fps">FPS: --</div>
-        <div id="q"><button data-q="0">Low</button><button data-q="1" class="on">Med</button><button data-q="2">High</button></div>
-        <div class="ov" id="hint">🖱 ЛКМ — вращать | ПКМ/Shift — двигать | колесо — зум<br>👆 тач: 1 палец — вращать, 2 — зум</div>
+        <div id="q"><button data-q="0">Low</button><button data-q="1" class="on">Med</button><button data-q="2">High</button><button data-u="1" class="on">UI 1×</button><button data-u="1.5">1.5×</button><button data-u="2">2×</button></div>
+        <div id="xf">
+          <button data-tool="select" class="on" title="Select (Q)">⬚</button>
+          <button data-tool="move" title="Move (W)">✥</button>
+          <button data-tool="rotate" title="Rotate (E)">⟳</button>
+          <button data-tool="scale" title="Scale (R)">⤢</button>
+          <button id="xFocus" title="Focus (F)">📍</button>
+          <button id="xSpace" title="World / Local">🌐</button>
+          <button id="xSnap" class="on" title="Snap">🧲</button>
+          <button id="xUndo" title="Undo (Ctrl+Z)" disabled>↶</button>
+          <button id="xRedo" title="Redo (Ctrl+Y)" disabled>↷</button>
+          <button id="xGear" title="Settings">⚙</button>
+        </div>
+        <div class="pop" id="mGear" style="left:8px;top:76px">
+          <label><input type="checkbox" id="gGrid" checked> Grid</label>
+          <label>Move snap <select id="gMove"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select></label>
+          <label>Rotate snap <select id="gRot"><option>5</option><option selected>15</option><option>45</option><option>90</option></select></label>
+        </div>
+        <div class="ov" id="hint"></div>
+        <div id="joy"><i></i></div>
+        <div id="jb"><button id="jUp">⬆</button><button id="jDn">⬇</button></div>
       </div>
-      <div id="right">
+      <div class="sp v" id="spR"></div>
+      <div id="right" class="pane zm">
         <div class="tabs"><div class="tab on" data-t="props">Properties</div><div class="tab" data-t="script">Script</div></div>
         <div id="props"></div>
         <div id="script"><div class="ph"><span id="sname">Script</span></div><pre id="code"></pre></div>
       </div>
     </div>
-    <div id="out"></div>
+    <div class="sp h" id="spB"></div>
+    <div id="outw">
+      <div id="outh"><span>Output</span><select id="outf"><option value="">All</option><option value="i">Info</option><option value="w">Warnings</option></select><button id="outClr" title="Clear">🗑</button></div>
+      <div id="out"></div>
+    </div>
+    <div id="mtabs"><button data-m="scene" class="on" data-ru="🎬 Сцена" data-en="🎬 Scene">🎬 Сцена</button><button data-m="panels" data-ru="📋 Панели" data-en="📋 Panels">📋 Панели</button></div>
   </div>
-  <p class="demo-note" data-ru="Это упрощённая демо-сцена на three.js. Настоящий редактор открывает реальные .rbxl-файлы — запусти его локально или установи APK."
-     data-en="This is a simplified three.js demo scene. The real editor opens actual .rbxl files — run it locally or install the APK.">Это упрощённая демо-сцена на three.js. Настоящий редактор открывает реальные .rbxl-файлы — запусти его локально или установи APK.</p>
+  <p class="demo-note" data-ru="Это упрощённая демо-сцена на three.js с тем же интерфейсом, что и у настоящего редактора. Он открывает реальные .rbxl-файлы — запусти его локально или установи APK."
+     data-en="This is a simplified three.js demo scene with the same interface as the real editor. The real one opens actual .rbxl files — run it locally or install the APK.">Это упрощённая демо-сцена на three.js с тем же интерфейсом, что и у настоящего редактора. Он открывает реальные .rbxl-файлы — запусти его локально или установи APK.</p>
 </div></section>
 
 <section id="features"><div class="wrap">
@@ -214,21 +304,32 @@ python3 app.py</pre>
 <script src="three.min.js"></script>
 <script>
 (function(){
+var $=function(s){return document.querySelector(s)},$$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
 /* ---------- язык ---------- */
 var lang='ru';
+var TXT={
+ ru:{hint:'🖱 ЛКМ — вращать | ПКМ/Shift — двигать | колесо — зум<br>👆 тач: 1 палец — вращать, 2 — зум',play:'🕹 Джойстик — ходить, ⬆⬇ — высота',
+  loaded:'Демо загружено',sel:'Выбрано: ',added:'Добавлено: ',deleted:'Удалено: ',playOn:'Play: запуск — Hello from RbxStudio Web!',playOff:'Play: остановлено',
+  base:'Baseplate нельзя удалить в демо',demo:'Недоступно в демо — есть в полном редакторе',tool:'Инструмент: ',snapOn:'Привязка: вкл',snapOff:'Привязка: выкл',
+  space:'Пространство: ',world:'мировое',local:'локальное',undo:'Отмена',redo:'Повтор',refresh:'Сцена обновлена',reset:'Демо-сцена сброшена',nosel:'Сначала выбери объект'},
+ en:{hint:'🖱 LMB — rotate | RMB/Shift — pan | wheel — zoom<br>👆 touch: 1 finger — rotate, 2 — zoom',play:'🕹 Joystick — walk, ⬆⬇ — height',
+  loaded:'Demo loaded',sel:'Selected: ',added:'Added: ',deleted:'Deleted: ',playOn:'Play: started — Hello from RbxStudio Web!',playOff:'Play: stopped',
+  base:'Baseplate cannot be deleted in the demo',demo:'Not available in the demo — use the full editor',tool:'Tool: ',snapOn:'Snap: on',snapOff:'Snap: off',
+  space:'Space: ',world:'world',local:'local',undo:'Undo',redo:'Redo',refresh:'Scene refreshed',reset:'Demo scene reset',nosel:'Select an object first'}
+};
+function T(k){return TXT[lang][k]}
 document.querySelectorAll('[data-ru]').forEach(function(e){e.dataset.ruHtml=e.innerHTML;});
-document.getElementById('lang').addEventListener('click',function(ev){
-  ev.preventDefault();lang=lang==='ru'?'en':'ru';
-  document.documentElement.lang=lang;this.textContent=lang==='ru'?'🌐 EN':'🌐 RU';
+function onLang(){
+  document.documentElement.lang=lang;$('#lang').textContent=lang==='ru'?'🌐 EN':'🌐 RU';$('#bLang').textContent=lang==='ru'?'🌐 EN':'🌐 RU';
   document.querySelectorAll('[data-en]').forEach(function(e){e.innerHTML=lang==='en'?e.dataset.en:e.dataset.ruHtml;});
-  document.getElementById('hint').innerHTML=lang==='ru'
-   ?'🖱 ЛКМ — вращать | ПКМ/Shift — двигать | колесо — зум<br>👆 тач: 1 палец — вращать, 2 — зум'
-   :'🖱 LMB — rotate | RMB/Shift — pan | wheel — zoom<br>👆 touch: 1 finger — rotate, 2 — zoom';
-});
+  setHint();
+}
+$('#lang').addEventListener('click',function(ev){ev.preventDefault();lang=lang==='ru'?'en':'ru';onLang();});
+$('#bLang').onclick=function(){$('#lang').click()};
+function setHint(){$('#hint').innerHTML=playing?T('play'):T('hint');}
 
 /* ---------- сцена ---------- */
-var $=function(s){return document.querySelector(s)};
-var vp=$('#vp');
+var vp=$('#vp'),studio=$('#studio');
 var renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.shadowMap.enabled=true;
 vp.insertBefore(renderer.domElement,vp.firstChild);
@@ -251,55 +352,104 @@ var rad=Math.PI/180,parts=[],counter=0,selected=null,box=null,playing=false;
 var geoBox=new THREE.BoxGeometry(1,1,1),geoBall=new THREE.SphereGeometry(.5,28,20),geoCyl=new THREE.CylinderGeometry(.5,.5,1,28);
 var ws=new THREE.Shape();ws.moveTo(-.5,-.5);ws.lineTo(.5,-.5);ws.lineTo(-.5,.5);ws.lineTo(-.5,-.5);
 var geoWedge=new THREE.ExtrudeGeometry(ws,{depth:1,bevelEnabled:false});geoWedge.center();
-var ICON={Part:'Part.png',Wedge:'WedgePart.png',Baseplate:'Part.png'};
-function addPart(name,cls,geo,color,pos,size,rot,anch){
-  var m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:color,roughness:.65,metalness:.05}));
+var GEO={box:geoBox,ball:geoBall,cyl:geoCyl,wedge:geoWedge};
+var CLS={box:'Part',ball:'Part',cyl:'Part',wedge:'WedgePart'};
+var ICON={Part:'Part.png',WedgePart:'WedgePart.png',Baseplate:'Part.png'};
+function addPart(name,cls,g,color,pos,size,rot,anch,model){
+  var m=new THREE.Mesh(GEO[g],new THREE.MeshStandardMaterial({color:color,roughness:.65,metalness:.05}));
   m.castShadow=true;m.receiveShadow=true;
-  m.userData={name:name,cls:cls,anchored:!!anch,vy:0};
+  m.userData={name:name,cls:cls,geo:g,anchored:!!anch,vy:0,model:model||''};
   m.position.set(pos[0],pos[1],pos[2]);m.scale.set(size[0],size[1],size[2]);
   m.rotation.set(rot[0]*rad,rot[1]*rad,rot[2]*rad);
-  m.userData.home={p:m.position.clone(),r:m.rotation.clone()};
   scene.add(m);parts.push(m);return m;
 }
-addPart('Baseplate','Baseplate',geoBox,0x4ade80,[0,-.5,0],[40,1,40],[0,0,0],true);
-addPart('Cube','Part',geoBox,0x3b82f6,[0,1,0],[2,2,2],[0,20,0]);
-addPart('Ball','Part',geoBall,0xef4444,[4,1,1],[2,2,2],[0,0,0]);
-addPart('Wedge','WedgePart',geoWedge,0xfacc15,[-4,1,2],[2,2,3],[0,90,0]);
-addPart('Cylinder','Part',geoCyl,0xa855f7,[1,1.5,-4],[2,3,2],[0,0,0]);
-var baseTop=0;
+function initScene(){
+  addPart('Baseplate','Baseplate','box',0x4ade80,[0,-.5,0],[40,1,40],[0,0,0],true);
+  addPart('Cube','Part','box',0x3b82f6,[0,1,0],[2,2,2],[0,20,0]);
+  addPart('Ball','Part','ball',0xef4444,[4,1,1],[2,2,2],[0,0,0]);
+  addPart('Wedge','WedgePart','wedge',0xfacc15,[-4,1,2],[2,2,3],[0,90,0]);
+  addPart('Cylinder','Part','cyl',0xa855f7,[1,1.5,-4],[2,3,2],[0,0,0]);
+  addPart('Base','Part','box',0x94a3b8,[-7,.5,-5],[4,1,4],[0,0,0],true,'Tower');
+  addPart('Mid','Part','box',0x64748b,[-7,2,-5],[2.5,2,2.5],[0,0,0],true,'Tower');
+  addPart('Top','Part','cyl',0xfb923c,[-7,3.6,-5],[1.5,1.2,1.5],[0,0,0],true,'Tower');
+}
 var CODE='<span class="c">-- ServerScriptService.Script</span>\n<span class="k">local</span> part = workspace:<span class="nm">FindFirstChild</span>(<span class="s">"Cube"</span>)\n\n<span class="k">while</span> part <span class="k">do</span>\n    part.Color = Color3.<span class="nm">fromHSV</span>(tick() % <span class="nm">5</span> / <span class="nm">5</span>, <span class="nm">1</span>, <span class="nm">1</span>)\n    <span class="nm">print</span>(<span class="s">"Hello from RbxStudio Web!"</span>)\n    <span class="nm">task</span>.wait(<span class="nm">1</span>)\n<span class="k">end</span>';
 $('#code').innerHTML=CODE;
 
 /* ---------- вывод ---------- */
 function log(t,c){var o=$('#out'),d=document.createElement('div');if(c)d.className=c;
   d.textContent=new Date().toTimeString().slice(0,8)+'  '+t;o.appendChild(d);o.scrollTop=o.scrollHeight;}
-log('RbxStudio Web demo loaded','i');
+$('#outf').onchange=function(){$('#out').dataset.f=this.value};
+$('#outClr').onclick=function(){$('#out').innerHTML=''};
+
+/* ---------- история (undo / redo) ---------- */
+var hist=[],hi=-1;
+function snapshot(){return {sel:parts.indexOf(selected),parts:parts.map(function(m){var u=m.userData;return {n:u.name,c:u.cls,g:u.geo,col:m.material.color.getHex(),a:u.anchored,p:m.position.toArray(),q:m.quaternion.toArray(),s:m.scale.toArray(),mo:u.model}})};}
+function restore(s,si){
+  if(box){scene.remove(box);box=null;}
+  parts.forEach(function(m){scene.remove(m);m.material.dispose()});parts=[];
+  s.parts.forEach(function(d){
+    var m=addPart(d.n,d.c,d.g,d.col,d.p,d.s,[0,0,0],d.a,d.mo);m.quaternion.fromArray(d.q);
+  });
+  stamp();var idx=si===undefined?s.sel:si;selected=idx>=0&&idx<parts.length?parts[idx]:null;
+  if(selected){box=new THREE.BoxHelper(selected,0x60a5fa);scene.add(box);}
+  buildTree();renderProps();buildGizmo();
+}
+function stamp(){parts.forEach(function(m){m.userData.home={p:m.position.clone(),q:m.quaternion.clone()}});}
+function histBtns(){$('#xUndo').disabled=hi<=0;$('#xRedo').disabled=hi>=hist.length-1;}
+function commit(){
+  stamp();hist=hist.slice(0,hi+1);hist.push(snapshot());if(hist.length>80)hist.shift();hi=hist.length-1;histBtns();
+}
+function undo(){if(playing)stop();if(hi>0){var si=parts.indexOf(selected);hi--;restore(hist[hi],si);histBtns();log(T('undo'));}}
+function redo(){if(playing)stop();if(hi<hist.length-1){var si=parts.indexOf(selected);hi++;restore(hist[hi],si);histBtns();log(T('redo'));}}
+$('#xUndo').onclick=undo;$('#xRedo').onclick=redo;
 
 /* ---------- Explorer ---------- */
+var open={Workspace:1,Tower:0,ServerScriptService:1},showStubs=true;
 function ico(n){return '<img src="icons/'+n+'" alt="" onerror="this.style.visibility=\'hidden\'">';}
-function row(label,icon,depth,key){
+function row(label,icon,depth,key,kids,isOpen,onclick,onarrow){
   var d=document.createElement('div');d.className='row';d.style.paddingLeft=(6+depth*14)+'px';d.dataset.key=key||'';
-  d.innerHTML=ico(icon)+'<span>'+label+'</span>';return d;
+  d.innerHTML='<span class="ar">'+(kids?(isOpen?'▼':'▶'):'')+'</span>'+ico(icon)+'<span>'+label+'</span>';
+  if(onclick)d.onclick=onclick;
+  if(kids&&onarrow)d.querySelector('.ar').onclick=function(e){e.stopPropagation();onarrow()};
+  return d;
 }
+function partRow(m,depth){return row(m.userData.name,ICON[m.userData.cls]||'Part.png',depth,'p'+parts.indexOf(m),false,false,function(){select(m)});}
+function toggle(k){open[k]=open[k]?0:1;buildTree();}
 function buildTree(){
-  var t=$('#tree');t.innerHTML='';
-  t.appendChild(row('Workspace','Workspace.png',0,''));
-  t.appendChild(row('Camera','Camera.png',1,''));
-  t.appendChild(row('Terrain','Terrain.png',1,''));
-  parts.forEach(function(m,i){var r=row(m.userData.name,ICON[m.userData.cls]||'Part.png',1,'p'+i);r.onclick=function(){select(m)};t.appendChild(r);});
+  var t=$('#tree');t.innerHTML='';var q=$('#search').value.trim().toLowerCase();
+  if(q){
+    parts.concat(['script']).forEach(function(m){
+      var name=m==='script'?'Script':m.userData.name;if(name.toLowerCase().indexOf(q)<0)return;
+      t.appendChild(m==='script'?row('Script','Script.png',0,'script',false,false,function(){select('script')}):partRow(m,0));
+    });hilite();return;
+  }
+  t.appendChild(row('Workspace','Workspace.png',0,'',true,open.Workspace,null,function(){toggle('Workspace')}));
+  if(open.Workspace){
+    if(showStubs){t.appendChild(row('Camera','Camera.png',1,'',false));t.appendChild(row('Terrain','Terrain.png',1,'',false));}
+    parts.forEach(function(m){if(!m.userData.model)t.appendChild(partRow(m,1));});
+    var tw=parts.filter(function(m){return m.userData.model==='Tower'});
+    if(tw.length){
+      t.appendChild(row('Tower','Model.png',1,'',true,open.Tower,null,function(){toggle('Tower')}));
+      if(open.Tower)tw.forEach(function(m){t.appendChild(partRow(m,2))});
+    }
+  }
   t.appendChild(row('Lighting','Lighting.png',0,''));
-  t.appendChild(row('ServerScriptService','ServerScriptService.png',0,''));
-  var s=row('Script','Script.png',1,'script');s.onclick=function(){select('script')};t.appendChild(s);
+  t.appendChild(row('ServerScriptService','ServerScriptService.png',0,'',true,open.ServerScriptService,null,function(){toggle('ServerScriptService')}));
+  if(open.ServerScriptService)t.appendChild(row('Script','Script.png',1,'script',false,false,function(){select('script')}));
   hilite();
 }
 function hilite(){
-  document.querySelectorAll('#tree .row').forEach(function(r){
+  $$('#tree .row').forEach(function(r){
     var k=r.dataset.key,on=false;
-    if(selected==='script')on=k==='script';
-    else if(selected)on=k==='p'+parts.indexOf(selected);
+    if(selected==='script')on=k==='script';else if(selected)on=k==='p'+parts.indexOf(selected);
     r.classList.toggle('sel',on);
   });
 }
+$('#search').oninput=buildTree;
+$('#exStub').onclick=function(){showStubs=!showStubs;this.classList.toggle('on',showStubs);buildTree();};
+$('#exOpen').onclick=function(){open.Workspace=open.Tower=open.ServerScriptService=1;buildTree();};
+$('#exClose').onclick=function(){open.Workspace=open.Tower=open.ServerScriptService=0;buildTree();};
 
 /* ---------- Properties ---------- */
 function f(v){return Math.round(v*100)/100}
@@ -309,7 +459,7 @@ function xyz(title,key,vals){
 }
 function renderProps(){
   var p=$('#props');
-  if(!selected||selected==='script'){p.innerHTML='<p style="color:#6b7280;font-size:12px;padding:8px">← Select an object</p>';return;}
+  if(!selected||selected==='script'){p.innerHTML='<p style="color:#6b7280;font-size:12px;padding:6px 0">← Select an object</p>';return;}
   var m=selected,u=m.userData;
   p.innerHTML='<div class="head">'+ico(ICON[u.cls]||'Part.png')+'<div><b>'+u.cls+'</b><small>ref '+(1000+parts.indexOf(m))+'</small></div></div>'
    +xyz('Position','pos',[m.position.x,m.position.y,m.position.z])
@@ -321,45 +471,129 @@ function renderProps(){
    +'<div class="pr">Anchored<input type="checkbox" id="pAnch" '+(u.anchored?'checked':'')+'></div>';
   p.querySelectorAll('input.n').forEach(function(inp){
     inp.addEventListener('input',function(){
-      var v=parseFloat(inp.value);if(isNaN(v))return;var i=+inp.dataset.i,k=inp.dataset.k;
-      var ax=['x','y','z'][i];
-      if(k==='pos'){m.position[ax]=v;m.userData.home.p[ax]=v;}
-      else if(k==='rot'){m.rotation[ax]=v*rad;m.userData.home.r[ax]=v*rad;}
-      else m.scale[ax]=Math.max(.1,v);
+      var v=parseFloat(inp.value);if(isNaN(v))return;var i=+inp.dataset.i,k=inp.dataset.k,ax=['x','y','z'][i];
+      if(k==='pos')m.position[ax]=v;else if(k==='rot')m.rotation[ax]=v*rad;else m.scale[ax]=Math.max(.1,v);
     });
+    inp.addEventListener('change',commit);
   });
-  $('#pName').addEventListener('input',function(e){u.name=e.target.value;var r=document.querySelector('#tree .row.sel span');if(r)r.textContent=u.name;});
+  $('#pName').addEventListener('input',function(e){u.name=e.target.value;var r=document.querySelector('#tree .row.sel span:last-child');if(r)r.textContent=u.name;});
+  $('#pName').addEventListener('change',commit);
   $('#pColor').addEventListener('input',function(e){m.material.color.set(e.target.value);});
-  $('#pAnch').addEventListener('change',function(e){u.anchored=e.target.checked;});
+  $('#pColor').addEventListener('change',commit);
+  $('#pAnch').addEventListener('change',function(e){u.anchored=e.target.checked;commit();});
 }
 function tab(n){
-  document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.t===n)});
+  $$('.tab').forEach(function(t){t.classList.toggle('on',t.dataset.t===n)});
   $('#props').style.display=n==='props'?'block':'none';
   $('#script').style.display=n==='script'?'flex':'none';
 }
-document.querySelectorAll('.tab').forEach(function(t){t.onclick=function(){tab(t.dataset.t)}});
-
+$$('.tab').forEach(function(t){t.onclick=function(){tab(t.dataset.t)}});
 function select(o){
   selected=o;
   if(box){scene.remove(box);box=null;}
-  if(o&&o!=='script'){box=new THREE.BoxHelper(o,0x60a5fa);scene.add(box);tab('props');log('Selected: '+o.userData.name);}
-  if(o==='script'){tab('script');}
-  hilite();renderProps();
+  if(o&&o!=='script'){box=new THREE.BoxHelper(o,0x60a5fa);scene.add(box);tab('props');log(T('sel')+o.userData.name);}
+  if(o==='script')tab('script');
+  hilite();renderProps();buildGizmo();
+}
+
+/* ---------- гизмо: Move / Rotate / Scale ---------- */
+var tool='select',space='world',snapOn=true,snapMove=1,snapRot=15,giz=new THREE.Group();giz.visible=false;scene.add(giz);
+var AX=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)],COL=[0xef4444,0x22c55e,0x3b82f6],Yv=new THREE.Vector3(0,1,0),Zv=new THREE.Vector3(0,0,1);
+function gm(c,o){return new THREE.MeshBasicMaterial({color:c,depthTest:false,depthWrite:false,transparent:true,opacity:o==null?.95:o})}
+function gmesh(geo,mat,x,y,z){var m=new THREE.Mesh(geo,mat);m.position.set(x||0,y||0,z||0);m.renderOrder=999;return m;}
+function clearGizmo(){while(giz.children.length){var c=giz.children.pop();c.traverse(function(o){if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});}}
+function buildGizmo(){
+  clearGizmo();
+  if(tool==='select'||!selected||selected==='script'||playing){giz.visible=false;return;}
+  giz.visible=true;
+  for(var i=0;i<3;i++){
+    var g=new THREE.Group();g.userData.axis=i;
+    if(tool==='rotate'){
+      g.add(gmesh(new THREE.TorusGeometry(1.2,.035,8,56),gm(COL[i])));
+      g.add(gmesh(new THREE.TorusGeometry(1.2,.16,6,40),gm(COL[i],0)));
+      g.quaternion.setFromUnitVectors(Zv,AX[i]);
+    }else{
+      g.add(gmesh(new THREE.CylinderGeometry(.035,.035,1,8),gm(COL[i]),0,.5,0));
+      if(tool==='move')g.add(gmesh(new THREE.ConeGeometry(.13,.34,16),gm(COL[i]),0,1.15,0));
+      else g.add(gmesh(new THREE.BoxGeometry(.24,.24,.24),gm(COL[i]),0,1.1,0));
+      g.add(gmesh(new THREE.CylinderGeometry(.18,.18,1.4,6),gm(COL[i],0),0,.75,0));
+      g.quaternion.setFromUnitVectors(Yv,AX[i]);
+    }
+    giz.add(g);
+  }
+}
+function placeGizmo(){
+  if(!giz.visible||!selected||selected==='script')return;
+  giz.position.copy(selected.position);
+  if(space==='local'||tool==='scale')giz.quaternion.copy(selected.quaternion);else giz.quaternion.set(0,0,0,1);
+  giz.scale.setScalar(Math.max(.3,cam.position.distanceTo(giz.position)*.13));
+  giz.updateMatrixWorld(true);
+}
+function setTool(t){
+  if(playing)return;tool=t;
+  $$('#xf [data-tool]').forEach(function(b){b.classList.toggle('on',b.dataset.tool===t)});
+  buildGizmo();log(T('tool')+t);
+}
+$$('#xf [data-tool]').forEach(function(b){b.onclick=function(){setTool(b.dataset.tool)}});
+$('#xSpace').onclick=function(){space=space==='world'?'local':'world';this.classList.toggle('on',space==='local');log(T('space')+T(space));};
+$('#xSnap').onclick=function(){snapOn=!snapOn;this.classList.toggle('on',snapOn);log(T(snapOn?'snapOn':'snapOff'));};
+$('#xFocus').onclick=focusSel;
+function focusSel(){if(selected&&selected!=='script'){target.copy(selected.position);dist=Math.max(5,selected.scale.length()*2.5);auto=false;}else log(T('nosel'),'w');}
+$('#gMove').onchange=function(){snapMove=parseFloat(this.value)};$('#gRot').onchange=function(){snapRot=parseFloat(this.value)};
+$('#gGrid').onchange=function(){grid.visible=this.checked};
+
+var el=renderer.domElement,ray=new THREE.Raycaster(),v2=new THREE.Vector2(),drag=null;
+function setRay(e){var r=el.getBoundingClientRect();v2.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);ray.setFromCamera(v2,cam);}
+function axisDir(i){return AX[i].clone().applyQuaternion(giz.quaternion);}
+function lineParam(O,d,r){var w0=O.clone().sub(r.origin),b=d.dot(r.direction),dd=d.dot(w0),e=r.direction.dot(w0),den=1-b*b;if(den<1e-4)return null;return (b*e-dd)/den;}
+function planeAngle(O,d,r){
+  var den=r.direction.dot(d);if(Math.abs(den)<1e-3)return null;
+  var t=O.clone().sub(r.origin).dot(d)/den,h=r.origin.clone().add(r.direction.clone().multiplyScalar(t)).sub(O);
+  var u=(Math.abs(d.y)<.9?new THREE.Vector3(0,1,0):new THREE.Vector3(1,0,0)).cross(d).normalize(),v=d.clone().cross(u);
+  return Math.atan2(h.dot(v),h.dot(u));
+}
+function pickGizmo(e){
+  if(tool==='select'||!giz.visible||playing)return null;
+  setRay(e);giz.updateMatrixWorld(true);
+  var h=ray.intersectObjects(giz.children,true)[0];if(!h)return null;
+  var o=h.object;while(o&&o.userData.axis===undefined)o=o.parent;return o?o.userData.axis:null;
+}
+function startDrag(i,e){
+  setRay(e);var m=selected,d=axisDir(i);
+  drag={i:i,pid:e.pointerId,kind:tool,dir:d,pos:m.position.clone(),q:m.quaternion.clone(),sc:m.scale.clone(),moved:false};
+  drag.p0=tool==='rotate'?planeAngle(drag.pos,d,ray.ray):lineParam(drag.pos,d,ray.ray);
+  el.setPointerCapture(e.pointerId);auto=false;
+}
+function dragMove(e){
+  setRay(e);var m=selected,k=drag.kind;
+  var p=k==='rotate'?planeAngle(drag.pos,drag.dir,ray.ray):lineParam(drag.pos,drag.dir,ray.ray);
+  if(p==null||drag.p0==null)return;
+  var dl=p-drag.p0;
+  if(k==='move'){if(snapOn)dl=Math.round(dl/snapMove)*snapMove;m.position.copy(drag.pos).add(drag.dir.clone().multiplyScalar(dl));}
+  else if(k==='scale'){if(snapOn)dl=Math.round(dl/(snapMove/2))*(snapMove/2);var s=drag.sc.clone();var ax=['x','y','z'][drag.i];s[ax]=Math.max(.1,s[ax]+dl);m.scale.copy(s);}
+  else{
+    while(dl>Math.PI)dl-=2*Math.PI;while(dl<-Math.PI)dl+=2*Math.PI;
+    if(snapOn){var st=snapRot*rad;dl=Math.round(dl/st)*st;}
+    m.quaternion.copy(new THREE.Quaternion().setFromAxisAngle(drag.dir,dl)).multiply(drag.q);
+  }
+  drag.moved=true;renderProps();
 }
 
 /* ---------- камера: мышь / тач ---------- */
-var el=renderer.domElement,ptrs=new Map(),moved=0;
+var ptrs=new Map(),moved=0;
 function pan(dx,dy){
   var k=dist*.0016,rx=Math.cos(theta),rz=-Math.sin(theta);
-  target.x-=rx*dx*k;target.z-=rz*dx*k;target.y+=dy*k;
-  target.y=Math.max(-1,Math.min(20,target.y));
+  target.x-=rx*dx*k;target.z-=rz*dx*k;target.y+=dy*k;target.y=Math.max(-1,Math.min(20,target.y));
 }
 el.addEventListener('contextmenu',function(e){e.preventDefault()});
 el.addEventListener('pointerdown',function(e){
+  closePops();
+  if(e.button===0){var gi=pickGizmo(e);if(gi!==null){startDrag(gi,e);return;}}
   el.setPointerCapture(e.pointerId);auto=false;
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,b:e.button});moved=0;
 });
 el.addEventListener('pointermove',function(e){
+  if(drag&&e.pointerId===drag.pid){dragMove(e);return;}
   var p=ptrs.get(e.pointerId);if(!p)return;
   var dx=e.clientX-p.x,dy=e.clientY-p.y;
   if(ptrs.size===1){
@@ -374,83 +608,135 @@ el.addEventListener('pointermove',function(e){
   p.x=e.clientX;p.y=e.clientY;
 });
 function up(e){
+  if(drag&&e.pointerId===drag.pid){var mv=drag.moved;drag=null;if(mv)commit();return;}
   var p=ptrs.get(e.pointerId);ptrs.delete(e.pointerId);
   if(p&&moved<6&&p.b===0&&e.type==='pointerup'&&ptrs.size===0)pick(e);
 }
 el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
 el.addEventListener('wheel',function(e){e.preventDefault();auto=false;dist=Math.max(3,Math.min(60,dist*Math.exp(e.deltaY*.001)));},{passive:false});
-var ray=new THREE.Raycaster(),v2=new THREE.Vector2();
-function pick(e){
-  var r=el.getBoundingClientRect();
-  v2.set((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height)*2+1);
-  ray.setFromCamera(v2,cam);
-  var h=ray.intersectObjects(parts)[0];
-  select(h?h.object:null);
-}
+function pick(e){setRay(e);var h=ray.intersectObjects(parts)[0];select(h?h.object:null);}
 function view(t,p){theta=t;phi=p;auto=false;}
-function reset(){theta=.8;phi=1.1;dist=15;target.set(0,1.5,0);auto=false;}
-$('#bReset').onclick=reset;
+$('#bReset').onclick=function(){theta=.8;phi=1.1;dist=15;target.set(0,1.5,0);auto=false;};
 $('#bTop').onclick=function(){view(theta,.02)};
 $('#bFront').onclick=function(){view(0,Math.PI/2)};
 $('#bRight').onclick=function(){view(Math.PI/2,Math.PI/2)};
-$('#bGrid').onclick=function(){grid.visible=!grid.visible;this.classList.toggle('on',grid.visible)};
-document.addEventListener('keydown',function(e){
-  if(/INPUT|TEXTAREA/.test((e.target.tagName||'')))return;
-  if(e.key==='f'||e.key==='F'){if(selected&&selected!=='script'){target.copy(selected.position);dist=Math.max(5,selected.scale.length()*2.5);}}
-  if(e.key==='Escape')select(null);
-});
 
-/* ---------- Add / Delete ---------- */
+/* ---------- Add / Delete / меню ---------- */
 var cols=[0x38bdf8,0xfb923c,0xf472b6,0x34d399,0xe879f9];
-$('#bAdd').onclick=function(){
-  stop();counter++;
-  var m=addPart('Part'+counter,'Part',[geoBox,geoBall,geoCyl][counter%3],cols[counter%cols.length],[(Math.random()-.5)*10,1.5,(Math.random()-.5)*10],[2,2,2],[0,Math.random()*90,0]);
-  buildTree();select(m);log('Added '+m.userData.name);
-};
+function pops(){return $$('.pop')}
+function closePops(){pops().forEach(function(p){p.classList.remove('show')});}
+function showPop(p,btn){
+  var was=p.classList.contains('show');closePops();if(was)return;
+  var sr=studio.getBoundingClientRect(),br=btn.getBoundingClientRect();
+  p.style.left=Math.max(4,Math.min(br.left-sr.left,sr.width-p.offsetWidth-8-170))+'px';p.style.top=(br.bottom-sr.top+4)+'px';p.classList.add('show');
+}
+$('#bFile').onclick=function(e){e.stopPropagation();showPop($('#mFile'),this)};
+$('#bAdd').onclick=function(e){e.stopPropagation();showPop($('#mAdd'),this)};
+$('#xGear').onclick=function(e){e.stopPropagation();var p=$('#mGear'),was=p.classList.contains('show');closePops();if(!was)p.classList.add('show');};
+document.addEventListener('click',function(e){if(!e.target.closest('.pop'))closePops();});
+$$('#mAdd [data-g]').forEach(function(b){b.onclick=function(){
+  closePops();stop();counter++;var g=b.dataset.g;
+  var m=addPart((g==='box'?'Part':g==='ball'?'Ball':g==='cyl'?'Cylinder':'Wedge')+counter,CLS[g],g,cols[counter%cols.length],[(Math.random()-.5)*10,1.5,(Math.random()-.5)*10],[2,2,2],[0,Math.random()*90,0]);
+  select(m);buildTree();commit();log(T('added')+m.userData.name);
+}});
+$$('#mFile [data-a]').forEach(function(b){b.onclick=function(){
+  closePops();
+  if(b.dataset.a==='resetdemo'){stop();restore(hist[0]);hist=[hist[0]];hi=0;histBtns();log(T('reset'),'i');}
+  else log(T('demo'),'w');
+}});
 $('#bDel').onclick=function(){
-  if(!selected||selected==='script')return;
-  if(selected.userData.name==='Baseplate'){log('Baseplate нельзя удалить в демо','w');return;}
-  stop();var m=selected;select(null);scene.remove(m);parts.splice(parts.indexOf(m),1);buildTree();log('Deleted '+m.userData.name);
+  if(!selected||selected==='script'){log(T('nosel'),'w');return;}
+  if(selected.userData.name==='Baseplate'){log(T('base'),'w');return;}
+  stop();var m=selected;select(null);scene.remove(m);parts.splice(parts.indexOf(m),1);buildTree();commit();log(T('deleted')+m.userData.name);
 };
+$('#bRef').onclick=function(){buildTree();renderProps();log(T('refresh'),'i');};
+['#bSave','#bPub','#bAcc','#bUI','#bView'].forEach(function(s){$(s).onclick=function(){log(T('demo'),'w')}});
+$('#hamb').onclick=function(){$('#tbt').classList.toggle('open')};
+$$('#mtabs button').forEach(function(b){b.onclick=function(){
+  studio.dataset.m=b.dataset.m;$$('#mtabs button').forEach(function(x){x.classList.toggle('on',x===b)});setTimeout(resize,0);
+}});
 
 /* ---------- Play ---------- */
-var bPlay=$('#bPlay');
+var bPlay=$('#bPlay'),jv={x:0,y:0};
 function start(){
-  playing=true;bPlay.textContent='⏹ Stop';bPlay.className='rd';
+  playing=true;bPlay.textContent='⏹ Stop';bPlay.className='stop';vp.classList.add('play');
   parts.forEach(function(m){m.userData.vy=0;if(!m.userData.anchored)m.position.y+=6;});
-  log('Play started — Hello from RbxStudio Web!','i');
+  if(box){scene.remove(box);box=null;}buildGizmo();setHint();log(T('playOn'),'i');
 }
 function stop(){
-  if(!playing)return;playing=false;bPlay.textContent='▶ Play';bPlay.className='gr';
-  parts.forEach(function(m){m.position.copy(m.userData.home.p);m.rotation.copy(m.userData.home.r);m.userData.vy=0;});
-  log('Play stopped','w');renderProps();
+  if(!playing)return;playing=false;bPlay.textContent='▶ Play';bPlay.className='green';vp.classList.remove('play');jv.x=jv.y=0;
+  parts.forEach(function(m){var h=m.userData.home;if(h){m.position.copy(h.p);m.quaternion.copy(h.q);}m.userData.vy=0;});
+  if(selected&&selected!=='script'){box=new THREE.BoxHelper(selected,0x60a5fa);scene.add(box);}
+  buildGizmo();setHint();log(T('playOff'),'w');renderProps();
 }
 bPlay.onclick=function(){playing?stop():start()};
 function physics(dt){
   parts.forEach(function(m){
     var u=m.userData;if(u.anchored)return;
     u.vy-=40*dt;m.position.y+=u.vy*dt;
-    var floor=baseTop+m.scale.y/2;
+    var floor=m.scale.y/2;
     if(m.position.y<floor){m.position.y=floor;u.vy=Math.abs(u.vy)>3?-u.vy*.4:0;}
     if(Math.abs(u.vy)>0.01||m.position.y>floor+.01)m.rotation.y+=dt*.8;
   });
 }
+/* джойстик + высота (Play) */
+(function(){
+  var joy=$('#joy'),knob=joy.firstElementChild,pid=null;
+  function mv(e){var r=joy.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,dx=e.clientX-cx,dy=e.clientY-cy,mx=r.width/2-8,l=Math.hypot(dx,dy);
+    if(l>mx){dx*=mx/l;dy*=mx/l;}knob.style.transform='translate('+dx+'px,'+dy+'px)';jv.x=dx/mx;jv.y=dy/mx;}
+  joy.addEventListener('pointerdown',function(e){pid=e.pointerId;joy.setPointerCapture(pid);mv(e);e.stopPropagation();});
+  joy.addEventListener('pointermove',function(e){if(e.pointerId===pid)mv(e)});
+  function end(e){if(e.pointerId!==pid)return;pid=null;jv.x=jv.y=0;knob.style.transform='';}
+  joy.addEventListener('pointerup',end);joy.addEventListener('pointercancel',end);
+  var hold=0,tmr=null;
+  function hb(d){return function(e){e.stopPropagation();hold=d;}}
+  $('#jUp').addEventListener('pointerdown',hb(1));$('#jDn').addEventListener('pointerdown',hb(-1));
+  window.addEventListener('pointerup',function(){hold=0});
+  setInterval(function(){if(playing&&hold){target.y=Math.max(-1,Math.min(20,target.y+hold*.15));}},16);
+})();
 
-/* ---------- качество / размер / цикл ---------- */
+/* ---------- качество / UI-масштаб / сплиттеры ---------- */
 var qual=1;
 function setQ(q){
   qual=q;renderer.setPixelRatio([.6,Math.min(devicePixelRatio,1.5),Math.min(devicePixelRatio,2)][q]);
   renderer.shadowMap.enabled=q>0;sun.castShadow=q>0;
   parts.forEach(function(m){m.material.needsUpdate=true});resize();
-  document.querySelectorAll('#q button').forEach(function(b){b.classList.toggle('on',+b.dataset.q===q)});
+  $$('#q [data-q]').forEach(function(b){b.classList.toggle('on',+b.dataset.q===q)});
 }
-document.querySelectorAll('#q button').forEach(function(b){b.onclick=function(){setQ(+b.dataset.q)}});
+$$('#q [data-q]').forEach(function(b){b.onclick=function(){setQ(+b.dataset.q)}});
+$$('#q [data-u]').forEach(function(b){b.onclick=function(){
+  studio.style.setProperty('--ui',b.dataset.u);$$('#q [data-u]').forEach(function(x){x.classList.toggle('on',x===b)});setTimeout(resize,0);
+}});
+function split(id,varName,axis,min,max,sign,getStart){
+  var s=$(id);
+  s.addEventListener('pointerdown',function(e){
+    s.setPointerCapture(e.pointerId);var p0=axis==='x'?e.clientX:e.clientY,v0=getStart();
+    function mv(ev){var d=(axis==='x'?ev.clientX:ev.clientY)-p0;studio.style.setProperty(varName,Math.max(min,Math.min(max,v0+sign*d))+'px');}
+    function end(){s.removeEventListener('pointermove',mv);s.removeEventListener('pointerup',end);s.removeEventListener('pointercancel',end);}
+    s.addEventListener('pointermove',mv);s.addEventListener('pointerup',end);s.addEventListener('pointercancel',end);
+  });
+}
+split('#spL','--exw','x',140,420,1,function(){return $('#explorer').getBoundingClientRect().width});
+split('#spR','--rtw','x',180,460,-1,function(){return $('#right').getBoundingClientRect().width});
+split('#spB','--outh','y',40,320,-1,function(){return $('#out').getBoundingClientRect().height});
 function resize(){
   var w=vp.clientWidth,h=vp.clientHeight;if(!w||!h)return;
   renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(vp);
 
+/* ---------- горячие клавиши ---------- */
+document.addEventListener('keydown',function(e){
+  if(/INPUT|TEXTAREA|SELECT/.test((e.target.tagName||'')))return;
+  var k=e.key.toLowerCase();
+  if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}
+  if((e.ctrlKey||e.metaKey)&&k==='y'){e.preventDefault();redo();return;}
+  if(!vp.matches(':hover')&&!$('#studio').contains(document.activeElement))return;
+  if(k==='q')setTool('select');else if(k==='w')setTool('move');else if(k==='e')setTool('rotate');else if(k==='r')setTool('scale');
+  else if(k==='f')focusSel();else if(k==='escape')select(null);else if(k==='delete'||k==='backspace'){e.preventDefault();$('#bDel').click();}
+});
+
+/* ---------- цикл ---------- */
 var last=performance.now(),frames=0,fl=last,visible=true;
 new IntersectionObserver(function(en){visible=en[0].isIntersecting},{threshold:0}).observe(vp);
 function loop(t){
@@ -458,12 +744,16 @@ function loop(t){
   if(!visible){last=t;return;}
   var dt=Math.min((t-last)/1000,.05);last=t;
   if(auto)theta+=dt*.25;
-  if(playing)physics(dt);
-  updCam();if(box)box.update();
+  if(playing){
+    physics(dt);
+    if(jv.x||jv.y){var sp=dt*9;target.x+=(Math.sin(theta)*jv.y+Math.cos(theta)*jv.x)*sp;target.z+=(Math.cos(theta)*jv.y-Math.sin(theta)*jv.x)*sp;}
+  }
+  updCam();if(box)box.update();placeGizmo();
   renderer.render(scene,cam);
-  frames++;if(t-fl>500){$('#fps').textContent='FPS: '+Math.round(frames*1000/(t-fl))+' | '+parts.length+' obj';frames=0;fl=t;}
+  frames++;if(t-fl>500){var s=renderer.getSize(new THREE.Vector2());$('#fps').textContent=vp.clientWidth<560?'FPS: '+Math.round(frames*1000/(t-fl))+' | '+parts.length+' obj':'FPS: '+Math.round(frames*1000/(t-fl))+' | '+parts.length+' obj | PR:'+renderer.getPixelRatio().toFixed(1)+' | buf:'+Math.round(s.x*renderer.getPixelRatio())+'×'+Math.round(s.y*renderer.getPixelRatio());frames=0;fl=t;}
 }
-buildTree();renderProps();setQ(1);resize();requestAnimationFrame(loop);
+initScene();stamp();hist=[snapshot()];hi=0;histBtns();
+buildTree();renderProps();setHint();setQ(1);resize();log(T('loaded'),'i');requestAnimationFrame(loop);
 })();
 </script>
 </body>
