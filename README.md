@@ -1,11 +1,13 @@
 [![Download](https://img.shields.io/github/downloads/suscersal/roblox-studio-web/total?label=Downloads&style=for-the-badge)](https://github.com/suscersal/roblox-studio-web/releases)
+[![Website](https://img.shields.io/badge/Website-suscersal.github.io-blue?style=for-the-badge)](https://suscersal.github.io/roblox-studio-web/)
 
 # 🎮 Roblox Studio Web
 
 **Аналог Roblox Studio** без тестов(полноценных) и плагинов, зато с 3D-просмотром.  
 Парсер `.rbxl` с веб-обёрткой на **Flask**.
 
-**A Roblox Studio clone** with a 3D viewport, built around a custom `.rbxl` parser and a Flask web wrapper.
+**A Roblox Studio clone** with a 3D viewport, built around a custom `.rbxl` parser and a Flask web wrapper.  
+🌐 **Website / Сайт:** [https://suscersal.github.io/roblox-studio-web/](https://suscersal.github.io/roblox-studio-web/)
 
 ## 🇷🇺
 
