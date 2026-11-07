@@ -5068,7 +5068,10 @@ def api_save():
 
 @flask_app.route('/api/publish', methods=['POST'])
 def api_publish():
-    """Публикация в Roblox через Open Cloud (POST universes/{id}/places/{id}/versions).
+    """Публикация в Roblox. Сначала Open Cloud (POST universes/{id}/places/{id}/versions, нужен API-ключ),
+    потом запасной путь через сессию аккаунта (POST data.roblox.com/Data/Upload.ashx?assetid=<Place ID>,
+    как делают Rojo и др.). Куки-путь неофициальный (Roblox просит переходить на Open Cloud), только
+    для Published: у него нет «Saved» (версия без выкладки игрокам) и Universe ID не нужен.
     Раньше уходил файл, лежащий на ДИСКЕ (state['file_path']): правки, не сохранённые кнопкой «Сохранить»,
     в публикацию не попадали, а у нового проекта без файла публикация вообще не работала. Теперь
     публикуется ТЕКУЩАЯ сцена: она сериализуется во временный .rbxl (локальный файл не трогаем)."""
@@ -5080,19 +5083,43 @@ def api_publish():
     place_id = str(data.get('place_id', '')).strip()
     api_key = (data.get('api_key') or '').strip() or _roblox_api_key() or ''
     version_type = data.get('version_type', 'Published')
-    if not universe_id.isdigit() or not place_id.isdigit():
-        return jsonify({'ok': False, 'error': 'Universe ID и Place ID должны быть числами'}), 400
-    if not api_key:
-        return jsonify({'ok': False, 'error': 'Нет API-ключа: введите его в окне или сохраните в «Аккаунт»'}), 400
     if version_type not in ('Published', 'Saved'):
         version_type = 'Published'
+    has_cookie = _roblox_cookie() is not None
+    if not place_id.isdigit():
+        return jsonify({'ok': False, 'error': 'Place ID должен быть числом'}), 400
+    if api_key and not universe_id.isdigit() and not (has_cookie and version_type == 'Published'):
+        return jsonify({'ok': False, 'error': 'Universe ID должен быть числом'}), 400
+    if not api_key and not has_cookie:
+        return jsonify({'ok': False, 'error': 'Нет API-ключа и входа в аккаунт: введите ключ в окне или настройте их в «Аккаунт»'}), 400
+    if not api_key and version_type == 'Saved':
+        return jsonify({'ok': False, 'error': 'Saved работает только с API-ключом: через вход в аккаунт Roblox всегда публикует'}), 400
     import tempfile
     fd, tmp_path = tempfile.mkstemp(suffix='.rbxl')
     os.close(fd)
     try:
         save_rbxl(parsed, tmp_path)
-        status, text = publish_place(tmp_path, universe_id, place_id, api_key, version_type)
-        return jsonify({'ok': status == 200, 'status': status, 'text': text})
+        status, text, via, key_note = None, '', None, ''
+        if api_key and universe_id.isdigit():
+            status, text = publish_place(tmp_path, universe_id, place_id, api_key, version_type)
+            via = 'api-key'
+            if status == 200:
+                return jsonify({'ok': True, 'status': status, 'text': text, 'via': via})
+            key_note = f'ключ: HTTP {status}'
+        # запасной путь: нет ключа или он не принят (401/403) — только Published
+        if has_cookie and version_type == 'Published' and (status is None or status in (401, 403)):
+            with open(tmp_path, 'rb') as f:
+                raw = f.read()
+            st2, d2 = _oc_cookie_call('POST', 'https://data.roblox.com/Data/Upload.ashx',
+                                      query={'assetid': place_id}, raw=raw, timeout=300,
+                                      headers={'User-Agent': 'Roblox/WinInet',
+                                               'Content-Type': 'application/octet-stream',
+                                               'Accept': 'application/json'})
+            text2 = d2 if isinstance(d2, str) else json.dumps(d2, ensure_ascii=False)
+            if key_note and not (200 <= st2 < 300):
+                text2 = f'{key_note}; cookie: HTTP {st2}: {text2}'
+            return jsonify({'ok': 200 <= st2 < 300, 'status': st2, 'text': text2, 'via': 'cookie'})
+        return jsonify({'ok': False, 'status': status, 'text': text, 'via': via})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -5617,6 +5644,331 @@ def _rbx_get_bytes(url):
     r = _req.Request(url, headers=_roblox_headers())
     with _req.urlopen(r, timeout=8) as resp:
         return _rbx_maybe_gunzip(resp.read())
+
+
+# ====================== Open Cloud: Toolbox (Creator Store) и настройки experience ======================
+# Серверная часть cloud.js (блок /api/cloud/*). Порядок способов везде одинаковый: СНАЧАЛА Open Cloud
+# API-ключ (_roblox_api_key()), и если ключа нет или Roblox ответил 401/403 — запасной путь через
+# сессию аккаунта (.ROBLOSECURITY из «Аккаунт»; для записи нужен X-CSRF-TOKEN). Куки-эндпоинты у
+# Roblox неофициальные/legacy и могут меняться без предупреждения. Ключ и кука уходят только к
+# Roblox и в браузер не возвращаются. Права ключа: creator-store-product:read (поиск и детали),
+# legacy-asset:manage (скачивание модели), universe:read / universe:write (настройки).
+_OC_BASE = 'https://apis.roblox.com'
+_OC_TOOLBOX_CATEGORIES = ('Audio', 'Model', 'Decal', 'Plugin', 'MeshPart', 'Video', 'FontFamily')
+# поля Universe (cloud/v2), которые разрешаем менять из UI: имя -> тип
+_OC_UNIVERSE_FIELDS = {
+    'displayName': str, 'description': str, 'visibility': str,
+    'voiceChatEnabled': bool, 'desktopEnabled': bool, 'mobileEnabled': bool,
+    'tabletEnabled': bool, 'consoleEnabled': bool, 'vrEnabled': bool,
+    'privateServerPriceRobux': int,
+}
+# что умеет куки-путь (develop.roblox.com v1): остальные поля пропускаются и возвращаются в 'skipped'
+_OC_COOKIE_DEVICES = {'desktopEnabled': 'Computer', 'mobileEnabled': 'Phone',
+                      'tabletEnabled': 'Tablet', 'consoleEnabled': 'Console'}
+_OC_COOKIE_UNIVERSE_FIELDS = ('displayName', 'description', 'visibility') + tuple(_OC_COOKIE_DEVICES)
+_OC_CSRF = {'token': ''}
+
+
+def _oc_parse(status, raw):
+    text = _rbx_maybe_gunzip(raw).decode('utf-8', 'replace')
+    try:
+        return status, json.loads(text) if text.strip() else {}
+    except json.JSONDecodeError:
+        return status, {'message': text[:300]}
+
+
+def _oc_call(method, path, body=None, query=None, timeout=30):
+    """Запрос к Open Cloud с x-api-key. Возвращает (status, data); data — JSON или {'message': текст}."""
+    key = _roblox_api_key()
+    if not key:
+        return 400, {'message': 'Нет API-ключа: сохраните его в окне «Аккаунт»'}
+    url = _OC_BASE + path
+    if query:
+        q = {k: v for k, v in query.items() if v not in (None, '')}
+        if q:
+            url += '?' + _urlparse.urlencode(q)
+    headers = {'x-api-key': key, 'Accept': 'application/json', 'Accept-Encoding': 'identity'}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode('utf-8')
+        headers['Content-Type'] = 'application/json'
+    rq = _req.Request(url, data=data, headers=headers, method=method)
+    try:
+        with _req.urlopen(rq, timeout=timeout) as resp:
+            return _oc_parse(resp.status, resp.read())
+    except _urlerr.HTTPError as e:
+        return _oc_parse(e.code, e.read())
+
+
+def _oc_csrf_token(force=False):
+    """X-CSRF-TOKEN для записи по куке: Roblox отдаёт его в заголовке 403-ответа на запрос без токена.
+    Берём у auth.roblox.com/v2/logout — без валидного токена этот запрос выйти из аккаунта не может."""
+    if _OC_CSRF['token'] and not force:
+        return _OC_CSRF['token']
+    rq = _req.Request('https://auth.roblox.com/v2/logout', data=b'', headers=_roblox_headers(), method='POST')
+    try:
+        with _req.urlopen(rq, timeout=15):
+            pass
+    except _urlerr.HTTPError as e:
+        _OC_CSRF['token'] = e.headers.get('x-csrf-token') or ''
+    return _OC_CSRF['token']
+
+
+def _oc_cookie_call(method, url, body=None, query=None, timeout=30, raw=None, headers=None):
+    """Запрос с сессией аккаунта. Для не-GET добавляет X-CSRF-TOKEN и один раз повторяет при смене токена.
+    body — JSON-тело, raw — готовые байты (загрузка файла). Возвращает (status, data)."""
+    if _roblox_cookie() is None:
+        return 400, {'message': 'Нет входа в аккаунт Roblox (окно «Аккаунт»)'}
+    if query:
+        q = {k: v for k, v in query.items() if v not in (None, '')}
+        if q:
+            url += ('&' if '?' in url else '?') + _urlparse.urlencode(q)
+    for attempt in (0, 1):
+        h = _roblox_headers()
+        data = raw
+        if body is not None:
+            data = json.dumps(body).encode('utf-8')
+            h['Content-Type'] = 'application/json'
+        if headers:
+            h.update(headers)
+        if method != 'GET':
+            h['X-CSRF-TOKEN'] = _oc_csrf_token(force=attempt == 1)
+            if data is None:
+                data = b''
+        rq = _req.Request(url, data=data, headers=h, method=method)
+        try:
+            with _req.urlopen(rq, timeout=timeout) as resp:
+                return _oc_parse(resp.status, resp.read())
+        except _urlerr.HTTPError as e:
+            new_tok = e.headers.get('x-csrf-token')
+            if e.code == 403 and method != 'GET' and new_tok and attempt == 0 and new_tok != h.get('X-CSRF-TOKEN'):
+                _OC_CSRF['token'] = new_tok
+                continue
+            return _oc_parse(e.code, e.read())
+    return 403, {'message': 'CSRF-токен не принят'}
+
+
+def _oc_dual(key_fn, cookie_fn):
+    """Сначала ключ, потом кука. key_fn/cookie_fn -> (status, data). Кука пробуется, если ключа нет или
+    ключ вернул 401/403. Возвращает (status, data, via): via — 'api-key' | 'cookie' | None."""
+    key_st = key_data = None
+    if key_fn and _roblox_api_key():
+        key_st, key_data = key_fn()
+        if key_st not in (401, 403):
+            return key_st, key_data, 'api-key'
+    if cookie_fn and _roblox_cookie() is not None:
+        st, data = cookie_fn()
+        if key_st is not None and not (200 <= st < 300):
+            m = data.get('message') if isinstance(data, dict) else data
+            data = {'message': f'ключ: HTTP {key_st}; cookie: HTTP {st}: {m}'}
+        return st, data, 'cookie'
+    if key_st is not None:
+        return key_st, key_data, 'api-key'
+    return 400, {'message': 'Нет ни API-ключа, ни входа в аккаунт: настройте любой в окне «Аккаунт»'}, None
+
+
+def _oc_reply(status, data, via=None):
+    ok = 200 <= status < 300
+    out = {'ok': ok, 'status': status, 'data': data, 'via': via}
+    if not ok:
+        msg = data.get('message') if isinstance(data, dict) else None
+        out['error'] = f'HTTP {status}: {msg or data}'
+        if status in (401, 403) and via == 'api-key':
+            out['error'] += ' (проверьте API-ключ и его права)'
+    return jsonify(out)
+
+
+@flask_app.route('/api/cloud/toolbox/search')
+def api_cloud_toolbox_search():
+    """Поиск в Creator Store: GET toolbox-service/v2/assets:search (searchCategoryType обязателен)."""
+    cat = request.args.get('category', 'Model')
+    if cat not in _OC_TOOLBOX_CATEGORIES:
+        return jsonify({'ok': False, 'error': 'Неизвестная категория'}), 400
+    q = {'searchCategoryType': cat, 'query': request.args.get('q', '').strip()[:200],
+         'pageToken': request.args.get('pageToken', '')[:500],
+         'maxPageSize': request.args.get('maxPageSize', '24')}
+    path = '/toolbox-service/v2/assets:search'
+    try:
+        st, data, via = _oc_dual(lambda: _oc_call('GET', path, query=q),
+                                 lambda: _oc_cookie_call('GET', _OC_BASE + path, query=q))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+    return _oc_reply(st, data, via)
+
+
+@flask_app.route('/api/cloud/toolbox/asset/<asset_id>')
+def api_cloud_toolbox_asset(asset_id):
+    """Детали ассета Creator Store: GET toolbox-service/v2/assets/{id}."""
+    if not asset_id.isdigit():
+        return jsonify({'ok': False, 'error': 'ID ассета должен быть числом'}), 400
+    path = f'/toolbox-service/v2/assets/{asset_id}'
+    try:
+        st, data, via = _oc_dual(lambda: _oc_call('GET', path),
+                                 lambda: _oc_cookie_call('GET', _OC_BASE + path))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+    return _oc_reply(st, data, via)
+
+
+@flask_app.route('/api/cloud/toolbox/insert', methods=['POST'])
+@_collab_track('import')
+def api_cloud_toolbox_insert():
+    """Вставка модели из Creator Store в сцену: скачивание (сначала Open Cloud Asset Delivery по ключу,
+    потом AssetDelivery с сессией аккаунта) -> бинарный .rbxm -> import_rbxm (как «Импорт .rbxm»).
+    Тело: {assetId, parent}."""
+    import tempfile
+    data = request.get_json(silent=True) or {}
+    asset_id = str(data.get('assetId', '')).strip()
+    if not asset_id.isdigit():
+        return jsonify({'ok': False, 'error': 'ID ассета должен быть числом'}), 400
+    parent = data.get('parent')
+    try:
+        parent = int(parent) if parent not in (None, '') else None
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'Некорректный родитель'}), 400
+    raw, errors = None, []
+    for name, fn in (('ключ', _rbx_get_bytes_opencloud), ('cookie', _rbx_get_place_bytes_cookie)):
+        try:
+            got = fn(asset_id)
+        except _urlerr.HTTPError as e:
+            errors.append(f'{name}: HTTP {e.code}')
+            continue
+        except Exception as e:
+            errors.append(f'{name}: {e}')
+            continue
+        if got is not None:
+            raw = got
+            break
+    if raw is None:
+        if not errors:
+            return jsonify({'ok': False, 'error': 'Нет ни API-ключа, ни входа в аккаунт: настройте любой в окне «Аккаунт»'}), 400
+        hint = ' (для ключа нужно право legacy-asset:manage)' if 'ключ: HTTP 40' in ' '.join(errors) else ''
+        return jsonify({'ok': False, 'error': 'Не удалось скачать ассет — ' + '; '.join(errors) + hint}), 502
+    if raw[:8] != b'<roblox!':
+        return jsonify({'ok': False, 'error': 'Это не бинарная модель .rbxm (XML-формат импорт не поддерживает)'}), 400
+    with tempfile.NamedTemporaryFile(suffix='.rbxm', delete=False) as tmp:
+        tmp.write(raw)
+        tmp_path = tmp.name
+    try:
+        return _finish_rbxm_import(tmp_path, parent)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def _oc_cookie_universe_get(uid):
+    """Куки-путь: develop.roblox.com/v1/universes/{id}/configuration -> форма Universe из cloud/v2.
+    Полей, которых там нет (voiceChat, VR, цена приватного сервера), в ответе просто нет."""
+    st, d = _oc_cookie_call('GET', f'https://develop.roblox.com/v1/universes/{uid}/configuration')
+    if not (200 <= st < 300) or not isinstance(d, dict):
+        return st, d
+    devs = d.get('playableDevices') or []
+    pt = str(d.get('privacyType') or '').lower()
+    return 200, {
+        'displayName': d.get('name') or '', 'description': d.get('description') or '',
+        'visibility': 'PUBLIC' if pt == 'public' else 'PRIVATE' if pt == 'private' else 'VISIBILITY_UNSPECIFIED',
+        'desktopEnabled': 'Computer' in devs, 'mobileEnabled': 'Phone' in devs,
+        'tabletEnabled': 'Tablet' in devs, 'consoleEnabled': 'Console' in devs,
+    }
+
+
+def _oc_cookie_universe_patch(uid, body):
+    """Куки-путь для PATCH: имя/описание/устройства — PATCH develop.roblox.com/v1/universes/{id}/configuration
+    (устройства: сперва читаем текущий список и меняем только присланные), доступ — POST .../activate|deactivate.
+    Остальные поля пропускаются (возвращаются в 'skipped')."""
+    base = f'https://develop.roblox.com/v1/universes/{uid}'
+    skipped = [k for k in body if k not in _OC_COOKIE_UNIVERSE_FIELDS]
+    cfg = {}
+    if 'displayName' in body:
+        cfg['name'] = body['displayName']
+    if 'description' in body:
+        cfg['description'] = body['description']
+    if any(k in body for k in _OC_COOKIE_DEVICES):
+        st, d = _oc_cookie_call('GET', base + '/configuration')
+        if not (200 <= st < 300) or not isinstance(d, dict):
+            return st, d
+        devs = set(d.get('playableDevices') or [])
+        for k, name in _OC_COOKIE_DEVICES.items():
+            if k in body:
+                (devs.add if body[k] else devs.discard)(name)
+        cfg['playableDevices'] = [n for n in _OC_COOKIE_DEVICES.values() if n in devs]
+    last = (200, {})
+    if cfg:
+        last = _oc_cookie_call('PATCH', base + '/configuration', body=cfg)
+        if not (200 <= last[0] < 300):
+            return last
+    if 'visibility' in body:
+        last = _oc_cookie_call('POST', base + ('/activate' if body['visibility'] == 'PUBLIC' else '/deactivate'))
+        if not (200 <= last[0] < 300):
+            return last
+    out = last[1] if isinstance(last[1], dict) else {}
+    out['skipped'] = skipped
+    return 200, out
+
+
+@flask_app.route('/api/cloud/universe/<universe_id>', methods=['GET', 'PATCH'])
+def api_cloud_universe(universe_id):
+    """Настройки experience. Сначала Open Cloud cloud/v2/universes/{id} (ключ), потом develop.roblox.com v1
+    (кука; умеет не все поля — остальные в 'skipped'). PATCH принимает только поля из _OC_UNIVERSE_FIELDS;
+    updateMask собирается из присланных полей."""
+    if not universe_id.isdigit():
+        return jsonify({'ok': False, 'error': 'Universe ID должен быть числом'}), 400
+    path = f'/cloud/v2/universes/{universe_id}'
+    try:
+        if request.method == 'GET':
+            st, data, via = _oc_dual(lambda: _oc_call('GET', path), lambda: _oc_cookie_universe_get(universe_id))
+            return _oc_reply(st, data, via)
+        src = request.get_json(silent=True) or {}
+        body = {}
+        for k, typ in _OC_UNIVERSE_FIELDS.items():
+            if k not in src:
+                continue
+            v = src[k]
+            if typ is int:
+                try:
+                    v = int(v)
+                except (TypeError, ValueError):
+                    return jsonify({'ok': False, 'error': f'{k}: нужно целое число'}), 400
+            elif not isinstance(v, typ):
+                return jsonify({'ok': False, 'error': f'{k}: неверный тип'}), 400
+            body[k] = v
+        if body.get('visibility') not in (None, 'PUBLIC', 'PRIVATE'):
+            return jsonify({'ok': False, 'error': 'visibility: PUBLIC или PRIVATE'}), 400
+        if not body:
+            return jsonify({'ok': False, 'error': 'Нечего обновлять'}), 400
+        st, data, via = _oc_dual(
+            lambda: _oc_call('PATCH', path, body=body, query={'updateMask': ','.join(body)}),
+            lambda: _oc_cookie_universe_patch(universe_id, body))
+        return _oc_reply(st, data, via)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+
+
+@flask_app.route('/api/cloud/universe/<universe_id>/restart', methods=['POST'])
+def api_cloud_universe_restart(universe_id):
+    """Перезапуск серверов после публикации: POST cloud/v2/universes/{id}:restartServers (только ключ —
+    куки-аналога у этого метода нет)."""
+    if not universe_id.isdigit():
+        return jsonify({'ok': False, 'error': 'Universe ID должен быть числом'}), 400
+    if not _roblox_api_key():
+        return jsonify({'ok': False, 'error': 'Перезапуск серверов работает только с API-ключом (право universe:write)'}), 400
+    try:
+        st, data = _oc_call('POST', f'/cloud/v2/universes/{universe_id}:restartServers', body={})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+    return _oc_reply(st, data, 'api-key')
+
+
+@flask_app.route('/cloud.js')
+def cloud_js():
+    try:
+        with open('cloud.js', 'r', encoding='utf-8') as f:
+            src = f.read()
+    except OSError:
+        src = '/* cloud.js не найден */'
+    return _no_cache(Response(src, mimetype='application/javascript'))
 
 
 # Кэш байтов ассетов — картинки/звуки в игре (SongIcon.Image, звуковые

@@ -63,6 +63,7 @@ Endpoint groups:
 - Files: `/api/open`, `/api/open/upload`, `/api/new`, `/api/save`, `/api/save/download`, `/api/browse`, `/api/publish`, `/api/export/rbxm` (GET download / POST to path), `/api/import/rbxm` (by path), `/api/import/rbxm/upload`
 - Tree and instances: `/api/tree`, `/api/all_instances`, `/api/scripts`, `/api/gui_tree`, `/api/scene`, `/api/spawn`, `/api/instance` (GET/POST/PUT/DELETE)
 - Roblox: `/api/roblox/*` (userid, auth-status, logout, api-key, avatar3d/*), `/api/asset-proxy`
+- Open Cloud (`cloud.js` + block `/api/cloud/*`): `toolbox/search`, `toolbox/asset/<id>`, `toolbox/insert` (Creator Store model -> `import_rbxm`), `universe/<id>` (GET/PATCH `cloud/v2/universes`), `universe/<id>/restart`. Publish/Save to Roblox stays in `/api/publish` (`version_type` Published/Saved). Every Open Cloud call tries the API key first and falls back to the `.ROBLOSECURITY` session (with X-CSRF-TOKEN) when there is no key or it gets 401/403; the cookie path is unofficial/legacy (develop.roblox.com v1, `Data/Upload.ashx` for Published only, `assetdelivery` for downloads) and the response carries `via`: `api-key` | `cookie`
 - Utility: `/api/status`, `/api/log`, `/api/log/list`, `/api/log/<name>`, `/vendor/<path>`, `/icons/<path>`, `/`
 
 Responses are JSON of the form `{'ok': True/False, 'error': ...}`; errors are returned with an HTTP 4xx/5xx status and the message in `error`.
