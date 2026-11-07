@@ -179,9 +179,9 @@
     function tbCard(it) {
         const i = itemInfo(it);
         if (!i.id) return '';
-        const thumb = 'https://www.roblox.com/asset-thumbnail/image?assetId=' + encodeURIComponent(i.id) + '&width=150&height=150&format=png';
+        const thumb = '/api/toolbox/thumb/' + encodeURIComponent(i.id);
         return '<div style="background:#1f2937;border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px">' +
-            '<img src="' + thumb + '" alt="" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;background:#111827">' +
+            '<img src="' + thumb + '" alt="" data-nolog="1" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;background:#111827">' +
             '<div style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(i.name) + '">' + esc(i.name) + '</div>' +
             (TB.cat === 'Model'
                 ? '<button data-ins="' + esc(i.id) + '" style="background:#16a34a">' + T('tb_insert') + '</button>'

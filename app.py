@@ -2825,6 +2825,44 @@ def api_roblox_thumb():
     return resp
 
 
+_TB_THUMB_CACHE = {}
+_TB_THUMB_SEM = _threading.Semaphore(4)   # не заваливаем сеть 24 одновременными запросами миниатюр
+_TB_PLACEHOLDER = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150"><rect width="150" height="150" fill="#111827"/>'
+                   '<text x="75" y="95" font-size="56" text-anchor="middle">\U0001F9F0</text></svg>')
+
+
+@flask_app.route('/api/toolbox/thumb/<int:asset_id>')
+def api_toolbox_thumb(asset_id):
+    """Миниатюра ассета для карточек Toolbox. Прямой www.roblox.com/asset-thumbnail в WebView часто не открывается
+    (блокировка/DNS) и сыпал по ошибке на каждую карточку; здесь миниатюру достаёт сервер (с DoH-запасным путём).
+    Ответ всегда 200: если достать не вышло — отдаём SVG-заглушку (без кэша), и в консоли нет ни одной ошибки."""
+    key = str(asset_id)
+    data = _TB_THUMB_CACHE.get(key)
+    if data is None:
+        with _TB_THUMB_SEM:
+            data = _TB_THUMB_CACHE.get(key)
+            if data is None:
+                try:
+                    d = _rbx_get_json('https://thumbnails.roblox.com/v1/assets?assetIds=' + key +
+                                      '&returnPolicy=PlaceHolder&size=150x150&format=Png&isCircular=false')
+                    row = (d.get('data') or [{}])[0] if isinstance(d, dict) else {}
+                    if row.get('state') == 'Completed' and row.get('imageUrl'):
+                        data = _rbx_get_bytes(row['imageUrl'])
+                        if len(_TB_THUMB_CACHE) >= 400:
+                            _TB_THUMB_CACHE.pop(next(iter(_TB_THUMB_CACHE)))
+                        _TB_THUMB_CACHE[key] = data
+                except Exception as e:
+                    print('[toolbox] thumb', key, 'не загрузилась:', repr(e)[:160])
+                    data = None
+    if data:
+        resp = Response(data, mimetype='image/png' if data[:4] == b'\x89PNG' else 'image/jpeg')
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
+        return resp
+    resp = Response(_TB_PLACEHOLDER, mimetype='image/svg+xml')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @flask_app.route('/api/roblox/experience/places')
 def api_roblox_experience_places():
     """Места внутри Experience (у многих одно — тогда клиент открывает его сразу)."""
@@ -7059,7 +7097,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-11-01 · transform-tools'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-11-07 · back-toolbox'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

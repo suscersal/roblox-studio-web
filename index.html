@@ -392,6 +392,9 @@
             // именно это нужно для диагностики офлайн-запуска.
             window.addEventListener('error', function (e) {
                 var t = e.target;
+                if (t && t !== window && t.getAttribute && t.getAttribute('data-nolog')) {
+                    return;   // миниатюры Toolbox и т.п.: ошибка не должна засорять Output
+                }
                 if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
                     addLine('❌ Не удалось загрузить ресурс: ' + (t.src || t.href), '#f66');
                 } else if (t && t !== window && (t.tagName === 'VIDEO' || t.tagName === 'AUDIO' || t.tagName === 'SOURCE')) {

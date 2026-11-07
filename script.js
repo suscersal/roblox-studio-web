@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-01 · transform-tools';
+        const BUILD_LABEL = '2026-11-07 · back-toolbox';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -4820,6 +4820,25 @@
         function togglePlay() {
             if (isPlaying) stopPlay(); else startPlay();
         }
+
+        // Системная кнопка «Назад» (Android: MainActivity.kt вызывает window.__handleBack()). Раньше она сразу закрывала
+        // приложение. Теперь закрывает самый верхний слой интерфейса и возвращает true; если закрывать нечего — false, и
+        // приложение само просит нажать «Назад» ещё раз для выхода.
+        window.__handleBack = function () {
+            try {
+                const cl = document.body.classList;
+                const ov = document.getElementById('modal-overlay');
+                if (ov && ov.classList.contains('show')) { closeModal(); return true; }            // диалоги (Add, Toolbox, Experience…)
+                if (document.getElementById('file-menu')) { closeFileMenu(); return true; }        // меню «Файл»
+                if (_startVisible() && document.querySelector('#tree-scroll')?.children.length) { hideStartScreen(); return true; }
+                if (isPlaying) { stopPlay(); return true; }                                          // Play → редактор
+                if (cl.contains('m-menu-open')) { cl.remove('m-menu-open'); return true; }          // раскрытое ☰
+                if (cl.contains('m-out-open')) { cl.remove('m-out-open'); return true; }            // плавающий Output
+                if (MUI.on && MUI.mode === 'panels') { muiSetMode('scene'); return true; }          // «Панели» → «Сцена»
+                if (selectedRef !== null && selectedRef !== undefined) { deselect(); return true; }            // снять выделение
+            } catch (e) { console.warn('back: ' + e); }
+            return false;
+        };
 
         // Раньше спавн искался среди уже подгруженных в редакторе мешей —
         async function findSpawnPoint() {

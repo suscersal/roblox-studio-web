@@ -9,6 +9,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.chaquo.python.Python
@@ -30,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
+    private var lastBackPressAt = 0L   // для «нажмите «Назад» ещё раз для выхода»
 
     // Импорт .rbxl-файла через системный пикер (SAF) — единственный
     // надёжный способ достать файл, выбранный пользователем, при scoped
@@ -209,6 +212,30 @@ class MainActivity : AppCompatActivity() {
         // системном WebView, явных флагов не требуется.
         webView.webViewClient = WebViewClient()
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+
+        // «Назад»: сначала даём странице закрыть самый верхний слой (диалог, меню, Play, «Панели» → «Сцена»…) —
+        // window.__handleBack() возвращает true, если что-то закрыла. Иначе — история WebView, а выход из приложения
+        // только по второму нажатию в течение 2 секунд.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                webView.evaluateJavascript(
+                    "(function(){try{return !!(window.__handleBack && window.__handleBack());}catch(e){return false;}})()"
+                ) { handled ->
+                    if (handled == "true") return@evaluateJavascript
+                    if (webView.canGoBack()) {
+                        webView.goBack()
+                        return@evaluateJavascript
+                    }
+                    val now = System.currentTimeMillis()
+                    if (now - lastBackPressAt < 2000) {
+                        finish()
+                    } else {
+                        lastBackPressAt = now
+                        Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        })
 
         val loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         loadingStatus.visibility = View.VISIBLE
