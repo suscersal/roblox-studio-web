@@ -826,10 +826,34 @@ def s_vector3int16(vals):
             buf.extend(struct.pack('<3h', 0, 0, 0))
     return bytes(buf)
 
+def _valid_numseq(v):
+    """NumberSequence в Roblox обязана иметь >= 2 ключевых точек (времена 0 и 1).
+    Пустой список (его получали из None / числа / нечитаемого значения) Studio
+    отвергает целиком — файл не открывается. Валидные последовательности не трогаем."""
+    kps = [k for k in v if isinstance(k, dict)] if isinstance(v, list) else []
+    if len(kps) >= 2:
+        return kps
+    if kps:
+        val = float(kps[0].get('value', 0))
+    elif isinstance(v, (int, float)) and not isinstance(v, bool):
+        val = float(v)     # число (например из поля свойств) = константная последовательность
+    else:
+        val = 0.0
+    return [{'time': 0.0, 'value': val, 'envelope': 0.0},
+            {'time': 1.0, 'value': val, 'envelope': 0.0}]
+
+def _valid_colorseq(v):
+    """То же для ColorSequence (пустая -> белая)."""
+    kps = [k for k in v if isinstance(k, dict)] if isinstance(v, list) else []
+    if len(kps) >= 2:
+        return kps
+    c = kps[0] if kps else {'r': 1.0, 'g': 1.0, 'b': 1.0}
+    return [dict(c, time=0.0), dict(c, time=1.0)]
+
 def s_numbersequence(vals):
     buf = bytearray()
     for v in vals:
-        keypoints = v if isinstance(v, list) else []
+        keypoints = _valid_numseq(v)
         buf.extend(struct.pack('<I', len(keypoints)))
         for kp in keypoints:
             if isinstance(kp, dict):
@@ -844,7 +868,7 @@ def s_numbersequence(vals):
 def s_colorsequence(vals):
     buf = bytearray()
     for v in vals:
-        keypoints = v if isinstance(v, list) else []
+        keypoints = _valid_colorseq(v)
         buf.extend(struct.pack('<I', len(keypoints)))
         for kp in keypoints:
             if isinstance(kp, dict):
@@ -1204,6 +1228,20 @@ _defaults_cache = None
 _BINARY_TO_REFLECTION_NAME = {'Color3uint8': 'Color', 'size': 'Size', 'shape': 'Shape', 'formFactorRaw': 'FormFactor'}
 
 
+# В базе дефолтов (reflection) нет NumberSequence/ColorSequence, поэтому объект, созданный
+# в редакторе (в файле у него нет этих свойств), получал пустые последовательности.
+# Значения по умолчанию ParticleEmitter в Studio: размер 1, прозрачность 0, squash 0, цвет белый.
+def _ns_const(v):
+    return [{'time': 0.0, 'value': float(v), 'envelope': 0.0}, {'time': 1.0, 'value': float(v), 'envelope': 0.0}]
+_WHITE_CS = [{'time': 0.0, 'r': 1.0, 'g': 1.0, 'b': 1.0}, {'time': 1.0, 'r': 1.0, 'g': 1.0, 'b': 1.0}]
+_SEQUENCE_DEFAULTS = {
+    ('ParticleEmitter', 'Size'): _ns_const(1),
+    ('ParticleEmitter', 'Transparency'): _ns_const(0),
+    ('ParticleEmitter', 'Squash'): _ns_const(0),
+    ('ParticleEmitter', 'Color'): _WHITE_CS,
+}
+
+
 def _class_defaults(cls):
     global _defaults_cache
     if _defaults_cache is None:
@@ -1259,8 +1297,17 @@ def _writable_props(cls, p, known):
     return out
 
 
+def _meta_payload(parsed):
+    """Распакованное содержимое чанка META исходного файла (ExplicitAutoJoints и т.п.)
+    или None. Писатель его раньше терял: в записанном файле META просто не было."""
+    for ch in parsed.get('_raw_chunks', []):
+        if ch['name'] == b'META':
+            return ch['payload']
+    return None
+
+
 def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types=None,
-                     shared_strings=None, service_refs=None, renumber=True):
+                     shared_strings=None, service_refs=None, renumber=True, meta=None):
     """Собирает бинарный .rbxl/.rbxm. Возвращает (bytes, warnings).
 
     refs — какие инстансы писать и в каком порядке (по умолчанию все, по
@@ -1314,6 +1361,8 @@ def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types
                 dv = cd.get(_BINARY_TO_REFLECTION_NAME.get(name, name))
                 if dv is None and type_id == 0x0b:
                     dv = 194   # BrickColor 0 невалиден; 194 = Medium stone grey (серый по умолчанию)
+                if dv is None:
+                    dv = _SEQUENCE_DEFAULTS.get((c, name))
                 if dv is not None:
                     vals = [dv if v is None else v for v in vals]
             try:
@@ -1356,6 +1405,8 @@ def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types
     out = bytearray(RBX_MAGIC)
     out.extend(struct.pack('<II', len(class_order), len(refs)))
     out.extend(b'\x00' * 8)
+    if meta:
+        out.extend(write_chunk(b'META', meta))
     if sstr_new:
         out.extend(write_chunk(b'SSTR', write_sstr(sstr_new)))
     for ch in inst_chunks:
@@ -1439,7 +1490,7 @@ def export_rbxm(parsed, root_refs):
     data, warnings = build_rbx_binary(
         parsed['referent_to_class'], parsed['parent_map'], parsed['props'], refs=refs,
         prop_types=parsed.get('prop_types'), shared_strings=parsed.get('shared_strings'),
-        renumber=True,
+        renumber=True, meta=_meta_payload(parsed),
     )
     # Свойства, которые парсер не умеет читать, при открытии файла были
     # потеряны — честно говорим об этом, а не молчим.
@@ -1682,7 +1733,11 @@ def parse_rbxl(path):
                 obj_props['Size'] = {'x': 4.0, 'y': 1.2, 'z': 2.0}
         
         # Обработка цвета
-        if 'Color3' in obj_props or 'Color' in obj_props or 'BrickColor' in obj_props:
+        # Color3 — производное имя (из Color3uint8/BrickColor). Но у Texture, Decal,
+        # Shirt, Pants это НАСТОЯЩЕЕ свойство: пересчёт с round(…, 3) портил значение
+        # (0.529412 -> 0.529) и при сохранении оно уходило в файл уже искажённым.
+        if (cls, 'Color3') not in prop_types and (
+                'Color3' in obj_props or 'Color' in obj_props or 'BrickColor' in obj_props):
             color = obj_props.get('Color3') or obj_props.get('Color') or obj_props.get('BrickColor')
             if isinstance(color, dict) and 'r' in color and 'g' in color and 'b' in color:
                 r = color['r']
@@ -1828,6 +1883,7 @@ def save_rbxl(parsed: dict, path: str):
         prop_types=parsed.get('prop_types'),
         shared_strings=parsed.get('shared_strings'),
         service_refs=parsed.get('service_refs'), renumber=False,
+        meta=_meta_payload(parsed),
     )
     for w in warnings:
         print('save_rbxl:', w)
