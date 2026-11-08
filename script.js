@@ -2312,6 +2312,10 @@
                     if (el.closest('#bottom-panel')) continue;
                     if (el.closest('.pad-btn')) return true;
                     if (!el.closest('#viewport')) return true;
+                    // Кнопки и поля самого редактора внутри вьюпорта (панель инструментов ✥ ⟳ ⤢, Play/Stop, качество, шаги привязки).
+                    // Раньше они подпадали под общее правило «внутри #viewport — не кнопка», и в ландшафте, где зона стика
+                    // (до 2×--joy по высоте) достаёт до панели инструментов, стик перехватывал касание раньше самой кнопки.
+                    if (el.closest('#tf-bar, #tf-steps, #quality-selector, #play-stop-fab, button, input, select, textarea, label, a[href], [role="button"]')) return true;
                     // elementsFromPoint уже исключает pointer-events:none, т.е. всё, что осталось внутри #gui-overlay, —
                     // кнопка, TextBox, ScrollingFrame, Active-Frame или Frame со скриптом на InputBegan и т.п.
                     if (el.closest('#gui-overlay') && el.id !== 'gui-overlay') return true;
@@ -2699,7 +2703,7 @@
             if (!isDragging && (e.button === 0 || e.button === 2) && isPlaying && luaClickDetectorAt(e.clientX, e.clientY, e.button === 2, false)) return;
             // В Play объекты мышью не выбираются (как в настоящей игре): иначе клик по экрану/инвентарю выделял деталь за ним
             if (!isDragging && e.button === 0 && !isPlaying) {
-                pick(e.clientX, e.clientY, { additive: e.ctrlKey || e.metaKey || multiSelectMode });
+                pick(e.clientX, e.clientY, { additive: e.ctrlKey || e.metaKey || multiSelectMode, exact: e.altKey });
             }
         }
 
@@ -2795,6 +2799,34 @@
             }
         }
 
+        // ============ ВЫБОР ВО ВЬЮПОРТЕ: ВЕРХНИЙ РОДИТЕЛЬ ============
+        // Как в Roblox Studio: клик по детали внутри Model выделяет самую верхнюю Model под Workspace, а не саму деталь.
+        // Повторный клик по детали внутри уже выделенной Model опускается на уровень глубже; Alt+клик выделяет сразу деталь.
+        // Folder/Workspace «группами» не считаются (иначе клик по детали выделял бы всю папку с сотнями деталей).
+        // false — вернуть старое поведение (выделяется ровно та деталь, по которой кликнули).
+        let viewportSelectTopModel = true;
+        const _SELECT_GROUP_CLASSES = new Set(['Model', 'Actor', 'Tool', 'Accessory', 'Hat', 'WorldModel']);
+        function viewportSelectTarget(hitRef, opts) {
+            if (!viewportSelectTopModel || (opts && opts.exact)) return hitRef;
+            if (!treeByRef[hitRef] || parentByRef[hitRef] === undefined) return hitRef;   // нет в дереве (аватар и т.п.)
+            if (selectedRefs.has(hitRef)) return hitRef;                                    // эта деталь уже выделена явно (Explorer / спуск)
+            // chain: [деталь, родитель, ..., корень-сервис]
+            const chain = [hitRef];
+            let p = parentByRef[hitRef], guard = 0;
+            while (p !== undefined && p !== null && p !== -1 && guard++ < 200) { chain.push(p); p = parentByRef[p]; }
+            const isGroup = (r) => r === hitRef || (treeByRef[r] && _SELECT_GROUP_CLASSES.has(treeByRef[r].cls));
+            // повторный клик внутри выделенной Model — на уровень глубже (без Ctrl/мультивыбора: там выбираем верх)
+            if (!(opts && opts.additive) && selectedRef !== null) {
+                const i = chain.indexOf(selectedRef);
+                if (i > 0) {
+                    for (let j = i - 1; j >= 0; j--) if (isGroup(chain[j])) return chain[j];
+                }
+            }
+            // самая верхняя группа под сервисом (последний элемент chain — сам сервис, Workspace и т.п., его не берём)
+            for (let j = chain.length - 2; j >= 0; j--) if (isGroup(chain[j])) return chain[j];
+            return hitRef;
+        }
+
         // ============ ИСПРАВЛЕННЫЙ PICK ============
         function pick(cx, cy, opts) {
             const vp = document.getElementById('viewport');
@@ -2843,7 +2875,7 @@
                     obj = obj.parent;
                 }
                 if (obj && obj.userData && obj.userData.ref) {
-                    selectRef(parseInt(obj.userData.ref), opts);
+                    selectRef(viewportSelectTarget(parseInt(obj.userData.ref), opts), opts);
                     return;
                 }
             }
