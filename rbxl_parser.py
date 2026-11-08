@@ -657,6 +657,9 @@ def s_content(vals):
     for u in uris:
         b = u.encode('utf-8')
         out += len(b).to_bytes(4, 'little') + b
+    out += (0).to_bytes(4, 'little')   # число Object-ссылок
+    # Studio за ними пишет ещё один нулевой u32 (в файлах 2025+ после типов идут
+    # три счётчика, а не два) — без него хвост короче, чем у настоящего файла.
     out += (0).to_bytes(4, 'little')
     return out
 
@@ -1724,7 +1727,12 @@ def parse_rbxl(path):
         # Обработка прозрачности
         if 'Transparency' in obj_props:
             trans = obj_props['Transparency']
-            if isinstance(trans, (int, float)):
+            if isinstance(trans, list):
+                # NumberSequence (ParticleEmitter.Transparency и т.п.): это не
+                # число, затирать нулём нельзя — при записи получилась бы
+                # последовательность без ключевых точек, и Studio не открывает файл.
+                pass
+            elif isinstance(trans, (int, float)):
                 obj_props['Transparency'] = max(0.0, min(1.0, float(trans)))
             else:
                 obj_props['Transparency'] = 0.0
