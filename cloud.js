@@ -213,7 +213,7 @@
         try { if (typeof rbxmImportParent === 'function') parent = rbxmImportParent(); } catch (e) { /* ok */ }
         const r = await call('POST', '/api/cloud/toolbox/insert', { assetId: id, parent: parent });
         btn.disabled = false;
-        if (r.ok) {
+        if (r.ok || r.needsConfirm) {
             if (typeof afterRbxmImport === 'function') await afterRbxmImport(r);
             else say(T('tb_inserted'));
         } else say(r.error || T('err'), 'err');

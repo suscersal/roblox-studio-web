@@ -11,7 +11,7 @@ import traceback
 import json
 import time
 from urllib.parse import quote
-from rbxl_parser import parse_rbxl, save_rbxl, publish_place, export_rbxm, import_rbxm
+from rbxl_parser import parse_rbxl, save_rbxl, publish_place, export_rbxm, import_rbxm, scan_rbxm
 from rbxl_parser import union_mesh_from_parsed as _union_mesh_solid, union_mesh_render_json
 from flask import Flask, request, jsonify, Response, send_from_directory
 from pathlib import Path
@@ -158,6 +158,9 @@ HIDDEN = {
     'VideoCaptureService', 'NonReplicatedCSGDictionaryService',
     'CSGDictionaryService', 'TweenService', 'PermissionsService',
 }
+
+# размеры по умолчанию для новых деталей из диалога Add (как в Roblox; лестница — высокая, чтобы по ней было что лезть)
+_ADD_SIZE_DEFAULTS = {'Seat': (4, 1, 2), 'VehicleSeat': (4, 1, 2), 'TrussPart': (2, 10, 2), 'SpawnLocation': (6, 1, 6)}
 
 PART_CLASSES = {
     'Part', 'WedgePart', 'CornerWedgePart', 'TrussPart',
@@ -4987,14 +4990,18 @@ def api_add():
         # в (0,0,0) с нулевым/дефолтным размером и накладывается на
         # другие части — визуально выглядит как "не появился".
         px, py, pz = data.get('px', 0), data.get('py', 5), data.get('pz', 0)
-        sx, sy, sz = data.get('sx', 4), data.get('sy', 1), data.get('sz', 2)
+        dsx, dsy, dsz = _ADD_SIZE_DEFAULTS.get(cls, (4, 1, 2))
+        sx, sy, sz = data.get('sx', dsx), data.get('sy', dsy), data.get('sz', dsz)
         props['Position'] = {'x': safe_float(
             px), 'y': safe_float(py), 'z': safe_float(pz)}
         props['Rotation'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         props['Size'] = {'x': safe_float(sx, 4), 'y': safe_float(
             sy, 1), 'z': safe_float(sz, 2)}
+        # Формат CFrame в props — 9 чисел поворота (по строкам) + отдельный position. Раньше сюда писали 12 чисел с позицией
+        # внутри matrix: позиция попадала в элементы поворота, и физтело новой детали получало мусорный (неединичный) поворот.
         props['CFrame'] = {
-            'matrix': [1, 0, 0, safe_float(px), 0, 1, 0, safe_float(py, 5), 0, 0, 1, safe_float(pz)]
+            'matrix': [1, 0, 0, 0, 1, 0, 0, 0, 1],
+            'position': {'x': safe_float(px), 'y': safe_float(py, 5), 'z': safe_float(pz)},
         }
         props['Anchored'] = data.get('anchored', True)
         props['CanCollide'] = data.get('cancollide', True)
@@ -5269,18 +5276,74 @@ def api_export_rbxm():
     )
 
 
-def _finish_rbxm_import(path, parent):
+_PENDING_IMPORTS = {}   # token -> {'path', 'parent', 'ts'}: модели со скриптами ждут подтверждения пользователя
+
+
+def _pending_cleanup():
+    now = time.time()
+    for tok in [t for t, v in _PENDING_IMPORTS.items() if now - v['ts'] > 1800]:
+        _pending_drop(tok)
+    while len(_PENDING_IMPORTS) > 8:
+        _pending_drop(next(iter(_PENDING_IMPORTS)))
+
+
+def _pending_drop(tok):
+    v = _PENDING_IMPORTS.pop(tok, None)
+    if v:
+        try:
+            os.unlink(v['path'])
+        except OSError:
+            pass
+
+
+def _finish_rbxm_import(path, parent, confirmed=False):
+    """Импорт .rbxm в сцену. Если в модели есть скрипты и пользователь ещё не подтвердил — НИЧЕГО не импортируем, а
+    отдаём сводку (сколько скриптов, найденные опасные команды вроде require/loadstring/HttpService) и token: клиент
+    покажет окно и вызовет /api/import/rbxm/confirm (или /cancel). Так одинаково работают Toolbox, .rbxm с диска и Android."""
+    import shutil
+    import tempfile
     if not state['parsed']:
         api_new()   # нечего открывать — импортируем в новую пустую сцену
+    if not confirmed:
+        scan = scan_rbxm(path)
+        if scan['scripts']['total']:
+            _pending_cleanup()
+            fd, keep = tempfile.mkstemp(suffix='.rbxm')
+            os.close(fd)
+            shutil.copyfile(path, keep)   # исходный временный файл вызывающий удалит сразу после ответа
+            tok = _secrets.token_hex(8)
+            _PENDING_IMPORTS[tok] = {'path': keep, 'parent': parent, 'ts': time.time()}
+            return jsonify({'ok': False, 'needsConfirm': True, 'token': tok, 'scan': scan})
+    info = {}
     try:
-        roots, count, warnings = import_rbxm(state['parsed'], path, parent)
+        roots, count, warnings = import_rbxm(state['parsed'], path, parent, info)
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     except Exception as e:
         traceback.print_exc()
         return jsonify({'ok': False, 'error': str(e)}), 500
     bump_scene_version()
-    return jsonify({'ok': True, 'count': count, 'roots': roots, 'warnings': warnings})
+    return jsonify({'ok': True, 'count': count, 'roots': roots, 'warnings': warnings, 'lighting': info.get('lighting', [])})
+
+
+@flask_app.route('/api/import/rbxm/confirm', methods=['POST'])
+@_collab_track('import')
+def api_import_rbxm_confirm():
+    """Подтверждение импорта модели со скриптами: {token}. Файл уже лежит в _PENDING_IMPORTS."""
+    tok = (request.get_json(silent=True) or {}).get('token')
+    v = _PENDING_IMPORTS.get(tok)
+    if not v:
+        return jsonify({'ok': False, 'error': 'Импорт устарел — повторите вставку модели'}), 404
+    try:
+        return _finish_rbxm_import(v['path'], v['parent'], confirmed=True)
+    finally:
+        _pending_drop(tok)
+
+
+@flask_app.route('/api/import/rbxm/cancel', methods=['POST'])
+def api_import_rbxm_cancel():
+    _pending_drop((request.get_json(silent=True) or {}).get('token'))
+    return jsonify({'ok': True})
 
 
 @flask_app.route('/api/import/rbxm', methods=['POST'])
@@ -6996,13 +7059,23 @@ def api_tool_item(ref):
                                 'offset': [safe_float(of.get('x', 0), 0), safe_float(of.get('y', 0), 0), safe_float(of.get('z', 0), 0)]}
                     break
         shape = pr.get('shape', pr.get('Shape'))
-        out.append({'name': pr.get('Name'), 'size': size, 'color': get_part_color(pr), 'transparency': tr,
+        out.append({'ref': k, 'name': pr.get('Name'), 'size': size, 'color': get_part_color(pr), 'transparency': tr,
                     'shape': {0: 'sphere', 2: 'cylinder'}.get(shape, 'box') if r2c[k] == 'Part' else 'box',
                     'mesh': mesh, 'cf': rel_cf(pr['CFrame'])})
     if not out:
         return jsonify({'ok': False, 'error': 'у Tool нет видимых деталей'})
+    # суставы (Motor6D/Weld): клиент двигает Part1 относительно Handle, когда скрипт меняет joint.C0 (нажатие клавиши и т.п.)
+    joints, st = [], list(kids.get(ref, []))
+    while st:
+        k = st.pop()
+        st.extend(kids.get(k, []))
+        if r2c.get(k) in ('Motor6D', 'Weld', 'ManualWeld'):
+            try:
+                joints.append({'ref': k, 'part0': int(props[k].get('Part0')), 'part1': int(props[k].get('Part1'))})
+            except (TypeError, ValueError):
+                pass
     grip = props[ref].get('Grip')
-    return jsonify({'ok': True, 'cls': 'Tool', 'name': props[ref].get('Name'), 'parts': out,
+    return jsonify({'ok': True, 'cls': 'Tool', 'name': props[ref].get('Name'), 'parts': out, 'joints': joints,
                     'grip': _cf12(grip) if isinstance(grip, dict) else None})
 
 
@@ -7097,7 +7170,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-11-07 · back-toolbox'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-11-08 · seat-ladder-import'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

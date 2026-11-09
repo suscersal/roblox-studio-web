@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-07 · back-toolbox';
+        const BUILD_LABEL = '2026-11-08 · seat-ladder-import';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -2452,6 +2452,7 @@
         // ============ АНИМАЦИЯ ============
         function animate() {
             requestAnimationFrame(animate);
+            _updateHeldTool();
 
             fpsFrames++;
             const now = performance.now();
@@ -4859,6 +4860,8 @@
         window.__handleBack = function () {
             try {
                 const cl = document.body.classList;
+                const gate = document.getElementById('rbxm-gate');
+                if (gate) { gate.querySelector('[data-cancel]').click(); return true; }              // подтверждение скриптов
                 const ov = document.getElementById('modal-overlay');
                 if (ov && ov.classList.contains('show')) { closeModal(); return true; }            // диалоги (Add, Toolbox, Experience…)
                 if (document.getElementById('file-menu')) { closeFileMenu(); return true; }        // меню «Файл»
@@ -5562,7 +5565,12 @@
         }
         function _clearHeldTool(group) {
             if (!group) return;
-            const root = group.userData.toolRoot;
+            const root = group.userData.toolRoot, heldG = group.userData.toolHeld;
+            if (heldG) {
+                heldG.traverse(n => { if (n.material) n.material.dispose(); });
+                if (heldG.parent) heldG.parent.remove(heldG);
+                group.userData.toolHeld = null;
+            }
             if (root) {
                 root.traverse(n => { if (n.material) n.material.dispose(); });
                 group.remove(root);
@@ -5576,9 +5584,9 @@
             let geo, scale = new THREE.Vector3(1, 1, 1), mat;
             const off = new THREE.Matrix4();
             const opac = 1 - (p.transparency || 0);
-            if (m.kind === 'special' || m.kind === 'meshpart') {
-                const res = await loadRealMeshGeometry(m.meshId);
-                if (!res) return null;
+            let res = null;
+            if (m.kind === 'special' || m.kind === 'meshpart') res = await loadRealMeshGeometry(m.meshId);
+            if ((m.kind === 'special' || m.kind === 'meshpart') && res) {
                 geo = res.geometry;
                 if (m.kind === 'special') {
                     scale.set(m.scale[0], m.scale[1], m.scale[2]);
@@ -5592,7 +5600,7 @@
                     side: THREE.DoubleSide, alphaTest: m.textureId ? 0.5 : 0,
                     transparent: opac < 1, opacity: opac,
                 });
-            } else {
+            } else {   // примитив — или меш не загрузился (нет сети/ассет недоступен): рисуем коробку по размеру детали
                 if (p.shape === 'sphere') { geo = new THREE.SphereGeometry(0.5, 16, 12); scale.set(p.size[0], p.size[1], p.size[2]); }
                 else if (p.shape === 'cylinder') { geo = makeCylinderXGeometry(p.size[0], p.size[1], p.size[2], 16); }
                 else geo = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
@@ -5603,6 +5611,8 @@
             mesh.matrix.copy(_cf12ToMatrix(p.cf)).multiply(off).multiply(new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z));
             mesh.matrixWorldNeedsUpdate = true;
             mesh.userData.shared = true;   // геометрия — из кэша мешей
+            mesh.userData.ref = p.ref;
+            mesh.userData.base = mesh.matrix.clone();
             return mesh;
         }
         async function refreshCharacterTool() {
@@ -5636,14 +5646,64 @@
                 try {
                     const mesh = await _buildToolPartMesh(p);
                     if (charMesh !== group || group.userData.toolToken !== token) { mesh && mesh.material.dispose(); return; }
-                    if (mesh) held.add(mesh);
+                    if (mesh) { held.add(mesh); (held.userData.byRef = held.userData.byRef || {})[p.ref] = mesh; }
                 } catch (e) { logLuaOutput('warn', 'Tool: ' + (p.name || '?') + ' — ' + (e && e.message || e)); }
             }
             if (charMesh !== group || group.userData.toolToken !== token) return;
+            held.userData.joints = {};
+            for (const j of (info.joints || [])) held.userData.joints[j.ref] = j;
+            // размер модели — для «вида из глаз»: крупную деталь (клавиша 3×1.4) уменьшаем, чтобы она не закрывала экран
+            held.matrix.identity();
+            const _bb = new THREE.Box3().setFromObject(held), _bs = new THREE.Vector3();
+            _bb.getSize(_bs);
+            held.userData.size = Math.max(_bs.x, _bs.y, _bs.z);
+            held.matrix.copy(H);
             root.add(held);
             group.add(root);
             group.userData.toolRoot = root;
+            group.userData.toolHeld = held;
+            group.userData.toolH = H.clone();
             _setRightArmRaised(group, true);
+            for (const jr of Object.keys(luaJointC)) _heldJointPose(Number(jr));   // позы Motor6D, выставленные до загрузки модели
+            _updateHeldTool();
+        }
+
+        // Предмет в руке: от третьего лица — на руке персонажа, от первого — «вьюмодель» перед камерой справа внизу
+        // (как в Roblox; раньше от первого лица в руке ничего не было видно). Там рисуем поверх мира, чтобы не врезался в стены.
+        function _heldDepth(held, normal) {
+            held.traverse(o => { if (o.material) { o.material.depthTest = normal; } if (o.isMesh) o.renderOrder = normal ? 0 : 998; });
+        }
+        function _updateHeldTool() {
+            const g = charMesh, held = g && g.userData.toolHeld;
+            if (!held || !isPlaying || !camera) return;
+            const fp = !thirdPerson;
+            const want = fp ? camera : g.userData.toolRoot;
+            if (!want || held.parent === want) return;
+            if (fp) {
+                if (!camera.parent) scene.add(camera);   // дети камеры рисуются только если сама камера в сцене
+                const k = Math.min(1, 0.55 / Math.max(0.01, held.userData.size || 1));
+                held.matrix.makeTranslation(0.55, -0.5, -1.25)
+                    .multiply(new THREE.Matrix4().makeRotationY(-0.3))
+                    .multiply(new THREE.Matrix4().makeRotationX(0.15))
+                    .multiply(new THREE.Matrix4().makeScale(k, k, k));
+            } else {
+                held.matrix.copy(g.userData.toolH);
+            }
+            _heldDepth(held, !fp);
+            want.add(held);
+        }
+        // Motor6D.C0 меняют (скрипт «Кнопка Z»: нажатие клавиши) -> двигаем деталь Part1 внутри модели в руке
+        function _heldJointPose(jointRef) {
+            const g = charMesh, held = g && g.userData.toolHeld;
+            if (!held || !held.userData.byRef) return;
+            // у клона Motor6D нет Part0/Part1 в luaRefProps — берём из данных файла (joints из /api/tool_item) по ref оригинала
+            const jo = luaCloneOrigin[jointRef] !== undefined ? luaCloneOrigin[jointRef] : jointRef;
+            const j = held.userData.joints && held.userData.joints[jo];
+            if (!j) return;
+            const mesh = held.userData.byRef[j.part1];
+            if (!mesh || !mesh.userData.base) return;
+            const rec = luaJointC[jointRef];
+            mesh.matrix.copy((rec && rec.C0) || new THREE.Matrix4()).multiply(mesh.userData.base);
         }
 
         async function setupPlayerAvatar(group) {
@@ -7661,6 +7721,7 @@ local function __ease(a, style, dir)
     if string.find(dir, "Out", 1, true) then return 1 - (1 - a) ^ pw end
     return a ^ pw
 end
+local __jointTweenOwner = {}
 local TweenMT = { __index = {
     Play = function(self)
         local cls = __get_class(self.__ref)
@@ -7678,6 +7739,37 @@ local TweenMT = { __index = {
                     local e = __ease(a, self.__style, self.__dir)
                     local okv, val = pcall(function() return from:Lerp(target, e) end)
                     inst.Value = (okv and val) or (a >= 1 and target) or from
+                    if a >= 1 then break end
+                    task.wait()
+                end
+                if self.__running == token then
+                    self.__running = nil
+                    __fire_signal(self.__completedKey, "Event")
+                end
+            end)
+            return
+        end
+        -- Motor6D/Weld: C0/C1 — CFrame-свойства суставов (анимация нажатия клавиши, дверные петли на Motor6D…). JS-твин такие
+        -- свойства не двигает, поэтому интерполируем здесь (CFrame:Lerp) и присваиваем каждый шаг — запись попадает в __joint_set.
+        if (cls == "Motor6D" or cls == "Weld" or cls == "ManualWeld" or cls == "Motor")
+           and (self.__props.C0 ~= nil or self.__props.C1 ~= nil) then
+            local token = {}
+            self.__running = token
+            __jointTweenOwner[self.__ref] = token   -- новый твин сустава отменяет предыдущий (как в Roblox: release после press)
+            task.spawn(function()
+                local inst = __wrap(self.__ref)
+                local froms = {}
+                for k, _ in pairs(self.__props) do
+                    if k == "C0" or k == "C1" then froms[k] = inst[k] end
+                end
+                local dur, t0 = math.max(self.__time or 0, 0), os.clock()
+                while self.__running == token and __jointTweenOwner[self.__ref] == token do
+                    local a = dur > 0 and math.min((os.clock() - t0) / dur, 1) or 1
+                    local e = __ease(a, self.__style, self.__dir)
+                    for k, from in pairs(froms) do
+                        local okv, val = pcall(function() return from:Lerp(self.__props[k], e) end)
+                        inst[k] = (okv and val) or self.__props[k]
+                    end
                     if a >= 1 then break end
                     task.wait()
                 end
@@ -8102,6 +8194,15 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             local rx, ry, rz = cf:ToOrientation()
             return Vector3.new(math.deg(rx), math.deg(ry), math.deg(rz))
         end
+        if k == "C0" or k == "C1" then
+            local jc = __get_class(ref)
+            if jc == "Motor6D" or jc == "Weld" or jc == "ManualWeld" or jc == "Motor" then return CFrame.new(__joint_get(ref, k)) end
+        end
+        if k == "SeatPart" or k == "Occupant" then
+            local sr = __refprop_get(ref, k)
+            if sr == nil or sr == -1 then return nil end
+            return __wrap(sr)
+        end
         if k == "Part0" or k == "Part1" or k == "Attachment0" or k == "Attachment1" or k == "PrimaryPart"
            or k == "SourceInstance" or k == "TargetInstance" or k == "PositionInstance" then
             local rr = __refprop_get(ref, k)
@@ -8169,6 +8270,13 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
         if type(v) == "table" then
             local tpp = __tblProps[ref]
             if tpp and tpp[k] ~= nil then tpp[k] = v; return end
+            if (k == "C0" or k == "C1") and rawget(v, "R00") ~= nil then
+                local jc = __get_class(ref)
+                if jc == "Motor6D" or jc == "Weld" or jc == "ManualWeld" or jc == "Motor" then
+                    __joint_set(ref, k, v:GetComponents())
+                    return
+                end
+            end
             if k == "Position" and rawget(v, "X") ~= nil and __get_class(ref) == "Attachment" then
                 __att_set(ref, v.X, v.Y, v.Z)
                 return
@@ -9750,6 +9858,10 @@ end
             if (charBody && luaIsCharRef(ref)) { charBody.__rbxGroup = value; luaApplyGroup(charBody); }
         }
         function luaSetGenericProp(ref, name, value) {
+            if (ref === luaHumanoidRef && name === 'Sit' && ref !== -1) {   // humanoid.Sit = true/false из скрипта
+                if (value && !seatState) seatSit(-1); else if (!value && seatState) seatStand(false);
+                return;
+            }
             if (name === 'Name' && luaByRef[ref]) {
                 luaByRef[ref].name = String(value);
                 if (guiPropsByRef[ref]) {
@@ -10063,6 +10175,7 @@ end
         // Подписчики на AncestryChanged (ref -> есть соединение). Раньше AncestryChanged объявлялся, но не стрелял никогда, и
         // кастомный инвентарь (tool.AncestryChanged) не узнавал, что Tool уничтожен/убран из Backpack — слот оставался в хотбаре.
         let luaAncestryRefs = new Set();
+        let luaJointC = {};   // joint ref -> {C0, C1}: Matrix4 (Motor6D/Weld)
         function luaFireAncestryChanged(ref, newParentRef) {
             if (!luaAncestryRefs.size) return;
             const arg = [{ __instanceRef: ref }, (newParentRef === undefined || newParentRef === -1) ? null : { __instanceRef: newParentRef }];
@@ -10841,6 +10954,20 @@ end
                     n(9), n(10), n(11), n(2),
                     0, 0, 0, 1);
             };
+            // Motor6D/Weld: C0/C1. Раньше свойство не существовало — скрипт «Кнопка Z» (joint.C0 * CFrame.new(...)) падал с
+            // «attempt to index a nil value». По умолчанию CFrame.identity; запись двигает деталь Part1 в руке (см. _heldJointPose).
+            def('__joint_get', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), key = lua.lua_tojsstring(L2, 2);
+                const rec = luaJointC[ref];
+                return _pushMatrix(L2, (rec && rec[key]) || new THREE.Matrix4());
+            });
+            def('__joint_set', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1), key = lua.lua_tojsstring(L2, 2);
+                const rec = luaJointC[ref] = luaJointC[ref] || {};
+                rec[key] = _readMatrix(L2, 3);
+                _heldJointPose(ref);
+                return 0;
+            });
             def('__get_cframe', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
                 const M = (luaIsPartRef(ref) && !luaIsCharRef(ref)) ? luaPartMatrix(ref) : luaGetPivotMatrix(ref);
@@ -12327,7 +12454,7 @@ end
 
             // ModuleScript-исходники по ref — require() ищет тут (см.
             luaScriptsByRef = {};
-            luaStartedClonedScripts = new Set(); luaAncestryRefs = new Set();
+            luaStartedClonedScripts = new Set(); luaAncestryRefs = new Set(); luaJointC = {};
             for (const scr of r.scripts) luaScriptsByRef[scr.ref] = scr;
             luaModuleSourceByRef = {};
             luaModuleNameByRef = {};
@@ -12442,7 +12569,7 @@ end
             luaCharacterRef = -1;
             luaPlayerRef = -1;
             luaScriptsByRef = {};
-            luaStartedClonedScripts = new Set(); luaAncestryRefs = new Set();
+            luaStartedClonedScripts = new Set(); luaAncestryRefs = new Set(); luaJointC = {};
             luaControlsDisabled = false;
             luaReleaseAllKeys();
             luaHollowUnions.clear(); luaGhostedUnions.clear();
@@ -13624,6 +13751,175 @@ end
 
         const luaMoveDir = { x: 0, z: 0 };
         let charVelX = 0, charVelZ = 0; // последняя заданная игроком горизонтальная скорость
+        // ============ Seat / VehicleSeat (сидение) и TrussPart (лестница) ============
+        // Seat: касание сверху сажает персонажа (если не Disabled и свободно): Humanoid.Sit=true, Humanoid.SeatPart / Seat.Occupant,
+        // событие Humanoid.Seated(true, seat); тело следует за сиденьем (в т.ч. за движущимся), ввод ходьбы отключён,
+        // прыжок — встать (после этого 1.2 с сиденье не подхватывает снова). VehicleSeat дополнительно выставляет
+        // Throttle/Steer из W/S и A/D (для скриптов машин).
+        // TrussPart: упёрся в неё и жмёшь вперёд — лезешь (W вверх, S вниз; скорость 0.7×WalkSpeed, как в Roblox), без гравитации;
+        // сверху — запрыгиваешь на край, прыжок — спрыгнуть от лестницы. Humanoid.Climbing(speed) стреляет при старте/конце.
+        let seatState = null;      // {ref, yaw, pos: Vector3, rotated}   ref=-1 — «сидит» без сиденья (Humanoid.Sit = true из скрипта)
+        let climbState = null;     // {ref, vy}
+        let _seatCooldownUntil = 0, _climbCooldownUntil = 0;
+        const SIT_DROP = 1.2;      // насколько опускаем модель при посадке (бёдра на уровень сиденья)
+        let _scCache = { t: -1e9, ver: -1, seats: [], truss: [] };
+        function _scRefresh() {
+            const now = performance.now();
+            if (now - _scCache.t < 800 && _scCache.ver === luaByRefVer) return;
+            _scCache.t = now; _scCache.ver = luaByRefVer;
+            const seats = [], truss = [];
+            for (const k in luaByRef) {
+                const c = luaByRef[k].cls;
+                if (c === 'Seat' || c === 'VehicleSeat') seats.push(+k);
+                else if (c === 'TrussPart') truss.push(+k);
+            }
+            _scCache.seats = seats; _scCache.truss = truss;
+        }
+        function _scLocal(ref, wp) {
+            if (!(sceneObjs[ref] || physicsBodies[ref]) || !luaIsUnderWorkspace(ref)) return null;
+            const M = luaPartMatrix(ref);
+            const s = luaSizeOfRef(ref);
+            return { M, p: wp.clone().applyMatrix4(M.clone().invert()), h: new THREE.Vector3(s.x / 2, s.y / 2, s.z / 2) };
+        }
+        function _seatSetHum(sitting, seatRef) {
+            if (luaHumanoidRef === -1) return;
+            virtualInstanceProps[luaHumanoidRef] = virtualInstanceProps[luaHumanoidRef] || {};
+            virtualInstanceProps[luaHumanoidRef].Sit = sitting;
+            (luaRefProps[luaHumanoidRef] = luaRefProps[luaHumanoidRef] || {}).SeatPart = sitting ? seatRef : -1;
+            fireLuaSignal(luaHumanoidRef, '__prop_Sit', []);
+            fireLuaSignal(luaHumanoidRef, '__prop_SeatPart', []);
+            fireLuaSignal(luaHumanoidRef, 'Seated', [sitting, sitting && seatRef !== -1 ? { __instanceRef: seatRef } : null]);
+        }
+        function seatSit(ref) {
+            if (seatState || !charBody) return;
+            seatState = { ref, yaw: spherical.theta, pos: new THREE.Vector3() };
+            charVelX = 0; charVelZ = 0;
+            charBody.velocity.set(0, 0, 0);
+            charBody.collisionResponse = false;   // тело следует за сиденьем, а не толкается с ним
+            if (ref !== -1) {
+                (luaRefProps[ref] = luaRefProps[ref] || {}).Occupant = luaHumanoidRef;
+                fireLuaSignal(ref, '__prop_Occupant', []);
+            }
+            _seatSetHum(true, ref);
+        }
+        function seatStand(jump) {
+            if (!seatState) return;
+            const ref = seatState.ref;
+            seatState = null;
+            if (charBody) {
+                charBody.collisionResponse = true;
+                if (jump) { charBody.position.y += 1.6; charBody.velocity.y = charJumpPower * JUMP_POWER_TO_VELOCITY * 0.8; }
+            }
+            _seatCooldownUntil = performance.now() + 1200;
+            if (ref !== -1 && luaRefProps[ref]) { luaRefProps[ref].Occupant = -1; fireLuaSignal(ref, '__prop_Occupant', []); }
+            _seatSetHum(false, ref);
+            if (ref !== -1 && luaByRef[ref] && luaByRef[ref].cls === 'VehicleSeat') {
+                for (const k of ['Throttle', 'Steer']) { (virtualInstanceProps[ref] = virtualInstanceProps[ref] || {})[k] = 0; fireLuaSignal(ref, '__prop_' + k, []); }
+            }
+        }
+        function climbStop(leap) {
+            if (!climbState) return;
+            climbState = null;
+            _climbCooldownUntil = performance.now() + (leap ? 600 : 250);
+            if (luaHumanoidRef !== -1) fireLuaSignal(luaHumanoidRef, 'Climbing', [0]);
+        }
+        // Возвращает true, если персонаж сидит/лезет и обычное управление нужно пропустить.
+        function _seatClimbTick(forward, strafe, dirX, dirZ) {
+            _scRefresh();
+            const now = performance.now();
+            const c = new THREE.Vector3(charBody.position.x, charBody.position.y, charBody.position.z);
+            // ---- сидим ----
+            if (seatState) {
+                const ref = seatState.ref;
+                if (ref !== -1) {
+                    const l = _scLocal(ref, c);
+                    if (!l || !luaByRef[ref]) { seatStand(false); return false; }
+                    const top = new THREE.Vector3(0, l.h.y + 0.4, 0).applyMatrix4(l.M);   // центр тела чуть выше поверхности
+                    // персонажа унесли (телепорт скриптом/респавн): вместо того, чтобы вернуть его к сиденью, встаём
+                    if (c.distanceTo(top) > 4) { seatStand(false); return false; }
+                    charBody.position.set(top.x, top.y, top.z);
+                    const q = new THREE.Quaternion(); l.M.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+                    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+                    seatState.yaw = Math.atan2(-f.x, -f.z);
+                    if (luaByRef[ref].cls === 'VehicleSeat') {
+                        const vp = (virtualInstanceProps[ref] = virtualInstanceProps[ref] || {});
+                        const th = Math.round(forward), st = Math.round(strafe);
+                        if (vp.Throttle !== th) { vp.Throttle = th; fireLuaSignal(ref, '__prop_Throttle', []); }
+                        if (vp.Steer !== st) { vp.Steer = st; fireLuaSignal(ref, '__prop_Steer', []); }
+                    }
+                }
+                charBody.velocity.set(0, 0, 0);
+                charVelX = 0; charVelZ = 0;
+                if (jumpQueued) { jumpQueued = false; seatStand(true); return true; }
+                return true;
+            }
+            // ---- лезем ----
+            if (climbState) {
+                const l = _scLocal(climbState.ref, c);
+                const e = 0.25 + CHAR_RADIUS;
+                const near = l && Math.abs(l.p.x) < l.h.x + e && Math.abs(l.p.z) < l.h.z + e && l.p.y > -l.h.y - 0.3 && l.p.y < l.h.y + CHAR_RADIUS + 0.6;
+                if (!near) { climbStop(false); return false; }
+                // направление «от лестницы» (в мировых XZ) — для прыжка и выхода наверх
+                const out = new THREE.Vector3(c.x - l.M.elements[12], 0, c.z - l.M.elements[14]);
+                if (out.lengthSq() < 1e-4) out.set(0, 0, 1); out.normalize();
+                if (jumpQueued) {          // спрыгнуть от лестницы
+                    jumpQueued = false;
+                    charBody.velocity.y = charJumpPower * JUMP_POWER_TO_VELOCITY * 0.6;
+                    charPushX = out.x * 8; charPushZ = out.z * 8; charPushT = 0.4;
+                    climbStop(true);
+                    return false;
+                }
+                const feet = c.y - CHAR_RADIUS;
+                const topWorld = new THREE.Vector3(0, l.h.y, 0).applyMatrix4(l.M).y;
+                if (feet >= topWorld - 0.25 && forward >= 0) {   // долезли до верха: запрыгиваем на край
+                    charBody.velocity.y = 9;
+                    charPushX = -out.x * 6; charPushZ = -out.z * 6; charPushT = 0.45;
+                    climbStop(true);
+                    return false;
+                }
+                if (forward < 0 && canJump) { climbStop(false); return false; }   // спустились на землю
+                const spd = charWalkSpeed * 0.7 * forward;
+                climbState.vy = spd;
+                charVelX = 0; charVelZ = 0;
+                charBody.velocity.set(0, spd, 0);
+                if (luaHumanoidRef !== -1 && Math.abs(spd - (climbState.lastSpd || 0)) > 0.5) { climbState.lastSpd = spd; fireLuaSignal(luaHumanoidRef, 'Climbing', [spd]); }
+                return true;
+            }
+            // ---- кандидаты: посадка / начало лазания ----
+            if (!luaControlsDisabled && now > _seatCooldownUntil && luaHumanoidRef !== -1) {
+                for (const ref of _scCache.seats) {
+                    const l = _scLocal(ref, c);
+                    if (!l) continue;
+                    if (luaGetGenericProp(ref, 'Disabled') === true) continue;
+                    const rp = luaRefProps[ref];
+                    if (rp && rp.Occupant !== undefined && rp.Occupant !== -1) continue;
+                    const up = new THREE.Vector3(0, 1, 0).transformDirection(l.M);   // сиденье не перевёрнуто
+                    if (up.y < 0.5) continue;
+                    if (Math.abs(l.p.x) < l.h.x + 0.6 && Math.abs(l.p.z) < l.h.z + 0.6 && l.p.y > l.h.y - 0.3 && l.p.y < l.h.y + CHAR_RADIUS + 0.9) {
+                        seatSit(ref);
+                        return true;
+                    }
+                }
+            }
+            if (!luaControlsDisabled && now > _climbCooldownUntil && (dirX !== 0 || dirZ !== 0)) {
+                for (const ref of _scCache.truss) {
+                    const l = _scLocal(ref, c);
+                    if (!l) continue;
+                    const e = 0.25 + CHAR_RADIUS;
+                    if (!(Math.abs(l.p.x) < l.h.x + e && Math.abs(l.p.z) < l.h.z + e && l.p.y > -l.h.y - 0.3 && l.p.y < l.h.y + CHAR_RADIUS + 0.6)) continue;
+                    const to = new THREE.Vector3(l.M.elements[12] - c.x, 0, l.M.elements[14] - c.z);
+                    if (to.lengthSq() < 1e-4) continue;
+                    to.normalize();
+                    if (to.x * dirX + to.z * dirZ > 0.2 && c.y - CHAR_RADIUS < new THREE.Vector3(0, l.h.y, 0).applyMatrix4(l.M).y - 0.3) {
+                        climbState = { ref, vy: 0, lastSpd: 0 };
+                        if (luaHumanoidRef !== -1) fireLuaSignal(luaHumanoidRef, 'Climbing', [charWalkSpeed * 0.7]);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         // Устанавливается настоящим PlayerModule:GetControls():Disable()
         let luaControlsDisabled = false;
 
@@ -13670,6 +13966,9 @@ end
             const result = new CANNON.RaycastResult();
             physicsWorld.raycastClosest(from, to, { collisionFilterMask: _charRayMask(), skipBackfaces: true }, result);
             canJump = result.hasHit;
+
+            // Сидение / лестница: пока сидим или лезем — обычная ходьба и прыжок пропускаются
+            if (_seatClimbTick(forward, strafe, dirX, dirZ)) return;
 
             // Падаем и уже какое-то время не находим опору — скорее всего
             if (!canJump && charBody.velocity.y < -5) {
@@ -13968,7 +14267,7 @@ end
                 if (tool === undefined || luaGetGenericProp(tool, 'Enabled') === false) return;
                 _activatedTool = tool;
                 fireLuaSignal(tool, 'Activated', []);
-                _toolPointerUp();
+                setTimeout(_toolPointerUp, 120);   // тап = короткое нажатие: даём анимации «нажать → отпустить» успеть
                 return;
             }
         }
@@ -14187,8 +14486,8 @@ end
                 target.z = desiredZ;
             }
             if (charMesh) {
-                charMesh.position.set(charBody.position.x, charBody.position.y, charBody.position.z);
-                charMesh.rotation.y = spherical.theta; // куб развёрнут туда же, куда смотрит камера
+                charMesh.position.set(charBody.position.x, charBody.position.y - (seatState ? SIT_DROP : 0), charBody.position.z);
+                charMesh.rotation.y = seatState && seatState.ref !== -1 ? seatState.yaw : spherical.theta; // куб развёрнут туда же, куда смотрит камера (сидя — по сиденью)
             }
             updateBlobShadow();
             updateCamera();
@@ -14316,6 +14615,7 @@ end
                     if (charBody) {
                         charBody.velocity.x = charVelX;
                         charBody.velocity.z = charVelZ;
+                        if (climbState) charBody.velocity.y = climbState.vy;   // без гравитации на лестнице
                     }
                 }
             }
@@ -15324,7 +15624,68 @@ end
             return null;
         }
 
+        // ===== Подтверждение импорта модели со скриптами =====
+        // Сервер (/api/import/rbxm*, Toolbox) вместо импорта отдаёт {needsConfirm, token, scan}, если в модели есть скрипты.
+        // «Больше не показывать» (localStorage) пропускает окно, НО только когда в скриптах нет require/loadstring/
+        // HttpService/Kick и прочих опасных команд — тогда окно показывается всегда.
+        const _RBXM_RULES = {
+            require_id: ['require(<ID/URL>) — загрузка стороннего кода по ID (типичный бэкдор)', 'require(<ID/URL>) — loads third-party code by ID (typical backdoor)'],
+            require: ['require(…) — подключение модуля', 'require(…) — loads a module'],
+            loadstring: ['loadstring — выполнение кода из строки', 'loadstring — runs code from a string'],
+            fenv: ['getfenv/setfenv/getgenv — подмена окружения (частый признак обфускации)', 'getfenv/setfenv/getgenv — environment tampering (common in obfuscated code)'],
+            http: ['HttpService — запросы в интернет', 'HttpService — internet requests'],
+            insert: ['InsertService:LoadAsset — загрузка ассетов извне', 'InsertService:LoadAsset — loads outside assets'],
+            market: ['MarketplaceService — запросы покупки', 'MarketplaceService — purchase prompts'],
+            teleport: ['TeleportService — телепорт игроков', 'TeleportService — teleports players'],
+            kick: [':Kick()/Shutdown — кик игроков/остановка сервера', ':Kick()/Shutdown — kicks players / shuts the server down'],
+            obf: ['обфусцированный код (длинные строки/escape-последовательности)', 'obfuscated code (long strings / escape sequences)'],
+        };
+        async function rbxmScriptGate(r) {
+            const sc = r.scan || {}, st = sc.scripts || {}, finds = sc.findings || [];
+            const danger = finds.length > 0;
+            let skip = false;
+            try { skip = localStorage.getItem('rsw_skip_script_warn') === '1'; } catch (e) { /* ok */ }
+            const confirmReq = () => api('POST', '/api/import/rbxm/confirm', { token: r.token });
+            if (skip && !danger) { notify(_gzT('📜 Скриптов в модели: ', '📜 Scripts in the model: ') + st.total, 'warn'); return await confirmReq(); }
+            const ru = LANG === 'ru';
+            const rows = finds.map(f => '<li style="margin:3px 0"><b>' + esc(f.path || f.script) + '</b> <span style="color:#9ca3af">(' + esc(f.cls) + ', ' + _gzT('стр. ', 'line ') + f.line + ')</span><br>'
+                + '<span style="color:#fca5a5">' + esc((_RBXM_RULES[f.rule] || [f.rule, f.rule])[ru ? 0 : 1]) + '</span><br>'
+                + '<code style="font-size:11px;color:#d1d5db;word-break:break-all">' + esc(f.snippet) + '</code></li>').join('');
+            const counts = ['Script', 'LocalScript', 'ModuleScript'].filter(k => st[k]).map(k => k + ': ' + st[k]).join(', ');
+            const ov = document.createElement('div');
+            ov.id = 'rbxm-gate';
+            ov.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:12px';
+            ov.innerHTML = '<div style="background:#1f2937;border:1px solid ' + (danger ? '#ef4444' : '#4b5563') + ';border-radius:12px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:16px;color:#f3f4f6;font-size:14px">'
+                + '<div style="font-size:17px;font-weight:700;margin-bottom:8px">' + (danger ? '⚠️ ' : '📜 ') + _gzT('Модель содержит скрипты', 'This model contains scripts') + '</div>'
+                + '<div style="margin-bottom:8px">' + _gzT('Скриптов: ', 'Scripts: ') + '<b>' + st.total + '</b>' + (counts ? ' <span style="color:#9ca3af">(' + counts + ')</span>' : '') + '</div>'
+                + (danger ? '<div style="background:#450a0a;border:1px solid #991b1b;border-radius:8px;padding:8px 10px;margin-bottom:10px"><b>'
+                    + _gzT('Найдены потенциально опасные команды — проверьте код перед запуском:', 'Potentially dangerous commands found — review the code before running:')
+                    + '</b><ul style="margin:6px 0 0 16px;padding:0">' + rows + '</ul></div>'
+                  : '<div style="color:#9ca3af;margin-bottom:10px">' + _gzT('Опасных команд (require, loadstring, HttpService…) не найдено.', 'No dangerous commands (require, loadstring, HttpService…) found.') + '</div>')
+                + (danger ? '<div style="color:#fca5a5;font-size:12px;margin-bottom:10px">' + _gzT('Для моделей с такими командами окно показывается всегда.', 'This prompt is always shown for models with such commands.') + '</div>'
+                  : '<label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer"><input type="checkbox" id="rbxm-gate-skip"> ' + _gzT('Больше не показывать (кроме моделей с опасными командами)', 'Don\'t show again (except models with dangerous commands)') + '</label>')
+                + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+                + '<button data-cancel style="background:#374151;color:#fff;border:0;border-radius:6px;padding:8px 16px;cursor:pointer">' + _gzT('Отмена', 'Cancel') + '</button>'
+                + '<button data-ok style="background:' + (danger ? '#b91c1c' : '#16a34a') + ';color:#fff;border:0;border-radius:6px;padding:8px 16px;cursor:pointer">' + (danger ? _gzT('Всё равно импортировать', 'Import anyway') : _gzT('Импортировать', 'Import')) + '</button></div></div>';
+            document.body.appendChild(ov);
+            return await new Promise(resolve => {
+                const done = async (ok) => {
+                    const chk = ov.querySelector('#rbxm-gate-skip');
+                    if (ok && chk && chk.checked) { try { localStorage.setItem('rsw_skip_script_warn', '1'); } catch (e) { /* ok */ } }
+                    ov.remove();
+                    if (ok) resolve(await confirmReq());
+                    else { api('POST', '/api/import/rbxm/cancel', { token: r.token }); resolve(null); }
+                };
+                ov.querySelector('[data-ok]').onclick = () => done(true);
+                ov.querySelector('[data-cancel]').onclick = () => done(false);
+            });
+        }
+
         async function afterRbxmImport(r) {
+            if (r && r.needsConfirm) {
+                r = await rbxmScriptGate(r);
+                if (!r) return;
+            }
             if (!r.ok) { notify(r.error || t('notify_error'), 'err'); return; }
             await loadTree();
             const roots = r.roots || [];
@@ -15342,6 +15703,8 @@ end
                 if (pr.ok) renderProps(pr);
             }
             notify(t('notify_rbxm_imported', { n: r.count }));
+            const lg = r.lighting || [];
+            if (lg.length) notify(_gzT('🌅 Небо/свет перенесены в Lighting: ', '🌅 Sky/lighting moved to Lighting: ') + lg.map(x => x.cls + (x.replaced ? _gzT(' (заменён прежний)', ' (replaced the old one)') : '')).join(', '), 'warn');
             if (r.warnings && r.warnings.length) notify(t('notify_rbxm_warn', { msg: r.warnings[0] }), 'warn');
         }
 
@@ -15588,7 +15951,7 @@ end
 
         function showAddDialog() {
             const ALL_CLS = [
-                'Part', 'WedgePart', 'SpherePart', 'MeshPart', 'Model', 'Folder',
+                'Part', 'WedgePart', 'SpherePart', 'MeshPart', 'Seat', 'VehicleSeat', 'TrussPart', 'SpawnLocation', 'Model', 'Folder',
                 'Script', 'LocalScript', 'ModuleScript', 'RemoteEvent', 'RemoteFunction',
                 'BindableEvent', 'BindableFunction', 'ScreenGui', 'Frame', 'TextLabel',
                 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton', 'Sound',

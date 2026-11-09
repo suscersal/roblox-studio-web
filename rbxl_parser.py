@@ -1,4 +1,5 @@
 import sys
+import re
 import struct
 import json
 import os
@@ -1502,9 +1503,121 @@ def export_rbxm(parsed, root_refs):
     return data, len(refs), warnings
 
 
-def import_rbxm(parsed, path, parent=None):
+# --- Безопасность импорта: что за скрипты лежат в модели --------------------------------------------------------------
+_SCRIPT_CLASSES = ('Script', 'LocalScript', 'ModuleScript')
+# Объекты неба/света: в сцене осмысленен один Sky/Atmosphere/Clouds и по одному эффекту каждого класса.
+LIGHTING_CLASSES = ('Sky', 'Atmosphere', 'Clouds', 'BloomEffect', 'BlurEffect', 'ColorCorrectionEffect',
+                    'DepthOfFieldEffect', 'SunRaysEffect')
+# (id правила, regexp по коду без комментариев). Любое совпадение заставляет клиент показать окно подтверждения,
+# даже если пользователь отметил «больше не показывать».
+_DANGER_RULES = [
+    ('require_id', r'\brequire\s*\(\s*(?:\d{5,}|["\']?(?:rbxassetid|https?)[^)]*)'),
+    ('require', r'\brequire\s*\('),
+    ('loadstring', r'\bloadstring\b'),
+    ('fenv', r'\b(?:getfenv|setfenv|getrawmetatable|setrawmetatable|getgenv|newproxy)\b'),
+    ('http', r'HttpService|\bHttpGet\b|:\s*(?:GetAsync|PostAsync|RequestAsync)\s*\('),
+    ('insert', r'InsertService|:\s*LoadAsset(?:Version)?\s*\('),
+    ('market', r'MarketplaceService|PromptPurchase|PromptGamePassPurchase|PromptProductPurchase'),
+    ('teleport', r'TeleportService|:\s*Teleport(?:ToPlaceInstance|Async)?\s*\('),
+    ('kick', r':\s*Kick\s*\(|\bBanAsync\b|\bgame\s*:\s*Shutdown\s*\('),
+]
+_DANGER_RE = [(rid, re.compile(rx)) for rid, rx in _DANGER_RULES]
+_LUA_COMMENT = re.compile(r'--\[(=*)\[.*?\]\1\]|--[^\n]*', re.S)
+
+
+def _blank_comments(src):
+    """Комментарии -> пробелы с сохранением переводов строк (номера строк остаются верными)."""
+    return _LUA_COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), src)
+
+
+def scan_lua_source(src):
+    """-> [(rule_id, номер_строки, фрагмент)] — по одному на правило."""
+    if not isinstance(src, str) or not src.strip():
+        return []
+    code = _blank_comments(src)
+    lines = src.split('\n')
+    found, seen = [], set()
+
+    def add(rid, pos_line):
+        if rid in seen:
+            return
+        seen.add(rid)
+        txt = lines[pos_line - 1].strip() if 0 < pos_line <= len(lines) else ''
+        found.append((rid, pos_line, txt[:90]))
+
+    for rid, rx in _DANGER_RE:
+        m = rx.search(code)
+        if not m:
+            continue
+        if rid == 'require' and 'require_id' in seen:
+            continue
+        add(rid, code.count('\n', 0, m.start()) + 1)
+    # обфускация: строка с кучей \ddd / \xHH, длинный base64-подобный литерал, много string.char
+    for i, ln in enumerate(code.split('\n'), 1):
+        if (len(re.findall(r'\\\d{1,3}', ln)) >= 25 or len(re.findall(r'\\x[0-9a-fA-F]{2}', ln)) >= 25
+                or re.search(r'["\'][A-Za-z0-9+/=]{300,}["\']', ln) or ln.count('string.char') >= 5):
+            add('obf', i)
+            break
+    return found
+
+
+def scan_rbxm(path):
+    """Читает .rbxm и возвращает сводку по скриптам без изменения сцены:
+    {'scripts': {'total', 'Script', 'LocalScript', 'ModuleScript'}, 'findings': [...], 'danger': bool}.
+    Любая ошибка разбора -> пустая сводка (импорт сам выдаст нормальное сообщение об ошибке)."""
+    empty = {'scripts': {'total': 0, 'Script': 0, 'LocalScript': 0, 'ModuleScript': 0}, 'findings': [], 'danger': False}
+    try:
+        other = parse_rbxl(path)
+    except Exception:
+        return empty
+    r2c, pmap, props = other['referent_to_class'], other['parent_map'], other['props']
+
+    def full_path(r):
+        names, g = [], 0
+        while r in r2c and g < 50:
+            names.append(str(props.get(r, {}).get('Name', r2c[r])))
+            r, g = pmap.get(r, -1), g + 1
+        return '/'.join(reversed(names))
+
+    out = dict(empty, scripts=dict(empty['scripts']), findings=[])
+    for r in sorted(r2c):
+        cls = r2c[r]
+        if cls not in _SCRIPT_CLASSES:
+            continue
+        out['scripts']['total'] += 1
+        out['scripts'][cls] += 1
+        for rid, line, snippet in scan_lua_source(props.get(r, {}).get('Source')):
+            if len(out['findings']) < 24:
+                out['findings'].append({'script': str(props.get(r, {}).get('Name', cls)), 'path': full_path(r), 'cls': cls,
+                                        'rule': rid, 'line': line, 'snippet': snippet})
+    out['danger'] = bool(out['findings'])
+    return out
+
+
+def _drop_subtree(parsed, ref):
+    """Удаляет объект и всех его потомков из сцены (три словаря + сервисы)."""
+    r2c, pmap, props = parsed['referent_to_class'], parsed['parent_map'], parsed['props']
+    kids = {}
+    for c, p in pmap.items():
+        kids.setdefault(p, []).append(c)
+    stack, gone = [ref], []
+    while stack:
+        r = stack.pop()
+        gone.append(r)
+        stack.extend(kids.get(r, []))
+    for r in gone:
+        r2c.pop(r, None)
+        pmap.pop(r, None)
+        props.pop(r, None)
+        if isinstance(parsed.get('service_refs'), set):
+            parsed['service_refs'].discard(r)
+    return gone
+
+
+def import_rbxm(parsed, path, parent=None, info=None):
     """Читает .rbxm и добавляет его объекты в parsed под родителя parent.
-    Возвращает (новые_корни, количество_объектов, warnings)."""
+    Возвращает (новые_корни, количество_объектов, warnings). Если передан словарь info, в info['lighting'] кладётся
+    список {'cls', 'name', 'replaced'} объектов неба/света, которые заменили такие же в Lighting."""
     with open(path, 'rb') as f:
         head = f.read(16)
     if not head.startswith(b'<roblox!'):
@@ -1559,6 +1672,52 @@ def import_rbxm(parsed, path, parent=None):
         else:
             pmap[mapping[old]] = parent
             roots.append(mapping[old])
+
+    # Небо/свет из модели (Sky, Atmosphere, Bloom…) в сцене нужны ровно по одному на класс и живут в Lighting: переносим их
+    # туда и УДАЛЯЕМ прежние объекты того же класса — иначе повторный импорт «Realistic Sky» копит дубликаты, а старое
+    # небо продолжает перебивать новое.
+    lighting_info = []
+    light_ref = next((r for r, c in r2c.items() if c == 'Lighting'), None)
+    new_refs = set(mapping.values())
+    if light_ref is not None:
+        moved = [n for n in sorted(new_refs) if r2c.get(n) in LIGHTING_CLASSES]
+        by_cls = {}
+        for n in moved:
+            by_cls.setdefault(r2c[n], []).append(n)
+        replaced_cls = set()
+        for cls, refs_ in by_cls.items():
+            old_same = [c for c, p in list(pmap.items()) if p == light_ref and r2c.get(c) == cls and c not in new_refs]
+            for o in old_same:
+                _drop_subtree(parsed, o)
+            if old_same:
+                replaced_cls.add(cls)
+        wrappers = set()
+        for n in moved:
+            old_par = pmap.get(n, -1)
+            pmap[n] = light_ref
+            if n in roots:
+                roots.remove(n)
+            if old_par in new_refs:
+                wrappers.add(old_par)
+            lighting_info.append({'cls': r2c[n], 'name': str(props.get(n, {}).get('Name', r2c[n])),
+                                  'replaced': r2c[n] in replaced_cls})
+        # опустевшие обёртки (Model/Folder, где лежали только небо/свет) убираем
+        for w in sorted(wrappers, reverse=True):
+            g = 0
+            while w in new_refs and w in r2c and g < 50:
+                still = any(p == w for p in pmap.values())
+                if still or r2c[w] not in ('Model', 'Folder'):
+                    break
+                up = pmap.get(w, -1)
+                _drop_subtree(parsed, w)
+                if w in roots:
+                    roots.remove(w)
+                w, g = up, g + 1
+        for n in moved:
+            if n in r2c:
+                roots.append(n)
+    if info is not None:
+        info['lighting'] = lighting_info
 
     parsed['_modified'] = True
     warnings = []
