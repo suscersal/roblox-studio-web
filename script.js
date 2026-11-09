@@ -4154,6 +4154,7 @@
             mesh.receiveShadow = qualitySettings.shadows;
             mesh.userData.ref = o.ref;
             mesh.userData.cls = o.class;
+            mesh.userData.seatDisabled = !!o.disabled;   // Seat/VehicleSeat.Disabled из файла (работает и без Lua)
             mesh.userData.shape = o.shape;
             mesh.userData.pivotOffset = o.pivotOffset || null; // PivotOffset детали (GetPivot/PivotTo)
             // Поза самой детали (без SpecialMesh.Offset) — от неё инструменты трансформации считают жесты
@@ -5945,6 +5946,7 @@
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
+            seatState = null; climbState = null; _seatCooldownUntil = 0; _climbCooldownUntil = 0; _scCache.t = -1e9;   // не тащим сиденье/лестницу в следующий Play
             _camReturnToCharT = null;
             luaHumanoidRootPartRef = -1;
             luaHumanoidRef = -1;
@@ -13767,28 +13769,59 @@ end
             const now = performance.now();
             if (now - _scCache.t < 800 && _scCache.ver === luaByRefVer) return;
             _scCache.t = now; _scCache.ver = luaByRefVer;
-            const seats = [], truss = [];
+            const seats = [], truss = [], seen = new Set();
             for (const k in luaByRef) {
                 const c = luaByRef[k].cls;
+                seen.add(+k);
+                if (c === 'Seat' || c === 'VehicleSeat') seats.push(+k);
+                else if (c === 'TrussPart') truss.push(+k);
+            }
+            // На карте без Script/LocalScript Lua-рантайм не стартует и luaByRef пуст — сиденья и лестницы берём прямо из сцены
+            for (const k in sceneObjs) {
+                if (seen.has(+k)) continue;
+                const c = sceneObjs[k] && sceneObjs[k].userData && sceneObjs[k].userData.cls;
                 if (c === 'Seat' || c === 'VehicleSeat') seats.push(+k);
                 else if (c === 'TrussPart') truss.push(+k);
             }
             _scCache.seats = seats; _scCache.truss = truss;
         }
+        // Деталь лежит в мире? Без Lua-рантайма иерархии (luaParentByRef) нет, но в sceneObjs попадает только то, что в Workspace
+        function _scInWorld(ref) {
+            if (luaParentByRef[ref] === undefined) return !!(sceneObjs[ref] || physicsBodies[ref]);
+            return luaIsUnderWorkspace(ref);
+        }
+        // fireLuaSignal без fengari (карта без скриптов) бросал TypeError — тут тихо ничего не делаем
+        function _scFire(ref, evName, args) {
+            if (!window.fengari) return;
+            try { fireLuaSignal(ref, evName, args); } catch (e) { console.warn('[seat/climb] signal', evName, e); }
+        }
+        function _scSeatDisabled(ref) {
+            const g = luaGenericPropsByRef[ref];
+            if (g && g.Disabled !== undefined) return g.Disabled === true;
+            const vp = virtualInstanceProps[ref];
+            if (vp && vp.Disabled !== undefined) return vp.Disabled === true;
+            const m = sceneObjs[ref];
+            return !!(m && m.userData && m.userData.seatDisabled);
+        }
         function _scLocal(ref, wp) {
-            if (!(sceneObjs[ref] || physicsBodies[ref]) || !luaIsUnderWorkspace(ref)) return null;
+            if (!(sceneObjs[ref] || physicsBodies[ref]) || !_scInWorld(ref)) return null;
             const M = luaPartMatrix(ref);
             const s = luaSizeOfRef(ref);
             return { M, p: wp.clone().applyMatrix4(M.clone().invert()), h: new THREE.Vector3(s.x / 2, s.y / 2, s.z / 2) };
+        }
+        function _scIsVehicleSeat(ref) {
+            if (luaByRef[ref]) return luaByRef[ref].cls === 'VehicleSeat';
+            const m = sceneObjs[ref];
+            return !!(m && m.userData && m.userData.cls === 'VehicleSeat');
         }
         function _seatSetHum(sitting, seatRef) {
             if (luaHumanoidRef === -1) return;
             virtualInstanceProps[luaHumanoidRef] = virtualInstanceProps[luaHumanoidRef] || {};
             virtualInstanceProps[luaHumanoidRef].Sit = sitting;
             (luaRefProps[luaHumanoidRef] = luaRefProps[luaHumanoidRef] || {}).SeatPart = sitting ? seatRef : -1;
-            fireLuaSignal(luaHumanoidRef, '__prop_Sit', []);
-            fireLuaSignal(luaHumanoidRef, '__prop_SeatPart', []);
-            fireLuaSignal(luaHumanoidRef, 'Seated', [sitting, sitting && seatRef !== -1 ? { __instanceRef: seatRef } : null]);
+            _scFire(luaHumanoidRef, '__prop_Sit', []);
+            _scFire(luaHumanoidRef, '__prop_SeatPart', []);
+            _scFire(luaHumanoidRef, 'Seated', [sitting, sitting && seatRef !== -1 ? { __instanceRef: seatRef } : null]);
         }
         function seatSit(ref) {
             if (seatState || !charBody) return;
@@ -13798,7 +13831,7 @@ end
             charBody.collisionResponse = false;   // тело следует за сиденьем, а не толкается с ним
             if (ref !== -1) {
                 (luaRefProps[ref] = luaRefProps[ref] || {}).Occupant = luaHumanoidRef;
-                fireLuaSignal(ref, '__prop_Occupant', []);
+                _scFire(ref, '__prop_Occupant', []);
             }
             _seatSetHum(true, ref);
         }
@@ -13811,17 +13844,17 @@ end
                 if (jump) { charBody.position.y += 1.6; charBody.velocity.y = charJumpPower * JUMP_POWER_TO_VELOCITY * 0.8; }
             }
             _seatCooldownUntil = performance.now() + 1200;
-            if (ref !== -1 && luaRefProps[ref]) { luaRefProps[ref].Occupant = -1; fireLuaSignal(ref, '__prop_Occupant', []); }
+            if (ref !== -1 && luaRefProps[ref]) { luaRefProps[ref].Occupant = -1; _scFire(ref, '__prop_Occupant', []); }
             _seatSetHum(false, ref);
-            if (ref !== -1 && luaByRef[ref] && luaByRef[ref].cls === 'VehicleSeat') {
-                for (const k of ['Throttle', 'Steer']) { (virtualInstanceProps[ref] = virtualInstanceProps[ref] || {})[k] = 0; fireLuaSignal(ref, '__prop_' + k, []); }
+            if (ref !== -1 && luaByRef[ref] && _scIsVehicleSeat(ref)) {
+                for (const k of ['Throttle', 'Steer']) { (virtualInstanceProps[ref] = virtualInstanceProps[ref] || {})[k] = 0; _scFire(ref, '__prop_' + k, []); }
             }
         }
         function climbStop(leap) {
             if (!climbState) return;
             climbState = null;
             _climbCooldownUntil = performance.now() + (leap ? 600 : 250);
-            if (luaHumanoidRef !== -1) fireLuaSignal(luaHumanoidRef, 'Climbing', [0]);
+            if (luaHumanoidRef !== -1) _scFire(luaHumanoidRef, 'Climbing', [0]);
         }
         // Возвращает true, если персонаж сидит/лезет и обычное управление нужно пропустить.
         function _seatClimbTick(forward, strafe, dirX, dirZ) {
@@ -13833,7 +13866,7 @@ end
                 const ref = seatState.ref;
                 if (ref !== -1) {
                     const l = _scLocal(ref, c);
-                    if (!l || !luaByRef[ref]) { seatStand(false); return false; }
+                    if (!l) { seatStand(false); return false; }
                     const top = new THREE.Vector3(0, l.h.y + 0.4, 0).applyMatrix4(l.M);   // центр тела чуть выше поверхности
                     // персонажа унесли (телепорт скриптом/респавн): вместо того, чтобы вернуть его к сиденью, встаём
                     if (c.distanceTo(top) > 4) { seatStand(false); return false; }
@@ -13841,11 +13874,11 @@ end
                     const q = new THREE.Quaternion(); l.M.decompose(new THREE.Vector3(), q, new THREE.Vector3());
                     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
                     seatState.yaw = Math.atan2(-f.x, -f.z);
-                    if (luaByRef[ref].cls === 'VehicleSeat') {
+                    if (_scIsVehicleSeat(ref)) {
                         const vp = (virtualInstanceProps[ref] = virtualInstanceProps[ref] || {});
                         const th = Math.round(forward), st = Math.round(strafe);
-                        if (vp.Throttle !== th) { vp.Throttle = th; fireLuaSignal(ref, '__prop_Throttle', []); }
-                        if (vp.Steer !== st) { vp.Steer = st; fireLuaSignal(ref, '__prop_Steer', []); }
+                        if (vp.Throttle !== th) { vp.Throttle = th; _scFire(ref, '__prop_Throttle', []); }
+                        if (vp.Steer !== st) { vp.Steer = st; _scFire(ref, '__prop_Steer', []); }
                     }
                 }
                 charBody.velocity.set(0, 0, 0);
@@ -13882,15 +13915,15 @@ end
                 climbState.vy = spd;
                 charVelX = 0; charVelZ = 0;
                 charBody.velocity.set(0, spd, 0);
-                if (luaHumanoidRef !== -1 && Math.abs(spd - (climbState.lastSpd || 0)) > 0.5) { climbState.lastSpd = spd; fireLuaSignal(luaHumanoidRef, 'Climbing', [spd]); }
+                if (luaHumanoidRef !== -1 && Math.abs(spd - (climbState.lastSpd || 0)) > 0.5) { climbState.lastSpd = spd; _scFire(luaHumanoidRef, 'Climbing', [spd]); }
                 return true;
             }
             // ---- кандидаты: посадка / начало лазания ----
-            if (!luaControlsDisabled && now > _seatCooldownUntil && luaHumanoidRef !== -1) {
+            if (!luaControlsDisabled && now > _seatCooldownUntil) {
                 for (const ref of _scCache.seats) {
                     const l = _scLocal(ref, c);
                     if (!l) continue;
-                    if (luaGetGenericProp(ref, 'Disabled') === true) continue;
+                    if (_scSeatDisabled(ref)) continue;
                     const rp = luaRefProps[ref];
                     if (rp && rp.Occupant !== undefined && rp.Occupant !== -1) continue;
                     const up = new THREE.Vector3(0, 1, 0).transformDirection(l.M);   // сиденье не перевёрнуто
@@ -13912,7 +13945,7 @@ end
                     to.normalize();
                     if (to.x * dirX + to.z * dirZ > 0.2 && c.y - CHAR_RADIUS < new THREE.Vector3(0, l.h.y, 0).applyMatrix4(l.M).y - 0.3) {
                         climbState = { ref, vy: 0, lastSpd: 0 };
-                        if (luaHumanoidRef !== -1) fireLuaSignal(luaHumanoidRef, 'Climbing', [charWalkSpeed * 0.7]);
+                        if (luaHumanoidRef !== -1) _scFire(luaHumanoidRef, 'Climbing', [charWalkSpeed * 0.7]);
                         return true;
                     }
                 }

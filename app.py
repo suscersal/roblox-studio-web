@@ -1081,6 +1081,7 @@ def build_all_scene_objects():
             'material': material, 'mvar': mvar,
             'unionMesh': union_mesh,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
+            'disabled': bool(props.get('Disabled')) if cls in ('Seat', 'VehicleSeat') else False,
         })
 
     _scene_build_cache.update(parsed_id=pid, objs=objs)
