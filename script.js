@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-10 · avatar-real-size';
+        const BUILD_LABEL = '2026-11-10 · rung-ladders';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -6065,7 +6065,7 @@
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
-            seatState = null; climbState = null; _seatCooldownUntil = 0; _climbCooldownUntil = 0; _scCache.t = -1e9;   // не тащим сиденье/лестницу в следующий Play
+            seatState = null; climbState = null; _seatCooldownUntil = 0; _climbCooldownUntil = 0; _scCache.t = -1e9; _scVirtN = -1;   // не тащим сиденье/лестницу в следующий Play
             _camReturnToCharT = null;
             luaHumanoidRootPartRef = -1;
             luaHumanoidRef = -1;
@@ -13884,6 +13884,59 @@ end
         let _seatCooldownUntil = 0, _climbCooldownUntil = 0;
         const SIT_DROP = 1.2;      // насколько опускаем модель при посадке (бёдра на уровень сиденья)
         let _scCache = { t: -1e9, ver: -1, seats: [], truss: [] };
+        // «Лестница из перекладин» (в картах вроде Castle Warfare — обычные Part, не TrussPart): ≥4 одинаковых горизонтальных бруска
+        // друг над другом (один центр по XZ и одно направление, между ними зазор), общая высота ≥6. Лезем по ней как по ферме:
+        // коллайдер-сфера на перекладину не встаёт, а в оригинале такие конструкции проходимы. Каждая найденная лестница —
+        // «виртуальный TrussPart» _scVirt[id] = {M, Minv, h}: коробка на всю высоту ряда по локальным осям перекладин.
+        let _scVirt = {}, _scVirtN = -1;
+        function _scDetectRungLadders() {
+            _scVirt = {};
+            const groups = new Map();
+            const col = (M, i) => new THREE.Vector3(M.elements[i * 4], M.elements[i * 4 + 1], M.elements[i * 4 + 2]);
+            for (const k in sceneObjs) {
+                const ud = sceneObjs[k] && sceneObjs[k].userData;
+                if (!ud || ud.cls !== 'Part' || ud.cancollideFlag === false) continue;   // решётка без коллизии лестницей не считается
+                const sz = luaSizeOfRef(+k);
+                if (!sz) continue;
+                const dims = [sz.x, sz.y, sz.z];
+                const li = dims[0] >= dims[1] && dims[0] >= dims[2] ? 0 : (dims[1] >= dims[2] ? 1 : 2);
+                const len = dims[li], o1 = dims[(li + 1) % 3], o2 = dims[(li + 2) % 3];
+                if (len < 2 || o1 > 1.6 || o2 > 1.6) continue;                 // тонкий брусок
+                const M = luaPartMatrix(+k);
+                const axis = col(M, li).normalize();
+                if (Math.abs(axis.y) > 0.15) continue;                          // перекладина горизонтальна
+                const ja = (li + 1) % 3, ka = (li + 2) % 3;
+                const jv = Math.abs(col(M, ja).y) >= Math.abs(col(M, ka).y) ? ja : ka;   // какая из двух других осей вертикальна
+                const vDim = dims[jv], tDim = dims[jv === ja ? ka : ja];
+                if (axis.x < 0 || (Math.abs(axis.x) < 1e-6 && axis.z < 0)) axis.negate();
+                const q = (v, st) => Math.round(v / st) * st;
+                const key = [q(M.elements[12], 0.25), q(M.elements[14], 0.25), q(Math.atan2(axis.z, axis.x), 0.05), q(len, 0.5), q(tDim, 0.25)].join('|');
+                let g = groups.get(key);
+                if (!g) groups.set(key, g = { axis: axis.clone(), len, tDim, items: [] });
+                g.items.push({ y: M.elements[13], vDim, x: M.elements[12], z: M.elements[14] });
+            }
+            let n = 0;
+            const flush = (g, run) => {
+                if (run.length < 4) return;
+                const yBot = Math.min(...run.map(r => r.y - r.vDim / 2)), yTop = Math.max(...run.map(r => r.y + r.vDim / 2));
+                if (yTop - yBot < 6) return;
+                const cx = run.reduce((a, r) => a + r.x, 0) / run.length, cz = run.reduce((a, r) => a + r.z, 0) / run.length;
+                const X = g.axis.clone(), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3().crossVectors(X, Y);
+                const M = new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(cx, (yBot + yTop) / 2, cz);
+                _scVirt['rl' + (n++)] = { M, Minv: M.clone().invert(), h: new THREE.Vector3(g.len / 2, (yTop - yBot) / 2, g.tDim / 2) };
+            };
+            for (const g of groups.values()) {
+                g.items.sort((a, b) => a.y - b.y);
+                let run = [g.items[0]];
+                for (let i = 1; i < g.items.length; i++) {
+                    const prev = run[run.length - 1], it = g.items[i], step = it.y - prev.y;
+                    if (step >= 0.6 && step <= 3.2 && step - Math.max(prev.vDim, it.vDim) >= 0.35) run.push(it);   // зазор между перекладинами
+                    else { flush(g, run); run = [it]; }
+                }
+                flush(g, run);
+            }
+            if (n) console.info('[climb] лестниц из перекладин найдено:', n);
+        }
         function _scRefresh() {
             const now = performance.now();
             if (now - _scCache.t < 800 && _scCache.ver === luaByRefVer) return;
@@ -13902,6 +13955,9 @@ end
                 if (c === 'Seat' || c === 'VehicleSeat') seats.push(+k);
                 else if (c === 'TrussPart') truss.push(+k);
             }
+            const nObjs = Object.keys(sceneObjs).length;
+            if (nObjs !== _scVirtN) { _scVirtN = nObjs; _scDetectRungLadders(); }   // сцена изменилась (стриминг/новые детали) — ищем заново
+            for (const id in _scVirt) truss.push(id);
             _scCache.seats = seats; _scCache.truss = truss;
         }
         // Деталь лежит в мире? Без Lua-рантайма иерархии (luaParentByRef) нет, но в sceneObjs попадает только то, что в Workspace
@@ -13923,10 +13979,21 @@ end
             return !!(m && m.userData && m.userData.seatDisabled);
         }
         function _scLocal(ref, wp) {
+            if (typeof ref === 'string') {               // виртуальная лестница из перекладин
+                const v = _scVirt[ref];
+                return v ? { M: v.M, p: wp.clone().applyMatrix4(v.Minv), h: v.h.clone() } : null;
+            }
             if (!(sceneObjs[ref] || physicsBodies[ref]) || !_scInWorld(ref)) return null;
             const M = luaPartMatrix(ref);
             const s = luaSizeOfRef(ref);
             return { M, p: wp.clone().applyMatrix4(M.clone().invert()), h: new THREE.Vector3(s.x / 2, s.y / 2, s.z / 2) };
+        }
+        // Ближайшая к персонажу точка коробки (мировые XZ): у широкой лестницы центр далеко сбоку, а лезть надо «в грань»
+        function _scNearestXZ(l, c) {
+            const q = l.p.clone();
+            q.x = Math.max(-l.h.x, Math.min(l.h.x, q.x)); q.y = 0; q.z = Math.max(-l.h.z, Math.min(l.h.z, q.z));
+            const w = q.applyMatrix4(l.M);
+            return { x: w.x, z: w.z };
         }
         function _scIsVehicleSeat(ref) {
             if (luaByRef[ref]) return luaByRef[ref].cls === 'VehicleSeat';
@@ -14012,7 +14079,8 @@ end
                 const near = l && Math.abs(l.p.x) < l.h.x + e && Math.abs(l.p.z) < l.h.z + e && l.p.y > -l.h.y - 0.3 && l.p.y < l.h.y + CHAR_RADIUS + 0.6;
                 if (!near) { climbStop(false); return false; }
                 // направление «от лестницы» (в мировых XZ) — для прыжка и выхода наверх
-                const out = new THREE.Vector3(c.x - l.M.elements[12], 0, c.z - l.M.elements[14]);
+                const nq = _scNearestXZ(l, c);
+                const out = new THREE.Vector3(c.x - nq.x, 0, c.z - nq.z);
                 if (out.lengthSq() < 1e-4) out.set(0, 0, 1); out.normalize();
                 if (jumpQueued) {          // спрыгнуть от лестницы
                     jumpQueued = false;
@@ -14059,7 +14127,8 @@ end
                     if (!l) continue;
                     const e = 0.25 + CHAR_RADIUS;
                     if (!(Math.abs(l.p.x) < l.h.x + e && Math.abs(l.p.z) < l.h.z + e && l.p.y > -l.h.y - 0.3 && l.p.y < l.h.y + CHAR_RADIUS + 0.6)) continue;
-                    const to = new THREE.Vector3(l.M.elements[12] - c.x, 0, l.M.elements[14] - c.z);
+                    const nq = _scNearestXZ(l, c);
+                    const to = new THREE.Vector3(nq.x - c.x, 0, nq.z - c.z);
                     if (to.lengthSq() < 1e-4) continue;
                     to.normalize();
                     if (to.x * dirX + to.z * dirZ > 0.2 && c.y - CHAR_RADIUS < new THREE.Vector3(0, l.h.y, 0).applyMatrix4(l.M).y - 0.3) {
