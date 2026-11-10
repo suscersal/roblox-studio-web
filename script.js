@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-10 · rung-ladders';
+        const BUILD_LABEL = '2026-11-10 · log-fixes-2';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -2197,7 +2197,9 @@
 
             updateCamera();
             animate();
-            loadTree();
+            // Дерево — только если карта уже загружена (сервер запущен с файлом); иначе /api/tree отвечал 400 и это попадало в лог.
+            // Новую/открытую карту дерево подхватывает само (loadTree после открытия/создания).
+            api('GET', '/api/status').then(st => { if (st && st.loaded) loadTree(); }).catch(() => {});
 
             // Фокус viewport для WASD
             vp.addEventListener('click', () => vp.focus());
@@ -4131,7 +4133,8 @@
                     opacity: op,
                     depthWrite: op >= 1.0,
                     visible: op > 0.01,
-                    flatShading: currentQuality === 'low',
+                    // flatShading тут не передаём: у MeshLambertMaterial в этой версии three такого свойства нет, параметр игнорировался,
+                    // а в консоль на каждый материал сыпалось «'flatShading' is not a property of this material»
                 };
                 if (faceIdx !== null) {
                     // Массив материалов по группам граней BoxGeometry:
@@ -4168,7 +4171,7 @@
                 const dk = 'decals_' + (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' +
                     decalList.map(d => d.face + ':' + d.tex + ':' + d.op.toFixed(1)).join('|');
                 if (!matCache[dk]) {
-                    const dBase = { transparent: op < 1.0, opacity: op, depthWrite: op >= 1.0, visible: op > 0.01, flatShading: currentQuality === 'low' };
+                    const dBase = { transparent: op < 1.0, opacity: op, depthWrite: op >= 1.0, visible: op > 0.01 };
                     const plainM = new THREE.MeshLambertMaterial({ ...dBase, color: o.color || '#a0a0a0' });
                     const arrM = [plainM, plainM, plainM, plainM, plainM, plainM];
                     const NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'];
@@ -6065,7 +6068,7 @@
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
-            seatState = null; climbState = null; _seatCooldownUntil = 0; _climbCooldownUntil = 0; _scCache.t = -1e9; _scVirtN = -1;   // не тащим сиденье/лестницу в следующий Play
+            seatState = null; climbState = null; _seatCooldownUntil = 0; _climbCooldownUntil = 0; _scCache.t = -1e9; _scVirtN = -1; _scVirtT = -1e9;   // не тащим сиденье/лестницу в следующий Play
             _camReturnToCharT = null;
             luaHumanoidRootPartRef = -1;
             luaHumanoidRef = -1;
@@ -7548,6 +7551,11 @@ InstanceMT.__index = function(t, k)
     end
     if k == "Destroy" or k == "remove" or k == "Remove" then
         return function(self) __destroy(ref) end
+    end
+    -- Model:MakeJoints()/BreakJoints() — устаревшие, но существующие методы Roblox (RegenScript в Castle Warfare зовёт MakeJoints
+    -- на клоне танка). Системы соединений в эмуляторе нет (детали статичны), поэтому вызов не падает и ничего не делает.
+    if k == "MakeJoints" or k == "makeJoints" or k == "BreakJoints" or k == "breakJoints" then
+        return function(self) end
     end
     if k == "Clone" or k == "clone" then
         -- Настоящая копия — новый виртуальный инстанс (свой ref), с тем же
@@ -13888,7 +13896,7 @@ end
         // друг над другом (один центр по XZ и одно направление, между ними зазор), общая высота ≥6. Лезем по ней как по ферме:
         // коллайдер-сфера на перекладину не встаёт, а в оригинале такие конструкции проходимы. Каждая найденная лестница —
         // «виртуальный TrussPart» _scVirt[id] = {M, Minv, h}: коробка на всю высоту ряда по локальным осям перекладин.
-        let _scVirt = {}, _scVirtN = -1;
+        let _scVirt = {}, _scVirtN = -1, _scVirtT = -1e9;
         function _scDetectRungLadders() {
             _scVirt = {};
             const groups = new Map();
@@ -13956,7 +13964,9 @@ end
                 else if (c === 'TrussPart') truss.push(+k);
             }
             const nObjs = Object.keys(sceneObjs).length;
-            if (nObjs !== _scVirtN) { _scVirtN = nObjs; _scDetectRungLadders(); }   // сцена изменилась (стриминг/новые детали) — ищем заново
+            // Сцена изменилась (новые детали/клоны) — ищем заново, но не чаще раза в 10 с: проход по тысячам деталей на телефоне заметен,
+            // а снаряды и клоны меняют число объектов постоянно
+            if (nObjs !== _scVirtN && now - _scVirtT > 10000) { _scVirtN = nObjs; _scVirtT = now; _scDetectRungLadders(); }
             for (const id in _scVirt) truss.push(id);
             _scCache.seats = seats; _scCache.truss = truss;
         }
