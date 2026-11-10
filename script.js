@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-10 · truss-lattice-2';
+        const BUILD_LABEL = '2026-11-10 · avatar-real-size';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -5393,6 +5393,38 @@
             return sp;
         }
 
+        // РЕАЛЬНЫЙ РАЗМЕР аватара (как в Roblox). Раньше каждый аватар растягивался так, чтобы ВЕСЬ его bbox (вместе со шляпой,
+        // причёской, крыльями) стал 5 стадов, — поэтому у аватаров с высокими аксессуарами тело съёживалось, а у «голых» раздувалось,
+        // и размеры/«хитбоксы» у всех были разные. Теперь масштаб берётся ОДИН на единицы OBJ, а не по росту конкретного аватара:
+        // порядок величины определяется по высоте bbox (R15 с аксессуарами = ~4.2–9 стадов): стады, метры (1 стад = 0.28 м) или
+        // степени десяти от них. Ступни ставятся ровно на землю (низ bbox), по X/Z — центр bbox.
+        // Если единицы определить не удалось — прежняя нормировка по высоте (_fitToCharHeight).
+        const _AVATAR_UNIT_CANDIDATES = [1, 1 / 0.28, 10, 10 / 0.28, 100, 100 / 0.28, 0.1, 0.01]; // множитель «единицы OBJ → стады»
+        function _fitAvatarRealSize(obj) {
+            const box = new THREE.Box3().setFromObject(obj);
+            const size = box.getSize(new THREE.Vector3());
+            let scale = null;
+            for (const k of _AVATAR_UNIT_CANDIDATES) {
+                const h = size.y * k;
+                if (h >= 4.2 && h <= 9) { scale = k; break; }   // диапазоны разных k не пересекаются
+            }
+            if (scale === null) {
+                logLuaOutput('warn', 'Avatar: единицы OBJ не определены (высота bbox ' + size.y.toFixed(3) + ') — масштаб по росту, как раньше');
+                return _fitToCharHeight(obj);
+            }
+            const c = box.getCenter(new THREE.Vector3());
+            obj.position.set(-c.x, -box.min.y, -c.z);            // ступни в y=0, по X/Z — по центру
+            const inner = new THREE.Group();
+            inner.add(obj);
+            inner.scale.setScalar(scale);
+            const outer = new THREE.Group();
+            outer.add(inner);
+            outer.rotation.y = PLAY_AVATAR_YAW_OFFSET;
+            outer.position.y = -CHAR_RADIUS;                      // центр сферы-коллайдера на CHAR_RADIUS над землёй
+            logLuaOutput('info', 'Avatar: bbox ' + size.y.toFixed(3) + ' ед. × ' + scale.toFixed(3) + ' = ' + (size.y * scale).toFixed(2) + ' стада (реальный размер)');
+            return outer;
+        }
+
         // OBJ+MTL → THREE-объект (те же фиксы Roblox-формата, что в importAvatarIntoScene)
         async function _buildPlayAvatarFromAssets(data) {
             await ensureObjMtlLoaders();
@@ -5431,7 +5463,7 @@
                 });
             });
             if (!verts) throw new Error('пустая геометрия аватара');
-            const fitted = _fitToCharHeight(object);
+            const fitted = _fitAvatarRealSize(object);
             fitted.userData.shared = true; // шаблон общий для всех Play-сессий — не dispose'им
             return fitted;
         }
@@ -5456,7 +5488,7 @@
             const p = (async () => {
                 let r = await api('GET', '/api/roblox/play-avatar?userId=' + userId);
                 if (!r || !r.ok) throw new Error((r && (r.message || r.error)) || 'play-avatar');
-                if (!r.cached) {
+                if (!r.cached) try {
                     let bundleUrl = null;
                     for (let i = 0; i < 45 && isPlaying; i++) { // Roblox генерирует модель асинхронно
                         const st = await api('GET', '/api/roblox/avatar3d/status?userId=' + userId);
@@ -5468,6 +5500,12 @@
                     if (!bundleUrl) throw new Error('таймаут генерации');
                     r = await api('GET', '/api/roblox/play-avatar?userId=' + userId + '&bundleUrl=' + encodeURIComponent(bundleUrl));
                     if (!r || !r.ok) throw new Error((r && (r.message || r.error)) || 'play-avatar');
+                } catch (e) {
+                    // Обновить не вышло (нет сети, нет куки, Roblox не отвечает) — лучше старый скачанный аватар, чем «нуб»
+                    const old = await api('GET', '/api/roblox/play-avatar?userId=' + userId + '&allowStale=1');
+                    if (!old || !old.ok || !old.cached) throw e;
+                    emuWarn('avatar:stale', 'Avatar: не удалось обновить (' + _errText(e) + ') — используется сохранённая копия');
+                    r = old;
                 }
                 return _buildPlayAvatarFromAssets(r);
             })();

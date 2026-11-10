@@ -7101,7 +7101,7 @@ def api_roblox_me():
         return jsonify({'ok': True, 'loggedIn': False, 'error': str(e)})
 
 
-PLAY_AVATAR_TTL = 24 * 3600  # сутки: аватар меняется редко, а генерация у Roblox небыстрая
+PLAY_AVATAR_TTL = 7 * 24 * 3600  # неделя: аватар меняется редко, а генерация у Roblox небыстрая (до минуты ожидания). Устаревшая копия отдаётся и позже (allowStale=1), если обновить не вышло
 
 
 def _play_avatar_cache_path(user_id):
@@ -7111,7 +7111,7 @@ def _play_avatar_cache_path(user_id):
 @flask_app.route('/api/roblox/play-avatar')
 def api_roblox_play_avatar():
     """3D-аватар для персонажа в Play (OBJ+MTL+текстуры одним JSON, без zip).
-    1) userId без bundleUrl — отдаёт кэш с диска, если он свежий, иначе
+    1) userId без bundleUrl — отдаёт кэш с диска, если он свежий (или с allowStale=1 — любой), иначе
        {ok, cached: false} (клиент тогда опрашивает /avatar3d/status и
        приходит сюда снова уже с bundleUrl);
     2) userId + bundleUrl — скачивает, кладёт в кэш и отдаёт."""
@@ -7122,7 +7122,8 @@ def api_roblox_play_avatar():
     cp = _play_avatar_cache_path(user_id)
     try:
         cf = _cache_find(cp)
-        if cf is not None and _time.time() - cf.stat().st_mtime < PLAY_AVATAR_TTL:
+        allow_stale = request.args.get('allowStale', '') == '1'   # клиент просит копию любого возраста (обновление не удалось)
+        if cf is not None and (allow_stale or _time.time() - cf.stat().st_mtime < PLAY_AVATAR_TTL):
             cached_json = _cache_read_file(cf)
             if cached_json is not None:
                 return Response(cached_json, mimetype='application/json')
@@ -7172,7 +7173,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-11-10 · truss-lattice-2'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-11-10 · avatar-real-size'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')
