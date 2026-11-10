@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-10 · truss-lattice';
+        const BUILD_LABEL = '2026-11-10 · truss-lattice-2';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -3986,7 +3986,7 @@
         // 1 = BridgeStyleSupports (X — обе диагонали), 2 = NoSupports (только стойки и кольца).
         // Рисуется одним объединённым мешем; коллайдер остаётся боксом (см. buildCannonShape), лазание от формы не зависит.
         function makeTrussGeometry(sx, sy, sz, style) {
-            const T = Math.max(0.05, Math.min(0.2, Math.min(sx, sz) * 0.1));   // толщина балки
+            const T = Math.max(0.05, Math.min(0.35, Math.min(sx, sz) * 0.14));   // толщина балки (~14% ширины, как на референсе из Roblox)
             const cells = Math.max(1, Math.round(sy / 2));
             const ch = sy / cells;
             const hx = sx / 2, hy = sy / 2, hz = sz / 2;
