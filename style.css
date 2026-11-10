@@ -260,7 +260,7 @@
         }
 
         /* Метка сборки: script.js сверяет её со своей и с app.py (см. checkBuildConsistency) */
-        :root { --css-build: "2026-11-08 · seat-ladder-import"; }
+        :root { --css-build: "2026-11-09 · seat-ladder-fix"; }
 
         /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
         #gui-overlay {

@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-08 · seat-ladder-import';
+        const BUILD_LABEL = '2026-11-09 · seat-ladder-fix';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -2245,8 +2245,9 @@
                 const r = vp.getBoundingClientRect();
                 const size = Math.max(72, Math.min(140, Math.round(Math.min(r.width, r.height) * 0.42)));
                 pad.style.setProperty('--joy', size + 'px');
-                maxR = size * 0.27;
-                deadZone = size * 0.054;
+                // Ход ручки почти до края круга (раньше 0.27 — полное отклонение за ~20px, стик был «дёрганым»)
+                maxR = size * 0.45;
+                deadZone = size * 0.1;
             }
             layout();
             if (typeof ResizeObserver !== 'undefined') new ResizeObserver(layout).observe(vp);
@@ -2286,8 +2287,12 @@
                     dy = dy / dist * maxR;
                 }
                 setThumb(dx, dy);
-                joyVector.x = dx / maxR;
-                joyVector.y = -dy / maxR; // тянем вверх по экрану — едем вперёд
+                // Отклонение 0..1 после мёртвой зоны + лёгкая кривая (m^1.5): у центра точная настройка направления/скорости,
+                // у края — полный ход. Направление берём от пальца, чтобы дрожь у центра не вертела персонажа.
+                const m = Math.min(1, (Math.min(dist, maxR) - deadZone) / (maxR - deadZone));
+                const k = Math.pow(m, 1.5) / Math.max(1e-6, Math.hypot(dx, dy));
+                joyVector.x = dx * k;
+                joyVector.y = -dy * k; // тянем вверх по экрану — едем вперёд
             }
 
             function resetJoy() {
@@ -13987,8 +13992,9 @@ end
             }
             if (len > 0.001) {
                 dirX = vx / len; dirZ = vz / len;
-                vx = dirX * charWalkSpeed;
-                vz = dirZ * charWalkSpeed;
+                const mag = Math.min(1, len);   // аналоговый стик: половина отклонения — половина скорости (клавиши дают len>=1 → полная)
+                vx = dirX * charWalkSpeed * mag;
+                vz = dirZ * charWalkSpeed * mag;
             } else {
                 vx = 0; vz = 0;
             }
@@ -16069,11 +16075,28 @@ end
                 };
                 parent = findWs(treeData) ?? -1;
             }
-            const r = await api('PUT', '/api/instance', {
-                class: cls,
-                name: name,
-                parent: parent
-            });
+            const body = { class: cls, name: name, parent: parent };
+            // Seat/VehicleSeat/TrussPart: без позиции сервер ставил их в (0,5,0) — лестница 2x10x2 накрывала точку спавна
+            // (персонаж появлялся внутри неё), а сиденье висело в воздухе. Ставим перед камерой, низом на землю.
+            const _halfH = { Seat: 0.5, VehicleSeat: 0.5, TrussPart: 5 }[cls];
+            if (_halfH !== undefined) {
+                const lx = -Math.sin(spherical.theta), lz = -Math.cos(spherical.theta);   // куда смотрит камера по горизонтали
+                // каждая следующая такая деталь — правее предыдущей, чтобы Seat и лестница не вставали друг в друга
+                const side = (window._addSpread = ((window._addSpread || 0) + 1)) - 1;
+                const rx = lz * -1, rz = lx;   // вправо от взгляда
+                const px = target.x + lx * 10 + rx * 6 * (side % 4), pz = target.z + lz * 10 + rz * 6 * (side % 4);
+                // высота земли в этой точке (на baseplate под ногами спавн-площадка выше плиты: деталь на y=0.5 оказывалась внутри неё)
+                let gy = 0;
+                try {
+                    const rc = new THREE.Raycaster(new THREE.Vector3(px, 1000, pz), new THREE.Vector3(0, -1, 0));
+                    const hit = rc.intersectObjects(Object.values(sceneObjs).filter(o => o.userData && o.userData.ref !== undefined), true)[0];
+                    if (hit) gy = hit.point.y;
+                } catch (e) { /* нет земли под точкой — ставим на y=0 */ }
+                body.px = Math.round(px * 10) / 10;
+                body.pz = Math.round(pz * 10) / 10;
+                body.py = Math.round((gy + _halfH) * 100) / 100;
+            }
+            const r = await api('PUT', '/api/instance', body);
             if (r.ok) {
                 notify('✅ ' + cls);
                 loadTree();
