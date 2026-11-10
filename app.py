@@ -1082,6 +1082,7 @@ def build_all_scene_objects():
             'unionMesh': union_mesh,
             'anchored': bool(anchored), 'cancollide': bool(cancollide),
             'disabled': bool(props.get('Disabled')) if cls in ('Seat', 'VehicleSeat') else False,
+            'trussStyle': (props.get('Style') if isinstance(props.get('Style'), int) and not isinstance(props.get('Style'), bool) else 0) if cls == 'TrussPart' else None,
         })
 
     _scene_build_cache.update(parsed_id=pid, objs=objs)
@@ -7171,7 +7172,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-11-09 · seat-ladder-fix'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-11-10 · truss-lattice'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')

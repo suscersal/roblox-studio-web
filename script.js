@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-09 · seat-ladder-fix';
+        const BUILD_LABEL = '2026-11-10 · truss-lattice';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -3980,10 +3980,86 @@
         }
 
         // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
+        // TrussPart в Roblox — не текстура, а настоящая решётчатая геометрия: полый столб из 4 угловых стоек,
+        // на каждой ячейке (≈2 стада высотой) — горизонтальное кольцо и диагонали на гранях.
+        // Style (enum Style): 0 = AlternatingSupports (по диагонали на грань, направление чередуется от ячейки к ячейке),
+        // 1 = BridgeStyleSupports (X — обе диагонали), 2 = NoSupports (только стойки и кольца).
+        // Рисуется одним объединённым мешем; коллайдер остаётся боксом (см. buildCannonShape), лазание от формы не зависит.
+        function makeTrussGeometry(sx, sy, sz, style) {
+            const T = Math.max(0.05, Math.min(0.2, Math.min(sx, sz) * 0.1));   // толщина балки
+            const cells = Math.max(1, Math.round(sy / 2));
+            const ch = sy / cells;
+            const hx = sx / 2, hy = sy / 2, hz = sz / 2;
+            const pos = [], nor = [], idx = [];
+            const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpV = new THREE.Vector3(), tmpS = new THREE.Vector3(1, 1, 1);
+            function beam(cx, cy, cz, w, h, d, qx, qy, qz, qw) {
+                const g = new THREE.BoxGeometry(w, h, d);
+                tmpQ.set(qx || 0, qy || 0, qz || 0, qw === undefined ? 1 : qw);
+                tmpM.compose(tmpV.set(cx, cy, cz), tmpQ, tmpS);
+                g.applyMatrix4(tmpM);
+                const base = pos.length / 3;
+                const p = g.attributes.position.array, n = g.attributes.normal.array, ix = g.index.array;
+                for (let i = 0; i < p.length; i++) { pos.push(p[i]); nor.push(n[i]); }
+                for (let i = 0; i < ix.length; i++) idx.push(base + ix[i]);
+                g.dispose();
+            }
+            // стойки по углам
+            for (const ix of [-1, 1]) for (const iz of [-1, 1]) beam(ix * (hx - T / 2), 0, iz * (hz - T / 2), T, sy, T);
+            // кольца на границах ячеек (низ и верх — внутри габарита)
+            for (let k = 0; k <= cells; k++) {
+                const y = -hy + k * ch + (k === 0 ? T / 2 : k === cells ? -T / 2 : 0);
+                beam(0, y, hz - T / 2, sx - 2 * T, T, T);
+                beam(0, y, -hz + T / 2, sx - 2 * T, T, T);
+                beam(hx - T / 2, y, 0, T, T, sz - 2 * T);
+                beam(-hx + T / 2, y, 0, T, T, sz - 2 * T);
+            }
+            if (style !== 2) {
+                for (let k = 0; k < cells; k++) {
+                    const y0 = -hy + k * ch + T, y1 = -hy + (k + 1) * ch - T;
+                    const x0 = -hx + T, x1 = hx - T, z0 = -hz + T, z1 = hz - T;
+                    const flip = (style === 0) && (k % 2 === 1);
+                    for (const sg of [-1, 1]) {
+                        // грани ±Z (плоскость XY)
+                        const dz = (a, b, c, d) => {
+                            const L = Math.hypot(c - a, d - b), ang = Math.atan2(d - b, c - a);
+                            const q = Math.sin(ang / 2), w = Math.cos(ang / 2);
+                            beam((a + c) / 2, (b + d) / 2, sg * (hz - T / 2), L, T, T, 0, 0, q, w);
+                        };
+                        // грани ±X (плоскость ZY): поворот вокруг Y на 90° переводит длину из X в Z, затем наклон вокруг неё
+                        const dx = (a, b, c, d) => {
+                            const L = Math.hypot(c - a, d - b), ang = Math.atan2(d - b, c - a);
+                            const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), ang);
+                            const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+                            const q = qy.multiply(qz);
+                            beam(sg * (hx - T / 2), (b + d) / 2, (a + c) / 2, L, T, T, q.x, q.y, q.z, q.w);
+                        };
+                        if (style === 1) {            // X
+                            dz(x0, y0, x1, y1); dz(x0, y1, x1, y0);
+                            dx(z0, y0, z1, y1); dx(z0, y1, z1, y0);
+                        } else if (!flip) {           // /
+                            dz(x0, y0, x1, y1); dx(z0, y0, z1, y1);
+                        } else {                      // \
+                            dz(x0, y1, x1, y0); dx(z0, y1, z1, y0);
+                        }
+                    }
+                }
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+            geo.setIndex(idx);
+            geo.computeBoundingBox(); geo.computeBoundingSphere();
+            return geo;
+        }
+
         function buildMeshFromObj(o, geoCache, matCache) {
-            const geoKey = o.shape + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
+            const isTruss = o.class === 'TrussPart' && !o.meshId;
+            const trussStyle = (typeof o.trussStyle === 'number') ? o.trussStyle : 0;   // нет свойства — AlternatingSupports
+            const geoKey = (isTruss ? 'truss' + trussStyle : o.shape) + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
             if (!geoCache[geoKey]) {
-                if (o.shape === 'sphere') {
+                if (isTruss) {
+                    geoCache[geoKey] = makeTrussGeometry(o.sx || 1, o.sy || 1, o.sz || 1, trussStyle);
+                } else if (o.shape === 'sphere') {
                     const seg = Math.max(4, qualitySettings.sphereSegments);
                     const radius = Math.max(o.sx || 1, o.sy || 1, o.sz || 1) * 0.5;
                     geoCache[geoKey] = new THREE.SphereGeometry(radius, seg, Math.round(seg * 0.75));
@@ -4017,7 +4093,7 @@
                 Right: 0, Left: 1, Top: 2, Bottom: 3, Back: 4, Front: 5,
             };
             // meshId (реальная кастомная геометрия, см.
-            const isBoxShape = !o.meshId && (!o.shape || o.shape === 'block' || o.shape === 'box');
+            const isBoxShape = !o.meshId && !isTruss && (!o.shape || o.shape === 'block' || o.shape === 'box');
             // Все Decal детали (o.decals, по одному на грань) — только для боксов и только с текстурами
             const decalList = (qualitySettings.textures && isBoxShape && Array.isArray(o.decals) && o.decals.length) ? o.decals : null;
             // Decal — своя явная грань (Face), уже вычислена корректно
