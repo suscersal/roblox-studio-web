@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-10 · log-fixes-2';
+        const BUILD_LABEL = '2026-11-10 · clone-physics';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -5172,6 +5172,40 @@
             }
         }
 
+        // Клоны (комнаты из ROOMS 2-20, враги, лифты…) серверный стриминг не трогает: данных для пересоздания тела у него нет
+        // (luaCloneOrigin). Поэтому их статичные тела раньше оставались в физическом мире НАВСЕГДА, мимо бюджета playBodies:
+        // после ~10 открытых дверей в мире 2–4 тыс. тел, шаг cannon (он обходит ВСЕ тела мира: clearForces, internalStep,
+        // sleepTick…) вырастал с 2.5 до ~50 мс, и FPS падал с 60 до ~9. Здесь к клонам применяется тот же бюджет и радиус, что к
+        // обычным деталям карты: в мире остаются playBodies ближайших статичных тел в пределах loadRadius, остальные из мира
+        // вынимаются. Объект тела остаётся в physicsBodies — Lua по-прежнему двигает его (PivotTo пишет в body.position),
+        // а при приближении тело возвращается в мир. Подвижные (DYNAMIC/KINEMATIC) тела не трогаем.
+        let _cloneStreamT = 0, _cloneStreamForce = true, _cloneStreamPos = { x: NaN, y: 0, z: 0 };
+        function streamCloneBodies() {
+            if (!isPlaying || !charBody || !physicsWorld) return;
+            const now = performance.now();
+            const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
+            const moved = Math.hypot(cx - _cloneStreamPos.x, cy - _cloneStreamPos.y, cz - _cloneStreamPos.z);   // NaN в начале → не «меньше»
+            if (!_cloneStreamForce && !(moved >= 12) && now - _cloneStreamT < 500) return;
+            if (!_cloneStreamForce && now - _cloneStreamT < 150) return;
+            _cloneStreamForce = false; _cloneStreamT = now; _cloneStreamPos = { x: cx, y: cy, z: cz };
+            const R = qualitySettings.loadRadius || 350, cap = Math.max(1, maxStreamedBodies());
+            const STATIC = CANNON.Body.STATIC;
+            const items = [];
+            for (const k in luaCloneOrigin) {
+                const b = physicsBodies[k];
+                if (!b || b === charBody || b.type !== STATIC) continue;
+                items.push({ b, d: Math.hypot(b.position.x - cx, b.position.y - cy, b.position.z - cz) - objRadiusOfRef(k) });
+            }
+            if (!items.length) return;
+            items.sort((a, c) => a.d - c.d);
+            let added = 0, removed = 0;
+            for (let i = 0; i < items.length; i++) {
+                const it = items[i], inWorld = it.b.world === physicsWorld;
+                if (!inWorld && i < cap && it.d <= R) { physicsWorld.addBody(it.b); it.b.aabbNeedsUpdate = true; added++; }
+                else if (inWorld && !(i < cap * 1.25 && it.d <= R + 40)) { physicsWorld.removeBody(it.b); removed++; }   // гистерезис: не дёргаем на границе
+            }
+            if (added || removed) console.info('[physics] тела клонов: +' + added + ' / −' + removed + ', в мире ' + physicsWorld.bodies.length);
+        }
         function maybeStreamGeometry() {
             // ВАЖНО: streamInFlight проверяем ДО таймера, а не внутри
             if (!isPlaying || !charBody || streamInFlight) return;
@@ -10250,9 +10284,14 @@ end
             }
             return -1;
         }
+        // Линейный перебор luaByRef (после клонирования комнат — десятки тысяч записей) звался из каждого game:GetService() и из
+        // обработчиков ввода. Найденный ref запоминаем и перед использованием проверяем, что он тот же сервис и всё ещё корневой.
+        const _svcRefCache = {};
         function luaFindServiceRef(name) {
+            const c = _svcRefCache[name];
+            if (c !== undefined && luaByRef[c] && luaByRef[c].cls === name && luaParentByRef[c] === -1) return c;
             for (const ref in luaByRef) {
-                if (luaByRef[ref].cls === name && luaParentByRef[ref] === -1) return parseInt(ref);
+                if (luaByRef[ref].cls === name && luaParentByRef[ref] === -1) return (_svcRefCache[name] = parseInt(ref));
             }
             return -1;
         }
@@ -10398,7 +10437,7 @@ end
             const src = luaByRef[ref];
             const cls = src ? src.cls : 'Instance';
             const newRef = luaCreateVirtualInstance(cls);
-            luaCloneOrigin[newRef] = luaCloneOrigin[ref] !== undefined ? luaCloneOrigin[ref] : ref;
+            luaCloneOrigin[newRef] = luaCloneOrigin[ref] !== undefined ? luaCloneOrigin[ref] : ref; _cloneStreamForce = true;
             luaCloneSource[newRef] = ref;
             if (src) luaByRef[newRef].name = src.name;
             if (virtualInstanceProps[ref]) {
@@ -12338,7 +12377,7 @@ end
                 luaSetParent(newRef, newParentRef);
                 refMap[origRef] = newRef;
                 // копия знает оригинал: по нему require(копия-ModuleScript) находит исходник (см. __compile_module)
-                luaCloneOrigin[newRef] = luaCloneOrigin[origRef] !== undefined ? luaCloneOrigin[origRef] : origRef;
+                luaCloneOrigin[newRef] = luaCloneOrigin[origRef] !== undefined ? luaCloneOrigin[origRef] : origRef; _cloneStreamForce = true;
                 luaCloneSource[newRef] = origRef;
                 if (guiPropsByRef[origRef]) {
                     guiPropsByRef[newRef] = Object.assign({}, guiPropsByRef[origRef], { cls: origInfo.cls, ref: newRef, parent: newParentRef });
@@ -14871,6 +14910,7 @@ end
             followCharacterCamera();
             updateProximityPrompts();
             maybeStreamGeometry();
+            streamCloneBodies();
             updateLuaScheduler();
         }
 

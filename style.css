@@ -260,7 +260,7 @@
         }
 
         /* Метка сборки: script.js сверяет её со своей и с app.py (см. checkBuildConsistency) */
-        :root { --css-build: "2026-11-10 · log-fixes-2"; }
+        :root { --css-build: "2026-11-10 · clone-physics"; }
 
         /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
         #gui-overlay {

@@ -7173,7 +7173,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-11-10 · log-fixes-2'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-11-10 · clone-physics'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
 
 
 @flask_app.route('/api/status')
