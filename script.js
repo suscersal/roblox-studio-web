@@ -690,7 +690,7 @@
         // ============ МЕТКА СБОРКИ ============
         // Меняйте строку при каждой правке — по ней в Output видно, что WebView
         // загрузил свежий script.js, а не кэш.
-        const BUILD_LABEL = '2026-11-10 · clone-physics';
+        const BUILD_LABEL = '2026-11-10 · tween-easing';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
@@ -7867,22 +7867,7 @@ local HttpServiceObj = setmetatable({}, { __index = {
 local __nextTweenId = 1
 local function __enumName(e) if type(e) == "table" then return tostring(e.Name or e) end return tostring(e or "") end
 local function __ease(a, style, dir)
-    style, dir = __enumName(style), __enumName(dir)
-    if string.find(style, "Linear", 1, true) then return a end
-    if string.find(style, "Sine", 1, true) then
-        if string.find(dir, "InOut", 1, true) then return -(math.cos(math.pi * a) - 1) / 2 end
-        if string.find(dir, "Out", 1, true) then return math.sin(a * math.pi / 2) end
-        return 1 - math.cos(a * math.pi / 2)
-    end
-    local pw = 2
-    if string.find(style, "Cubic", 1, true) then pw = 3 elseif string.find(style, "Quart", 1, true) then pw = 4
-    elseif string.find(style, "Quint", 1, true) then pw = 5 end
-    if string.find(dir, "InOut", 1, true) then
-        if a < 0.5 then return (2 ^ (pw - 1)) * a ^ pw end
-        return 1 - ((-2 * a + 2) ^ pw) / 2
-    end
-    if string.find(dir, "Out", 1, true) then return 1 - (1 - a) ^ pw end
-    return a ^ pw
+    return __ease_js(a, __enumName(style), __enumName(dir))
 end
 local __jointTweenOwner = {}
 local TweenMT = { __index = {
@@ -7944,11 +7929,12 @@ local TweenMT = { __index = {
             return
         end
         for name, target in pairs(self.__props) do
-            __tween_register(self.__completedKey, self.__ref, name, target, self.__time)
+            __tween_register(self.__completedKey, self.__ref, name, target, self.__time,
+                __enumName(self.__style), __enumName(self.__dir), self.__delay or 0, self.__repeat or 0, self.__reverses and true or false)
         end
     end,
     Pause = function(self) end, -- честной паузы нет — покадровый твин на JS-стороне идёт по времени, а не по кадрам
-    Cancel = function(self) self.__running = nil end, -- для Value-твинов (Lua) отмена честная; JS-твины остановить пока нельзя
+    Cancel = function(self) self.__running = nil; __tween_cancel(self.__completedKey) end, -- Lua-твины (Value/Motor6D) останавливает токен, JS-твины — __tween_cancel
 } }
 local TweenServiceObj = setmetatable({}, { __index = {
     Create = function(self, instance, tweenInfo, props)
@@ -7963,6 +7949,7 @@ local TweenServiceObj = setmetatable({}, { __index = {
             __ref = rawget(instance, "__ref"), __props = props, __time = (tweenInfo and tweenInfo.Time) or 1,
             __completedKey = completedKey, Completed = makeEvent(completedKey, "Event"),
             __style = tweenInfo and tweenInfo.EasingStyle, __dir = tweenInfo and tweenInfo.EasingDirection,
+            __delay = tweenInfo and tweenInfo.DelayTime, __repeat = tweenInfo and tweenInfo.RepeatCount, __reverses = tweenInfo and tweenInfo.Reverses,
         }, TweenMT)
     end,
 } })
@@ -11515,6 +11502,14 @@ end
                 const ref = lua.lua_tonumber(L2, 2);
                 const propName = lua.lua_tojsstring(L2, 3);
                 const duration = lua.lua_tonumber(L2, 5) || 0;
+                // TweenInfo: стиль/направление easing, DelayTime, RepeatCount (-1 = бесконечно), Reverses
+                const tinfo = {
+                    style: lua.lua_isstring(L2, 6) ? lua.lua_tojsstring(L2, 6) : '',
+                    dir: lua.lua_isstring(L2, 7) ? lua.lua_tojsstring(L2, 7) : '',
+                    delay: lua.lua_isnumber(L2, 8) ? lua.lua_tonumber(L2, 8) : 0,
+                    repeat: lua.lua_isnumber(L2, 9) ? lua.lua_tonumber(L2, 9) : 0,
+                    reverses: !!lua.lua_toboolean(L2, 10),
+                };
                 // CFrame — отдельный случай ДО общей ветки composite ниже:
                 if (propName === 'CFrame' && lua.lua_type(L2, 4) === lua.LUA_TTABLE) {
                     const gx = (f) => { lua.lua_getfield(L2, 4, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
@@ -11557,7 +11552,7 @@ end
                         ref, propName, cframe: true, fromQuat, toQuat,
                         fromPos: { x: fx, y: fy, z: fz }, toPos: { x: tx, y: ty, z: tz },
                         fromLook: { x: flx, y: fly, z: flz }, toLook: { x: tlx, y: tly, z: tlz },
-                        duration, startTime: performance.now(), completedRef: completedKey,
+                        duration, startTime: performance.now(), completedRef: completedKey, ...tinfo,
                     });
                     return 0;
                 }
@@ -11570,7 +11565,7 @@ end
                     activeTweens.push({
                         ref, propName, partPos: true,
                         fromPos: { x: cur.x, y: cur.y, z: cur.z }, toPos: { x: gv('X'), y: gv('Y'), z: gv('Z') },
-                        duration, startTime: performance.now(), completedRef: completedKey,
+                        duration, startTime: performance.now(), completedRef: completedKey, ...tinfo,
                     });
                     return 0;
                 }
@@ -11580,7 +11575,7 @@ end
                     const a0 = luaAttCF[ref] || [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1];
                     activeTweens.push({
                         ref, attPos: true, from: [a0[0], a0[1], a0[2]], to: [gq('X'), gq('Y'), gq('Z')],
-                        duration, startTime: performance.now(), completedRef: completedKey,
+                        duration, startTime: performance.now(), completedRef: completedKey, ...tinfo,
                     });
                     return 0;
                 }
@@ -11592,10 +11587,32 @@ end
                 let fromVal = null;
                 if (!composite) {
                     const cur = luaGetGenericProp(ref, propName);
-                    fromVal = (typeof cur === 'number') ? cur : toVal; // не смогли прочитать текущее число — сразу к цели, без анимации
+                // NumberValue/IntValue без записанного Value в Roblox равны 0 (раньше твин считал текущее значение нечитаемым и прыгал сразу к цели)
+                const numDefault = (luaByRef[ref] && /^(NumberValue|IntValue)$/.test(luaByRef[ref].cls)) ? 0 : toVal;
+                fromVal = (typeof cur === 'number') ? cur : numDefault; // не смогли прочитать текущее число — сразу к цели, без анимации
                 }
-                activeTweens.push({ ref, propName, from: fromVal, to: toVal, duration, startTime: performance.now(), composite, completedRef: completedKey });
+                // Составное значение (UDim2/Color3/Vector2/UDim) GUI-объекта: берём текущее из guiPropsByRef и двигаем покадрово
+                let fromComposite = null;
+                if (composite && toVal && typeof toVal === 'object' && guiPropsByRef[ref] && _tweenCompatible(guiPropsByRef[ref][propName], toVal)) {
+                    fromComposite = JSON.parse(JSON.stringify(guiPropsByRef[ref][propName]));
+                }
+                activeTweens.push({ ref, propName, from: fromVal, to: toVal, duration, startTime: performance.now(), composite, fromComposite, completedRef: completedKey, ...tinfo });
                 return 0;
+            });
+            // Tween:Cancel() для JS-твинов: убираем из активных, Completed стреляет с PlaybackState.Cancelled (как в Roblox)
+            def('__tween_cancel', function (L2) {
+                const key = lua.lua_tonumber(L2, 1);
+                const mine = activeTweens.filter(t => t.completedRef === key);
+                if (mine.length) {
+                    activeTweens = activeTweens.filter(t => t.completedRef !== key);
+                    _tweenFinish(mine[0], 'Cancelled');
+                }
+                return 0;
+            });
+            // Easing для Lua-твинов (Value/Motor6D): тот же набор стилей, что и у JS-твинов
+            def('__ease_js', function (L2) {
+                lua.lua_pushnumber(L2, _tweenEase(lua.lua_tonumber(L2, 1), lua.lua_isstring(L2, 2) ? lua.lua_tojsstring(L2, 2) : '', lua.lua_isstring(L2, 3) ? lua.lua_tojsstring(L2, 3) : ''));
+                return 1;
             });
             def('__set_parent', function (L2) {
                 luaSetParent(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2));
@@ -12920,7 +12937,11 @@ end
                 }
             }
             // ScreenGui/BillboardGui управляются свойством Enabled (не
-            if (cls === 'ScreenGui' || cls === 'BillboardGui') {
+            if (cls === 'BillboardGui') {
+                // Позицию и размер BillboardGui каждый кадр выставляет updateBillboardGuis (он же включает display). Если показать
+                // элемент здесь сразу, браузер успевает отрисовать «сырой» кадр с чужими координатами/размером.
+                el.style.display = (props.Enabled === false) ? 'none' : (el.style.display === 'flex' ? 'flex' : 'none');
+            } else if (cls === 'ScreenGui') {
                 el.style.display = (props.Enabled === false) ? 'none' : 'flex';
             } else {
                 el.style.display = (props.Visible === false) ? 'none' : 'flex';
@@ -13096,9 +13117,6 @@ end
             }
             const run = () => {
                 const w = el.clientWidth, h = el.clientHeight;
-                if (!(w > 0 && h > 0)) return;
-                const lines = String(el.textContent || '').split('\n');
-                if (!_fitCtx) _fitCtx = document.createElement('canvas').getContext('2d');
                 // UITextSizeConstraint (дочерний): ограничивает итоговый размер шрифта TextScaled-текста [Min, Max]
                 let tMin = 4, tMax = 100;
                 for (const k of (guiChildrenByRef[el.dataset.ref] || [])) {
@@ -13109,6 +13127,12 @@ end
                         break;
                     }
                 }
+                // Размера у элемента ещё нет (скрыт, высота 0 в начале твина появления) — шрифт минимальный. Раньше здесь был
+                // просто return, и текст жил с литеральным TextSize (у TextScaled-подписей это 100px): при появлении кастомного
+                // ProximityPrompt (Druns_PP: Group.Size.Y = 0 -> твин) на ~0.4 с вылезал огромный текст.
+                if (!(w > 0 && h > 0)) { el.style.fontSize = tMin + 'px'; return; }
+                const lines = String(el.textContent || '').split('\n');
+                if (!_fitCtx) _fitCtx = document.createElement('canvas').getContext('2d');
                 let size = Math.max(tMin, Math.min(tMax, (h / lines.length) * 0.95));
                 _fitCtx.font = size + 'px sans-serif';
                 const widest = Math.max(...lines.map(l => _fitCtx.measureText(l).width), 1);
@@ -13733,66 +13757,129 @@ end
         }
 
         // TweenService:Create(...):Play() — раньше TweenService не
+        // Easing как в Roblox (формулы Пеннера): Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic ×
+        // In/Out/InOut. Раньше JS-твины шли линейно, а Lua-сторона знала только Linear/Sine/Quad–Quint (остальное — Quad):
+        // Back/Bounce/Elastic и т.д. не работали. По умолчанию Roblox — Quad/Out.
+        function _tweenEase(a, style, dir) {
+            style = String(style || 'Quad').replace(/^Enum\.EasingStyle\./, '');
+            dir = String(dir || 'Out').replace(/^Enum\.EasingDirection\./, '');
+            if (a <= 0) return 0;
+            if (a >= 1) return 1;
+            if (style === 'Linear') return a;
+            const pw = { Quad: 2, Cubic: 3, Quart: 4, Quint: 5 }[style];
+            const bounceOut = (x) => {
+                const n1 = 7.5625, d1 = 2.75;
+                if (x < 1 / d1) return n1 * x * x;
+                if (x < 2 / d1) return n1 * (x -= 1.5 / d1) * x + 0.75;
+                if (x < 2.5 / d1) return n1 * (x -= 2.25 / d1) * x + 0.9375;
+                return n1 * (x -= 2.625 / d1) * x + 0.984375;
+            };
+            const inF = (x) => {
+                switch (style) {
+                    case 'Sine': return 1 - Math.cos(x * Math.PI / 2);
+                    case 'Exponential': return x <= 0 ? 0 : Math.pow(2, 10 * x - 10);
+                    case 'Circular': return 1 - Math.sqrt(1 - x * x);
+                    case 'Back': { const c1 = 1.70158, c3 = c1 + 1; return c3 * x * x * x - c1 * x * x; }
+                    case 'Bounce': return 1 - bounceOut(1 - x);
+                    case 'Elastic': return -Math.pow(2, 10 * x - 10) * Math.sin((x * 10 - 10.75) * (2 * Math.PI / 3));
+                    default: return Math.pow(x, pw || 2);
+                }
+            };
+            if (dir === 'In') return inF(a);
+            if (dir === 'InOut') return a < 0.5 ? inF(a * 2) / 2 : 1 - inF((1 - a) * 2) / 2;
+            return 1 - inF(1 - a);   // Out
+        }
+        // Прогресс твина с учётом DelayTime/RepeatCount/Reverses -> { p (0..1 внутри цикла), done, waiting }
+        function _tweenProg(t, now) {
+            const D = t.duration;
+            const el = (now - t.startTime) / 1000 - (t.delay || 0);
+            if (el < 0) return { p: 0, done: false, waiting: true };
+            if (!(D > 0)) return { p: 1, done: true };
+            const cycles = (t.repeat === -1) ? Infinity : (t.repeat || 0) + 1;
+            const per = t.reverses ? D * 2 : D;
+            if (el >= per * cycles) return { p: t.reverses ? 0 : 1, done: true };
+            const c = el % per;
+            let p = c / D;
+            if (p > 1) p = 2 - p;    // обратный ход
+            return { p, done: false };
+        }
+        // Оба значения — вложенные объекты с одинаковыми числовыми полями (UDim2, Color3, Vector2, UDim) -> можно интерполировать
+        function _tweenCompatible(a, b) {
+            if (typeof a === 'number' && typeof b === 'number') return true;
+            if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+            for (const k in b) if (!(k in a) || !_tweenCompatible(a[k], b[k])) return false;
+            return true;
+        }
+        function _tweenLerp(a, b, e) {
+            if (typeof b === 'number') return a + (b - a) * e;
+            const o = {};
+            for (const k in b) o[k] = _tweenLerp(a[k], b[k], e);
+            return o;
+        }
+        // Completed стреляет с PlaybackState (Completed/Cancelled), как в Roblox: скрипты проверяют state == Enum.PlaybackState.Completed
+        function _tweenFinish(t, state) { fireLuaSignal(t.completedRef, 'Event', [{ __enum: ['PlaybackState', state || 'Completed'] }]); }
         function updateTweens() {
             if (!activeTweens.length) return;
             const now = performance.now();
             const stillActive = [];
             for (const t of activeTweens) {
-                const elapsed = (now - t.startTime) / 1000;
-                const p = t.duration > 0 ? Math.min(1, elapsed / t.duration) : 1;
+                const pr = _tweenProg(t, now);
+                if (pr.waiting) { stillActive.push(t); continue; }           // DelayTime ещё не прошёл
+                const pe = _tweenEase(pr.p, t.style, t.dir), done = pr.done;
                 if (t.cframe) {
-                    const x = t.fromPos.x + (t.toPos.x - t.fromPos.x) * p;
-                    const y = t.fromPos.y + (t.toPos.y - t.fromPos.y) * p;
-                    const z = t.fromPos.z + (t.toPos.z - t.fromPos.z) * p;
-                    let lx = t.fromLook.x + (t.toLook.x - t.fromLook.x) * p;
-                    let ly = t.fromLook.y + (t.toLook.y - t.fromLook.y) * p;
-                    let lz = t.fromLook.z + (t.toLook.z - t.fromLook.z) * p;
+                    const x = t.fromPos.x + (t.toPos.x - t.fromPos.x) * pe;
+                    const y = t.fromPos.y + (t.toPos.y - t.fromPos.y) * pe;
+                    const z = t.fromPos.z + (t.toPos.z - t.fromPos.z) * pe;
+                    let lx = t.fromLook.x + (t.toLook.x - t.fromLook.x) * pe;
+                    let ly = t.fromLook.y + (t.toLook.y - t.fromLook.y) * pe;
+                    let lz = t.fromLook.z + (t.toLook.z - t.fromLook.z) * pe;
                     const llen = Math.hypot(lx, ly, lz) || 1;
                     if (t.fromQuat && t.toQuat && luaIsPartRef(t.ref)) {
-                        const qq = t.fromQuat.clone().slerp(t.toQuat, p);
+                        const qq = t.fromQuat.clone().slerp(t.toQuat, pe);
                         luaApplyPartMatrix(t.ref, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), qq, new THREE.Vector3(1, 1, 1)));
                         fireLuaSignal(t.ref, '__prop_CFrame', []); fireLuaSignal(t.ref, '__prop_Position', []);
                     } else {
                         applyCFrameValue(t.ref, x, y, z, lx / llen, ly / llen, lz / llen);
                     }
-                    if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
-                    else stillActive.push(t);
+                    if (done) _tweenFinish(t); else stillActive.push(t);
                     continue;
                 }
                 if (t.partPos) {
-                    const x = t.fromPos.x + (t.toPos.x - t.fromPos.x) * p;
-                    const y = t.fromPos.y + (t.toPos.y - t.fromPos.y) * p;
-                    const z = t.fromPos.z + (t.toPos.z - t.fromPos.z) * p;
+                    const x = t.fromPos.x + (t.toPos.x - t.fromPos.x) * pe;
+                    const y = t.fromPos.y + (t.toPos.y - t.fromPos.y) * pe;
+                    const z = t.fromPos.z + (t.toPos.z - t.fromPos.z) * pe;
                     const cm = luaPartMatrix(t.ref), cp = new THREE.Vector3(), cq = new THREE.Quaternion(), cs = new THREE.Vector3();
                     cm.decompose(cp, cq, cs);
                     luaApplyPartMatrix(t.ref, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), cq, new THREE.Vector3(1, 1, 1)));
                     fireLuaSignal(t.ref, '__prop_CFrame', []); fireLuaSignal(t.ref, '__prop_Position', []);
-                    if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
-                    else stillActive.push(t);
+                    if (done) _tweenFinish(t); else stillActive.push(t);
                     continue;
                 }
                 if (t.attPos) {
                     const a = luaAttCF[t.ref] || (luaAttCF[t.ref] = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
-                    for (let i = 0; i < 3; i++) a[i] = t.from[i] + (t.to[i] - t.from[i]) * p;
-                    if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
-                    else stillActive.push(t);
+                    for (let i = 0; i < 3; i++) a[i] = t.from[i] + (t.to[i] - t.from[i]) * pe;
+                    if (done) _tweenFinish(t); else stillActive.push(t);
                     continue;
                 }
                 if (t.composite) {
-                    if (p >= 1) {
+                    if (t.fromComposite) {
+                        // UDim2/Color3/Vector2/UDim у GUI-объектов: плавно по кадрам (раньше значение просто прыгало в конце твина —
+                        // появление кастомного ProximityPrompt и любые твины Size/Position/цвета GUI были скачком)
+                        luaSetGenericProp(t.ref, t.propName, _tweenLerp(t.fromComposite, t.to, pe));
+                        if (done) { fireLuaSignal(t.ref, '__prop_' + t.propName, []); _tweenFinish(t); } else stillActive.push(t);
+                    } else if (done) {
                         luaSetGenericProp(t.ref, t.propName, t.to);
-                        fireLuaSignal(t.completedRef, 'Event', []);
+                        _tweenFinish(t);
                     } else {
                         stillActive.push(t);
                     }
                     continue;
                 }
-                const v = t.from + (t.to - t.from) * p;
+                const v = t.from + (t.to - t.from) * pe;
                 luaSetGenericProp(t.ref, t.propName, v);
                 if (t.propName === 'Value') fireLuaSignal(t.ref, 'Changed', [v]);
                 fireLuaSignal(t.ref, '__prop_' + t.propName, []);
-                if (p >= 1) fireLuaSignal(t.completedRef, 'Event', []);
-                else stillActive.push(t);
+                if (done) _tweenFinish(t); else stillActive.push(t);
             }
             activeTweens = stillActive;
         }
