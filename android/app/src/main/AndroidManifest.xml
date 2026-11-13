@@ -47,6 +47,19 @@
                 <data android:pathPattern=".*\\..*\\..*\\.rbxl" />
                 <data android:pathPattern=".*\\..*\\..*\\..*\\.rbxl" />
             </intent-filter>
+
+            <!-- Запасной вариант без проверки пути: Telegram и др. открывают неизвестные файлы как text/plain, а MIUI/HyperOS
+                 «Проводник» — как application/octet-stream, и путь у content://-Uri не всегда оканчивается на .rbxl.
+                 Побочный эффект: приложение предлагается и для других текстовых/неопознанных файлов. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="application/x-binary" />
+            </intent-filter>
         </activity>
 
         <!-- Отдельный экран для входа в аккаунт Roblox через обычную
