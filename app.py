@@ -2547,6 +2547,57 @@ def _rbx_get_place_bytes(place_id, version=None):
     raise err
 
 
+def _rbx_group_universes(archived='false', max_groups=30):
+    """Experiences групп текущего аккаунта. Группы: groups.roblox.com/v2/users/{id}/groups/roles; игры группы:
+    develop.roblox.com/v1/groups/{id}/universes (нужны права редактирования — для остальных групп Roblox отвечает
+    403, такие группы молча пропускаем). Параллельно, до max_groups групп и 3 страниц на группу."""
+    me = _rbx_get_json('https://users.roblox.com/v1/users/authenticated')
+    uid = me.get('id') if isinstance(me, dict) else None
+    if not uid:
+        return []
+    d = _rbx_get_json(f'https://groups.roblox.com/v2/users/{int(uid)}/groups/roles')
+    groups = []
+    for row in (d.get('data') or []) if isinstance(d, dict) else []:
+        g = row.get('group') or {}
+        if g.get('id'):
+            groups.append((int(g['id']), g.get('name') or ''))
+    groups = groups[:max_groups]
+
+    def one(g):
+        gid, gname = g
+        out, cursor = [], None
+        for _ in range(3):
+            url = (f'https://develop.roblox.com/v1/groups/{gid}/universes'
+                   f'?isArchived={archived}&limit=50&sortOrder=Desc')
+            if cursor:
+                url += '&cursor=' + _urlparse.quote(cursor)
+            try:
+                dd = _rbx_get_json(url)
+            except Exception:
+                return out      # нет прав на группу / сеть — пропускаем её
+            for u in (dd.get('data') or []) if isinstance(dd, dict) else []:
+                if not (u.get('id') and u.get('rootPlaceId')):
+                    continue
+                out.append({
+                    'universeId': u['id'], 'placeId': u['rootPlaceId'],
+                    'name': u.get('name') or str(u['id']),
+                    'private': (u.get('privacyType') or 'Private') != 'Public',
+                    'updated': u.get('updated') or u.get('created') or '',
+                    'owner': gname or u.get('creatorName') or '',
+                    'group': True, 'icon': None})
+            cursor = dd.get('nextPageCursor') if isinstance(dd, dict) else None
+            if not cursor:
+                break
+        return out
+
+    from concurrent.futures import ThreadPoolExecutor
+    res = []
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for part in ex.map(one, groups):
+            res.extend(part)
+    return res
+
+
 @flask_app.route('/api/roblox/experiences')
 def api_roblox_experiences():
     """Список Experiences аккаунта — как стартовый экран Studio (My Recent
@@ -2584,6 +2635,18 @@ def api_roblox_experiences():
         needs = 'HTTP 401' in str(e) or 'HTTP 403' in str(e)
         return jsonify({'ok': False, 'needLogin': needs, 'error': str(e)}), (401 if needs else 502)
 
+    # Experiences ГРУПП, в которых состоит пользователь: /v1/user/universes отдаёт только личные игры, поэтому
+    # игры групп (как «Group Games» в Studio) тянем отдельно. Ошибки по группам не роняют весь список.
+    group_err = None
+    try:
+        seen = {x['universeId'] for x in items}
+        for u in _rbx_group_universes(archived):
+            if u['universeId'] not in seen:
+                seen.add(u['universeId'])
+                items.append(u)
+    except Exception as e:
+        group_err = str(e)
+
     # иконки (необязательны: при ошибке остаются заглушки)
     try:
         for i in range(0, len(items), 50):
@@ -2600,7 +2663,7 @@ def api_roblox_experiences():
     except Exception:
         pass
     items.sort(key=lambda x: x['updated'], reverse=True)
-    return jsonify({'ok': True, 'experiences': items})
+    return jsonify({'ok': True, 'experiences': items, 'groupError': group_err})
 
 
 # === Игры студии на стартовом экране ===
@@ -2702,14 +2765,21 @@ def api_studio_games():
     group_err = None
     if group_id:
         try:
-            url = (f'https://games.roblox.com/v2/groups/{int(group_id)}/games'
-                   '?accessFilter=2&limit=50&sortOrder=Asc')
-            d = _rbx_get_json(url)
-            for u in (d.get('data') or []):
-                root = (u.get('rootPlace') or {}).get('id')
-                if u.get('id') and root:
-                    add(u.get('name'), root, u.get('id'), u.get('updated') or u.get('created') or '',
-                        (u.get('creator') or {}).get('name') or '')
+            cursor = None
+            for _ in range(10):     # раньше брались только первые 50 игр группы
+                url = (f'https://games.roblox.com/v2/groups/{int(group_id)}/games'
+                       '?accessFilter=2&limit=50&sortOrder=Desc')
+                if cursor:
+                    url += '&cursor=' + _urlparse.quote(cursor)
+                d = _rbx_get_json(url)
+                for u in (d.get('data') or []):
+                    root = (u.get('rootPlace') or {}).get('id')
+                    if u.get('id') and root:
+                        add(u.get('name'), root, u.get('id'), u.get('updated') or u.get('created') or '',
+                            (u.get('creator') or {}).get('name') or '')
+                cursor = d.get('nextPageCursor') if isinstance(d, dict) else None
+                if not cursor:
+                    break
         except Exception as e:
             group_err = str(e)
 

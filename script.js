@@ -16724,7 +16724,7 @@ end
             let html = '';
             list.forEach((x, i) => {
                 if (!_stMatch(x.name)) return;
-                html += _stCard('openExperience(' + i + ')', _stTile(x.icon, '🌐'), x.private ? '🔒 ' + t('exp_private') : '🌐 ' + t('exp_public'),
+                html += _stCard('openExperience(' + i + ')', _stTile(x.icon, '🌐'), (x.group ? '👥 ' : '') + (x.private ? '🔒 ' + t('exp_private') : '🌐 ' + t('exp_public')),
                     x.name, x.updated ? t('st_modified', { d: _fmtDate(x.updated) }) : '', x.owner);
             });
             return html;
