@@ -2457,6 +2457,48 @@
         }
 
         // ============ АНИМАЦИЯ ============
+
+        // ============ Профайлер кадра (строка под счётчиком FPS) ============
+        // Показывает, куда уходят мс кадра: шаг cannon, Lua-планировщик, синхронизация мешей и т.д.
+        const _PROF = { acc: {}, frames: 0, wrapped: false, el: null };
+        function _profWrap(name, fn) {
+            return function () {
+                const t = performance.now();
+                try { return fn.apply(this, arguments); }
+                finally { _PROF.acc[name] = (_PROF.acc[name] || 0) + performance.now() - t; }
+            };
+        }
+        function _profInstall() {
+            if (_PROF.wrapped) return;
+            _PROF.wrapped = true;
+            const names = ['applyCharacterControl', 'updateHollowUnionGhosts', 'updateSurfaceGuis', 'luaStepWelds', 'updateTouchTriggers',
+                'updateContactTouches', 'followCharacterCamera', 'updateProximityPrompts', 'maybeStreamGeometry', 'streamCloneBodies',
+                'updateLuaScheduler', 'updateParticles', 'updateBeams', 'updateHighlights', 'updateSmallCull', 'updateBillboardGuis'];
+            for (const n of names) { try { const f = eval(n); if (typeof f === 'function') eval(n + ' = _profWrap(n, f)'); } catch (e) { /* нет такой функции */ } }
+            const r = renderer.render.bind(renderer);
+            renderer.render = function (a, b) { const t = performance.now(); r(a, b); _PROF.acc.render = (_PROF.acc.render || 0) + performance.now() - t; };
+        }
+        function _profWrapWorld() {
+            if (!physicsWorld || physicsWorld._profd) return;
+            physicsWorld._profd = true;
+            const st = physicsWorld.step.bind(physicsWorld);
+            physicsWorld.step = function (dt) { const t = performance.now(); st(dt); _PROF.acc.cannon = (_PROF.acc.cannon || 0) + performance.now() - t; };
+        }
+        function _profReport(frames) {
+            const c = document.getElementById('fps-counter');
+            if (!c) return;
+            if (!_PROF.el) {
+                _PROF.el = document.createElement('div');
+                _PROF.el.style.cssText = 'position:fixed;z-index:99999;font:12px monospace;color:#fc6;background:rgba(0,0,0,.6);padding:2px 6px;pointer-events:none;max-width:70vw';
+                document.body.appendChild(_PROF.el);
+            }
+            const rc = c.getBoundingClientRect();
+            _PROF.el.style.left = rc.left + 'px'; _PROF.el.style.top = (rc.bottom + 2) + 'px';
+            const rows = Object.entries(_PROF.acc).map(([k, v]) => [k, v / Math.max(1, frames)]).filter(r => r[1] >= 0.3).sort((a, b) => b[1] - a[1]).slice(0, 7);
+            _PROF.el.textContent = 'ms/кадр: ' + rows.map(r => r[0] + ' ' + r[1].toFixed(1)).join(' | ');
+            _PROF.acc = {};
+        }
+
         function animate() {
             requestAnimationFrame(animate);
             _updateHeldTool();
@@ -2477,6 +2519,7 @@
                 document.getElementById('fps-counter').textContent = 'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
                     ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '');
+                if (isPlaying) { _profInstall(); _profWrapWorld(); _profReport(fpsFrames); }
                 fpsFrames = 0;
                 fpsTime = now;
             }
