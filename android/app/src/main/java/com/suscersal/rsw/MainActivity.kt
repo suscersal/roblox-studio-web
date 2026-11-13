@@ -197,6 +197,49 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    // «Открыть с помощью» из файлового менеджера (ACTION_VIEW на .rbxl): копируем файл так же, как после пикера,
+    // и передаём странице через window.onAndroidFileImported. Если страница ещё не загрузилась (холодный старт) —
+    // результат ждёт в pendingIncomingJs до onPageFinished.
+    @Volatile private var pendingIncomingJs: String? = null
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null || intent.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        intent.data = null   // не обрабатывать повторно при пересоздании
+        Thread {
+            val dest = File(filesDir, "imported_${System.currentTimeMillis()}.rbxl")
+            val js: String = try {
+                val shownName = displayNameOf(uri) ?: uri.lastPathSegment
+                contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                } ?: throw java.io.IOException("contentResolver вернул пустой поток для $uri")
+                rememberSourceUri(dest.absolutePath, uri)
+                "window.onAndroidFileImported(${org.json.JSONObject.quote(dest.absolutePath)}, null, " +
+                    "${shownName?.let { org.json.JSONObject.quote(it) } ?: "null"});"
+            } catch (e: Exception) {
+                dest.delete()
+                "window.onAndroidFileImported(null, ${org.json.JSONObject.quote(e.message ?: e.toString())});"
+            }
+            // функция появляется, когда загрузится script.js — ждём её до ~15 с
+            pendingIncomingJs = "(function t(n){ if (window.onAndroidFileImported) { $js } else if (n < 50) setTimeout(function(){ t(n + 1); }, 300); })(0);"
+            runOnUiThread { flushIncoming() }
+        }.start()
+    }
+
+    private fun flushIncoming() {
+        val js = pendingIncomingJs ?: return
+        val url = webView.url ?: return
+        if (!url.startsWith("http://127.0.0.1")) return   // приложение ещё грузится — вызовем из onPageFinished
+        pendingIncomingJs = null
+        webView.evaluateJavascript(js, null)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -210,8 +253,14 @@ class MainActivity : AppCompatActivity() {
         webView.settings.domStorageEnabled = true
         // WebGL для 3D-вьюпорта — включено по умолчанию в современном
         // системном WebView, явных флагов не требуется.
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                // страница приложения загружена — отдаём ей .rbxl, с которым нас открыли из файлового менеджера
+                if (url != null && url.startsWith("http://127.0.0.1")) flushIncoming()
+            }
+        }
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
+        handleIncomingIntent(intent)
 
         // «Назад»: сначала даём странице закрыть самый верхний слой (диалог, меню, Play, «Панели» → «Сцена»…) —
         // window.__handleBack() возвращает true, если что-то закрыла. Иначе — история WebView, а выход из приложения

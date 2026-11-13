@@ -24,11 +24,28 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- «Открыть с помощью» для .rbxl из файлового менеджера. pathPattern в Android не умеет «любое число точек»,
+                 поэтому шаблонов несколько (имя с точками внутри). mimeType */* — у менеджеров он почти всегда разный. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="*/*" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.rbxl" />
+                <data android:pathPattern=".*\\..*\\.rbxl" />
+                <data android:pathPattern=".*\\..*\\..*\\.rbxl" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.rbxl" />
             </intent-filter>
         </activity>
 
