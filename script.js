@@ -5335,6 +5335,7 @@
         // обычным деталям карты: в мире остаются playBodies ближайших статичных тел в пределах loadRadius, остальные из мира
         // вынимаются. Объект тела остаётся в physicsBodies — Lua по-прежнему двигает его (PivotTo пишет в body.position),
         // а при приближении тело возвращается в мир. Подвижные (DYNAMIC/KINEMATIC) тела не трогаем.
+        const CLONE_PHYS_RADIUS = 160;
         let _cloneStreamT = 0, _cloneStreamForce = true, _cloneStreamPos = { x: NaN, y: 0, z: 0 };
         function streamCloneBodies() {
             if (!isPlaying || !charBody || !physicsWorld) return;
@@ -5344,7 +5345,7 @@
             if (!_cloneStreamForce && !(moved >= 12) && now - _cloneStreamT < 500) return;
             if (!_cloneStreamForce && now - _cloneStreamT < 150) return;
             _cloneStreamForce = false; _cloneStreamT = now; _cloneStreamPos = { x: cx, y: cy, z: cz };
-            const R = qualitySettings.loadRadius || 350, cap = Math.max(1, maxStreamedBodies());
+            const R = Math.min(qualitySettings.loadRadius || 350, CLONE_PHYS_RADIUS), cap = Math.max(1, maxStreamedBodies());   // клонам (комнаты) физика нужна только рядом
             const STATIC = CANNON.Body.STATIC;
             const items = [];
             for (const k in luaCloneOrigin) {
@@ -15023,6 +15024,8 @@ end
 
         let _physLastT = 0, _physAcc = 0;
         let _syncP = null, _syncQ = null, _syncOne = null;   // создаются лениво: THREE подгружается позже скрипта
+        const PHYS_BUDGET_MS = 30;
+        let _physStepEma = 1;   // мс на один physicsWorld.step
         const PHYSICS_MAX_TICKS = 5;   // не больше 5 шагов (1/12 с) за кадр
         const PHYSICS_SUBSTEPS = 4; // дробим шаг — у cannon.js 0.6.2 нет CCD,
         // быстро падающая сфера может за один большой шаг проскочить сквозь
@@ -15129,16 +15132,23 @@ end
             const dtReal = _physLastT ? (nowT - _physLastT) / 1000 : 1 / 60;
             _physLastT = nowT;
             _physAcc = Math.min(_physAcc + dtReal, PHYSICS_MAX_TICKS / 60);
+            // Бюджет физики на кадр: шаг мира cannon на телефоне с тысячей тел стоит ~10 мс, а 5 тиков × 4 подшага = 20 шагов
+            // давали 190 мс/кадр и спираль (медленный кадр -> больше тиков -> ещё медленнее). Меряем стоимость шага (EMA) и
+            // подбираем подшаги (не меньше 2 — CCD нет) и число тиков так, чтобы уложиться в PHYS_BUDGET_MS; остальное — замедление времени.
+            const subN = Math.max(2, Math.min(PHYSICS_SUBSTEPS, Math.floor(PHYS_BUDGET_MS / Math.max(0.1, _physStepEma))));
+            const maxTicks = Math.max(1, Math.min(PHYSICS_MAX_TICKS, Math.floor(PHYS_BUDGET_MS / Math.max(0.1, _physStepEma * subN))));
             let ticks = 0;
-            while (_physAcc >= 1 / 60 - 1e-6 && ticks < PHYSICS_MAX_TICKS) {
+            while (_physAcc >= 1 / 60 - 1e-6 && ticks < maxTicks) {
                 _physAcc -= 1 / 60; ticks++;
                 applyCharacterControl();
                 if (charBody && charBody.velocity.y < -MAX_FALL_SPEED) {
                     charBody.velocity.y = -MAX_FALL_SPEED;
                 }
-                const subDt = (1 / 60) / PHYSICS_SUBSTEPS;
-                for (let i = 0; i < PHYSICS_SUBSTEPS; i++) {
+                const subDt = (1 / 60) / subN;
+                for (let i = 0; i < subN; i++) {
+                    const _t0 = performance.now();
                     physicsWorld.step(subDt);
+                    _physStepEma += (performance.now() - _t0 - _physStepEma) * 0.1;
                     // Ступеньки лестницы — это отдельные боксы с вертикальными
                     if (charBody) {
                         charBody.velocity.x = charVelX;
