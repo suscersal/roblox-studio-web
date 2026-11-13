@@ -2552,6 +2552,10 @@
             } catch (e) {
                 _reportFrameError('beams', e);
             }
+            if (isPlaying) {
+                try { updateHighlights(now); } catch (e) { _reportFrameError('highlight', e); }
+                try { updateSmallCull(now); } catch (e) { _reportFrameError('smallcull', e); }
+            }
             try {
                 gzTick();
             } catch (e) {
@@ -4259,6 +4263,114 @@
             if (o.meshId) scheduleRealMeshSwap(o, mesh);
             if (o.unionMesh) scheduleUnionMeshSwap(o, mesh);
             return mesh;
+        }
+
+        // ============ Highlight (заливка + контур детали/модели) ============
+        // Adornee (или Parent, если Adornee пуст) -> на каждую деталь цели вешаем дочерние меши: заливка
+        // (та же геометрия, MeshBasicMaterial) и контур (EdgesGeometry). DepthMode: 0 AlwaysOnTop, 1 Occluded.
+        // Работает по Lua-дереву (luaByRef), поэтому видит и Highlight в клонах комнат. Раз в 400 мс сверяем состав.
+        const _hlState = {};            // ref Highlight -> { objs: {partRef: {mesh, fill, line}}, sig }
+        let _hlT = 0;
+        const _hlEdgeCache = new WeakMap();
+        function _hlParts(ref) {
+            const rp = luaRefProps[ref], ad = rp && rp.Adornee !== undefined && rp.Adornee !== -1 ? rp.Adornee : luaParentByRef[ref];
+            const out = [];
+            const stack = [ad];
+            while (stack.length && out.length < 150) {
+                const r = stack.pop();
+                if (r === undefined || r === -1) continue;
+                if (sceneObjs[r] && sceneObjs[r].geometry) out.push(r);
+                const kids = luaChildrenByRef[r];
+                if (kids) for (const k of kids) stack.push(k);
+            }
+            return out;
+        }
+        function _hlDisposeObj(o) {
+            if (o.fill) { o.mesh.remove(o.fill); o.fill.material.dispose(); }
+            if (o.line) { o.mesh.remove(o.line); o.line.material.dispose(); }
+        }
+        function _hlDispose(ref) {
+            const st = _hlState[ref]; if (!st) return;
+            for (const k of Object.keys(st.objs)) _hlDisposeObj(st.objs[k]);
+            delete _hlState[ref];
+        }
+        function resetHighlights() { for (const r of Object.keys(_hlState)) _hlDispose(r); }
+        function updateHighlights(nowMs) {
+            if (!scene || nowMs - _hlT < 400) return;
+            _hlT = nowMs;
+            if (_beamWsRef === -1 || !luaByRef[_beamWsRef]) _beamWsRef = luaWorkspaceRef();
+            const seen = new Set();
+            for (const k in luaByRef) {
+                const inst = luaByRef[k];
+                if (!inst || inst.cls !== 'Highlight') continue;
+                const ref = Number(k);
+                seen.add(ref);
+                const gp = luaGenericPropsByRef[ref] || {};
+                const on = gp.Enabled !== false && _beamUnderWorkspace(ref);
+                if (!on) { _hlDispose(ref); continue; }
+                let st = _hlState[ref];
+                if (!st) st = _hlState[ref] = { objs: {} };
+                const fc = gp.HL_Fill || [1, 0, 0], oc = gp.HL_Out || [1, 1, 1];
+                const fillT = typeof gp.FillTransparency === 'number' ? gp.FillTransparency : 0.5;
+                const outT = typeof gp.OutlineTransparency === 'number' ? gp.OutlineTransparency : 0;
+                const onTop = Number(gp.DepthMode) === 0;
+                const targets = new Set(_hlParts(ref));
+                for (const pr of Object.keys(st.objs)) {
+                    if (!targets.has(Number(pr)) || st.objs[pr].mesh !== sceneObjs[pr]) { _hlDisposeObj(st.objs[pr]); delete st.objs[pr]; }
+                }
+                for (const pr of targets) {
+                    const mesh = sceneObjs[pr];
+                    let o = st.objs[pr];
+                    if (!o) {
+                        o = st.objs[pr] = { mesh, fill: null, line: null };
+                        const geo = mesh.geometry;
+                        o.fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, fog: false, side: THREE.FrontSide,
+                            polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+                        o.fill.renderOrder = 998; o.fill.castShadow = false;
+                        mesh.add(o.fill);
+                        const pos = geo.attributes && geo.attributes.position;
+                        if (pos && pos.count <= 6000) {
+                            let eg = _hlEdgeCache.get(geo);
+                            if (!eg) { eg = new THREE.EdgesGeometry(geo, 35); _hlEdgeCache.set(geo, eg); }
+                            o.line = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ transparent: true, depthWrite: false, fog: false }));
+                            o.line.renderOrder = 999;
+                            mesh.add(o.line);
+                        }
+                    }
+                    const fm = o.fill.material;
+                    fm.color.setRGB(fc[0], fc[1], fc[2]); fm.opacity = 1 - fillT; fm.depthTest = !onTop; fm.visible = fillT < 1;
+                    if (o.line) {
+                        const lm = o.line.material;
+                        lm.color.setRGB(oc[0], oc[1], oc[2]); lm.opacity = 1 - outT; lm.depthTest = !onTop; lm.visible = outT < 1;
+                    }
+                }
+            }
+            for (const r of Object.keys(_hlState)) if (!seen.has(Number(r))) _hlDispose(r);
+        }
+
+        // ============ Отсечение мелочи по экранному размеру ============
+        // Комната на сотни мелких деталей (лампы, болты, декор) давала сотни draw call'ов, хотя вдали каждая — пара пикселей.
+        // Прячем деталь, если её угловой размер < ~0.6% при дистанции > 40 студов. mesh.visible стримингом выставляется сам,
+        // поэтому свои скрытые меши помечаем (_sc) и возвращаем сами.
+        let _scT = 0;
+        const _SC_RATIO = 0.006, _SC_MIN_DIST = 40;
+        function updateSmallCull(nowMs) {
+            if (nowMs - _scT < 200 || !camera) return;
+            _scT = nowMs;
+            const cp = camera.position, cutoff = playRenderCutoff();
+            for (const k in sceneObjs) {
+                const m = sceneObjs[k], sz = loadedObjSize[k];
+                if (!m || !sz || m.children.length) continue;
+                const e = m.matrix.elements;
+                const d = Math.hypot(e[12] - cp.x, e[13] - cp.y, e[14] - cp.z);
+                const r = 0.5 * Math.hypot(sz.x, sz.y, sz.z);
+                const small = d > _SC_MIN_DIST && r / d < _SC_RATIO;
+                if (small) { if (m.visible) { m.visible = false; m.userData._sc = 1; } }
+                else if (m.userData._sc) { m.userData._sc = 0; m.visible = d - r <= cutoff; }
+            }
+        }
+        function restoreSmallCull() {
+            for (const k in sceneObjs) { const m = sceneObjs[k]; if (m && m.userData._sc) { m.userData._sc = 0; m.visible = true; } }
         }
 
         // ============ ЧАСТИЦЫ (ParticleEmitter) ============
@@ -6093,6 +6205,7 @@
 
         function stopPlay() {
             try { resetBeams(); } catch (e) { /* сцена уже разобрана */ }
+            try { resetHighlights(); restoreSmallCull(); } catch (e) { /* сцена уже разобрана */ }
             isPlaying = false;
             _updateTouchControlsVisibility(); // возвращаем джойстик/кнопку — она могла остаться скрытой, если скрипт вызвал Disable() и не успел/не стал явно включать обратно
             cameraIsScriptable = false;
@@ -13685,7 +13798,8 @@ end
             }
             return made;
         }
-        let _sgEnsureT = 0;
+        let _sgEnsureT = 0, _sgFrustum = null, _sgMat = null, _sgSph = null;
+        const SG_MAX_DIST = 90;
         function clearSurfaceGuis() {
             for (const ref of Object.keys(surfaceGuis)) {
                 const sg = surfaceGuis[ref];
@@ -13698,15 +13812,27 @@ end
         function updateSurfaceGuis() {
             const nowT = performance.now();
             if (nowT - _sgEnsureT > 500) { _sgEnsureT = nowT; ensureSurfaceGuis(); }
+            // 108 табло в одной комнате = 108 прозрачных draw call'ов даже за стеной: отсекаем по дальности и пирамиде камеры
+            if (!_sgFrustum) { _sgFrustum = new THREE.Frustum(); _sgMat = new THREE.Matrix4(); _sgSph = new THREE.Sphere(); }
+            camera.updateMatrixWorld();
+            _sgMat.multiplyMatrices(camera.projectionMatrix, _sgMat.copy(camera.matrixWorld).invert());
+            _sgFrustum.setFromProjectionMatrix(_sgMat);
             for (const sg of Object.values(surfaceGuis)) {
-                if (sg.dirty) surfaceGuiRedraw(sg);
                 if (!sceneObjs[sg.partRef]) { sg.mesh.visible = false; continue; }
-                sg.mesh.visible = sceneObjs[sg.partRef].visible !== false;
                 // matrix (а не только matrixWorld): в этой версии three.js сцена каждый кадр делает
                 // matrixWorld = parent.matrixWorld * matrix, и плоскость с единичной matrix оказывалась в (0,0,0).
                 sg.mesh.matrix.copy(luaPartMatrix(sg.partRef)).multiply(sg.local);
                 sg.mesh.matrixWorld.copy(sg.mesh.matrix);
                 sg.mesh.matrixWorldNeedsUpdate = true;
+                let vis = sceneObjs[sg.partRef].visible !== false;
+                if (vis) {
+                    const e = sg.mesh.matrix.elements, gp = sg.mesh.geometry.parameters || {};
+                    _sgSph.center.set(e[12], e[13], e[14]);
+                    _sgSph.radius = 0.5 * Math.hypot(gp.width || 1, gp.height || 1) + 0.5;
+                    vis = _sgSph.center.distanceTo(camera.position) - _sgSph.radius <= SG_MAX_DIST && _sgFrustum.intersectsSphere(_sgSph);
+                }
+                sg.mesh.visible = vis;
+                if (vis && sg.dirty) surfaceGuiRedraw(sg);
             }
         }
 

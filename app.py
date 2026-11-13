@@ -3892,6 +3892,7 @@ _REF_PROP_CLASSES = ('RigidConstraint', 'WeldConstraint', 'Weld', 'ManualWeld', 
 # новый Audio API (AudioPlayer/Wire/...), пост-эффекты Lighting, Atmosphere/Clouds, Beam, Smoke/Sparkles,
 # констрейнты, Highlight. Берём ВСЕ свойства из файла, кроме служебных.
 _FILE_PROP_CLASSES = frozenset((
+    'Highlight',
     'AudioPlayer', 'AudioFader', 'AudioCompressor', 'AudioEqualizer', 'AudioEmitter', 'AudioListener',
     'AudioDeviceOutput', 'AudioReverb', 'AudioEcho', 'AudioDistortion', 'AudioFlanger', 'AudioChorus',
     'AudioPitchShifter', 'AudioLimiter', 'AudioTextToSpeech', 'AudioFilter', 'Wire', 'HapticEffect',
@@ -4168,6 +4169,15 @@ def api_all_instances():
                 item['beamColor'] = [float(_bc[0].get('r', 1)), float(_bc[0].get('g', 1)), float(_bc[0].get('b', 1))]
         if cls in _FILE_PROP_CLASSES or cls == 'Terrain':
             _g, _t = _file_props_for_client(cls, pr.get(ref, {}), r2c)
+            if cls == 'Highlight':
+                # цвета числами: клиент рисует заливку/контур и по клонам (gprops копируются при Clone())
+                _hq = pr.get(ref, {})
+                for _pn, _gn in (('FillColor', 'HL_Fill'), ('OutlineColor', 'HL_Out')):
+                    _c = _hq.get(_pn)
+                    if isinstance(_c, dict) and all(k in _c for k in ('r', 'g', 'b')):
+                        _g[_gn] = [float(_c['r']), float(_c['g']), float(_c['b'])]
+                    else:
+                        _g[_gn] = [1.0, 0.0, 0.0] if _pn == 'FillColor' else [1.0, 1.0, 1.0]
             if _g:
                 item.setdefault('gprops', {}).update(_g)
             if _t:
