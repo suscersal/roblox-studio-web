@@ -4353,7 +4353,7 @@
         // Прячем деталь, если её угловой размер < ~0.6% при дистанции > 40 студов. mesh.visible стримингом выставляется сам,
         // поэтому свои скрытые меши помечаем (_sc) и возвращаем сами.
         let _scT = 0;
-        const _SC_RATIO = 0.006, _SC_MIN_DIST = 40;
+        const _SC_RATIO = 0.006, _SC_MIN_DIST = 40, _SC_CLONE_DIST = 110;
         function updateSmallCull(nowMs) {
             if (nowMs - _scT < 200 || !camera) return;
             _scT = nowMs;
@@ -4364,7 +4364,8 @@
                 const e = m.matrix.elements;
                 const d = Math.hypot(e[12] - cp.x, e[13] - cp.y, e[14] - cp.z);
                 const r = 0.5 * Math.hypot(sz.x, sz.y, sz.z);
-                const small = d > _SC_MIN_DIST && r / d < _SC_RATIO;
+                // клоны (комнаты из ROOMS 2-20 и т.п.) дальше _SC_CLONE_DIST не рисуем: пройденные комнаты остаются в сцене
+                const small = (d > _SC_MIN_DIST && r / d < _SC_RATIO) || (luaCloneOrigin[k] !== undefined && d - r > _SC_CLONE_DIST);
                 if (small) { if (m.visible) { m.visible = false; m.userData._sc = 1; } }
                 else if (m.userData._sc) { m.userData._sc = 0; m.visible = d - r <= cutoff; }
             }
