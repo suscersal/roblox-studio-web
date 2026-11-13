@@ -5266,7 +5266,7 @@
             const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
             streamInFlight = true;
             try {
-                const loadRadius = qualitySettings.loadRadius || 350;     // физика — до этой дистанции
+                const loadRadius = Math.min(qualitySettings.loadRadius || 350, PHYS_STATIC_RADIUS);     // физика — до этой дистанции (дальше статика персонажу не нужна)
                 const visualRadius = qualitySettings.visualRadius || 2000; // рендер — до этой (без физики)
                 const visualCap = maxVisualBodies(); // аварийный потолок на количество, см. пресеты
                 const sceneResp = await api('POST', '/api/scene', {
@@ -5335,7 +5335,8 @@
         // обычным деталям карты: в мире остаются playBodies ближайших статичных тел в пределах loadRadius, остальные из мира
         // вынимаются. Объект тела остаётся в physicsBodies — Lua по-прежнему двигает его (PivotTo пишет в body.position),
         // а при приближении тело возвращается в мир. Подвижные (DYNAMIC/KINEMATIC) тела не трогаем.
-        const CLONE_PHYS_RADIUS = 160;
+        const CLONE_PHYS_RADIUS = 100;
+        const PHYS_STATIC_RADIUS = 140;   // статичные тела карты в мире только в этом радиусе от персонажа: шаг cannon растёт с числом тел
         let _cloneStreamT = 0, _cloneStreamForce = true, _cloneStreamPos = { x: NaN, y: 0, z: 0 };
         function streamCloneBodies() {
             if (!isPlaying || !charBody || !physicsWorld) return;
