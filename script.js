@@ -5361,7 +5361,6 @@
                 if (!inWorld && i < cap && it.d <= R) { physicsWorld.addBody(it.b); it.b.aabbNeedsUpdate = true; added++; }
                 else if (inWorld && !(i < cap * 1.25 && it.d <= R + 40)) { physicsWorld.removeBody(it.b); removed++; }   // гистерезис: не дёргаем на границе
             }
-            if (added || removed) console.info('[physics] тела клонов: +' + added + ' / −' + removed + ', в мире ' + physicsWorld.bodies.length);
         }
         function maybeStreamGeometry() {
             // ВАЖНО: streamInFlight проверяем ДО таймера, а не внутри
