@@ -2495,7 +2495,7 @@
             const rc = c.getBoundingClientRect();
             _PROF.el.style.left = rc.left + 'px'; _PROF.el.style.top = (rc.bottom + 2) + 'px';
             const rows = Object.entries(_PROF.acc).map(([k, v]) => [k, v / Math.max(1, frames)]).filter(r => r[1] >= 0.3).sort((a, b) => b[1] - a[1]).slice(0, 7);
-            _PROF.el.textContent = 'ms/кадр: ' + rows.map(r => r[0] + ' ' + r[1].toFixed(1)).join(' | ');
+            _PROF.el.textContent = 'ms/кадр: ' + rows.map(r => r[0] + ' ' + r[1].toFixed(1)).join(' | ') + ' || тел ' + (physicsWorld ? physicsWorld.bodies.length : 0) + ', шаг ' + _physStepEma.toFixed(1) + ' мс';
             _PROF.acc = {};
         }
 
@@ -14716,8 +14716,13 @@ end
                 const vp = document.getElementById('viewport'); if (!vp) return;
                 vp.appendChild(_hotbarEl);
             }
+            // Хотбар мог оказаться вне DOM (пересборка вьюпорта при смене качества/размера) — возвращаем на место и перерисовываем
+            if (!_hotbarEl.isConnected) {
+                const vp = document.getElementById('viewport'); if (!vp) return;
+                vp.appendChild(_hotbarEl); _hotbarSig = '';
+            }
             const sig = tools.map(t => t + ':' + (luaParentByRef[t] === luaCharacterRef ? 1 : 0) + ':' + luaByRef[t].name).join('|');
-            if (sig === _hotbarSig) return;
+            if (sig === _hotbarSig && (_hotbarEl.childElementCount > 0 || !tools.length)) return;
             _hotbarSig = sig;
             _hotbarEl.innerHTML = '';
             tools.forEach((t, i) => {
