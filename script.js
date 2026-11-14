@@ -823,7 +823,7 @@
                 tb_add: '➕ Add', tb_addobj_title: 'Add object',
                 tb_delete: '🗑 Delete', tb_delete_title: 'Delete (Delete)',
                 tb_refresh: '🔄 Refresh', tb_refresh_title: 'Refresh scene (F5)',
-                tb_publish: '☁ Publish', tb_publish_title: 'Publish',
+                tb_publish: '☁ Publish', tb_publish_title: 'Publish', tb_places: '🌍 Places', tb_places_title: 'Places (worlds) of this experience', pl_title: '🌍 Places of this experience', pl_none: 'Open the experience through “Open from Roblox” first — then you can switch between its places here.', pl_current: 'open now', pl_note: 'Unsaved changes in the current place will be lost.', pl_loading: 'Loading places…',
                 tb_download: '🏠 Start', tb_download_title: 'Start screen: recent files and your Roblox experiences',
                 dl_hint: 'Uses your Roblox sign-in (Account), like Studio. You need edit access to the place or it must be copyable.', cookie_ph: '.ROBLOSECURITY value', cookie_btn: 'Sign in with cookie', cookie_help: 'Desktop sign-in: in your browser, signed in to roblox.com, open DevTools → Application → Cookies → .ROBLOSECURITY and paste the value. Treat it like a password: it gives full account access. It is stored only on this device.', cookie_ok: '✅ Signed in as {name}', cookie_bad: 'Sign-in failed',
                 st_new: 'New Experience', st_recents: 'Recents', st_home: 'Home', st_experiences: 'Experiences', st_templates: 'Templates', st_archive: 'Archive', st_recent_h: 'My Recent Experiences', st_tpl_h: 'Open a Template', st_banner_t: 'Pick up where you left off', st_banner_p: 'Open a file, download one of your experiences from Roblox, or start from a template.', st_modified: 'Modified {d}', st_opened: 'Opened {d}', st_local: 'Local', st_refresh: 'Refresh', st_close: 'Close', st_remove: 'Remove from recents?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Empty scene', st_tpl_sub: 'Template', st_menu: 'Remove from recents', st_studio: 'Studio games', st_studio_pill: 'Studio', st_studio_empty: 'The studio game list is empty. Add games to studio_games.json in the repository (groupId or games).', st_studio_group_err: 'Could not load group games: {err}', st_studio_login: 'Sign in to your Roblox account (Experiences tab) — the games of your groups will appear here automatically.', st_studio_none_auto: 'No games found in your groups. Only groups where you can edit games are shown.',
@@ -1077,7 +1077,7 @@
                 tb_add: '➕ Добавить', tb_addobj_title: 'Добавить объект',
                 tb_delete: '🗑 Удалить', tb_delete_title: 'Удалить (Delete)',
                 tb_refresh: '🔄 Обновить', tb_refresh_title: 'Обновить сцену (F5)',
-                tb_publish: '☁ Публикация', tb_publish_title: 'Опубликовать',
+                tb_publish: '☁ Публикация', tb_publish_title: 'Опубликовать', tb_places: '🌍 Места', tb_places_title: 'Места (миры) этого experience', pl_title: '🌍 Места этого experience', pl_none: 'Сначала откройте игру через «Открыть из Roblox» — тогда здесь можно переключаться между её местами.', pl_current: 'открыто сейчас', pl_note: 'Несохранённые изменения текущего места пропадут.', pl_loading: 'Загружаю места…',
                 tb_download: '🏠 Старт', tb_download_title: 'Стартовый экран: недавние файлы и твои experiences с Roblox',
                 dl_hint: 'Используется твой вход в Roblox (Account), как в Studio. Нужен доступ на редактирование места или оно должно быть копируемым.', cookie_ph: 'Значение .ROBLOSECURITY', cookie_btn: 'Войти по куке', cookie_help: 'Вход на десктопе: в браузере, где ты вошёл на roblox.com, открой DevTools → Application → Cookies → .ROBLOSECURITY и вставь значение. Относись как к паролю: оно даёт полный доступ к аккаунту. Хранится только на этом устройстве.', cookie_ok: '✅ Вход выполнен: {name}', cookie_bad: 'Вход не выполнен',
                 st_new: 'Новый experience', st_recents: 'Недавние', st_home: 'Главная', st_experiences: 'Experiences', st_templates: 'Шаблоны', st_archive: 'Архив', st_recent_h: 'Мои недавние Experiences', st_tpl_h: 'Открыть шаблон', st_banner_t: 'Продолжи с того же места', st_banner_p: 'Открой файл, скачай одно из своих experiences с Roblox или начни с шаблона.', st_modified: 'Изменено {d}', st_opened: 'Открыто {d}', st_local: 'Локально', st_refresh: 'Обновить', st_close: 'Закрыть', st_remove: 'Убрать из недавних?', st_tpl_base: 'Baseplate', st_tpl_empty: 'Пустая сцена', st_tpl_sub: 'Шаблон', st_menu: 'Убрать из недавних', st_studio: 'Игры студии', st_studio_pill: 'Студия', st_studio_empty: 'Список игр студии пуст. Добавьте игры в studio_games.json в репозитории (groupId или games).', st_studio_group_err: 'Не удалось загрузить игры группы: {err}', st_studio_login: 'Войдите в аккаунт Roblox (вкладка Experiences) — игры ваших групп появятся здесь автоматически.', st_studio_none_auto: 'В ваших группах не найдено игр. Показываются только группы, где у вас есть права редактировать игры.',
@@ -17009,6 +17009,43 @@ end
         function hideLoading() {
             const el = document.getElementById('rsw-loading');
             if (el) el.classList.remove('show');
+        }
+
+        // Места (миры) открытого experience: список из Roblox и переключение для редактирования (как Game Explorer в Studio).
+        async function showPlacesDialog() {
+            const o = window._rbxOrigin;
+            if (!o || !o.universeId) {
+                showModal('<h3>' + t('pl_title') + '</h3><p style="opacity:.85">' + t('pl_none') + '</p>' +
+                    '<div class="modal-row"><button onclick="closeModal()">OK</button></div>');
+                return;
+            }
+            showModal('<h3>' + t('pl_title') + '</h3><p style="opacity:.8">' + t('pl_loading') + '</p>');
+            const pr = await api('GET', '/api/roblox/experience/places?universeId=' + encodeURIComponent(o.universeId) +
+                '&rootPlaceId=' + encodeURIComponent(o.placeId || ''));
+            if (!pr.ok || !pr.places) {
+                showModal('<h3>' + t('pl_title') + '</h3><p style="color:#f87171">' + esc(pr.error || t('notify_error')) + '</p>' +
+                    '<div class="modal-row"><button onclick="closeModal()">OK</button></div>');
+                return;
+            }
+            let h = '<h3>' + t('pl_title') + '</h3>' + (o.name ? '<p style="opacity:.8">' + esc(o.name) + '</p>' : '') +
+                '<div style="display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow-y:auto">';
+            pr.places.forEach((p) => {
+                const cur = String(p.id) === String(o.placeId);
+                h += '<button ' + (cur ? 'disabled ' : '') + 'onclick="switchPlace(' + Number(p.id) + ')" style="text-align:left">' +
+                    (cur ? '✔ ' : (p.root ? '⭐ ' : '')) + esc(p.name) + ' <span style="opacity:.6">(' + Number(p.id) + ')' +
+                    (cur ? ' — ' + t('pl_current') : '') + '</span></button>';
+            });
+            h += '</div><p style="opacity:.7;font-size:12px">' + t('pl_note') + '</p>' +
+                '<div class="modal-row"><button onclick="closeModal()">' + t('btn_cancel') + '</button></div>';
+            showModal(h);
+        }
+
+        function switchPlace(placeId) {
+            const o = window._rbxOrigin;
+            if (!o) return;
+            if (isPlaying) stopPlay();
+            window._rbxPendingName = o.name || '';
+            loadPlaceFromRoblox(placeId, o.universeId);
         }
 
         // TeleportService:Teleport(placeId) из Lua: остановить игру, скачать другой плейс (из той же вселенной, что и
