@@ -16683,6 +16683,12 @@ end
         }
 
         function _stTileFail(img) {
+            // Первая неудача часто временная (медленный DNS/CDN, сервер отвечает 502): пробуем ещё раз, и только потом заглушка
+            if (!img._retried) {
+                img._retried = true;
+                setTimeout(() => { if (img.isConnected) img.src = img.src.replace(/&_r=\d+$/, '') + '&_r=' + Date.now(); }, 1500);
+                return;
+            }
             if (!window._stThumbDiag) {   // причина — один раз, не на каждую карточку
                 window._stThumbDiag = true;
                 fetch(img.src).then(r => r.text().then(tx =>

@@ -599,6 +599,12 @@ def t_capabilities(buf, count):
     return [untransform_i64(v) for v in raw]
 
 
+class _ContentStr(str):
+    """Строка Content, помнящая тег источника из файла (в новых версиях Studio Uri помечен 2, в старых — 1):
+    s_content пишет тот же тег обратно, поэтому пересохранение не меняет смысл значения."""
+    ctype = 1
+
+
 def t_content(buf, count):
     """Content (0x22, напр. SurfaceAppearance.EmissiveMaskContent): массив
     типов источника (u32, interleaved: 0 — пусто, 1 — Uri, 2 — Object),
@@ -611,10 +617,19 @@ def t_content(buf, count):
     for _ in range(n_uri):
         l = int.from_bytes(buf[pos:pos + 4], 'little'); pos += 4
         uris.append(buf[pos:pos + l].decode('utf-8', 'replace')); pos += l
+    # Строки относятся к записям с тегом Uri. В новых файлах Studio (MeshContent/TextureContent/Sky*Content…) это 2,
+    # в старых — 1: берём тот тег, количество которого совпадает с числом строк (иначе MeshPart оставались без меша).
+    uri_tag = 1
+    if n_uri:
+        for cand in (2, 1):
+            if sum(1 for t in types if t == cand) == n_uri:
+                uri_tag = cand
+                break
     out, ui = [], 0
     for t in types:
-        if t == 1 and ui < len(uris):
-            out.append(uris[ui]); ui += 1
+        if t == uri_tag and ui < len(uris):
+            v = _ContentStr(uris[ui]); v.ctype = uri_tag
+            out.append(v); ui += 1
         else:
             out.append('')
     return out
@@ -652,7 +667,7 @@ def s_string(vals):
 
 def s_content(vals):
     uris = [v for v in vals if isinstance(v, str) and v]
-    types = [1 if (isinstance(v, str) and v) else 0 for v in vals]
+    types = [(getattr(v, 'ctype', 1) if isinstance(v, str) and v else 0) for v in vals]   # тег источника из файла сохраняем
     out = write_interleaved_u32_array(types)
     out += len(uris).to_bytes(4, 'little')
     for u in uris:
@@ -1283,6 +1298,12 @@ def _writable_props(cls, p, known):
         if known and name not in known and name in _DERIVED_PROPS:
             continue
         out[name] = val
+    # Копии *Content-свойств под старыми именами (MeshId/TextureID/SkyboxBk…, см. _alias_content_props) в файл не
+    # пишем, пока значение совпадает с исходным Content-свойством: иначе в файл добавлялись бы лишние PROP.
+    for new_name, old_name in _CONTENT_ALIASES.get(cls, {}).items():
+        if (old_name in out and old_name not in known and new_name in p
+                and str(p.get(old_name)) == str(p.get(new_name))):
+            out.pop(old_name, None)
     # Часть, созданная в редакторе: есть CFrame и Size, но нет настоящих
     # size/Color3uint8. (Без CFrame не трогаем: парсер сам подставляет
     # дефолтный Size частям без size, это не пользовательские данные.)
@@ -1729,6 +1750,32 @@ def import_rbxm(parsed, path, parent=None, info=None):
 
 # ====================== Parse / Save ======================
 
+# Новые версии Studio хранят ссылки на ассеты в *Content-свойствах (тип Content), а app.py и клиент читают
+# старые имена (MeshId, TextureID, Texture, SkyboxBk…). Копируем значение под старым именем, если его там нет.
+_CONTENT_ALIASES = {
+    'MeshPart': {'MeshContent': 'MeshId', 'TextureContent': 'TextureID'},
+    'SpecialMesh': {'MeshContent': 'MeshId', 'TextureContent': 'TextureId'},
+    'Decal': {'TextureContent': 'Texture'},
+    'Texture': {'TextureContent': 'Texture'},
+    'Beam': {'TextureContent': 'Texture'},
+    'ImageLabel': {'ImageContent': 'Image'},
+    'ImageButton': {'ImageContent': 'Image'},
+    'Sky': {'SkyboxBackContent': 'SkyboxBk', 'SkyboxDownContent': 'SkyboxDn', 'SkyboxFrontContent': 'SkyboxFt',
+            'SkyboxLeftContent': 'SkyboxLf', 'SkyboxRightContent': 'SkyboxRt', 'SkyboxUpContent': 'SkyboxUp',
+            'SunTextureContent': 'SunTextureId', 'MoonTextureContent': 'MoonTextureId'},
+    'Shirt': {'ShirtContent': 'ShirtTemplate'},
+    'Pants': {'PantsContent': 'PantsTemplate'},
+    'ShirtGraphic': {'GraphicContent': 'Graphic'},
+}
+
+
+def _alias_content_props(class_name, obj_props):
+    for new_name, old_name in _CONTENT_ALIASES.get(class_name, {}).items():
+        v = obj_props.get(new_name)
+        if isinstance(v, str) and v and not obj_props.get(old_name):
+            obj_props[old_name] = str(v)
+
+
 def parse_rbxl(path):
     """Парсит .rbxl файл и возвращает структуру данных"""
     chunks = read_chunks(path)
@@ -1791,6 +1838,7 @@ def parse_rbxl(path):
 
     # Пост-обработка: разбиваем CFrame на Position и Rotation
     for ref, obj_props in props.items():
+        _alias_content_props(referent_to_class.get(ref), obj_props)
         if 'CFrame' in obj_props:
             cf = obj_props['CFrame']
             
