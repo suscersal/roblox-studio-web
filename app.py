@@ -3976,7 +3976,7 @@ _REF_PROP_CLASSES = ('RigidConstraint', 'WeldConstraint', 'Weld', 'ManualWeld', 
 # новый Audio API (AudioPlayer/Wire/...), пост-эффекты Lighting, Atmosphere/Clouds, Beam, Smoke/Sparkles,
 # констрейнты, Highlight. Берём ВСЕ свойства из файла, кроме служебных.
 _FILE_PROP_CLASSES = frozenset((
-    'Highlight',
+    'Highlight', 'Decal',   # Decal: Texture/Transparency/Face/ZIndex читаются и меняются из Lua (экран ТВ, постеры)
     'AudioPlayer', 'AudioFader', 'AudioCompressor', 'AudioEqualizer', 'AudioEmitter', 'AudioListener',
     'AudioDeviceOutput', 'AudioReverb', 'AudioEcho', 'AudioDistortion', 'AudioFlanger', 'AudioChorus',
     'AudioPitchShifter', 'AudioLimiter', 'AudioTextToSpeech', 'AudioFilter', 'Wire', 'HapticEffect',
@@ -5018,6 +5018,19 @@ _PARTICLE_PROPS = (
 )
 
 
+# Контейнеры-склады шаблонов: объекты внутри не существуют в мире (появляются, только когда скрипт делает Clone() в Workspace)
+_NOT_IN_WORLD_ROOTS = ('ServerStorage', 'ReplicatedStorage', 'StarterPack')
+
+
+def _ref_in_world(ref, pmap, r2c):
+    """False, если объект лежит в ServerStorage/ReplicatedStorage/StarterPack (шаблон, а не часть мира)."""
+    root, g = ref, 0
+    while pmap.get(root) in r2c and g < 500:
+        root = pmap[root]
+        g += 1
+    return r2c.get(root) not in _NOT_IN_WORLD_ROOTS
+
+
 @flask_app.route('/api/particles')
 def api_particles():
     """Все ParticleEmitter сцены: где они стоят (мировая позиция/поворот
@@ -5032,6 +5045,8 @@ def api_particles():
     for ref, cls in r2c.items():
         if cls != 'ParticleEmitter':
             continue
+        if not _ref_in_world(ref, pmap, r2c):
+            continue    # эмиттеры шаблонов из ServerStorage раньше «горели» на месте шаблона в воздухе
         parent = pmap.get(ref, -1)
         pcls = r2c.get(parent)
         if pcls == 'Attachment':
@@ -6970,6 +6985,8 @@ def api_lighting():
         lpr = props.get(r, {})
         if lpr.get('Enabled') is False:
             continue
+        if not _ref_in_world(r, pmap, r2c):
+            continue    # лампы шаблонов комнат из ServerStorage занимали слоты MAX_MAP_LIGHTS и светили в пустоту
         # позиция — у ближайшего предка с CFrame (Part, либо Attachment внутри Part)
         anc, pos = pmap.get(r), None
         for _ in range(4):

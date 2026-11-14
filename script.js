@@ -10098,6 +10098,7 @@ end
                 if (name === 'Anchored' || name === 'Massless') return false;
                 if (name === 'Material' && luaByRef[ref] && /Part|UnionOperation/.test(luaByRef[ref].cls)) return 'Plastic';
                 const vcls = luaByRef[ref] && luaByRef[ref].cls;
+                if (vcls === 'Decal' && luaGenericPropsByRef[ref] && name in luaGenericPropsByRef[ref]) return luaGenericPropsByRef[ref][name];
                 if (name === 'Transparency' || name === 'Reflectance') {
                     if (vcls && /Part$|^Part$|MeshPart|UnionOperation|WedgePart|TrussPart|SpawnLocation|Decal|Texture/.test(vcls)) return 0;
                 }
@@ -10176,7 +10177,44 @@ end
             // часть персонажа -> группа тела игрока (в приложении весь персонаж — один charBody)
             if (charBody && luaIsCharRef(ref)) { charBody.__rbxGroup = value; luaApplyGroup(charBody); }
         }
+        // Decal из Lua: decal.Texture = "rbxassetid://…" / Transparency / Face / ZIndex — меняет картинку на грани детали.
+        // Раньше свойства Decal в эмуляторе не существовали (decal.Texture == nil), и скрипты вроде «вирус на экране ТВ» падали.
+        const _DECAL_FACE_NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'];
+        const _DECAL_BOX_GROUP = { Right: 0, Left: 1, Top: 2, Bottom: 3, Back: 4, Front: 5 };
+        function luaDecalChanged(decalRef) {
+            const partRef = luaParentByRef[decalRef];
+            const mesh = partRef !== undefined ? sceneObjs[partRef] : null;
+            if (!mesh || !mesh.geometry || !mesh.geometry.groups || mesh.geometry.groups.length !== 6) return;   // декали рисуются только на боксах
+            const by = {};
+            (luaChildrenByRef[partRef] || []).forEach((c, order) => {
+                if (!luaByRef[c] || luaByRef[c].cls !== 'Decal') return;
+                const gp = luaGenericPropsByRef[c] || {};
+                const m = /(\d+)\s*$/.exec(String(gp.Texture || '')) || /[?&]id=(\d+)/.exec(String(gp.Texture || ''));
+                if (!m) return;
+                let f = gp.Face;
+                f = typeof f === 'number' ? _DECAL_FACE_NAMES[f] : (f && f.Name) || f || 'Front';
+                if (_DECAL_BOX_GROUP[f] === undefined) return;
+                const key = (Number(gp.ZIndex) || 1) * 1000 + order;
+                if (!by[f] || key >= by[f].key) by[f] = { key, tex: m[1], op: 1 - Math.max(0, Math.min(1, Number(gp.Transparency) || 0)) };
+            });
+            const cur = mesh.material;
+            const base = Array.isArray(cur) ? (cur.find(x => x && !x.map) || cur[0]) : cur;
+            const arr = [base, base, base, base, base, base];
+            for (const f of Object.keys(by)) {
+                const d = by[f];
+                arr[_DECAL_BOX_GROUP[f]] = _applyDecalBias(new THREE.MeshLambertMaterial({
+                    ...DECAL_FACE_OPTS, transparent: true, opacity: d.op, depthWrite: d.op >= 0.99, color: '#ffffff', map: getOrLoadPartTexture(d.tex),
+                }));
+            }
+            mesh.material = arr;
+        }
+
         function luaSetGenericProp(ref, name, value) {
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Decal' && (name === 'Texture' || name === 'Transparency' || name === 'Face' || name === 'ZIndex')) {
+                (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {})[name] = (name === 'Texture') ? String(value) : value;
+                try { luaDecalChanged(ref); } catch (e) { console.error('decal:', e); }
+                return;
+            }
             if (ref === luaHumanoidRef && name === 'Sit' && ref !== -1) {   // humanoid.Sit = true/false из скрипта
                 if (value && !seatState) seatSit(-1); else if (!value && seatState) seatStand(false);
                 return;
