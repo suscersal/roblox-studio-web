@@ -2783,6 +2783,19 @@ def api_studio_games():
         except Exception as e:
             group_err = str(e)
 
+    # Конфиг не задан — автоматический режим: игры групп аккаунта, в который выполнен вход (как «Group Games» в Studio)
+    auto, need_login = False, False
+    if not (group_id or cfg.get('games')):
+        auto = True
+        if _roblox_cookie() is None:
+            need_login = True
+        else:
+            try:
+                for u in _rbx_group_universes('false'):
+                    add(u['name'], u['placeId'], u['universeId'], u['updated'], u['owner'])
+            except Exception as e:
+                group_err = str(e)
+
     # иконки (необязательны)
     try:
         with_u = [x for x in items if x['universeId']]
@@ -2800,7 +2813,8 @@ def api_studio_games():
     except Exception:
         pass
     return jsonify({'ok': True, 'title': cfg.get('title') or None, 'games': items,
-                    'configured': bool(group_id or cfg.get('games')), 'groupError': group_err})
+                    'configured': bool(group_id or cfg.get('games')), 'groupError': group_err,
+                    'auto': auto, 'needLogin': need_login})
 
 
 _DOH_CACHE = {}
