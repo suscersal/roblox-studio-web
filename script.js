@@ -8195,11 +8195,10 @@ local CollectionServiceObj = setmetatable({}, { __index = {
     end,
 } })
 
--- TeleportService: перехода между плейсами в эмуляторе нет (как и в Studio без публикации), поэтому
--- любой запрос на телепорт честно ЗАВЕРШАЕТСЯ ОТКАЗОМ: в Output предупреждение и сигнал
--- TeleportInitFailed(player, Enum.TeleportResult.Failure, сообщение, placeId, options) — скрипты лобби
--- (лифты/матчмейкинг) подписываются на него при старте и раньше падали на "attempt to index a nil value
--- (field 'TeleportInitFailed')", не доходя до остального кода.
+-- TeleportService: телепорт в ДРУГОЙ плейс переключает редактор на него: игра останавливается, плейс скачивается
+-- с Roblox (нужен вход в аккаунт / ключ, как при «Открыть из Roblox») и запускается заново. Если переключиться
+-- нельзя (уже идёт переключение, ошибка скачивания) — как раньше: warn и сигнал TeleportInitFailed(player,
+-- Enum.TeleportResult.Failure, сообщение, placeId, options), чтобы скрипты лобби не падали на nil.
 local TeleportServiceObj
 do
     local initFailed = newSignal()
@@ -8218,15 +8217,27 @@ do
             for _, pl in ipairs(list) do initFailed.__fire(pl, failure(), msg, placeId, options) end
         end)
     end
+    local function go(placeId, players, options)
+        local pid = tonumber(placeId)
+        if pid ~= nil and __teleport_place(pid) then
+            print("Teleport: переключаюсь на плейс " .. tostring(pid))
+            return true
+        end
+        deny(placeId, players, options)
+        return false
+    end
     TeleportServiceObj = setmetatable({}, { __index = {
         TeleportInitFailed = initFailed,
         LocalPlayerArrivedFromTeleport = arrived,
-        Teleport = function(self, placeId, player) deny(placeId, player) end,
-        TeleportAsync = function(self, placeId, players, options) deny(placeId, players, options) return nil end,
-        TeleportToPlaceInstance = function(self, placeId, instanceId, player) deny(placeId, player) end,
-        TeleportToPrivateServer = function(self, placeId, code, players) deny(placeId, players) end,
-        TeleportToSpawnByName = function(self, placeId, spawn, player) deny(placeId, player) end,
-        TeleportPartyAsync = function(self, placeId, players, teleportData) deny(placeId, players) return "" end,
+        Teleport = function(self, placeId, player) go(placeId, player) end,
+        TeleportAsync = function(self, placeId, players, options)
+            go(placeId, players, options)
+            return { PrivateServerId = "", ReservedServerAccessCode = "", UserIds = {} }
+        end,
+        TeleportToPlaceInstance = function(self, placeId, instanceId, player) go(placeId, player) end,
+        TeleportToPrivateServer = function(self, placeId, code, players) go(placeId, players) end,
+        TeleportToSpawnByName = function(self, placeId, spawn, player) go(placeId, player) end,
+        TeleportPartyAsync = function(self, placeId, players, teleportData) go(placeId, players) return "" end,
         ReserveServer = function(self, placeId) return "emu-reserved-" .. tostring(placeId), "emu-private-" .. tostring(placeId) end,
         GetLocalPlayerTeleportData = function(self) return nil end,
         GetArrivingTeleportGui = function(self) return nil end,
@@ -11022,6 +11033,10 @@ end
                 const r = luaCamRay(lua.lua_tonumber(L2, 1) * guiScale, lua.lua_tonumber(L2, 2) * guiScale);
                 for (const v of [r.o.x, r.o.y, r.o.z, r.d.x, r.d.y, r.d.z]) lua.lua_pushnumber(L2, v);
                 return 6;
+            });
+            def('__teleport_place', function (L2) {
+                lua.lua_pushboolean(L2, luaTeleportToPlace(lua.lua_tonumber(L2, 1)) ? 1 : 0);
+                return 1;
             });
             def('__particle_emit', function (L2) {
                 try { psEmit(lua.lua_tonumber(L2, 1), Math.max(0, Math.min(500, lua.lua_tonumber(L2, 2) || 1))); } catch (e) { console.error('Emit:', e); }
@@ -16994,6 +17009,30 @@ end
         function hideLoading() {
             const el = document.getElementById('rsw-loading');
             if (el) el.classList.remove('show');
+        }
+
+        // TeleportService:Teleport(placeId) из Lua: остановить игру, скачать другой плейс (из той же вселенной, что и
+        // открытый) и запустить заново. stopPlay закрывает Lua-VM, поэтому из вызова Lua его делаем отложенно.
+        let _teleporting = false;
+        function luaTeleportToPlace(placeId) {
+            placeId = Math.floor(Number(placeId));
+            if (!placeId || placeId < 1 || _teleporting || !isPlaying) return false;
+            _teleporting = true;
+            const uni = (window._rbxOrigin && window._rbxOrigin.universeId) || '';
+            setTimeout(async () => {
+                try {
+                    stopPlay();
+                    window._rbxPendingName = '';
+                    await loadPlaceFromRoblox(placeId, uni);
+                    if (window._rbxOrigin && String(window._rbxOrigin.placeId) === String(placeId)) startPlay();
+                } catch (e) {
+                    console.error('teleport:', e);
+                    notify(String(e), 'err');
+                } finally {
+                    _teleporting = false;
+                }
+            }, 0);
+            return true;
         }
 
         async function loadPlaceFromRoblox(placeId, universeId, version) {

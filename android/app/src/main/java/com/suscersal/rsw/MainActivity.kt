@@ -20,6 +20,9 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import org.json.JSONObject
 import android.util.Log
+import android.app.AlertDialog
+import android.webkit.JsResult
+import android.webkit.WebChromeClient
 
 class MainActivity : AppCompatActivity() {
 
@@ -251,6 +254,30 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        // Без WebChromeClient WebView молча возвращает false из window.confirm() и игнорирует alert(): из-за этого
+        // «Открыть из Roblox» при уже открытом мире отменялось без единого диалога («Несохранённые изменения пропадут…»).
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult): Boolean {
+                if (isFinishing) { result.cancel(); return true }
+                AlertDialog.Builder(this@MainActivity)
+                    .setMessage(message)
+                    .setPositiveButton(android.R.string.ok) { _, _ -> result.confirm() }
+                    .setNegativeButton(android.R.string.cancel) { _, _ -> result.cancel() }
+                    .setOnCancelListener { result.cancel() }
+                    .show()
+                return true
+            }
+
+            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult): Boolean {
+                if (isFinishing) { result.confirm(); return true }
+                AlertDialog.Builder(this@MainActivity)
+                    .setMessage(message)
+                    .setPositiveButton(android.R.string.ok) { _, _ -> result.confirm() }
+                    .setOnCancelListener { result.confirm() }
+                    .show()
+                return true
+            }
+        }
         // WebGL для 3D-вьюпорта — включено по умолчанию в современном
         // системном WebView, явных флагов не требуется.
         webView.webViewClient = object : WebViewClient() {
