@@ -6536,7 +6536,11 @@ UDim.__sub = function(a, b) return UDim.new(a.Scale - b.Scale, a.Offset - b.Offs
 UDim.__tostring = function(u) return u.Scale .. ", " .. u.Offset end
 
 UDim2 = {}
-UDim2.__index = UDim2
+-- UDim2.Width/Height — синонимы X/Y (в Roblox это те же UDim); без них скрипты падали: attempt to index a nil value (field 'Width')
+UDim2.__index = function(t, k)
+    if k == "Width" then return rawget(t, "X") elseif k == "Height" then return rawget(t, "Y") end
+    return UDim2[k]
+end
 function UDim2.new(xs, xo, ys, yo)
     return setmetatable({X = UDim.new(xs or 0, xo or 0), Y = UDim.new(ys or 0, yo or 0)}, UDim2)
 end
@@ -7458,6 +7462,15 @@ InstanceMT.__index = function(t, k)
                 local c = __render_binds[name]
                 if c then c:Disconnect(); __render_binds[name] = nil end
             end
+        -- Раньше этих методов не было вовсе (RunService:IsStudio() -> attempt to call a nil value, AdminPanelServer падал).
+        -- Приложение — это «Studio»: IsStudio = true; игра запущена кнопкой Play (не Run): IsRunning = true, IsRunMode = false.
+        -- Клиентская VM отличается от серверной базой id подписок (__CONN_BASE > 0).
+        elseif k == "IsStudio" then return function(self) return true end
+        elseif k == "IsRunning" then return function(self) return true end
+        elseif k == "IsRunMode" then return function(self) return false end
+        elseif k == "IsEdit" then return function(self) return false end
+        elseif k == "IsClient" then return function(self) return (__CONN_BASE or 0) > 0 end
+        elseif k == "IsServer" then return function(self) return (__CONN_BASE or 0) == 0 end
         end
     end
     -- Команды: Team.TeamColor/AutoAssignable, Player.Team/Neutral/TeamColor, Teams:GetTeams(). Раньше команд не было
@@ -7556,6 +7569,7 @@ InstanceMT.__index = function(t, k)
         -- Второй аргумент FindFirstChild(name, recursive) раньше игнорировался: ViewModelController искал
         -- MuzzleAttachment глубоко внутри модели и «не находил» его, хотя в файле он есть.
         return function(self, name, recursive)
+            local timeout = recursive   -- у WaitForChild 2-й аргумент — таймаут
             local c = __find_first_child(ref, name)
             if c ~= nil and c ~= -1 then return wrap(c) end
             if recursive == true and (k == "FindFirstChild" or k == "findFirstChild") then
@@ -7571,6 +7585,27 @@ InstanceMT.__index = function(t, k)
                 end
                 local found = search(ref)
                 if found ~= nil then return wrap(found) end
+            end
+            if k == "WaitForChild" or k == "waitForChild" then
+                -- Как в Roblox: WaitForChild ЖДЁТ появления ребёнка (создаётся другим скриптом/клоном позже), а не возвращает nil
+                -- сразу. С таймаутом (2-й аргумент) — после него nil; без — ждёт, через 5 с пишет «Infinite yield possible».
+                -- Раньше сразу отдавался nil, и скрипты падали на «attempt to index a nil value (upvalue 'main')» там, где в
+                -- Roblox они просто ждут и ничего не ломают.
+                local limit = tonumber(timeout)
+                local waited, warned = 0, false
+                while true do
+                    local cl = __get_class(ref)
+                    if cl == nil or cl == "" then return nil end   -- сам объект уничтожен — ждать некого
+                    task.wait(0.1)
+                    waited = waited + 0.1
+                    local f = __find_first_child(ref, name)
+                    if f ~= nil and f ~= -1 then return wrap(f) end
+                    if limit and waited >= limit then return nil end
+                    if not warned and waited >= 5 then
+                        warned = true
+                        warn("Infinite yield possible on '" .. tostring(__get_name(ref)) .. ":WaitForChild(" .. tostring(name) .. ")'")
+                    end
+                end
             end
             return wrap(c)
         end
@@ -7878,6 +7913,25 @@ InstanceMT.__index = function(t, k)
             return Enum.CameraType.Custom -- значение по умолчанию у камеры в Roblox
         end
     end
+    -- Составные значения GUI-свойств (UIGridLayout.CellSize/CellPadding — UDim2, UIListLayout.Padding/UICorner.CornerRadius — UDim,
+    -- AnchorPoint — Vector2, StudsOffset — Vector3, цвета) JS отдаёт JSON-строкой. Раньше строка доходила до скрипта как есть:
+    -- hotbar.Grid.CellSize.X.Offset падал на «attempt to index a nil value (field 'X')» (инвентарь, перетаскивание).
+    if ok and type(v) == "string" and string.byte(v, 1) == 123 then
+        local dok, t = pcall(__json_decode, v)
+        if dok and type(t) == "table" then
+            local jx, jy = t.x, t.y
+            if type(jx) == "table" and type(jy) == "table" and (jx.scale ~= nil or jx.offset ~= nil) then
+                return UDim2.new(jx.scale or 0, jx.offset or 0, jy.scale or 0, jy.offset or 0)
+            elseif t.scale ~= nil and t.offset ~= nil and jx == nil then
+                return UDim.new(t.scale, t.offset)
+            elseif type(t.r) == "number" and type(t.g) == "number" and type(t.b) == "number" then
+                return Color3.new(t.r, t.g, t.b)
+            elseif type(jx) == "number" and type(jy) == "number" then
+                if type(t.z) == "number" then return Vector3.new(jx, jy, t.z) end
+                return Vector2.new(jx, jy)
+            end
+        end
+    end
     if ok and v ~= nil then return v end
     -- Roblox поддерживает доступ к дочернему объекту прямо через точку —
     -- part.Engine эквивалентно part:FindFirstChild("Engine"), а не только
@@ -7891,6 +7945,12 @@ InstanceMT.__index = function(t, k)
     -- Ни свойства, ни потомка с таким именем: в Roblox это ошибка "X is not a valid member of Class". Эмулятор
     -- отдавал молча nil — теперь говорим об этом (один раз на Класс.Имя), чтобы было видно, чего не хватает.
     local cls = tostring(__get_class(ref))
+    if cls == "ScreenGui" or cls == "SurfaceGui" or cls == "BillboardGui" then
+        -- значения по умолчанию корневых GUI: у созданного через Instance.new(\"ScreenGui\") Enabled читался как nil, и
+        -- переключатели вида gui.Enabled = not gui.Enabled (AdminPanelClient) всегда включали, а не переключали
+        local d = ({ Enabled = true, ResetOnSpawn = true, IgnoreGuiInset = false, DisplayOrder = 0, AlwaysOnTop = false })[k]
+        if d ~= nil then return d end
+    end
     if cls == "Tool" then
         -- значения по умолчанию Tool (Enabled, TextureId, ToolTip, ...): раньше nil + предупреждение, а хотбар читает tool.Enabled
         local d = __TOOL_DEFAULTS[k]
@@ -8676,6 +8736,17 @@ game = setmetatable({}, {
         end
         if k == "Name" then return "game" end
         if k == "ClassName" or k == "className" then return "DataModel" end
+        -- Идентификаторы игры: раньше любое неизвестное имя уходило в getService(k), и game.PlaceId/CreatorId оказывались
+        -- «виртуальными сервисами» (печатались как строка 'PlaceId'), а сравнения game.CreatorId == player.UserId ломались.
+        if k == "PlaceId" then return __PLACE_ID or 0 end
+        if k == "GameId" then return __GAME_ID or 0 end
+        if k == "CreatorId" then return __CREATOR_ID or 0 end
+        if k == "JobId" then return "" end
+        if k == "PlaceVersion" then return 0 end
+        if k == "CreatorType" then
+            local okE, e = pcall(function() return Enum.CreatorType.User end)
+            return okE and e or "User"
+        end
         -- game сам по себе — как обычный Instance с детьми-сервисами
         -- (Workspace/Players/...), только эти дети лежат не в
         -- luaChildrenByRef (у него родитель -1, туда не попадает — см.
@@ -10093,6 +10164,13 @@ end
                 if (_promptRegistry[ref] && name in _promptRegistry[ref] && name !== 'parentRef' && _promptRegistry[ref][name] !== undefined) return _promptRegistry[ref][name];
                 const v = virtualInstanceProps[ref][name];
                 if (v !== undefined) return v;
+                // Player до загрузки аккаунта: UserId = -1 (как у локального тестового игрока в Studio), а не nil — иначе
+                // скрипты вида states[plr.UserId] падали (AdminPanelServer: table index is nil), пока /api/roblox/me ещё грузится
+                if (luaByRef[ref] && luaByRef[ref].cls === 'Player') {
+                    if (name === 'UserId') return -1;
+                    if (name === 'DisplayName') return 'LocalPlayer';
+                    if (name === 'AccountAge') return 0;
+                }
                 // клон/Instance.new части без записанного свойства — значения по умолчанию Roblox, а не nil
                 if (name === 'CanCollide' || name === 'CanTouch' || name === 'CanQuery') return true;
                 if (name === 'Anchored' || name === 'Massless') return false;
@@ -10385,11 +10463,33 @@ end
         let remoteQueue = [];      // [{ref, targetSide, args, dueAt}] — см. __fire_remote
 
         // Резолвит и дёргает все Connect-колбэки для (ref, evName) — общий
+        // Значение из RemoteEvent (null/число/строка/булево/массив/объект/Instance) -> Lua, вложенные таблицы рекурсивно
+        function pushRemoteValue(L, a) {
+            const { lua } = window.fengari;
+            if (a === null || a === undefined) lua.lua_pushnil(L);
+            else if (typeof a === 'number') lua.lua_pushnumber(L, a);
+            else if (typeof a === 'boolean') lua.lua_pushboolean(L, a);
+            else if (typeof a === 'string') lua.lua_pushstring(L, a);
+            else if (Array.isArray(a)) {
+                lua.lua_createtable(L, a.length, 0);
+                a.forEach((v, i) => { pushRemoteValue(L, v); lua.lua_rawseti(L, -2, i + 1); });
+            } else if (typeof a === 'object' && '__instanceRef' in a) {
+                lua.lua_getglobal(L, '__wrap');
+                lua.lua_pushnumber(L, a.__instanceRef);
+                lua.lua_call(L, 1, 1);
+            } else if (typeof a === 'object') {
+                lua.lua_createtable(L, 0, 0);
+                for (const k of Object.keys(a)) { lua.lua_pushstring(L, k); pushRemoteValue(L, a[k]); lua.lua_rawset(L, -3); }
+            } else lua.lua_pushnil(L);
+        }
+
         function pushLuaSignalArgs(L, args) {
             const { lua } = window.fengari;
             let n = 0;
             for (const a of (args || [])) {
-                if (a && typeof a === 'object' && '__instanceRef' in a) {
+                if (Array.isArray(a) || (a && typeof a === 'object' && !('__instanceRef' in a) && !a.__enum)) {
+                    pushRemoteValue(L, a);
+                } else if (a && typeof a === 'object' && '__instanceRef' in a) {
                     lua.lua_getglobal(L, '__wrap');
                     lua.lua_pushnumber(L, a.__instanceRef);
                     lua.lua_call(L, 1, 1);
@@ -10997,6 +11097,44 @@ end
                     return obj;
                 }
                 return null;
+            }
+            // RemoteEvent:FireServer/FireClient(...): таблицы (в т.ч. вложенные) и Instance передаём между VM. Раньше любой
+            // аргумент-таблица превращался в nil (else args.push(null)): AdminPanel получал init без данных -> attempt to index a nil
+            // value (local 'data'). Метатаблицы (Vector3/CFrame) теряются — приходят таблицей полей, как и у JSONEncode.
+            function luaToRemote(L2, idx, depth) {
+                idx = lua.lua_absindex(L2, idx);
+                const ty = lua.lua_type(L2, idx);
+                if (ty === lua.LUA_TBOOLEAN) return !!lua.lua_toboolean(L2, idx);
+                if (ty === lua.LUA_TNUMBER) return lua.lua_tonumber(L2, idx);
+                if (ty === lua.LUA_TSTRING) return lua.lua_tojsstring(L2, idx);
+                if (ty !== lua.LUA_TTABLE || depth > 8) return null;
+                lua.lua_pushstring(L2, '__ref');
+                lua.lua_rawget(L2, idx);
+                const isInst = lua.lua_type(L2, -1) === lua.LUA_TNUMBER;
+                const instRef = isInst ? lua.lua_tonumber(L2, -1) : null;
+                lua.lua_pop(L2, 1);
+                if (isInst) return { __instanceRef: instRef };
+                const n = lua.lua_rawlen(L2, idx);
+                if (n > 0) {
+                    const arr = [];
+                    for (let i = 1; i <= n; i++) {
+                        lua.lua_rawgeti(L2, idx, i);
+                        arr.push(luaToRemote(L2, -1, depth + 1));
+                        lua.lua_pop(L2, 1);
+                    }
+                    return arr;
+                }
+                const obj = {};
+                lua.lua_pushnil(L2);
+                while (lua.lua_next(L2, idx) !== 0) {
+                    const kty = lua.lua_type(L2, -2);
+                    let key = null;
+                    if (kty === lua.LUA_TSTRING) key = lua.lua_tojsstring(L2, -2);
+                    else if (kty === lua.LUA_TNUMBER) key = String(lua.lua_tonumber(L2, -2));
+                    if (key !== null) obj[key] = luaToRemote(L2, -1, depth + 1);
+                    lua.lua_pop(L2, 1);
+                }
+                return obj;
             }
             def('__json_encode', function (L2) {
                 let out = '{}';
@@ -11889,6 +12027,7 @@ end
                     if (ty === lua.LUA_TNUMBER) args.push(lua.lua_tonumber(L2, i));
                     else if (ty === lua.LUA_TBOOLEAN) args.push(!!lua.lua_toboolean(L2, i));
                     else if (ty === lua.LUA_TSTRING) args.push(lua.lua_tojsstring(L2, i));
+                    else if (ty === lua.LUA_TTABLE) args.push(luaToRemote(L2, i, 0));
                     else args.push(null);
                 }
                 remoteQueue.push({ ref, targetSide, args, dueAt: performance.now() + 16 });
@@ -12828,6 +12967,11 @@ end
                 // база для id подписок: у клиентской VM свой диапазон (см. __nextConnId в prelude)
                 lua.lua_pushnumber(L, L === luaClientL ? 1000000 : 0);
                 lua.lua_setglobal(L, '__CONN_BASE');
+                // game.PlaceId/GameId/CreatorId: из открытого «Открыть из Roblox» плейса; у файла/неопубликованного — 0, как в Studio
+                const _o = window._rbxOrigin || {};
+                lua.lua_pushnumber(L, Number(_o.placeId) || 0); lua.lua_setglobal(L, '__PLACE_ID');
+                lua.lua_pushnumber(L, Number(_o.universeId) || 0); lua.lua_setglobal(L, '__GAME_ID');
+                lua.lua_pushnumber(L, (_o.placeId && playerAccount ? Number(playerAccount.userId) : 0) || 0); lua.lua_setglobal(L, '__CREATOR_ID');
                 const preludeStatus = doLuaString(L, LUA_PRELUDE, 'prelude');
                 if (preludeStatus !== lua.LUA_OK) {
                     logLuaOutput('error', 'Lua prelude (' + label + '): ' + luaErrToString(L));
