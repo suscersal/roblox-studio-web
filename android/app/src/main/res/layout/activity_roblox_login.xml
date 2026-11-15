@@ -18,13 +18,13 @@
             android:layout_weight="1"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
-            android:text="Войдите в аккаунт Roblox" />
+            android:text="@string/roblox_login_title" />
 
         <Button
             android:id="@+id/closeLoginBtn"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Отмена" />
+            android:text="@string/cancel" />
     </LinearLayout>
 
     <WebView

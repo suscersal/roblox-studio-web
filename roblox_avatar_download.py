@@ -1,11 +1,11 @@
 """
-Скачивание 3D-аватара пользователя Roblox по User ID.
+Downloading a Roblox user's 3D avatar by User ID.
 
-Использование:
-    pip install requests
-    python roblox_avatar_download.py
+Usage:
+pip install requests
+python roblox_avatar_download.py
 
-По умолчанию скачивает аватар для USER_ID, заданного ниже.
+By default it downloads the avatar for the USER_ID set below.
 """
 
 import json
@@ -38,13 +38,13 @@ def get_json(url: str) -> dict:
     r = requests.get(url, headers=HEADERS, timeout=30)
     if not r.ok:
         raise RuntimeError(
-            f"HTTP {r.status_code} при запросе {url}\nОтвет сервера: {r.text[:500]}"
+            f"HTTP {r.status_code} on request {url}\nServer response: {r.text[:500]}"
         )
     return r.json()
 
 
 def download_any_cdn(hash_value: str) -> bytes:
-    """Roblox раздаёт статику через t0..t7.rbxcdn.com — перебираем узлы."""
+    """Roblox serves static files through t0..t7.rbxcdn.com — we try the nodes in turn."""
     last_err = None
     for n in range(8):
         url = f"https://t{n}.rbxcdn.com/{hash_value}"
@@ -56,11 +56,11 @@ def download_any_cdn(hash_value: str) -> bytes:
         if r.status_code == 200 and r.content:
             return r.content
         last_err = f"{r.status_code} {url}"
-    raise RuntimeError(last_err or f"Не удалось скачать {hash_value}")
+    raise RuntimeError(last_err or f"Could not download {hash_value}")
 
 
 def fetch_avatar_bundle(user_id: str, max_wait_seconds: int = 30) -> dict:
-    """Запрашивает 3D-превью аватара, дожидаясь готовности (state=Completed)."""
+    """Requests a 3D avatar preview, waiting until it is ready (state=Completed)."""
     api_url = f"https://thumbnails.roblox.com/v1/users/avatar-3d?userId={user_id}"
     waited = 0
     while True:
@@ -73,13 +73,13 @@ def fetch_avatar_bundle(user_id: str, max_wait_seconds: int = 30) -> dict:
             bundle["_preview_url"] = item["imageUrl"]
             return bundle
         if state == "Error" or waited >= max_wait_seconds:
-            raise RuntimeError(f"Аватар не готов (state={state}): {item}")
+            raise RuntimeError(f"The avatar is not ready (state={state}): {item}")
         time.sleep(2)
         waited += 2
 
 
 def main():
-    print(f"Запрашиваю 3D-аватар для userId={USER_ID}...")
+    print(f"Requesting the 3D avatar for userId={USER_ID}...")
     bundle = fetch_avatar_bundle(USER_ID)
 
     obj_hash = bundle["obj"]
@@ -115,7 +115,7 @@ def main():
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    print("Готово:", OUT_DIR.resolve())
+    print("Done:", OUT_DIR.resolve())
 
 
 if __name__ == "__main__":

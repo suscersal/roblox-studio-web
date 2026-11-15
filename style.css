@@ -1,4 +1,4 @@
-/* Единая палитра: тёмный фон #111827, панели #1f2937, кнопки #374151/#4b5563, акцент синий */
+/* Unified palette: dark background #111827, panels #1f2937, buttons #374151/#4b5563, blue accent */
 :root{--ui-bg:#111827;--ui-panel:#1f2937;--ui-btn:#374151;--ui-line:#4b5563;--ui-text:#f3f4f6;--ui-muted:#9ca3af;--ui-accent:#3b82f6;--ui-accent-h:#2563eb}
         * {
             box-sizing: border-box;
@@ -11,16 +11,16 @@
             color: #fff;
             font-family: system-ui, sans-serif;
             height: 100vh;
-            /* фолбэк для браузеров без поддержки dvh */
+            /* fallback for browsers without dvh support */
             height: 100dvh;
-            /* 100vh на мобильных — это ВСЯ layout-высота,
-            включая область под виртуальной клавиатурой; когда клавиатура
-            открывается, эта высота не уменьшается сама, и вместе с
-            overflow:hidden ниже получается "экран уплывает" — браузер
-            пытается докрутить фокус в контейнер, который по факту больше
-            видимой области. 100dvh — современная единица, которая САМА
-            учитывает открытую клавиатуру (уменьшается вместе с видимой
-            областью), без единой строчки JS. */
+            /* 100vh on mobile is the WHOLE layout height,
+            including the area under the virtual keyboard; when the keyboard
+            opens, this height doesn't shrink on its own, and together with
+            overflow:hidden below you get a "screen drifts away" effect — the browser
+            tries to scroll the focus into a container that is actually larger than
+            the visible area. 100dvh is a modern unit that ITSELF
+            accounts for the open keyboard (it shrinks together with the visible
+            area), without a single line of JS. */
             overflow: hidden;
             display: flex;
             flex-direction: column
@@ -259,10 +259,10 @@
             display: block
         }
 
-        /* Метка сборки: script.js сверяет её со своей и с app.py (см. checkBuildConsistency) */
+        /* Build label: script.js compares it with its own and with app.py (see checkBuildConsistency) */
         :root { --css-build: "2026-11-10 · tween-easing"; }
 
-        /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... в Play) ============ */
+        /* ============ GUI overlay (ScreenGui/Frame/TextLabel/... in Play) ============ */
         #gui-overlay {
             position: absolute;
             inset: 0;
@@ -282,27 +282,27 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            /* НЕ hidden: в Roblox потомки выходят за рамку родителя, пока не включён ClipsDescendants
-               (его выставляет applyGuiElementStyle). Раньше тут стояло overflow:hidden, и кнопка стрельбы Blaster —
-               её центр лежит на левом краю фрейма Buttons — показывалась только наполовину, как и иконка перезарядки.
-               Экран по-прежнему обрезает #gui-overlay. */
+            /* NOT hidden: in Roblox descendants extend beyond the parent's frame until ClipsDescendants is on
+               (applyGuiElementStyle sets it). There used to be overflow:hidden here, and Blaster's fire button —
+               its center lies on the left edge of the Buttons frame — was shown only half, like the reload icon.
+               The screen still clips #gui-overlay. */
             overflow: visible;
             white-space: pre-wrap;
             font-family: 'Segoe UI', Roboto, Arial, sans-serif;
             pointer-events: none;
         }
 
-        /* ScreenGui/BillboardGui — организационные full-screen контейнеры,
-           не визуальные элементы (в настоящем Roblox сами по себе клики
-           никогда не блокируют, блокируют только их GuiObject-потомки).
-           Раньше pointer-events:auto по ошибке повесили на БАЗОВЫЙ класс
-           целиком, включая эти корни — из-за чего ЛЮБОЙ другой, даже
-           пустой в этом месте экрана, но Enabled=true ScreenGui, если он
-           стоял позже по DOM/z-order, перехватывал клики по ВСЕЙ площади
-           экрана, включая совершенно другое меню под ним (см. диагностику
-           Playwright: "<div ... data-cls="ScreenGui"> intercepts pointer
-           events" — Играть/Прослушать не срабатывали именно поэтому).
-           Включаем auto только настоящим GuiObject'ам. */
+        /* ScreenGui/BillboardGui are organizational full-screen containers,
+           not visual elements (in real Roblox they never block clicks
+           by themselves, only their GuiObject descendants do).
+           pointer-events:auto used to be mistakenly put on the BASE class
+           as a whole, including these roots — because of which ANY other ScreenGui, even one
+           empty at this place on the screen but with Enabled=true, if it
+           stood later in the DOM/z-order, intercepted clicks over the WHOLE area of the
+           screen, including a completely different menu under it (see the Playwright
+           diagnostics: "<div ... data-cls=\"ScreenGui\"> intercepts pointer
+           events" — Play/Listen didn't work exactly for this reason).
+           We enable auto only for real GuiObjects. */
         .rbx-gui-el[data-cls="Frame"],
         .rbx-gui-el[data-cls="ScrollingFrame"],
         .rbx-gui-el[data-cls="TextLabel"],
@@ -319,7 +319,7 @@
         }
 
         #vp-label {
-            display: none; /* подсказка по ЛКМ/ПКМ/WASD убрана по просьбе — загораживала GUI-оверлей снизу */
+            display: none; /* the LMB/RMB/WASD hint was removed on request — it covered the GUI overlay from below */
         }
 
         #fps-counter {
@@ -337,12 +337,12 @@
             transition: left .15s;
         }
 
-        /* Плавающая кнопка Stop поверх вьюпорта во время Play — просили
-           убрать верхний тулбар целиком (Explorer/Properties и так уже
-           сворачиваются, но САМ тулбар с обычными кнопками редактора всё
-           ещё съедал строку высоты, а Stop в нём — единственное, что
-           реально нужно в Play). Иконка вместо текста — компактнее, чем
-           целая кнопка "⏹ Stop" из тулбара. */
+        /* The floating Stop button over the viewport during Play — we were asked to
+           remove the top toolbar entirely (Explorer/Properties already
+           collapse, but the toolbar ITSELF with the ordinary editor buttons still
+           ate a row of height, and Stop in it is the only thing that is
+           really needed in Play). An icon instead of text — more compact than a
+           whole "⏹ Stop" button from the toolbar. */
         #play-stop-fab {
             display: none;
             position: absolute;
@@ -485,7 +485,7 @@
             display: block !important;
         }
 
-        /* Автодополнение (show-hint) в тон monokai-темы редактора */
+        /* Autocomplete (show-hint) matching the editor's monokai theme */
         .CodeMirror-hints {
             font-family: 'Fira Code', 'Consolas', monospace;
             font-size: 13px;
@@ -719,7 +719,7 @@
             z-index: 200
         }
 
-        /* Горизонтальный ресайзер между main и bottom-panel */
+        /* Horizontal resizer between main and bottom-panel */
         .resizer-h {
             height: 5px;
             background: #374151;
@@ -735,7 +735,7 @@
 
         #bottom-panel {
             height: 180px;
-            /* начальная высота, меняется ресайзером */
+            /* initial height, changed by the resizer */
             min-height: 80px;
             max-height: 60vh;
             background: #1f2937;
@@ -826,15 +826,15 @@
         }
 
         #mobile-pad {
-            --joy: 112px;   /* размер стика; JS (initJoystick/layout) подгоняет под размер вьюпорта */
+            --joy: 112px;   /* stick size; JS (initJoystick/layout) fits it to the viewport size */
             position: absolute;
             bottom: 10px;
             left: 16px;
-            right: 16px;   /* на всю ширину: джойстик слева, кнопки прыжка/вниз у правого края */
+            right: 16px;   /* full width: the joystick on the left, the jump/down buttons at the right edge */
             display: none;
             align-items: flex-end;
             gap: 14px;
-            z-index: 60;   /* выше плавающей панели Output (z-index 50), иначе она перекрывает кнопки у правого края */
+            z-index: 60;   /* above the floating Output panel (z-index 50), otherwise it covers the buttons at the right edge */
             pointer-events: none
         }
 
@@ -844,18 +844,18 @@
             }
         }
 
-        /* Раньше стик нужно было ловить пальцем ровно в границах круга
-           112px — на телефоне, когда не смотришь на большой палец, это
-           стабильно промахивается. Теперь есть широкая невидимая зона
-           #joy-zone (выше и вокруг круга), и стик "всплывает" туда, куда
-           реально попал палец, а не наоборот. */
+        /* The stick used to have to be caught with a finger exactly within the bounds of the
+           112px circle — on a phone, when you aren't looking at your thumb, this
+           consistently misses. Now there is a wide invisible zone
+           #joy-zone (above and around the circle), and the stick "pops up" where the finger
+           really landed, and not the other way around. */
         #joy-zone {
             position: absolute;
             left: 0;
             bottom: 0;
             width: var(--joy);
             height: calc(var(--joy) * 2);
-            pointer-events: none;   /* касания ловит initJoystick на уровне вьюпорта — зона не закрывает кнопки игры */
+            pointer-events: none;   /* touches are caught by initJoystick at the viewport level — the zone doesn't cover the game's buttons */
             touch-action: none;
         }
 
@@ -891,7 +891,7 @@
             gap: 4px;
             align-items: center;
             pointer-events: all;
-            /* joy-base/joy-zone вне потока (position:absolute) — колонка кнопок уходит к правому краю */
+            /* joy-base/joy-zone are out of flow (position:absolute) — the button column goes to the right edge */
             margin-left: auto;
         }
 
@@ -916,9 +916,9 @@
             background: rgba(59, 130, 246, 0.7)
         }
 
-/* ============ GUI: масштаб текста/кнопок, разделители, ползунки, поля ввода ============
-   Управляется переменными --fs (текст), --bs (кнопки/поля), --rz (толщина
-   разделителей панелей), --sb (полосы прокрутки); меняются кнопкой «🎚 UI». */
+/* ============ GUI: text/button scale, dividers, sliders, input fields ============
+   Controlled by the variables --fs (text), --bs (buttons/fields), --rz (thickness of
+   panel dividers), --sb (scrollbars); changed with the «🎚 UI» button. */
 :root {
     --fs: 1;
     --bs: 1;
@@ -933,7 +933,7 @@
     }
 }
 
-/* Верхняя панель */
+/* Top bar */
 #toolbar-top {
     height: calc(40px * var(--bs));
 }
@@ -994,10 +994,10 @@
     padding: calc(6px * var(--bs));
 }
 
-/* Заголовок Properties (имя класса + ref): раньше при увеличенном
-   размере текста (--fs) слова, не помещавшиеся по ширине узкой панели,
-   переносились посимвольно ("B a s e p l a t e") — не было ни nowrap,
-   ни ellipsis. */
+/* Properties header (class name + ref): previously with an increased
+   text size (--fs) words that didn't fit the width of the narrow panel
+   wrapped character by character ("B a s e p l a t e") — there was neither nowrap
+   nor ellipsis. */
 .prop-header {
     overflow: hidden;
 }
@@ -1067,7 +1067,7 @@
     padding: calc(8px * var(--bs));
 }
 
-/* Разделители панелей («ползунки»): толще, с хорошо видимой ручкой */
+/* Panel dividers («sliders»): thicker, with a clearly visible handle */
 .resizer {
     width: var(--rz);
     touch-action: none;
@@ -1101,7 +1101,7 @@
     background: #fff;
 }
 
-/* Полосы прокрутки */
+/* Scrollbars */
 ::-webkit-scrollbar {
     width: var(--sb);
     height: var(--sb);
@@ -1137,7 +1137,7 @@
     font-size: calc(12px * var(--fs));
 }
 
-/* Вьюпорт: качество, кнопки движения */
+/* Viewport: quality, movement buttons */
 #quality-selector button {
     font-size: calc(10px * var(--fs));
     padding: calc(3px * var(--bs)) calc(8px * var(--bs));
@@ -1154,7 +1154,7 @@
     font-size: calc(20px * var(--fs));
 }
 
-/* Диалоги */
+/* Dialogs */
 .modal h3 {
     font-size: calc(15px * var(--fs));
 }
@@ -1181,7 +1181,7 @@
     font-size: calc(13px * var(--fs));
 }
 
-/* Панель настроек интерфейса */
+/* Interface settings panel */
 #ui-settings {
     position: fixed;
     top: 48px;
@@ -1198,19 +1198,19 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
 }
 
-/* ProximityPrompt — кнопка/кольцо взаимодействия у объекта поблизости */
+/* ProximityPrompt — an interaction button/ring at a nearby object */
 #proximity-prompt {
     position: absolute;
     right: 14px;
-    bottom: calc(10px + 2 * 52px * var(--bs) + 30px);   /* над кнопками прыжка/вниз, не перекрывая их */
+    bottom: calc(10px + 2 * 52px * var(--bs) + 30px);   /* above the jump/down buttons, without covering them */
     display: flex;
-    flex-direction: row-reverse;   /* кольцо у самого правого края, подпись слева от него */
+    flex-direction: row-reverse;   /* the ring at the very right edge, the label to the left of it */
     align-items: center;
     gap: 10px;
     z-index: 250;
     pointer-events: none;
-    /* touch-action:none тут не нужен — сам тап обрабатывается через
-       pointerdown/up на #proximity-prompt-ring ниже */
+    /* touch-action:none isn't needed here — the tap itself is handled via
+       pointerdown/up on #proximity-prompt-ring below */
 }
 
 #proximity-prompt-ring {
@@ -1300,7 +1300,7 @@
 }
 
 
-/* ============ Explorer: перетаскивание (drag & drop) ============ */
+/* ============ Explorer: drag & drop ============ */
 .tree-node.drop-target {
     background: #1d4ed8 !important;
     outline: 1px dashed #93c5fd;
@@ -1329,7 +1329,7 @@
 }
 body.tree-dragging, body.tree-dragging * { user-select: none !important; -webkit-user-select: none !important; }
 
-/* ===== Стартовый экран (как у Roblox Studio): боковая панель + карточки ===== */
+/* ===== Start screen (like Roblox Studio): a sidebar + cards ===== */
 #start-screen { position: fixed; inset: 0; z-index: 90; display: none; background: #111827; color: #f3f4f6; }
 #start-screen.show { display: flex; }
 #start-screen .st-side { width: 230px; flex: none; background: #1f2937; border-right: 1px solid #374151;
@@ -1387,7 +1387,7 @@ body.tree-dragging, body.tree-dragging * { user-select: none !important; -webkit
     #start-screen .st-top .st-btn { padding: 7px 12px; font-size: 13px; }
 }
 
-/* Инструменты трансформации (Move/Rotate/Scale/Pivot) — плавающая панель во вьюпорте */
+/* Transform tools (Move/Rotate/Scale/Pivot) — a floating panel in the viewport */
 #tf-bar {
     position: absolute;
     top: 66px;
@@ -1450,7 +1450,7 @@ body.tree-dragging, body.tree-dragging * { user-select: none !important; -webkit
     outline: none
 }
 
-/* ===== Мобильный интерфейс (body.m-ui): режимы «Сцена» и «Панели» ===== */
+/* ===== Mobile interface (body.m-ui): «Scene» and «Panels» modes ===== */
 #m-nav, #m-subtabs, #m-menu-btn, #m-out-toggle { display: none }
 
 body.m-ui {
@@ -1471,7 +1471,7 @@ body.m-ui.m-kb { padding-bottom: 0 }
 
 body.m-ui.m-playing { padding-top: 0 }
 
-/* верхняя строка: ☰, Play, Save; остальное раскрывается по ☰ */
+/* top row: ☰, Play, Save; the rest expands via ☰ */
 body.m-ui #toolbar-top {
     position: fixed;
     top: 0;
@@ -1509,7 +1509,7 @@ body.m-ui.m-menu-open #toolbar-top {
 
 body.m-ui.m-menu-open #toolbar-top > button { display: inline-flex; align-items: center }
 
-/* раскладка: всё накладывается друг на друга, показывается нужное по режиму */
+/* layout: everything overlaps, the needed one is shown by the mode */
 body.m-ui #main {
     display: block;
     position: relative;
@@ -1612,7 +1612,7 @@ body.m-ui #m-nav {
 body.m-ui.m-playing #m-nav,
 body.m-ui.m-kb #m-nav { display: none }
 
-/* Play: панели недоступны; Output — по кнопке 📟 */
+/* Play: panels are unavailable; Output — via the 📟 button */
 body.m-ui.m-playing #m-out-toggle {
     display: block;
     position: fixed;
@@ -1630,7 +1630,7 @@ body.m-ui.m-playing #m-out-toggle {
 
 body.m-ui.m-playing:not(.m-out-open) #bottom-panel { display: none !important }
 
-/* вьюпорт: панели инструментов в одну строку с прокруткой, не налезая друг на друга */
+/* viewport: toolbars in a single scrollable row, without overlapping each other */
 body.m-ui #quality-selector {
     top: 8px;
     right: 8px;
@@ -1651,7 +1651,7 @@ body.m-ui #tf-steps { flex-shrink: 0 }
 body.m-ui #tf-bar button { flex-shrink: 0 }
 body.m-ui #vp-label { display: none }
 
-/* ландшафт телефона: тонкие верхняя и нижняя панели, чтобы вьюпорту осталась высота */
+/* phone landscape: thin top and bottom bars so that the viewport keeps its height */
 @media (max-height: 520px) {
     body.m-ui {
         --m-bar-h: 38px;
@@ -1662,7 +1662,7 @@ body.m-ui #vp-label { display: none }
     #m-nav button { font-size: 14px }
 }
 
-/* кнопки инструментов — под палец (на Poco X6 Pro 30 css-px ≈ 5 мм, мало): 44px */
+/* tool buttons — sized for a finger (on a Poco X6 Pro 30 css-px ≈ 5 mm, too little): 44px */
 body.m-ui #tf-bar button {
     min-width: 38px;
     height: 38px;
@@ -1673,10 +1673,10 @@ body.m-ui #tf-bar button {
 body.m-ui #tf-steps label { height: 38px }
 body.m-ui #tf-steps input { width: 48px; font-size: 14px }
 
-/* плавающая кнопка 🐞 (консоль отладки) в «Панелях» налезала на поля свойств — там есть вкладка «Вывод» */
+/* the floating 🐞 button (debug console) in «Panels» covered the property fields — there is an «Output» tab there */
 body.m-ui.m-panels button[style*="z-index:1000000"] { display: none !important }
 
-/* ландшафт: инструменты ещё компактнее (правила ниже базовых, иначе их перебивают) */
+/* landscape: tools are even more compact (rules below the base ones, otherwise they get overridden) */
 @media (max-height: 520px) {
     body.m-ui #tf-bar { top: 36px; gap: 2px }
     body.m-ui #tf-bar button { min-width: 32px; height: 32px; padding: 0 4px; font-size: 15px }
@@ -1684,10 +1684,10 @@ body.m-ui.m-panels button[style*="z-index:1000000"] { display: none !important }
     body.m-ui #quality-selector { top: 4px }
 }
 
-/* Play: в покое стик почти прозрачный (как DynamicThumbstick в Roblox) и не закрывает GUI игры; при касании — яркий */
+/* Play: at rest the stick is almost transparent (like DynamicThumbstick in Roblox) and doesn't cover the game's GUI; on touch — bright */
 body.m-ui.m-playing #joy-base:not(.active) { opacity: .3 }
 
-/* Долгое нажатие по подсказкам/GUI в Play не должно выделять текст и вызывать системное меню */
+/* A long press on prompts/GUI in Play must not select text or bring up the system menu */
 #viewport, #viewport *:not(input):not(textarea) {
     -webkit-user-select: none; user-select: none;
     -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;

@@ -22,17 +22,17 @@ import io
 
 
 
-# Кэш .whl рядом со скриптом — после первой (единственной) установки с
-# сетью pip кладёт сюда скачанные колёса, и все последующие запуски на
-# Termux (в т.ч. без интернета — самолёт, метро, нет сим-карты) ставят
-# зависимости из ЭТОЙ папки через --no-index, а не заново из PyPI.
+# The .whl cache next to the script — after the first (only) install with
+# network access pip puts the downloaded wheels here, and all later launches on
+# Termux (including without internet — a plane, the subway, no SIM card) install
+# dependencies from THIS folder via --no-index, instead of from PyPI again.
 #
-# RSW_VENDOR_DIR — та же логика, что у RSW_ICONS_DIR ниже: если app.py
-# запущен из-под APK-обёртки (bridge_launcher.py подменяет __file__ на
-# путь внутри hotpatch, который недоступен на запись), эта переменная
-# указывает на настоящую писабельную папку (например filesDir/vendor).
-# При обычном запуске (`python app.py` в Termux/на ПК) — путь рядом со
-# скриптом, как и раньше.
+# RSW_VENDOR_DIR — the same logic as RSW_ICONS_DIR below: if app.py
+# is started under the APK wrapper (bridge_launcher.py replaces __file__ with
+# a path inside hotpatch, which is not writable), this variable
+# points to a real writable folder (for example filesDir/vendor).
+# On an ordinary launch (`python app.py` in Termux/on a PC) — a path next to
+# the script, as before.
 VENDOR_DIR = Path(os.environ['RSW_VENDOR_DIR']) if os.environ.get('RSW_VENDOR_DIR') \
     else Path(__file__).parent / 'vendor'
 _WHEELS_DIR = VENDOR_DIR / 'wheels'
@@ -49,7 +49,7 @@ def _ensure(pkg, imp=None):
     has_cached = any(_WHEELS_DIR.glob(f'{pkg.replace("-", "_")}*'))
 
     if has_cached:
-        print(f'[RbxStudio] Устанавливаю {pkg} из локального кэша (офлайн)...')
+        print(f'[RbxStudio] Installing {pkg} from the local cache (offline)...')
         try:
             subprocess.check_call([
                 sys.executable, '-m', 'pip', 'install', pkg,
@@ -58,18 +58,18 @@ def _ensure(pkg, imp=None):
             ])
             return
         except subprocess.CalledProcessError:
-            print(f'[RbxStudio] Офлайн-кэш для {pkg} не подошёл, пробую сеть...')
+            print(f'[RbxStudio] The offline cache for {pkg} did not fit, trying the network...')
 
-    print(f'[RbxStudio] Устанавливаю {pkg} (и сохраняю .whl в кэш для офлайн-запусков)...')
-    # Сначала скачиваем колесо в кэш, потом ставим из него — так кэш
-    # пополняется независимо от того, есть у pip install свой кэш или нет.
+    print(f'[RbxStudio] Installing {pkg} (and saving the .whl to the cache for offline runs)...')
+    # First we download the wheel into the cache, then install from it — this way the cache
+    # is refilled regardless of whether pip install has its own cache.
     try:
         subprocess.check_call([
             sys.executable, '-m', 'pip', 'download', pkg,
             '-d', str(_WHEELS_DIR), '-q',
         ])
     except subprocess.CalledProcessError:
-        pass  # даже без скачивания .whl обычная установка ниже может сработать
+        pass  # even without downloading the .whl the ordinary install below may work
     subprocess.check_call([
         sys.executable, '-m', 'pip', 'install', pkg,
         '--break-system-packages', '-q',
@@ -82,21 +82,21 @@ _ensure('flask')
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-# На Android иконки (icons/, icons.txt) НИКОГДА не проходят через
-# OTA-хотфикс (см. OtaUpdater.kt) — только через полную пересборку APK.
-# Но bridge_launcher.py при наличии хотфикса подменяет __file__ этого
-# модуля на путь внутри filesDir/hotpatch, где icons/ и icons.txt
-# физически не существуют. Раньше это молча обнуляло CLASS_ICONS и
-# гасило все иконки в Explorer/Properties. RSW_ICONS_DIR — явный путь к
-# ПОСТОЯННОЙ (baked-in) папке приложения, который bridge_launcher.py
-# прокидывает через переменную окружения именно на такой случай; если
-# её нет (обычный запуск `python app.py` с ПК), используем прежнее
-# поведение — путь рядом с этим файлом.
+# On Android the icons (icons/, icons.txt) NEVER go through the
+# OTA hotfix (see OtaUpdater.kt) — only through a full APK rebuild.
+# But when a hotfix is present, bridge_launcher.py replaces this module's __file__
+# with a path inside filesDir/hotpatch, where icons/ and icons.txt
+# physically don't exist. This used to silently zero out CLASS_ICONS and
+# turn off all icons in Explorer/Properties. RSW_ICONS_DIR is an explicit path to the app's
+# PERMANENT (baked-in) folder, which bridge_launcher.py
+# passes through an environment variable precisely for this case; if
+# it is absent (an ordinary `python app.py` launch from a PC), we use the previous
+# behavior — a path next to this file.
 _ICONS_BASE = Path(os.environ['RSW_ICONS_DIR']) if os.environ.get('RSW_ICONS_DIR') \
     else Path(__file__).parent
 
 ICONS_DIR = _ICONS_BASE / 'icons'
-PORT = 47182  # нестандартный порт — 8080 часто занят другими приложениями/ADB
+PORT = 47182  # a non-standard port — 8080 is often taken by other apps/ADB
 
 CLASS_ICONS = {}
 _icon_b64 = {}
@@ -135,9 +135,9 @@ _load_icons()
 
 
 def icon_src(cls):
-    # 'Instance.png' в icons/ никогда не было — любой класс без записи в
-    # CLASS_ICONS раньше молча оставался без иконки. 'Unknown.png' там
-    # реально есть.
+    # There never was an 'Instance.png' in icons/ — any class without an entry in
+    # CLASS_ICONS used to silently stay without an icon. 'Unknown.png' is
+    # really there.
     fn = CLASS_ICONS.get(cls, 'Unknown.png')
     return _icon_b64.get(fn, '')
 
@@ -159,60 +159,60 @@ HIDDEN = {
     'CSGDictionaryService', 'TweenService', 'PermissionsService',
 }
 
-# размеры по умолчанию для новых деталей из диалога Add (как в Roblox; лестница — высокая, чтобы по ней было что лезть)
+# default sizes for new parts from the Add dialog (as in Roblox; the ladder is tall so there is something to climb)
 _ADD_SIZE_DEFAULTS = {'Seat': (4, 1, 2), 'VehicleSeat': (4, 1, 2), 'TrussPart': (2, 10, 2), 'SpawnLocation': (6, 1, 6)}
 
 PART_CLASSES = {
     'Part', 'WedgePart', 'CornerWedgePart', 'TrussPart',
     'SpawnLocation', 'Seat', 'VehicleSeat', 'SpherePart',
-    # MeshPart раньше сюда не входил — такие объекты молча пропускались
-    # в build_all_scene_objects (см. ниже) и вообще не попадали в сцену,
-    # хотя парсер их видит и активно используется классом в
-    # Lua-песочнице/диалоге "Добавить". Рендерим как обычный box (реальная
-    # геометрия .mesh не разбирается — см. _extract_part_texture_id ниже
-    # про текстуру).
+    # MeshPart used not to be included here — such objects were silently skipped
+    # in build_all_scene_objects (see below) and didn't get into the scene at all,
+    # although the parser sees them and the class is actively used in
+    # the Lua sandbox/the "Add" dialog. We render it as an ordinary box (the real
+    # .mesh geometry isn't parsed — see _extract_part_texture_id below
+    # for the texture).
     'MeshPart',
-    # UnionOperation (CSG-юнион) раньше не входил сюда вообще — такие
-    # объекты молча пропускались и не попадали в сцену. Их настоящая
-    # геометрия лежит в сжатом бинарном блобе MeshData2 (SharedString),
-    # который мы не декодируем, поэтому пока рисуем как box по Size — с
-    # правильными CFrame/цветом/материалом (Size у юниона — это габарит
-    # готового тела, так что box хотя бы совпадает с его bounding box).
-    # NegateOperation НЕ добавляем: это "вычитаемая" деталь, в игре её
-    # не видно.
+    # UnionOperation (a CSG union) used not to be included here at all — such
+    # objects were silently skipped and didn't get into the scene. Their real
+    # geometry lies in the compressed binary blob MeshData2 (SharedString),
+    # which we don't decode, so for now we draw a box by Size — with the
+    # right CFrame/color/material (a union's Size is the dimension of the
+    # finished body, so the box at least matches its bounding box).
+    # We do NOT add NegateOperation: it is a "subtracted" part, it isn't
+    # visible in the game.
     'UnionOperation',
 }
 
-# Классы 2D-интерфейса (Roblox GUI) — рендерятся отдельным DOM-оверлеем
-# поверх 3D-вьюпорта в Play (см. index.html, buildGuiOverlay/#gui-overlay),
-# а не как объекты сцены three.js/cannon.js, как PART_CLASSES.
+# 2D interface classes (Roblox GUI) — rendered by a separate DOM overlay
+# on top of the 3D viewport in Play (see index.html, buildGuiOverlay/#gui-overlay),
+# and not as three.js/cannon.js scene objects, like PART_CLASSES.
 GUI_ROOT_CLASSES = {'ScreenGui', 'BillboardGui', 'SurfaceGui'}
-GUI_CONTAINER_CLASSES = {'Frame', 'ScrollingFrame', 'CanvasGroup'}   # CanvasGroup: контейнер с общей прозрачностью (GroupTransparency)
+GUI_CONTAINER_CLASSES = {'Frame', 'ScrollingFrame', 'CanvasGroup'}   # CanvasGroup: a container with a shared transparency (GroupTransparency)
 GUI_LEAF_CLASSES = {
     'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
 }
-# UICorner/UIStroke не рисуются отдельным DOM-узлом — они модификаторы
-# соседнего GUI-объекта (border-radius / обводка), см. index.html
-# applyGuiDecorationToParent. Раньше их не было ни в одном из наборов
-# классов вообще, поэтому /api/gui_tree их молча отбрасывал — фронтенд
-# никогда не узнавал о TopLeftRadius/.../Thickness, лежащих в самом
-# .rbxl, и все GUI-плашки в Play всегда рисовались с прямыми углами и
-# без обводки, независимо от того, что реально настроено в файле.
-GUI_DECORATION_CLASSES = {'UICorner', 'UIStroke', 'UIScale', 'UIListLayout', 'UIGridLayout'}   # layout-ы: свойства раскладки нужны клиенту, DOM-узла у них нет   # UIScale: масштаб родителя (см. applyGuiElementStyle)
+# UICorner/UIStroke aren't drawn as a separate DOM node — they are modifiers
+# of the neighboring GUI object (border-radius / outline), see index.html
+# applyGuiDecorationToParent. They used not to be in any of the class
+# sets at all, so /api/gui_tree silently dropped them — the frontend
+# never learned about the TopLeftRadius/.../Thickness stored in the
+# .rbxl itself, and all GUI plates in Play were always drawn with square corners and
+# without an outline, regardless of what is really configured in the file.
+GUI_DECORATION_CLASSES = {'UICorner', 'UIStroke', 'UIScale', 'UIListLayout', 'UIGridLayout'}   # layouts: the layout properties are needed by the client, they have no DOM node   # UIScale: the parent's scale (see applyGuiElementStyle)
 GUI_CLASSES = GUI_ROOT_CLASSES | GUI_CONTAINER_CLASSES | GUI_LEAF_CLASSES | GUI_DECORATION_CLASSES
 
-# Свойства, которые реально нужны фронтенду для рисования GUI-оверлея —
-# сознательно узкий список (как и SCRIPT_CLASSES выше по духу), чтобы не
-# гонять по сети произвольные бинарные/редкие свойства ради одного div'а.
+# The properties that the frontend really needs to draw the GUI overlay —
+# a deliberately narrow list (like SCRIPT_CLASSES above in spirit), so as not to
+# push arbitrary binary/rare properties over the network for the sake of one div.
 GUI_PROPS = (
     'Name', 'Position', 'Size', 'AnchorPoint', 'Visible', 'Enabled',
     'ZIndex', 'BackgroundColor3', 'BackgroundTransparency', 'BorderSizePixel',
     'BorderColor3', 'Text', 'TextColor3', 'TextTransparency', 'TextSize',
     'TextScaled', 'TextWrapped', 'TextXAlignment', 'TextYAlignment', 'Font',
     'Image', 'ScaleType', 'ClipsDescendants',
-    # UICorner: некоторые файлы (в т.ч. этот) хранят независимый радиус
-    # на каждый угол (более новый вариант UICorner в Roblox) вместо
-    # одного общего CornerRadius — фронтенд понимает оба варианта.
+    # UICorner: some files (this one included) store an independent radius
+    # per corner (the newer UICorner variant in Roblox) instead of
+    # one shared CornerRadius — the frontend understands both variants.
     'CornerRadius', 'TopLeftRadius', 'TopRightRadius',
     'BottomLeftRadius', 'BottomRightRadius',
     # UIStroke
@@ -221,20 +221,20 @@ GUI_PROPS = (
     'Scale',
     # CanvasGroup
     'GroupTransparency',
-    # SurfaceGui (интерфейс на грани детали)
+    # SurfaceGui (an interface on a part's face)
     'Face', 'SizingMode', 'PixelsPerStud', 'CanvasSize', 'AlwaysOnTop', 'Brightness',
-    # BillboardGui (интерфейс в мире, лицом к камере)
+    # BillboardGui (an interface in the world, facing the camera)
     'Adornee', 'StudsOffset', 'StudsOffsetWorldSpace', 'SizeOffset', 'ExtentsOffset', 'MaxDistance',
-    # UIListLayout / UIGridLayout (раскладка потомков)
+    # UIListLayout / UIGridLayout (layout of descendants)
     'FillDirection', 'Padding', 'HorizontalAlignment', 'VerticalAlignment', 'SortOrder', 'StartCorner',
     'CellSize', 'CellPadding', 'FillDirectionMaxCells', 'LayoutOrder',
 )
 
-# Script/LocalScript исполняются в РАЗНЫХ средах в настоящем Roblox
-# (сервер и клиент соответственно) — 'side' используется фронтендом
-# (index.html, /api/scripts) только для того, чтобы пометить бейджем и в
-# Output, откуда пришёл вывод; сам движок остаётся с одной общей Lua VM
-# (нет настоящей сети клиент↔сервер), см. комментарий у api_scripts ниже.
+# Script/LocalScript run in DIFFERENT environments in real Roblox
+# (server and client respectively) — 'side' is used by the frontend
+# (index.html, /api/scripts) only to mark with a badge and in
+# Output where the output came from; the engine itself keeps one shared Lua VM
+# (there is no real client↔server network), see the comment at api_scripts below.
 SCRIPT_SIDE = {'Script': 'server', 'LocalScript': 'client', 'ModuleScript': 'shared'}
 
 
@@ -264,10 +264,10 @@ def get_color(c):
 
 
 def get_part_color(props):
-    """Цвет BasePart. В новых .rbxl (zstd, 2024+) цвет лежит в свойстве
-    Color3uint8 (целые 0..255), а НЕ в Color3/Color (float 0..1) — раньше
-    читались только последние, поэтому все Part из новых файлов были
-    серыми (#a0a0a0): Head/Torso/руки/ноги R6 без цвета кожи и т.д."""
+    """BasePart color. In new .rbxl files (zstd, 2024+) the color lives in the
+    Color3uint8 property (integers 0..255), NOT in Color3/Color (float 0..1) — previously
+    only the latter were read, so all Parts from new files were
+    gray (#a0a0a0): R6 Head/Torso/arms/legs without skin color, etc."""
     c8 = props.get('Color3uint8')
     if isinstance(c8, dict) and 'r' in c8:
         r = max(0, min(255, int(safe_float(c8.get('r', 160), 160))))
@@ -280,8 +280,8 @@ def get_part_color(props):
 
 # Enum.MeshType (SpecialMesh.MeshType): Head=0, Torso=1, Wedge=2, Sphere=3,
 # Cylinder=4, FileMesh=5, Brick=6, Prism=7, Pyramid=8, ParallelRamp=9,
-# RightAngleRamp=10, CornerWedge=11. Раньше 1 читался как цилиндр, а 6
-# (Brick) как клин — числа были перепутаны.
+# RightAngleRamp=10, CornerWedge=11. Previously 1 was read as a cylinder and 6
+# (Brick) as a wedge — the numbers were mixed up.
 MESHTYPE_TO_SHAPE = {
     0: 'head', 1: 'box', 2: 'wedge', 3: 'sphere', 4: 'cylinder',
     6: 'box', 7: 'wedge', 8: 'cone', 9: 'wedge', 10: 'wedge', 11: 'wedge',
@@ -289,15 +289,15 @@ MESHTYPE_TO_SHAPE = {
 
 
 def find_special_mesh(ref, children_by_parent, all_props, referent_to_class):
-    """Свойства первого SpecialMesh-ребёнка части (или None). Раньше
-    искали по номеру referent (ref+1 / ref+2) — это работало только пока
-    меш лежал в файле сразу после детали."""
+    """Properties of a part's first SpecialMesh child (or None). Previously we
+    looked it up by referent number (ref+1 / ref+2) — that worked only while the
+    mesh lay in the file right after the part."""
     for child in children_by_parent.get(ref, ()):
         c = referent_to_class.get(child)
         if c == 'SpecialMesh':
             return all_props.get(child, {})
         if c in _LEGACY_MESH_TYPE:
-            # BlockMesh/CylinderMesh — старые классы того же вида (Scale/Offset), тип зашит в класс
+            # BlockMesh/CylinderMesh — old classes of the same kind (Scale/Offset), the type is baked into the class
             return dict(all_props.get(child, {}), MeshType=_LEGACY_MESH_TYPE[c])
     return None
 
@@ -338,17 +338,17 @@ def get_rot_matrix(cf):
 
 
 
-# --- Геометрия юниона из его ИСХОДНЫХ деталей --------------------------------------------------------------
-# Новый формат юниона хранит меш в MeshData2 (сжатые потоки), а старый SolidMeshHolder пуст — тогда union_mesh_from_parsed
-# возвращал None, и юнион рисовался сплошным боксом по Size (стол в fnf.rbxl). Но в ChildData/ChildData2 лежит вложенный
-# rbxm с деталями, из которых юнион собран (ножки, столешница...), в ЛОКАЛЬНОЙ системе юниона. Строим меш из них:
-# реальные операнды вместо сплошного бокса. Ограничения: вычитающие операнды (NegateOperation) пропускаются, а пересечения
-# деталей не склеиваются — внутри остаются лишние грани (на вид не влияет, т.к. они внутри).
-_UNION_CHILD_SHAPES_BOX = {None, 1}   # Part.Shape: 1 = Block (по умолчанию); остальные формы приближаем боксом операнда
+# --- Union geometry from its SOURCE parts --------------------------------------------------------------
+# The new union format stores the mesh in MeshData2 (compressed streams), and the old SolidMeshHolder is empty — then union_mesh_from_parsed
+# returned None, and the union was drawn as a solid box by Size (the table in fnf.rbxl). But ChildData/ChildData2 hold a nested
+# rbxm with the parts the union is made of (legs, tabletop...), in the union's LOCAL space. We build the mesh from them:
+# real operands instead of a solid box. Limitations: subtracting operands (NegateOperation) are skipped, and the intersections of
+# parts aren't merged — extra faces remain inside (it doesn't affect the look, since they are inside).
+_UNION_CHILD_SHAPES_BOX = {None, 1}   # Part.Shape: 1 = Block (default); other shapes are approximated by the operand's box
 
 
 def _box_triangles(pos, rot, half):
-    """Бокс (центр pos, поворот rot 3x3 по строкам, половинные размеры half) -> (positions, normals, tri_index)."""
+    """Box (center pos, rotation rot as 3x3 by rows, half sizes half) -> (positions, normals, tri_index)."""
     positions, normals, index = [], [], []
     axes = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
     for ax in axes:
@@ -362,7 +362,7 @@ def _box_triangles(pos, rot, half):
             positions.append([pos[i] + sum(rot[i * 3 + j] * loc[j] for j in range(3)) for i in range(3)])
         nrm = [sum(rot[i * 3 + j] * ax[j] for j in range(3)) for i in range(3)]
         normals.append(nrm)
-        # порядок обхода зависит от знака и от чётности осей — берём так, чтобы нормаль треугольника совпала с нормалью грани
+        # the traversal order depends on the sign and the parity of the axes — we take it so that the triangle's normal matches the face normal
         a, b, c, d = base, base + 1, base + 2, base + 3
         e1 = [positions[b][i] - positions[a][i] for i in range(3)]
         e2 = [positions[c][i] - positions[a][i] for i in range(3)]
@@ -374,7 +374,7 @@ def _box_triangles(pos, rot, half):
 
 
 def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
-    """Рекурсивно собирает (pos, rot, half) операндов юниона ref в его локальной системе. None — данных нет."""
+    """Recursively collects the (pos, rot, half) operands of union ref in its local space. None — no data."""
     import os as _os, tempfile as _tmp
     from rbxl_parser import parse_rbxl as _parse
     out = [] if out is None else out
@@ -407,7 +407,7 @@ def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
     got = False
     for cref, cls in r2c.items():
         if cls not in ('Part', 'MeshPart', 'UnionOperation'):
-            continue   # NegateOperation и прочее — не добавляем
+            continue   # NegateOperation and the rest — we don't add
         pr = cp.get(cref, {})
         sz = pr.get('Size') or pr.get('InitialSize')
         cf = pr.get('CFrame')
@@ -418,7 +418,7 @@ def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
         except Exception:
             continue
         if cls == 'UnionOperation':
-            # вложенный юнион: пробуем его собственные операнды (в его локальной системе -> переносим в нашу)
+            # a nested union: we try its own operands (in its local space -> transfer into ours)
             sub = _collect_union_child_boxes(child, cref, depth + 1, [])
             if sub:
                 for spos, srot, shalf in sub:
@@ -432,7 +432,7 @@ def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
 
 
 def union_mesh_from_parsed(parsed, ref):
-    """Меш юниона: сначала старый формат (SolidMeshHolder), иначе — собранный из исходных деталей (ChildData/ChildData2)."""
+    """Union mesh: first the old format (SolidMeshHolder), otherwise one assembled from the source parts (ChildData/ChildData2)."""
     m = _union_mesh_solid(parsed, ref)
     if m is not None:
         return m
@@ -467,26 +467,26 @@ def serialize_prop(v):
         return str(v)
 
 
-CHUNK_SIZE = 48.0   # студов — целевой размер стороны одного фрагмента
-CHUNK_MAX_GRID = 16  # ограничение и по X, и по Z из соображений пользователя
-# Порог, ниже которого объект не режем — нет смысла плодить фрагменты
-# для условного забора 60x2x2.
+CHUNK_SIZE = 48.0   # studs — the target side size of one fragment
+CHUNK_MAX_GRID = 16  # a limit on both X and Z for the user's sake
+# A threshold below which we don't cut an object — there is no point spawning fragments
+# for a conventional 60x2x2 fence.
 CHUNK_MIN_DIM = 64.0
 
 
 def _rot_axis_world(rot, col):
-    # rot — построчная 3x3 матрица (см. get_rot_matrix); мировое направление
-    # локальной оси col — это СТОЛБЕЦ col матрицы (умножение R * e_col).
+    # rot — a row-wise 3x3 matrix (see get_rot_matrix); the world direction
+    # of the local axis col is COLUMN col of the matrix (the multiplication R * e_col).
     return (rot[col], rot[3 + col], rot[6 + col])
 
 
 def chunk_box_object(o):
-    """Режет один box-объект на сетку под-фрагментов по двум наибольшим
-    измерениям (третье — обычно толщина — не трогаем). Каждый фрагмент —
-    самостоятельный объект с честным центром и размером, чтобы дистанция
-    до игрока считалась по кускам, а не по гигантскому исходнику."""
+    """Cuts a single box object into a grid of sub-fragments along the two largest
+    dimensions (the third — usually the thickness — is left alone). Each fragment is a
+    standalone object with an honest center and size, so that the distance
+    to the player is computed per piece, not for the giant original."""
     dims = [('sx', o['sx']), ('sy', o['sy']), ('sz', o['sz'])]
-    # индексы измерений от большего к меньшему
+    # dimension indexes from larger to smaller
     order = sorted(range(3), key=lambda i: -dims[i][1])
     big_a, big_b, keep = order[0], order[1], order[2]
     dim_names = ['sx', 'sy', 'sz']
@@ -509,8 +509,8 @@ def chunk_box_object(o):
 
     out = []
     for i in range(grid_a):
-        # смещение центра фрагмента i вдоль локальной оси big_a от центра
-        # исходного объекта (в студах, в локальных координатах)
+        # offset of fragment i's center along the local axis big_a from the center
+        # of the original object (in studs, in local coordinates)
         off_a = -size_a * 0.5 + cell_a * (i + 0.5)
         for j in range(grid_b):
             off_b = -size_b * 0.5 + cell_b * (j + 0.5)
@@ -525,9 +525,9 @@ def chunk_box_object(o):
             chunk = dict(o)
             chunk.update(new_sizes)
             chunk['px'], chunk['py'], chunk['pz'] = wx, wy, wz
-            # синтетический, но уникальный ref — реальный ref детали
-            # закодирован в старших разрядах, коллизий с настоящими
-            # referent-ами (обычно < 10^6) быть не должно
+            # a synthetic but unique ref — the part's real ref is
+            # encoded in the high bits, there must be no collisions with real
+            # referents (usually < 10^6)
             chunk['ref'] = o['ref'] * 100000 + i * CHUNK_MAX_GRID + j
             chunk['source_ref'] = o['ref']
             out.append(chunk)
@@ -537,13 +537,13 @@ def chunk_box_object(o):
 def chunk_large_objects(objs):
     out = []
     for o in objs:
-        # meshId — реальная кастомная геометрия (см. _extract_real_mesh_id),
-        # а не настоящий bounding-box: chunk_box_object режет объект на
-        # суб-боксы буквально по его Size, что для реального меша (форма
-        # почти никогда не совпадает с прямоугольником) раздробило бы
-        # видимую модель на набор неверных кубов вместо неё самой.
-        # unionMesh — то же самое: у юниона своя геометрия (с вырезами),
-        # суб-боксы по Size закрыли бы вырезы.
+        # meshId — real custom geometry (see _extract_real_mesh_id),
+        # not a real bounding box: chunk_box_object cuts an object into
+        # sub-boxes literally by its Size, which for a real mesh (the shape
+        # almost never matches a rectangle) would break the
+        # visible model into a set of wrong cubes instead of itself.
+        # unionMesh — the same: a union has its own geometry (with cut-outs),
+        # sub-boxes by Size would cover the cut-outs.
         if o.get('shape') == 'box' and not o.get('meshId') and not o.get('unionMesh'):
             out.extend(chunk_box_object(o))
         else:
@@ -552,14 +552,14 @@ def chunk_large_objects(objs):
 
 
 
-# Счётчик версий сцены: правки в редакторе (добавление/удаление/смена
-# свойств объекта) мутируют state['parsed'] НА МЕСТЕ, не пересоздавая сам
-# словарь — значит id(parsed) не меняется, и кэши ниже (build_all_scene_
-# objects/get_chunk_index), завязанные только на id(parsed), продолжали бы
-# молча отдавать данные до правки.
-# Каждая точка мутации (см. api_edit_prop/api_add_instance/api_delete)
-# зовёт bump_scene_version() — кэши ключуются на (id(parsed), version), так
-# что любая правка честно инвалидирует их все разом.
+# The scene version counter: edits in the editor (adding/deleting/changing
+# an object's properties) mutate state['parsed'] IN PLACE, without recreating the
+# dict itself — so id(parsed) doesn't change, and the caches below (build_all_scene_
+# objects/get_chunk_index), keyed only by id(parsed), would keep
+# silently serving data from before the edit.
+# Every mutation point (see api_edit_prop/api_add_instance/api_delete)
+# calls bump_scene_version() — caches are keyed on (id(parsed), version), so
+# any edit honestly invalidates all of them at once.
 _scene_version = {'v': 0}
 
 
@@ -567,19 +567,19 @@ def bump_scene_version():
     _scene_version['v'] += 1
 
 
-# ---- Chunk-based стриминг (как в Minecraft / Unreal World Partition) ----
+# ---- Chunk-based streaming (like Minecraft / Unreal World Partition) ----
 #
-# Все предыдущие итерации (один луч → веер лучей → лучи с радиусом →
-# лучи неограниченной длины) пытались решить "что подгрузить" через
-# направление взгляда камеры. Это НЕ то, как это принято делать —
-# ни один крупный движок с open-world стримингом не завязывает загрузку
-# геометрии на направление камеры, только на РАССТОЯНИЕ от игрока: мир
-# один раз (при открытии карты) режется на равномерную 2D-сетку ячеек
-# по осям X/Z (высота Y внутри ячейки не ограничивается — верхушка
-# высокой башни остаётся в той же ячейке, что и её основание), а на
-# каждый тик просто берутся все ячейки в радиусе loadRadius от игрока.
-# Ни рейкаста, ни направления камеры — только позиция.
-CHUNK_CELL_SIZE = 100.0  # студов на сторону ячейки
+# All the previous iterations (one ray → a fan of rays → rays with a radius →
+# rays of unlimited length) tried to solve "what to load" via
+# the camera's view direction. That is NOT how it is usually done —
+# no major open-world streaming engine ties geometry loading
+# to the camera direction, only to the DISTANCE from the player: the world is
+# cut once (when the map is opened) into a uniform 2D grid of cells
+# along the X/Z axes (the Y height inside a cell isn't limited — the top of
+# a tall tower stays in the same cell as its base), and on
+# every tick we simply take all cells within loadRadius of the player.
+# No raycasting, no camera direction — only position.
+CHUNK_CELL_SIZE = 100.0  # studs per cell side
 
 _chunk_index_cache = {'parsed_id': None, 'index': None}
 
@@ -590,19 +590,19 @@ def get_chunk_index():
         return {}
     pid = (id(parsed), _scene_version['v'])
     if _chunk_index_cache['parsed_id'] != pid:
-        # Крупные объекты дробим (chunk_large_objects, уже есть для
-        # .rbxl экспорта) ПЕРЕД раскладкой по ячейкам — иначе стена в
-        # 300 студов длиной попадёт только в одну ячейку по своему
-        # центру и не найдётся, когда игрок стоит в соседней, хотя
-        # физически стена прямо перед ним.
-        # Детали из ServerStorage/ReplicatedStorage/StarterPack (nw) в мире не существуют — в сцену не попадают;
-        # их данные для Clone() отдаёт отдельная ручка /api/scene?nw=1.
+        # We split large objects (chunk_large_objects, already present for the
+        # .rbxl export) BEFORE laying them out into cells — otherwise a wall
+        # 300 studs long lands in only one cell by its
+        # center and won't be found when the player stands in a neighboring one, although
+        # physically the wall is right in front of them.
+        # Parts from ServerStorage/ReplicatedStorage/StarterPack (nw) don't exist in the world — they don't get into the scene;
+        # their data for Clone() is served by a separate handler /api/scene?nw=1.
         objs = chunk_large_objects([o for o in build_all_scene_objects() if not o.get('nw')])
         index = {}
         for o in objs:
-            # Полуразмер по X/Z (без учёта поворота — консервативная
-            # оценка чуть больше настоящей OBB, зато дешёвая и без
-            # риска пропустить ячейку, которую объект реально задевает).
+            # Half-size along X/Z (without accounting for rotation — a conservative
+            # estimate slightly larger than the real OBB, but cheap and without
+            # the risk of missing a cell the object really touches).
             half_x = math.sqrt(o['sx'] ** 2 + o['sz'] ** 2) * 0.5
             min_cx = int(math.floor((o['px'] - half_x) / CHUNK_CELL_SIZE))
             max_cx = int(math.floor((o['px'] + half_x) / CHUNK_CELL_SIZE))
@@ -616,11 +616,11 @@ def get_chunk_index():
 
 
 def gather_objects_in_radius(cx, cy, cz, radius):
-    # Круговой (в плане X/Z) отбор объектов вокруг игрока — сетка ячеек
-    # используется только как быстрый способ НЕ перебирать все объекты
-    # карты (кандидаты берутся из квадрата ячеек, задевающих окружность
-    # радиуса radius), фильтрация "входит ли в радиус" — по честной
-    # euclidean-дистанции.
+    # Circular (in the X/Z plan) selection of objects around the player — the cell grid
+    # is used only as a fast way NOT to iterate over all objects
+    # of the map (candidates are taken from the square of cells touching the circle of
+    # radius radius), the "is it within the radius" filtering — by an honest
+    # euclidean distance.
     index = get_chunk_index()
     if not index:
         return []
@@ -634,21 +634,21 @@ def gather_objects_in_radius(cx, cy, cz, radius):
         for ccz in range(min_cz, max_cz + 1):
             for o in index.get((ccx, ccz), ()):
                 if o['ref'] in seen_refs:
-                    continue  # объект мог попасть в несколько соседних ячеек
+                    continue  # an object could fall into several neighboring cells
                 seen_refs.add(o['ref'])
                 d = math.sqrt((o['px'] - cx) ** 2 + (o['py'] - cy) ** 2 + (o['pz'] - cz) ** 2)
                 if d <= radius:
                     result.append((d, o))
 
-    # Сортируем НЕ по чистой дистанции, а с поправкой на размер объекта.
-    # Без этого, когда общий бюджет (limit/streamCap в api_scene) меньше,
-    # чем всего объектов в радиусе, топ забивают ближние мелкие детали
-    # (трава, мусор, декор в упор у игрока) — а структурно важная дальняя
-    # стена или пол, которые реально нужны для обзора, просто не попадают
-    # в отсечку. Крупные объекты получают скидку к своей "эффективной"
-    # дистанции (логарифм — чтобы один гигантский terrain-кусок не забил
-    # собой весь бюджет монопольно, но обычная стена/пол ощутимо выигрывает
-    # у россыпи мелочи на той же дистанции).
+    # We sort NOT by pure distance, but with a correction for the object's size.
+    # Without this, when the overall budget (limit/streamCap in api_scene) is smaller
+    # than the total number of objects in the radius, the top gets filled by nearby small parts
+    # (grass, trash, decor right next to the player) — while a structurally important distant
+    # wall or floor, which are really needed for the view, simply don't make
+    # the cut. Large objects get a discount on their "effective"
+    # distance (a logarithm — so that one giant terrain piece doesn't eat
+    # the whole budget monopolistically, but an ordinary wall/floor noticeably beats
+    # a scatter of small stuff at the same distance).
     def sort_key(pair):
         d, o = pair
         bounding_radius = math.sqrt(o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
@@ -662,22 +662,22 @@ _scene_build_cache = {'parsed_id': None, 'objs': None}
 
 
 def _rbxassetid_num(value):
-    """'rbxassetid://123' -> '123'. Отсеивает rbxasset://textures/... —
-    это встроенные в студию файлы, у них нет числового id и их всё равно
-    нельзя утянуть с /api/asset-proxy (см. там же про assetdelivery)."""
+    """'rbxassetid://123' -> '123'. Filters out rbxasset://textures/... —
+    those are files built into Studio, they have no numeric id and can't be
+    pulled via /api/asset-proxy anyway (see the assetdelivery notes there)."""
     if not value:
         return None
     s = str(value)
-    # Два формата ссылки на ассет: 'rbxassetid://123' (новый) и 'http://www.roblox.com/asset/?id=123'
-    # (старый; так записаны классические R15-руки/ноги 5487114xx и их текстуры). Раньше принимался только
-    # первый — у деталей со вторым терялись и меш, и текстура, и они рисовались запасным кубом.
+    # Two asset link formats: 'rbxassetid://123' (new) and 'http://www.roblox.com/asset/?id=123'
+    # (old; the classic R15 arms/legs 5487114xx and their textures are written this way). Previously only the
+    # first was accepted — parts with the second lost both the mesh and the texture, and were drawn as a fallback cube.
     m = _re.search(r'(?:rbxassetid://|[?&]id=)(\d+)', s, _re.I)
     return m.group(1) if m else None
 
 
 def _asset_url_num(value):
-    """Числовой id из 'http://www.roblox.com/asset/?id=123' или 'rbxassetid://123'
-    (ShirtTemplate/PantsTemplate хранятся в первом виде)."""
+    """The numeric id from 'http://www.roblox.com/asset/?id=123' or 'rbxassetid://123'
+    (ShirtTemplate/PantsTemplate are stored in the former form)."""
     if not value:
         return None
     s = str(value)
@@ -687,10 +687,10 @@ def _asset_url_num(value):
     return m.group() if m else None
 
 
-# Части R6-персонажа, на которые ложится одежда (Shirt/Pants из соседних
-# детей той же Model): shirt — торс и руки, pants — торс и ноги
-# (в шаблоне 585x559 руки/ноги лежат в одних и тех же прямоугольниках,
-# поэтому рубашку на ноги и штаны на руки класть нельзя).
+# The parts of an R6 character that clothing lies on (Shirt/Pants from sibling
+# children of the same Model): shirt — torso and arms, pants — torso and legs
+# (in the 585x559 template arms/legs lie in the same rectangles,
+# so a shirt can't be put on the legs and pants on the arms).
 R6_CLOTH_LIMBS = {
     'Torso': ('shirt', 'pants'),
     'Left Arm': ('shirt',), 'Right Arm': ('shirt',),
@@ -699,27 +699,27 @@ R6_CLOTH_LIMBS = {
 
 
 def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
-    """Ищем ЛЮБОЙ реальный (rbxassetid://) источник картинки для части:
-    1) TextureID/Texture прямо на MeshPart,
-    2) Texture дочернего Decal,
-    3) TextureId дочернего SpecialMesh.
-    Первое найденное побеждает — комбинировать несколько текстур на одном
-    box-приближении всё равно не получится, это не полноценный UV-меш.
-
-    Возвращает (texture_id, face) — face берём ТОЛЬКО у Decal (его
-    свойство Face — на какую грань накладывать, по умолчанию 'Front',
-    как в самом Roblox) и только для него: раньше текстура клалась
-    ОДНИМ материалом на всю BoxGeometry — то есть на ВСЕ 6 граней сразу
-    (дефолтный UV each-face-0..1 у Three.js), а не на одну, как в
-    реальном Roblox — отсюда и "плохо легли текстуры" (растянутая
-    копия текстуры со всех сторон сразу). Для MeshPart.TextureID/
-    SpecialMesh face не возвращаем — они на реальном меше оборачивают
-    всю поверхность, а не одну грань, так что "на все грани" тут ближе
-    к истине (это по-прежнему лишь box-приближение, не настоящий меш)."""
+    """We look for ANY real (rbxassetid://) image source for a part:
+    1) TextureID/Texture directly on the MeshPart,
+    2) the Texture of a child Decal,
+    3) the TextureId of a child SpecialMesh.
+    The first one found wins — combining several textures on one
+    box approximation won't work anyway, this is not a full UV mesh.
+    
+    Returns (texture_id, face) — face is taken ONLY from a Decal (its
+    Face property — which face to apply it to, 'Front' by default,
+    as in Roblox itself) and only for it: previously the texture was put as
+    ONE material on the whole BoxGeometry — i.e. on ALL 6 faces at once
+    (the default each-face-0..1 UV of Three.js), not on one, as in
+    real Roblox — hence the "textures were laid out badly" (a stretched
+    copy of the texture on all sides at once). For MeshPart.TextureID/
+    SpecialMesh we don't return face — on a real mesh they wrap
+    the whole surface, not one face, so "on all faces" is closer
+    to the truth here (it is still only a box approximation, not a real mesh)."""
     if cls == 'MeshPart':
-        # SurfaceAppearance.ColorMap — в Roblox он имеет приоритет над
-        # MeshPart.TextureID (у таких мешей TextureID обычно пустой — как
-        # у акул, у которых из-за этого не было текстуры).
+        # SurfaceAppearance.ColorMap — in Roblox it has priority over
+        # MeshPart.TextureID (for such meshes TextureID is usually empty — as with
+        # sharks, which for this reason had no texture).
         for child in children_by_parent.get(ref, ()):
             if referent_to_class.get(child) == 'SurfaceAppearance':
                 tid = _rbxassetid_num(all_props.get(child, {}).get('ColorMap'))
@@ -734,7 +734,7 @@ def _extract_part_texture_id(ref, cls, props, children_by_parent, all_props, ref
             child_props = all_props.get(child, {})
             tid = _rbxassetid_num(child_props.get('Texture'))
             if tid:
-                # Face — число NormalId; 0 (Right) ложно по `or`, поэтому явная проверка на None
+                # Face — a NormalId number; 0 (Right) is falsy under `or`, hence the explicit check for None
                 _f = child_props.get('Face')
                 return tid, (_f if _f is not None and _f != '' else 'Front')
         elif child_cls == 'SpecialMesh':
@@ -748,7 +748,7 @@ _NORMAL_ID_NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front']
 
 
 def _normal_id_name(face):
-    """Enum.NormalId (число 0..5 или имя) -> имя грани; неизвестное -> Front."""
+    """Enum.NormalId (a number 0..5 or a name) -> the face name; unknown -> Front."""
     if isinstance(face, bool):
         return 'Front'
     if isinstance(face, (int, float)) and 0 <= int(face) <= 5:
@@ -762,9 +762,9 @@ def _normal_id_name(face):
 
 
 def _extract_decals(ref, children_by_parent, all_props, referent_to_class):
-    """ВСЕ Decal детали: [{tex, face, op}] — по одной на грань (при нескольких на
-    одной грани побеждает с бОльшим ZIndex, при равенстве — более поздняя).
-    Раньше бралась только первая найденная, и постеры на других гранях пропадали."""
+    """ALL Decals of a part: [{tex, face, op}] — one per face (when there are several on
+    one face, the one with the larger ZIndex wins, on a tie — the later one).
+    Previously only the first one found was taken, and posters on other faces disappeared."""
     by_face = {}
     for order, child in enumerate(children_by_parent.get(ref, ())):
         if referent_to_class.get(child) != 'Decal':
@@ -789,9 +789,9 @@ def _extract_decals(ref, children_by_parent, all_props, referent_to_class):
 
 
 def _surface_alpha_mode(ref, cls, children_by_parent, all_props, referent_to_class):
-    """AlphaMode у SurfaceAppearance, из чьего ColorMap взята текстура MeshPart:
-    0 = Overlay (альфа — «насколько текстура перекрывает Color детали»), 1 = Transparency (альфа — прозрачность),
-    2 = TintMask. None — текстура не из SurfaceAppearance (обычный TextureID: альфа = вырез)."""
+    """AlphaMode of the SurfaceAppearance whose ColorMap the MeshPart texture was taken from:
+    0 = Overlay (alpha — «how much the texture covers the part's Color»), 1 = Transparency (alpha — transparency),
+    2 = TintMask. None — the texture is not from a SurfaceAppearance (an ordinary TextureID: alpha = cutout)."""
     if cls != 'MeshPart':
         return None
     for child in children_by_parent.get(ref, ()):
@@ -807,19 +807,19 @@ def _surface_alpha_mode(ref, cls, children_by_parent, all_props, referent_to_cla
 
 
 def _extract_real_mesh_id(ref, cls, props, children_by_parent, all_props, referent_to_class):
-    """MeshId для РЕАЛЬНОЙ геометрии — в отличие от shape-эвристики в
-    build_all_scene_objects (которая лишь подбирает ближайший ИЗ ФИКСИРОВАННОГО
-    НАБОРА примитивов: box/sphere/cylinder/cone/wedge), это отдельный
-    кастомный меш, который раньше вообще не подгружался: MeshPart.MeshId
-    и SpecialMesh.MeshId (при MeshType.FileMesh, число 5 — единственный
-    тип, где MeshId указывает на реальную кастомную геометрию с сервера;
-    Cylinder/Sphere/Wedge/Head и т.п. — это встроенные примитивы, у них
-    MeshId либо пуст, либо игнорируется настоящим Roblox тоже, никакой
-    реальной геометрии подгружать не нужно). Раньше эти MeshId нигде не
-    читались для геометрии вообще — FileMesh-меши (BasePart с дочерним
-    SpecialMesh, MeshType=5) и любые MeshPart рендерились ТОЛЬКО как
-    bounding-box, отсюда и "меши не грузятся"/"кривая развёртка" — текстура
-    клеилась на приближение вместо настоящей формы и её настоящих UV."""
+    """MeshId for REAL geometry — unlike the shape heuristic in
+    build_all_scene_objects (which merely picks the nearest of a FIXED
+    SET of primitives: box/sphere/cylinder/cone/wedge), this is a separate
+    custom mesh that previously wasn't loaded at all: MeshPart.MeshId
+    and SpecialMesh.MeshId (with MeshType.FileMesh, the number 5 — the only
+    type where MeshId points to real custom geometry from the server;
+    Cylinder/Sphere/Wedge/Head etc. are built-in primitives, their
+    MeshId is either empty or ignored by real Roblox too, so no
+    real geometry needs to be loaded). Previously these MeshIds weren't
+    read for geometry anywhere at all — FileMesh meshes (a BasePart with a child
+    SpecialMesh, MeshType=5) and any MeshPart were rendered ONLY as a
+    bounding box, hence "meshes don't load"/"crooked unwrap" — the texture
+    was glued onto an approximation instead of the real shape and its real UVs."""
     if cls == 'MeshPart':
         mid = _rbxassetid_num(props.get('MeshId') or props.get('MeshID'))
         if mid:
@@ -838,14 +838,14 @@ def _extract_real_mesh_id(ref, cls, props, children_by_parent, all_props, refere
 
 
 def build_all_scene_objects():
-    # Раньше этот разбор (CFrame/матрицы поворота, поиск SpecialMesh для
-    # формы, цвет, Anchored/CanCollide) заново гонялся по ВСЕМ объектам
-    # карты на КАЖДЫЙ вызов /api/scene — а стриминг дёргает его каждые
-    # ~600мс. На картах в несколько тысяч частей (Castle Warfare) это и
-    # была основная причина тормозов: сами raycast/сортировка по факту
-    # быстрые, но каждый запрос сначала заново пересобирал ВЕСЬ список
-    # объектов с нуля. Карта между открытиями не меняется — кэшируем
-    # построенный список по id распарсенной карты, как и get_chunk_index.
+    # Previously this parsing (CFrame/rotation matrices, looking up a SpecialMesh for
+    # the shape, color, Anchored/CanCollide) was run again over ALL map objects
+    # on EVERY /api/scene call — and streaming calls it every
+    # ~600 ms. On maps of several thousand parts (Castle Warfare) this
+    # was the main cause of slowdowns: raycast/sorting themselves are in fact
+    # fast, but every request first rebuilt the WHOLE object list
+    # from scratch. The map doesn't change between openings — we cache the
+    # built list by the id of the parsed map, like get_chunk_index.
     parsed = state.get('parsed')
     if not parsed:
         return []
@@ -853,16 +853,16 @@ def build_all_scene_objects():
     if _scene_build_cache['parsed_id'] == pid:
         return _scene_build_cache['objs']
 
-    # ref ребёнка -> ref родителя из parent_map — переворачиваем один раз
-    # на всю сборку сцены, а не ищем детей линейным проходом на каждую
-    # часть (на картах в тысячи объектов это была бы O(n^2) сборка).
+    # child ref -> parent ref from parent_map — we invert it once
+    # for the whole scene build, instead of looking for children with a linear pass for every
+    # part (on maps of thousands of objects that would be an O(n^2) build).
     children_by_parent = {}
     for child_ref, parent_ref in parsed['parent_map'].items():
         children_by_parent.setdefault(parent_ref, []).append(child_ref)
 
-    # MaterialService/MaterialVariant: (имя, BaseMaterial) -> карты. Деталь
-    # ссылается на вариант по имени в MaterialVariantSerialized (так
-    # перчатки gloveR/gloveL получают свой материал 'main').
+    # MaterialService/MaterialVariant: (name, BaseMaterial) -> maps. A part
+    # refers to a variant by name in MaterialVariantSerialized (this is how the
+    # gloveR/gloveL gloves get their own material 'main').
     material_variants = {}
     for vref, vcls in parsed['referent_to_class'].items():
         if vcls != 'MaterialVariant':
@@ -885,7 +885,7 @@ def build_all_scene_objects():
         if props.get('Visible') is False:
             continue
 
-        # Получаем Position
+        # Get the Position
         pos = props.get('Position', {})
         if isinstance(pos, dict):
             px = safe_float(pos.get('x', 0))
@@ -894,12 +894,12 @@ def build_all_scene_objects():
         else:
             px = py = pz = 0
 
-        # Получаем CFrame (если он есть, он может переопределить позицию)
+        # Get the CFrame (if present, it can override the position)
         cf = props.get('CFrame', {})
-        # Используем CFrame только если он реально содержит позицию или матрицу
+        # We use the CFrame only if it really contains a position or a matrix
         if isinstance(cf, dict) and ('position' in cf or 'matrix' in cf):
             cf_pos = get_pos(cf)
-            # Если get_pos вернул не (0,0,0) — берём позицию из CFrame
+            # If get_pos returned non-(0,0,0) — we take the position from the CFrame
             if cf_pos != (0.0, 0.0, 0.0):
                 px, py, pz = cf_pos
         rot_matrix = get_rot_matrix(cf)
@@ -917,17 +917,17 @@ def build_all_scene_objects():
         else:
             sx = sy = sz_ = 1.0
 
-        # Цвет (Color3uint8 из новых файлов, иначе Color3/Color/BrickColor)
+        # Color (Color3uint8 from new files, otherwise Color3/Color/BrickColor)
         color = get_part_color(props)
 
-        # Прозрачность: раньше не передавалась вообще, и невидимый
-        # HumanoidRootPart (Transparency=1, размером с Torso) рисовался
-        # сплошным серым блоком поверх персонажа.
+        # Transparency: previously not passed at all, and an invisible
+        # HumanoidRootPart (Transparency=1, the size of the Torso) was drawn as
+        # a solid gray block over the character.
         transp = safe_float(props.get('Transparency', 0.0), 0.0)
         opacity = max(0.0, min(1.0, 1.0 - transp))
-        # Head, который заменяет аксессуар-голова (у Handle есть свой
-        # FaceCenterAttachment, как у Baki_head): в Roblox Head скрывают, иначе
-        # он закрывает меш аксессуара (так и было: «Head перекрывает текстуру»).
+        # A Head that is replaced by an accessory head (the Handle has its own
+        # FaceCenterAttachment, like Baki_head): in Roblox the Head is hidden, otherwise
+        # it covers the accessory's mesh (this is how it was: «the Head overlaps the texture»).
         if cls == 'Part' and props.get('Name') == 'Head':
             for sib in children_by_parent.get(parsed['parent_map'].get(ref), ()):
                 if parsed['referent_to_class'].get(sib) != 'Accessory':
@@ -940,8 +940,8 @@ def build_all_scene_objects():
                            for a in children_by_parent.get(handle, ())):
                         opacity = 0.0
 
-        # Форма: Part.Shape (0=Ball, 1=Block, 2=Cylinder — ось вдоль X),
-        # класс SpherePart, либо дочерний SpecialMesh (Enum.MeshType).
+        # Shape: Part.Shape (0=Ball, 1=Block, 2=Cylinder — axis along X),
+        # class SpherePart, or a child SpecialMesh (Enum.MeshType).
         shape = 'sphere' if cls == 'SpherePart' else 'box'
         part_shape = props.get('shape', props.get('Shape'))
         if part_shape == 0:
@@ -969,14 +969,14 @@ def build_all_scene_objects():
             if any(cid in mid for cid in CONE_IDS):
                 shape = 'cone'
             elif mt == 5:
-                # FileMesh: реальный размер = родной размер меша * Scale,
-                # Size детали НЕ участвует — передаём Scale клиенту.
+                # FileMesh: the real size = the mesh's native size * Scale,
+                # the part's Size does NOT take part — we pass Scale to the client.
                 mesh_scale = [msx, msy, msz]
             elif mt in MESHTYPE_TO_SHAPE:
                 shape = MESHTYPE_TO_SHAPE[mt]
                 if shape == 'head':
-                    # Head-меш — скруглённый цилиндр; ширина = глубине
-                    # (иначе у R6 Head 2x1x1 получилась бы 2.5 в ширину).
+                    # Head mesh — a rounded cylinder; the width = the depth
+                    # (otherwise the R6 Head 2x1x1 would come out 2.5 wide).
                     sx, sy, sz_ = sz_ * msx, sy * msy, sz_ * msz
                 else:
                     sx, sy, sz_ = sx * msx, sy * msy, sz_ * msz
@@ -984,7 +984,7 @@ def build_all_scene_objects():
                 mesh_offset = [mox, moy, moz]
         name = props.get('Name', cls)
 
-        # Enum.Material и MaterialVariant детали
+        # The part's Enum.Material and MaterialVariant
         material = props.get('Material')
         if not isinstance(material, int):
             material = 256
@@ -993,7 +993,7 @@ def build_all_scene_objects():
         if mv_name:
             mvar = material_variants.get((mv_name, material))
 
-        # Одежда R6 (Shirt/Pants рядом с частью в той же Model)
+        # R6 clothing (Shirt/Pants next to the part in the same Model)
         cloth = None
         kinds = R6_CLOTH_LIMBS.get(name) if cls == 'Part' else None
         if kinds:
@@ -1010,9 +1010,9 @@ def build_all_scene_objects():
         texture_id, texture_face = _extract_part_texture_id(
             ref, cls, props, children_by_parent, parsed['props'],
             parsed['referent_to_class'])
-        # Прозрачность самого Decal (0..1). Decal на невидимой детали (Transparency=1) — частый
-        # приём для постеров/вывесок: деталь не видна, а картинка видна. Раньше текстура
-        # красилась прозрачностью ДЕТАЛИ, и такие постеры пропадали.
+        # The Decal's own transparency (0..1). A Decal on an invisible part (Transparency=1) is a common
+        # trick for posters/signs: the part isn't visible, but the picture is. Previously the texture
+        # was tinted with the PART's transparency, and such posters disappeared.
         texture_opacity = None
         if texture_id and texture_face is not None and texture_face != '':
             for _ch in children_by_parent.get(ref, ()):
@@ -1039,13 +1039,13 @@ def build_all_scene_objects():
         if isinstance(cancollide, str):
             cancollide = cancollide.lower() in ('true', '1')
 
-        # У юниона есть настоящий меш, если SolidMeshHolder декодируется.
-        # Сам меш по сети не гоняем — клиент заберёт его по /api/union_mesh.
+        # A union has a real mesh if SolidMeshHolder decodes.
+        # We don't send the mesh itself over the network — the client fetches it via /api/union_mesh.
         union_mesh = (cls == 'UnionOperation'
                       and union_mesh_from_parsed(parsed, ref) is not None)
 
-        # PivotOffset детали (смещение точки вращения для GetPivot/PivotTo —
-        # например петля двери): [x, y, z, R00..R22]; None, если единичный.
+        # The part's PivotOffset (an offset of the rotation point for GetPivot/PivotTo —
+        # for example a door hinge): [x, y, z, R00..R22]; None if identity.
         pivot_offset = None
         _po = props.get('PivotOffset')
         if isinstance(_po, dict):
@@ -1055,8 +1055,8 @@ def build_all_scene_objects():
                     or any(abs(x - y) > 1e-6 for x, y in zip(_pr, [1, 0, 0, 0, 1, 0, 0, 0, 1]))):
                 pivot_offset = _pp + _pr
 
-        # Деталь лежит в контейнере, которого нет в мире (ServerStorage/ReplicatedStorage — склад шаблонов): клиент не рисует её
-        # и не даёт ей физику, но данные оставляет — по ним Clone() строит меш копии в Workspace.
+        # The part lies in a container that doesn't exist in the world (ServerStorage/ReplicatedStorage — a template storage): the client doesn't draw it
+        # and gives it no physics, but keeps the data — Clone() builds the copy's mesh in Workspace from it.
         _root = ref
         _pm = parsed['parent_map']
         _r2c = parsed['referent_to_class']
@@ -1093,31 +1093,31 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=Fals
     parsed = state['parsed']
     if not parsed:
         return [], 0
-    # nw-детали (ServerStorage/ReplicatedStorage/StarterPack) не рисуем и не считаем в limit/total
+    # nw parts (ServerStorage/ReplicatedStorage/StarterPack) aren't drawn and aren't counted in limit/total
     objs = [o for o in build_all_scene_objects() if not o.get('nw')]
 
     if chunk:
         objs = chunk_large_objects(objs)
 
-    # Можно передать несколько точек (не только cx,cy,cz) — дистанция
-    # объекта берётся как минимум до любой из них. Используется вторым,
-    # points-based путём в api_scene (обычная загрузка сцены редактора);
-    # основной Play-стриминг теперь идёт через chunk-based
-    # gather_objects_in_radius выше и этот путь не задействует.
+    # Several points can be passed (not only cx,cy,cz) — the object's distance
+    # is taken as the minimum to any of them. Used by the second,
+    # points-based path in api_scene (the editor's ordinary scene load);
+    # the main Play streaming now goes through the chunk-based
+    # gather_objects_in_radius above and doesn't use this path.
     query_points = list(points) if points else (
         [(cx, cy, cz)] if cx is not None and cy is not None and cz is not None else []
     )
 
     if query_points:
         def dist_to_nearest_point(o):
-            # Расстояние до центра занижает приоритет больших объектов:
-            # у длинной плиты пола центр может быть в сотне студов от
-            # игрока, а край — прямо под ногами. Аппроксимируем нижней
-            # оценкой расстояния до объекта — вычитаем полудиагональ
-            # его габаритов (радиус описанной сферы) из расстояния до
-            # центра. Оценка консервативная (может немного занижать
-            # реальную дистанцию до OBB), но гарантированно не отбросит
-            # объект, который на самом деле рядом.
+            # The distance to the center understates the priority of large objects:
+            # a long floor slab can have its center a hundred studs from
+            # the player, while its edge is right under the feet. We approximate with a lower
+            # bound of the distance to the object — we subtract the half-diagonal of
+            # its dimensions (the radius of the circumscribed sphere) from the distance to
+            # the center. The estimate is conservative (it may slightly understate
+            # the real distance to the OBB), but is guaranteed not to discard
+            # an object that is actually nearby.
             bounding_radius = math.sqrt(
                 o['sx'] ** 2 + o['sy'] ** 2 + o['sz'] ** 2) * 0.5
             best = None
@@ -1141,36 +1141,36 @@ def make_scene_objects(cx=None, cy=None, cz=None, r=None, limit=None, chunk=Fals
 
 flask_app = Flask(__name__)
 
-# ============ СОВМЕСТНАЯ РАБОТА (2+ человека над одной картой) ============
-# Сервер один и держит единственное состояние карты (state['parsed']); второй
-# человек открывает тот же адрес (http://<ip-хоста>:PORT) и вводит код комнаты.
-# Все правки идут через те же эндпоинты, что и раньше — каждый из них обёрнут в
-# @_collab_track(...): декоратор под общим замком снимает «до»-снимок, пускает
-# правку и пишет в журнал операцию с обратным действием (undo) — отсюда
-# история «кто что поменял» и откат до ревизии. Клиент (collab.js) раз в
-# несколько секунд long-poll'ит /api/collab/poll и перечитывает дерево/сцену.
-# Выключено по умолчанию: пока хост не нажал «Начать» (/api/collab/start),
-# декоратор ничего не пишет и поведение редактора прежнее. Пока комната
-# включена, не-локальные запросы на запись требуют заголовок X-Collab-Token.
+# ============ COLLABORATION (2+ people on one map) ============
+# There is one server and it holds the single map state (state['parsed']); the second
+# person opens the same address (http://<host-ip>:PORT) and enters the room code.
+# All edits go through the same endpoints as before — each of them is wrapped in
+# @_collab_track(...): under a shared lock the decorator takes a «before» snapshot, lets the
+# edit through and writes an operation with the inverse action (undo) to the log — hence
+# the «who changed what» history and rollback to a revision. The client (collab.js) long-polls
+# /api/collab/poll every few seconds and re-reads the tree/scene.
+# Off by default: until the host presses «Start» (/api/collab/start),
+# the decorator writes nothing and the editor's behavior is as before. While the room
+# is on, non-local write requests require the X-Collab-Token header.
 import copy as _copy
 import functools as _functools
 import secrets as _secrets
 import socket as _socket
 import threading as _threading
 
-COLLAB_MAX_OPS = 2000          # длина журнала; старые ревизии выпадают из истории
-COLLAB_MAX_UNDO_BYTES = 65536  # Source скрипта больше этого не снимаем (правка не откатывается)
-COLLAB_PEER_TTL = 15           # секунд без poll — человек считается ушедшим
+COLLAB_MAX_OPS = 2000          # log length; old revisions drop out of the history
+COLLAB_MAX_UNDO_BYTES = 65536  # We no longer snapshot a script's Source (such an edit isn't rolled back)
+COLLAB_PEER_TTL = 15           # seconds without a poll — the person is considered gone
 
 _collab = {
     'on': False, 'token': None, 'rev': 0, 'base': 0,
     'ops': [],      # {rev,t,by,byId,type,ref,name,cls,prop,n,undo,redo}
     'peers': {},    # id -> {name, seen, sel}
-    'pv': 0,        # версия «присутствия»: меняется, когда кто-то вошёл/сменил выбранный объект
+    'pv': 0,        # «presence» version: changes when someone joined/changed their selected object
 }
-# Один замок на всё: правка карты + запись в журнал атомарны (а api_add без
-# замка мог бы выдать двум одновременным PUT один и тот же ref); Condition на
-# нём же будит long-poll'ы.
+# One lock for everything: a map edit + a log write are atomic (while api_add without
+# a lock could hand the same ref to two simultaneous PUTs); the Condition on
+# it wakes the long-polls.
 _collab_cond = _threading.Condition(_threading.RLock())
 _MISSING = object()
 
@@ -1181,7 +1181,7 @@ def _collab_is_local():
 
 def _collab_who():
     cid = (request.headers.get('X-Collab-Id') or '')[:40]
-    # имя приходит в заголовке через encodeURIComponent (кириллица в заголовках нельзя)
+    # the name arrives in a header via encodeURIComponent (Cyrillic isn't allowed in headers)
     name = _urlparse.unquote(request.headers.get('X-Collab-Name') or '').strip()[:32]
     if not name:
         name = 'host' if _collab_is_local() else (request.remote_addr or '?')
@@ -1190,8 +1190,8 @@ def _collab_who():
 
 def _collab_push(typ, ref=None, name='', cls='', prop='', n=1, undo=None, redo=None,
                  who=None, remote=False):
-    """Дописывает операцию в журнал (вызывать под _collab_cond). remote=True — правка
-    пришла через git от другого автора (who): в свой журнал пишем, но обратно не отправляем."""
+    """Appends an operation to the log (call under _collab_cond). remote=True — the edit
+    came through git from another author (who): we write it to our own log, but don't send it back."""
     c = _collab
     cid, me = _collab_who()
     if remote:
@@ -1199,8 +1199,8 @@ def _collab_push(typ, ref=None, name='', cls='', prop='', n=1, undo=None, redo=N
     else:
         who = me
     last = c['ops'][-1] if c['ops'] else None
-    # подряд идущие правки ОДНОГО свойства одним человеком за 5 с — одна запись
-    # (поле ввода / автосохранение скрипта): undo остаётся самым первым старым значением
+    # consecutive edits of the SAME property by one person within 5 s — one entry
+    # (an input field / script autosave): undo stays the very first old value
     if (typ == 'set' and not remote and last and last['type'] == 'set' and cid and last['byId'] == cid
             and last['ref'] == ref and last['prop'] == prop and time.time() - last['t'] < 5):
         c['rev'] += 1
@@ -1223,18 +1223,18 @@ def _collab_push(typ, ref=None, name='', cls='', prop='', n=1, undo=None, redo=N
 
 
 def _collab_reset(typ='reload'):
-    """Открыта/создана другая карта: история старой карты бессмысленна."""
+    """Another map was opened/created: the old map's history is meaningless."""
     c = _collab
     c['ops'] = []
     _collab_push(typ)
     c['base'] = c['rev']
 
 
-# --- примитивные действия, из которых собираются undo/redo ---
-# ('props', ref, {prop: значение | _MISSING})  — вернуть значения свойств
-# ('put',   ref, cls, parent, props)           — создать/восстановить объект
-# ('rm',    ref)                               — удалить объект
-# ('parent', ref, parent)                      — сменить родителя
+# --- primitive actions that undo/redo are assembled from ---
+# ('props', ref, {prop: value | _MISSING})  — restore property values
+# ('put',   ref, cls, parent, props)           — create/restore an object
+# ('rm',    ref)                               — delete an object
+# ('parent', ref, parent)                      — change the parent
 
 def _collab_apply(parsed, acts):
     for a in acts:
@@ -1263,7 +1263,7 @@ def _collab_apply(parsed, acts):
 
 
 def _collab_obj(parsed, ref):
-    """(класс, имя) объекта для подписи в ленте."""
+    """(class, name) of an object for the feed label."""
     cls = parsed['referent_to_class'].get(ref, '')
     return cls, str(parsed['props'].get(ref, {}).get('Name', ''))[:60]
 
@@ -1274,7 +1274,7 @@ def _collab_snapshot_props(parsed, ref, names):
 
 
 def _collab_track(kind):
-    """Декоратор правящих эндпоинтов. kind: set | add | del | move | reload | import."""
+    """Decorator for editing endpoints. kind: set | add | del | move | reload | import."""
     def deco(fn):
         @_functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -1282,7 +1282,7 @@ def _collab_track(kind):
                 if not (_collab['on'] or _cg['on']):
                     return fn(*args, **kwargs)
                 if kind == 'reload' and _collab['on'] and not _collab_is_local():
-                    return jsonify({'ok': False, 'error': 'Карту открывает только хост'}), 403
+                    return jsonify({'ok': False, 'error': _alang('Карту открывает только хост', 'Only the host can open a map')}), 403
                 parsed = state['parsed']
                 body = request.get_json(silent=True) if request.is_json else None
                 body = body if isinstance(body, dict) else {}
@@ -1304,7 +1304,7 @@ def _collab_track(kind):
                         pm = parsed['parent_map']
                         pre = {r: pm.get(r, -1) for r in (body.get('refs') or [])
                                if isinstance(r, int)}
-                except Exception:   # снимок не должен ломать саму правку
+                except Exception:   # a snapshot must not break the edit itself
                     traceback.print_exc()
                     pre = None
                 rv = fn(*args, **kwargs)
@@ -1316,7 +1316,7 @@ def _collab_track(kind):
                     parsed = state['parsed']
                     if kind in ('reload',):
                         if _cg['on']:
-                            _cg_disable('Открыта другая карта — git отключён, подключите заново')
+                            _cg_disable(_alang('Открыта другая карта — git отключён, подключите заново', 'Another map is open — git is disconnected, connect again'))
                         _collab_reset('reload')
                     elif kind == 'import':
                         _collab_push('import', n=int(js.get('count') or 0))
@@ -1356,7 +1356,7 @@ def _collab_track(kind):
 
 @flask_app.before_request
 def _collab_gate():
-    """Пока комната включена: запись и /api/collab/* — только локально или с кодом."""
+    """While the room is on: writing and /api/collab/* — only locally or with a code."""
     c = _collab
     if not c['on'] or not request.path.startswith('/api/'):
         return None
@@ -1369,7 +1369,7 @@ def _collab_gate():
     tok = request.headers.get('X-Collab-Token') or ''
     if c['token'] and _secrets.compare_digest(tok, c['token']):
         return None
-    return jsonify({'ok': False, 'error': 'Нужен код комнаты', 'needToken': True}), 403
+    return jsonify({'ok': False, 'error': _alang('Нужен код комнаты', 'A room code is required'), 'needToken': True}), 403
 
 
 def _collab_public(op):
@@ -1390,15 +1390,15 @@ def _collab_touch():
         _collab['peers'][cid] = {'name': who, 'seen': time.time(), 'sel': sel}
         if old is None or old['sel'] != sel or old['name'] != who:
             _collab['pv'] += 1
-            _collab_cond.notify_all()       # разбудить чужие poll'ы — пусть сразу увидят
+            _collab_cond.notify_all()       # wake other people's polls — let them see it right away
 
 
 def _collab_lan_urls():
-    """Адреса ЭТОГО устройства во всех сетях. Гостю нужен тот, что из его сети: дома это
-    обычно 192.168.x.x, а 10.x — часто VPN/виртуальный адаптер или корпоративная сеть."""
+    """ADDRESSES of THIS device on all networks. A guest needs the one from their network: at home it is
+    usually 192.168.x.x, while 10.x is often a VPN/virtual adapter or a corporate network."""
     ips = set()
-    # интерфейс маршрута по умолчанию и по одному «пробному» адресу из каждой частной сети:
-    # пакет не уходит — ОС лишь выбирает интерфейс (так находятся и виртуальные адаптеры)
+    # the default-route interface and one «probe» address from each private network:
+    # no packet is sent — the OS just picks an interface (this is how virtual adapters are found too)
     for probe in ('8.8.8.8', '192.168.255.255', '172.16.255.255', '10.255.255.255'):
         try:
             s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
@@ -1428,7 +1428,7 @@ def api_collab_status():
     with _collab_cond:
         out = {'ok': True, 'on': c['on'], 'rev': c['rev'], 'base': c['base'],
                'peers': _collab_peers(), 'local': _collab_is_local()}
-        if c['on'] and _collab_is_local():       # код и адреса видит только хост
+        if c['on'] and _collab_is_local():       # the code and addresses are seen only by the host
             out['token'] = c['token']
             out['urls'] = _collab_lan_urls()
         return jsonify(out)
@@ -1437,11 +1437,11 @@ def api_collab_status():
 @flask_app.route('/api/collab/start', methods=['POST'])
 def api_collab_start():
     if not _collab_is_local():
-        return jsonify({'ok': False, 'error': 'Комнату запускает только хост'}), 403
+        return jsonify({'ok': False, 'error': _alang('Комнату запускает только хост', 'Only the host can start the room')}), 403
     with _collab_cond:
         if not _collab['on']:
             _collab['on'] = True
-            # без похожих символов (0/O, 1/I) — код диктуют голосом
+            # without look-alike characters (0/O, 1/I) — the code is dictated by voice
             _collab['token'] = ''.join(_secrets.choice('ABCDEFGHJKMNPQRSTUVWXYZ23456789') for _ in range(6))
             _collab_reset('reload')
         _collab_cond.notify_all()
@@ -1451,7 +1451,7 @@ def api_collab_start():
 @flask_app.route('/api/collab/stop', methods=['POST'])
 def api_collab_stop():
     if not _collab_is_local():
-        return jsonify({'ok': False, 'error': 'Комнату закрывает только хост'}), 403
+        return jsonify({'ok': False, 'error': _alang('Комнату закрывает только хост', 'Only the host can close the room')}), 403
     with _collab_cond:
         _collab.update({'on': False, 'token': None, 'ops': [], 'peers': {}})
         _collab['base'] = _collab['rev']
@@ -1463,15 +1463,15 @@ def api_collab_stop():
 def api_collab_join():
     with _collab_cond:
         if not _collab['on']:
-            return jsonify({'ok': False, 'error': 'Комната не запущена'}), 404
+            return jsonify({'ok': False, 'error': _alang('Комната не запущена', 'The room is not running')}), 404
         _collab_touch()
         return jsonify({'ok': True, 'rev': _collab['rev'], 'peers': _collab_peers()})
 
 
 @flask_app.route('/api/collab/poll')
 def api_collab_poll():
-    """Long-poll: ждёт ревизию новее since (до wait секунд). Если since больше
-    текущей ревизии (сервер перезапускали) — reset=True, клиент перечитывает всё."""
+    """Long-poll: waits for a revision newer than since (up to wait seconds). If since is greater than
+    the current revision (the server was restarted) — reset=True, the client re-reads everything."""
     since = request.args.get('since', 0, type=int)
     wait = min(max(request.args.get('wait', 15, type=float), 0), 25)
     deadline = time.time() + wait
@@ -1495,7 +1495,7 @@ def api_collab_poll():
 
 @flask_app.route('/api/collab/ping')
 def api_collab_ping():
-    """Лёгкая отметка присутствия: клиент зовёт при смене выбранного объекта."""
+    """A light presence mark: the client calls it when the selected object changes."""
     with _collab_cond:
         if _collab['on']:
             _collab_touch()
@@ -1506,33 +1506,33 @@ def api_collab_ping():
 def api_collab_history():
     limit = min(request.args.get('limit', 100, type=int), COLLAB_MAX_OPS)
     with _collab_cond:
-        ops = _collab['ops'][-limit:][::-1]       # новые сверху
+        ops = _collab['ops'][-limit:][::-1]       # newest on top
         return jsonify({'ok': True, 'rev': _collab['rev'], 'base': _collab['base'],
                         'ops': [dict(_collab_public(o), undoable=o['undo'] is not None) for o in ops]})
 
 
 @flask_app.route('/api/collab/revert', methods=['POST'])
 def api_collab_revert():
-    """Откат карты к состоянию сразу ПОСЛЕ ревизии `rev`: undo всех более поздних
-    операций от новых к старым. История не переписывается — откат сам становится
-    операцией (его тоже можно откатить)."""
+    """Rolls the map back to the state right AFTER revision `rev`: undoes all later
+    operations from newest to oldest. History is not rewritten — the rollback itself becomes
+    an operation (it can be rolled back too)."""
     body = request.get_json(silent=True) or {}
     try:
         target = int(body.get('rev'))
     except (TypeError, ValueError):
-        return jsonify({'ok': False, 'error': 'Нужен rev'}), 400
+        return jsonify({'ok': False, 'error': _alang('Нужен rev', 'rev is required')}), 400
     with _collab_cond:
         c, parsed = _collab, state['parsed']
         if not c['on'] or not parsed:
-            return jsonify({'ok': False, 'error': 'Нет открытой комнаты/карты'}), 400
+            return jsonify({'ok': False, 'error': _alang('Нет открытой комнаты/карты', 'No open room/map')}), 400
         if target < c['base'] or target > c['rev']:
-            return jsonify({'ok': False, 'error': 'Эта ревизия уже выпала из истории'}), 400
+            return jsonify({'ok': False, 'error': _alang('Эта ревизия уже выпала из истории', 'This revision has already dropped out of the history')}), 400
         later = [o for o in c['ops'] if o['rev'] > target]
         if not later:
             return jsonify({'ok': True, 'reverted': 0, 'rev': c['rev']})
         bad = [o['rev'] for o in later if o['undo'] is None]
         if bad:
-            return jsonify({'ok': False, 'error': 'Не откатываются операции: %s' % bad[:5]}), 409
+            return jsonify({'ok': False, 'error': _alang('Не откатываются операции: %s', 'These operations cannot be reverted: %s') % bad[:5]}), 409
         undo_all = [a for o in reversed(later) for a in o['undo']]
         redo_all = [a for o in later for a in o['redo']]
         _collab_apply(parsed, undo_all)
@@ -1540,15 +1540,15 @@ def api_collab_revert():
         return jsonify({'ok': True, 'reverted': len(later), 'rev': c['rev']})
 
 
-# ---------- запасной вариант: правки через git-сервер ----------
-# Когда напрямую не достучаться (разные сети, изоляция клиентов Wi-Fi, закрытые
-# порты), правки ездят через любой git-репозиторий. В репозитории лежит base.rbxl
-# (исходная карта) и ops/<автор>.jsonl — журнал правок КАЖДОГО автора в его
-# собственном файле, поэтому git никогда не видит конфликта слияния. «Синхронизировать»
-# = дописать свои новые правки → fetch+rebase → применить чужие → push.
-# Новые объекты у двоих могут получить один и тот же ref (api_add берёт max+1),
-# поэтому в файле объекты названы каноническими именами: число — объект исходной
-# карты, [автор, ref] — созданный позже; каждый перекладывает их в свои ref'ы.
+# ---------- fallback: edits through a git server ----------
+# When there is no direct connection (different networks, Wi-Fi client isolation, closed
+# ports), edits travel through any git repository. The repository holds base.rbxl
+# (the original map) and ops/<author>.jsonl — the edit log of EACH author in their
+# own file, so git never sees a merge conflict. «Synchronize»
+# = append own new edits → fetch+rebase → apply others' → push.
+# New objects of two people can get the same ref (api_add takes max+1),
+# so in the file objects are named by canonical names: a number — an object of the original
+# map, [author, ref] — one created later; everyone maps them to their own refs.
 import json as _json
 import re as _re
 import shutil as _shutil
@@ -1571,7 +1571,7 @@ def _cg_save():
 
 
 def _cg_restore():
-    """После перезапуска редактора подхватываем уже подключённый репозиторий."""
+    """After the editor restarts we pick up the already connected repository."""
     try:
         with open(_cg_path('.git', 'rsw-sync.json'), encoding='utf-8') as f:
             d = _json.load(f)
@@ -1595,17 +1595,17 @@ def _cg_git(*args, cwd=None, timeout=90):
                             text=True, timeout=timeout,
                             env=dict(os.environ, GIT_TERMINAL_PROMPT='0', LC_ALL='C'))
     except FileNotFoundError:
-        return 127, 'git не найден: установите git и перезапустите редактор'
+        return 127, _alang('git не найден: установите git и перезапустите редактор', 'git not found: install git and restart the editor')
     except _subprocess.TimeoutExpired:
-        return 124, 'git: нет ответа (сеть или запрос пароля). Настройте вход заранее: SSH-ключ или токен'
+        return 124, _alang('git: нет ответа (сеть или запрос пароля). Настройте вход заранее: SSH-ключ или токен', 'git: no response (network or a password prompt). Set up sign-in beforehand: an SSH key or a token')
     return p.returncode, ((p.stdout or '') + (p.stderr or '')).strip()
 
 
-# --- JSON-представление действий (кортежи/«нет свойства» не живут в JSON) ---
+# --- JSON representation of actions (tuples/«no property» don't live in JSON) ---
 def _cg_enc(v):
     if v is _MISSING:
         return {'__m': 1}
-    if isinstance(v, (bytes, bytearray)):          # бинарные свойства (Terrain, атрибуты и т.п.)
+    if isinstance(v, (bytes, bytearray)):          # binary properties (Terrain, attributes, etc.)
         return {'__b': _b64.b64encode(bytes(v)).decode('ascii')}
     if isinstance(v, tuple):
         return {'__t': [_cg_enc(x) for x in v]}
@@ -1643,7 +1643,7 @@ def _cg_acts_json(acts):
 
 
 def _cg_pending_add(op):
-    """Каждая своя правка сразу дописывается на диск — переживёт перезапуск до отправки."""
+    """Each own edit is appended to disk immediately — it survives a restart before sending."""
     if not _cg['on'] or op['type'] not in ('set', 'add', 'del', 'move', 'revert', 'import'):
         return
     rec = {k: op[k] for k in ('t', 'type', 'name', 'cls', 'prop', 'n')}
@@ -1663,7 +1663,7 @@ def _cg_pending_count():
         return 0
 
 
-# --- ref'ы: локальный <-> канонический ---
+# --- refs: local <-> canonical ---
 def _cg_cref(s, ref):
     if not isinstance(ref, int) or ref < 0:
         return ref
@@ -1703,7 +1703,7 @@ def _cg_canon_act(s, a):
 
 
 def _cg_local_act(s, parsed, a):
-    """Действие из файла -> внутренний кортеж с локальными ref'ами (None — объекта у нас нет)."""
+    """An action from a file -> an internal tuple with local refs (None — we don't have the object)."""
     k = a[0]
     if k == 'put':
         ref = _cg_lref(s, parsed, a[1], create=True)
@@ -1721,7 +1721,7 @@ def _cg_local_act(s, parsed, a):
 
 
 def _collab_inverse(parsed, a):
-    """Обратное действие для одного действия — снимается ДО его применения."""
+    """The inverse action for a single action — taken BEFORE it is applied."""
     k, ref = a[0], a[1]
     r2c = parsed['referent_to_class']
     if k == 'props':
@@ -1738,15 +1738,15 @@ def _collab_inverse(parsed, a):
 
 
 def _cg_mask(u):
-    """Токен/пароль внутри https-адреса (https://TOKEN@… или user:pass@…) наружу не отдаём."""
+    """A token/password inside an https address (https://TOKEN@… or user:pass@…) is never given out."""
     return _re.sub(r'(https?://)[^/@\s]+@', r'\1***@', u or '')
 
 
 def _cg_lww(s, a, t, who, local=False):
-    """«Последний победил» для props/parent: у каждой пары (объект, свойство) помним
-    (время, автор) последней применённой правки. Порядок (время, автор) общий для всех,
-    поэтому при одновременной правке все приходят к одному значению. local=True — только
-    запомнить свою правку. Возвращает действие (возможно, без устаревших свойств) или None."""
+    """«Last one wins» for props/parent: for each (object, property) pair we remember
+    (time, author) of the last applied edit. The (time, author) order is common to everyone,
+    so with simultaneous edits everyone converges on one value. local=True — only
+    remember our own edit. Returns the action (possibly without stale properties) or None."""
     if a[0] not in ('props', 'parent'):
         return a
     stamp, st, ref = s.setdefault('stamp', {}), (t, who), _json.dumps(a[1])
@@ -1767,7 +1767,7 @@ def _cg_lww(s, a, t, who, local=False):
 
 
 def _cg_export():
-    """Свои новые правки -> ops/<я>.jsonl (с каноническими ref'ами). Возвращает, сколько записано."""
+    """Own new edits -> ops/<me>.jsonl (with canonical refs). Returns how many were written."""
     s, pf = _cg['sync'], _cg_path('.git', 'rsw-pending.jsonl')
     if not os.path.exists(pf):
         return 0
@@ -1784,7 +1784,7 @@ def _cg_export():
         for o in raw:
             acts = o.get('acts')
             if o['type'] == 'add' and acts:
-                s['mine'].add(acts[0][1])          # с этого момента объект — «мой»
+                s['mine'].add(acts[0][1])          # from now on the object is «mine»
             if acts is not None:
                 acts = [_cg_canon_act(s, a) for a in acts]
                 for a in acts:
@@ -1799,7 +1799,7 @@ def _cg_export():
 
 
 def _cg_apply_remote():
-    """Применяет чужие правки из ops/*.jsonl, которых мы ещё не видели. -> (применено, пропущено)."""
+    """Applies other people's edits from ops/*.jsonl that we haven't seen yet. -> (applied, skipped)."""
     s, parsed = _cg['sync'], state['parsed']
     ops_dir = _cg_path('ops')
     done = skipped = 0
@@ -1817,21 +1817,21 @@ def _cg_apply_remote():
             try:
                 o = _json.loads(l)
             except ValueError:
-                break                              # недописанная строка — доберём в следующий раз
+                break                              # an unfinished line — we'll pick it up next time
             batch.append((o.get('t', 0), slug, i, o))
             cur = i + 1
         newcur[slug] = cur
-    # правки разных авторов — в порядке времени: так объект (put) раньше правок, которые на него ссылаются
+    # edits of different authors — in time order: so an object (put) comes before the edits that refer to it
     batch.sort(key=lambda x: (x[0], x[1], x[2]))
     for t, slug, _i, o in batch:
         if o.get('acts') is None:
-            skipped += 1                           # import и т.п.: из файла не воспроизвести
+            skipped += 1                           # import etc.: can't be reproduced from a file
             continue
         undo, redo, first = [], [], None
         for a in o['acts']:
             a = _cg_lww(s, a, t, slug)
             if a is None:
-                continue                           # у нас уже есть более свежая правка
+                continue                           # we already have a fresher edit
             la = _cg_local_act(s, parsed, a)
             if la is None:
                 continue
@@ -1862,14 +1862,14 @@ def _cg_fail(msg, code=400):
 
 def _cg_host_only():
     if not _collab_is_local():
-        return jsonify({'ok': False, 'error': 'Git-синхронизацию настраивает только хост'}), 403
+        return jsonify({'ok': False, 'error': _alang('Git-синхронизацию настраивает только хост', 'Only the host configures git synchronization')}), 403
     return None
 
 
-# --- транспорт без git: напрямую через GitHub API (для APK, где нет бинарника git) ---
-# Те же файлы (meta.json, base.rbxl, ops/<автор>.jsonl), только вместо clone/push/fetch —
-# запросы к REST API репозитория. Нужен токен с доступом к ОДНОМУ репозиторию
-# (fine-grained, Contents: Read and write); репозиторий не должен быть пустым (хотя бы README).
+# --- transport without git: directly through the GitHub API (for the APK, which has no git binary) ---
+# The same files (meta.json, base.rbxl, ops/<author>.jsonl), only instead of clone/push/fetch —
+# requests to the repository's REST API. A token with access to ONE repository is needed
+# (fine-grained, Contents: Read and write); the repository must not be empty (at least a README).
 import base64 as _b64
 import hashlib as _hashlib
 import urllib.error as _urlerr
@@ -1879,7 +1879,7 @@ _GH_API = os.environ.get('RSW_GH_API') or 'https://api.github.com'
 
 
 def _gh_parse(remote):
-    """-> (владелец, репозиторий, токен-из-адреса) или None, если это не адрес GitHub."""
+    """-> (owner, repository, token-from-address) or None if this is not a GitHub address."""
     m = (_re.match(r'^(?:https?://(?:([^/@\s]+)@)?github\.com/|git@github\.com:|ssh://git@github\.com/|github\.com/)'
                    r'([\w.-]+)/([\w.-]+?)(?:\.git)?/?$', remote.strip())
          or _re.match(r'^()([\w.-]+)/([\w.-]+?)(?:\.git)?$', remote.strip()))
@@ -1890,7 +1890,7 @@ def _gh_parse(remote):
 
 
 def _gh_req(method, path, token, body=None, raw=False, timeout=60):
-    """-> (http-код, JSON | bytes | текст ошибки). Код 0 — нет связи."""
+    """-> (http code, JSON | bytes | error text). Code 0 — no connection."""
     data = _json.dumps(body).encode('utf-8') if body is not None else None
     req = _urlreq.Request(_GH_API + path, data=data, method=method)
     req.add_header('Authorization', 'Bearer ' + token)
@@ -1912,19 +1912,19 @@ def _gh_req(method, path, token, body=None, raw=False, timeout=60):
             msg = ''
         return e.code, msg or str(e)
     except (_urlerr.URLError, OSError) as e:
-        return 0, 'нет связи с GitHub (%s)' % e
+        return 0, _alang('нет связи с GitHub (%s)', 'no connection to GitHub (%s)') % e
 
 
 def _gh_err(st, msg):
     if st == 0:
         return msg
     if st == 401:
-        return 'GitHub не принял токен (401): он неверный или истёк'
+        return _alang('GitHub не принял токен (401): он неверный или истёк', 'GitHub rejected the token (401): it is invalid or expired')
     if st in (403, 404):
-        return ('GitHub %d: нет доступа к репозиторию. Проверьте имя и что у токена выбран именно этот '
-                'репозиторий с правом Contents: Read and write (%s)' % (st, msg))
+        return (_alang('GitHub %d: нет доступа к репозиторию. Проверьте имя и что у токена выбран именно этот '
+                'репозиторий с правом Contents: Read and write (%s)', 'GitHub %d: no access to the repository. Check the name and that the token has exactly this repository selected with Contents: Read and write (%s)') % (st, msg))
     if st == 409 and 'empty' in str(msg).lower():
-        return 'Репозиторий пустой: создайте его с файлом README (Add a README file) и повторите'
+        return _alang('Репозиторий пустой: создайте его с файлом README (Add a README file) и повторите', 'The repository is empty: create it with a README file (Add a README file) and try again')
     return 'GitHub %d: %s' % (st, msg)
 
 
@@ -1943,13 +1943,13 @@ def _gh_get(token, g, path, raw=False):
 
 def _cg_setup_api(owner, repo, token, name):
     if not _re.fullmatch(r'[A-Za-z0-9_\-]{10,255}', token):
-        return _cg_fail('Токен выглядит неверно: вставьте его целиком, без пробелов')
+        return _cg_fail(_alang('Токен выглядит неверно: вставьте его целиком, без пробелов', 'The token looks wrong: paste it in full, without spaces'))
     with _collab_cond:
         st, info = _gh_req('GET', '/repos/%s/%s' % (owner, repo), token)
         if st != 200:
             return _cg_fail(_gh_err(st, info))
         if (info.get('permissions') or {}).get('push') is False:
-            return _cg_fail('У токена нет права записи: нужен Contents: Read and write')
+            return _cg_fail(_alang('У токена нет права записи: нужен Contents: Read and write', 'The token has no write permission: Contents: Read and write is required'))
         g = {'owner': owner, 'repo': repo, 'branch': info.get('default_branch') or 'main',
              'sha': {}, 'mine': ''}
         st, meta = _gh_get(token, g, 'meta.json')
@@ -1960,16 +1960,16 @@ def _cg_setup_api(owner, repo, token, name):
         if joining:
             st, base = _gh_get(token, g, 'base.rbxl', raw=True)
             if st != 200:
-                return _cg_fail('Не удалось скачать base.rbxl: ' + _gh_err(st, base))
+                return _cg_fail(_alang('Не удалось скачать base.rbxl: ', 'Could not download base.rbxl: ') + _gh_err(st, base))
         else:
             parsed, src = state['parsed'], state['file_path']
             if not parsed or not src or not os.path.isfile(src):
-                return _cg_fail('Сначала откройте карту (с файла на диске)')
+                return _cg_fail(_alang('Сначала откройте карту (с файла на диске)', 'Open a map first (from a file on disk)'))
             if parsed.get('_modified'):
-                return _cg_fail('В карте есть несохранённые изменения: сохраните её (Save) и повторите')
-        if os.path.exists(_CG_DIR):                # прежнюю папку не удаляем — убираем в сторону
+                return _cg_fail(_alang('В карте есть несохранённые изменения: сохраните её (Save) и повторите', 'The map has unsaved changes: save it (Save) and try again'))
+        if os.path.exists(_CG_DIR):                # we don't delete the previous folder — we move it aside
             os.rename(_CG_DIR, _CG_DIR + '.old-%d' % int(time.time()))
-        # пустая .git нужна лишь как место для служебных файлов синхронизации (rsw-sync/pending)
+        # an empty .git is needed only as a place for sync service files (rsw-sync/pending)
         os.makedirs(_cg_path('.git'))
         os.makedirs(_cg_path('ops'))
         if joining:
@@ -1979,7 +1979,7 @@ def _cg_setup_api(owner, repo, token, name):
             try:
                 parsed = parse_rbxl(work)
             except Exception as e:
-                return _cg_fail('Не удалось открыть base.rbxl: %s' % e)
+                return _cg_fail(_alang('Не удалось открыть base.rbxl: %s', 'Could not open base.rbxl: %s') % e)
             state['parsed'], state['file_path'] = parsed, work
             _recents_add_file(work, name='work.rbxl (git)')
             if _collab['on']:
@@ -1991,7 +1991,7 @@ def _cg_setup_api(owner, repo, token, name):
             for path, blob in (('base.rbxl', data),
                                ('meta.json', _json.dumps({'format': 1, 'base': 'base.rbxl',
                                                           'created_by': name}).encode('utf-8'))):
-                st, r = _gh_put(token, g, path, blob, 'Начало совместной работы: ' + path)
+                st, r = _gh_put(token, g, path, blob, _alang('Начало совместной работы: ', 'Collaboration started: ') + path)
                 if st not in (200, 201):
                     return _cg_fail(_gh_err(st, r))
         _cg['sync'] = {'slug': slug, 'name': name, 'remote': 'github.com/%s/%s' % (owner, repo),
@@ -2012,12 +2012,12 @@ def _cg_setup_api(owner, repo, token, name):
 
 
 def _cg_fetch_api(s):
-    """Скачивает чужие ops-файлы, изменившиеся с прошлого раза. -> текст ошибки или None."""
+    """Downloads other people's ops files that changed since last time. -> error text or None."""
     g, token = s['gh'], s['token']
     mine = 'ops/%s.jsonl' % s['slug']
     st, lst = _gh_get(token, g, 'ops')
     if st == 404:
-        lst = []                                            # пока никто ничего не отправлял
+        lst = []                                            # nobody has sent anything yet
     elif st != 200 or not isinstance(lst, list):
         return _gh_err(st, lst)
     for e in lst:
@@ -2034,10 +2034,10 @@ def _cg_fetch_api(s):
 
 
 def _cg_sync_api():
-    """Отправить свой ops-файл, скачать изменившиеся чужие, применить (вызывать под _collab_cond)."""
+    """Send our own ops file, download changed ones of others, apply (call under _collab_cond)."""
     s = _cg['sync']
     g, token = s['gh'], s['token']
-    sent = _cg_export()          # свои правки -> локальный ops/<я>.jsonl (отправка ниже идемпотентна)
+    sent = _cg_export()          # own edits -> the local ops/<me>.jsonl (the sending below is idempotent)
     mine = 'ops/%s.jsonl' % s['slug']
     if os.path.exists(_cg_path(mine)):
         with open(_cg_path(mine), 'rb') as f:
@@ -2045,11 +2045,11 @@ def _cg_sync_api():
         h = _hashlib.sha256(data).hexdigest()
         if h != g.get('mine'):
             for attempt in (1, 2):
-                st, r = _gh_put(token, g, mine, data, 'Правки: %s' % s['name'], sha=g['sha'].get(mine))
+                st, r = _gh_put(token, g, mine, data, _alang('Правки: %s', 'Edits: %s') % s['name'], sha=g['sha'].get(mine))
                 if st in (200, 201):
                     g['sha'][mine], g['mine'] = r['content']['sha'], h
                     break
-                if st in (409, 422) and attempt == 1:       # потеряли sha (например, файл уже есть)
+                if st in (409, 422) and attempt == 1:       # lost the sha (for example, the file already exists)
                     st2, meta = _gh_get(token, g, mine)
                     if st2 == 200 and isinstance(meta, dict):
                         g['sha'][mine] = meta.get('sha')
@@ -2079,8 +2079,8 @@ def api_cg_status():
 
 @flask_app.route('/api/collab/git/setup', methods=['POST'])
 def api_cg_setup():
-    """Подключает репозиторий. Пустой — стартуем с текущей карты (base.rbxl);
-    с base.rbxl внутри — вступаем: открывается карта из репозитория и применяются правки."""
+    """Connects a repository. If empty — we start from the current map (base.rbxl);
+    if it has base.rbxl inside — we join: the map from the repository is opened and the edits are applied."""
     bad = _cg_host_only()
     if bad:
         return bad
@@ -2088,18 +2088,18 @@ def api_cg_setup():
     remote = (body.get('remote') or '').strip()
     name = (body.get('name') or '').strip()[:32] or 'Host'
     if not remote:
-        return _cg_fail('Укажите адрес репозитория')
+        return _cg_fail(_alang('Укажите адрес репозитория', 'Enter the repository address'))
     if remote.startswith('-') or any(c in remote for c in '\r\n\x00') or _re.match(r'[A-Za-z][A-Za-z0-9+.-]*::', remote):
-        return _cg_fail('Некорректный адрес репозитория')
+        return _cg_fail(_alang('Некорректный адрес репозитория', 'Invalid repository address'))
     gh = _gh_parse(remote)
     token = (body.get('token') or '').strip() or (gh[2] if gh else '')
     if gh and token and (body.get('api') or not _shutil.which('git')):
-        return _cg_setup_api(gh[0], gh[1], token, name)      # без git: через GitHub API
+        return _cg_setup_api(gh[0], gh[1], token, name)      # without git: via the GitHub API
     if not _shutil.which('git'):
-        return _cg_fail('git на этом устройстве нет (так в APK). Укажите токен GitHub — тогда синхронизация '
-                        'пойдёт напрямую через интернет, без git')
+        return _cg_fail(_alang('git на этом устройстве нет (так в APK). Укажите токен GitHub — тогда синхронизация '
+                        'пойдёт напрямую через интернет, без git', 'There is no git on this device (as in the APK). Enter a GitHub token — then synchronization will go directly over the internet, without git'))
     with _collab_cond:
-        if os.path.exists(_CG_DIR):                # прежнюю папку не удаляем — убираем в сторону
+        if os.path.exists(_CG_DIR):                # we don't delete the previous folder — we move it aside
             os.rename(_CG_DIR, _CG_DIR + '.old-%d' % int(time.time()))
         rc, out = _cg_git('clone', '--', remote, _CG_DIR, cwd=os.path.dirname(_CG_DIR), timeout=180)
         if rc != 0:
@@ -2114,7 +2114,7 @@ def api_cg_setup():
             try:
                 parsed = parse_rbxl(work)
             except Exception as e:
-                return _cg_fail('Не удалось открыть base.rbxl: %s' % e)
+                return _cg_fail(_alang('Не удалось открыть base.rbxl: %s', 'Could not open base.rbxl: %s') % e)
             state['parsed'], state['file_path'] = parsed, work
             _recents_add_file(work, name='work.rbxl (git)')
             if _collab['on']:
@@ -2123,9 +2123,9 @@ def api_cg_setup():
         else:
             parsed, src = state['parsed'], state['file_path']
             if not parsed or not src or not os.path.isfile(src):
-                return _cg_fail('Сначала откройте карту (с файла на диске)')
+                return _cg_fail(_alang('Сначала откройте карту (с файла на диске)', 'Open a map first (from a file on disk)'))
             if parsed.get('_modified'):
-                return _cg_fail('В карте есть несохранённые изменения: сохраните её (Save) и повторите')
+                return _cg_fail(_alang('В карте есть несохранённые изменения: сохраните её (Save) и повторите', 'The map has unsaved changes: save it (Save) and try again'))
             _shutil.copyfile(src, _cg_path('base.rbxl'))
             with open(_cg_path('.gitignore'), 'w', encoding='utf-8') as f:
                 f.write('work.rbxl\n')
@@ -2138,7 +2138,7 @@ def api_cg_setup():
         _cg_save()
         if not joining:
             _cg_git('add', '-A')
-            rc, out = _cg_git('commit', '-m', 'Начало совместной работы: исходная карта')
+            rc, out = _cg_git('commit', '-m', _alang('Начало совместной работы: исходная карта', 'Collaboration started: the original map'))
             rc, out = _cg_git('push', '-u', 'origin', 'main', timeout=180)
             if rc != 0:
                 return _cg_fail('git push: ' + out[-400:])
@@ -2155,16 +2155,16 @@ def api_cg_sync():
     if bad:
         return bad
     if not _cg['on']:
-        return _cg_fail('Git не подключён')
+        return _cg_fail(_alang('Git не подключён', 'Git is not connected'))
     with _collab_cond:
         if not state['parsed']:
-            return _cg_fail('Карта не открыта: откройте work.rbxl из папки collab-git')
+            return _cg_fail(_alang('Карта не открыта: откройте work.rbxl из папки collab-git', 'The map is not open: open work.rbxl from the collab-git folder'))
         if _cg['sync'].get('mode') == 'api':
             return _cg_sync_api()
         sent = _cg_export()
         if sent:
             _cg_git('add', '-A')
-            _cg_git('commit', '-m', 'Правки: %s (+%d)' % (_cg['sync']['name'], sent))
+            _cg_git('commit', '-m', _alang('Правки: %s (+%d)', 'Edits: %s (+%d)') % (_cg['sync']['name'], sent))
         branch = _cg_branch()
         pulled = skipped = 0
         for attempt in (1, 2):
@@ -2182,7 +2182,7 @@ def api_cg_sync():
             if rc == 0:
                 break
             if attempt == 2:
-                return _cg_fail('git push: ' + out[-400:])   # правки уже в локальном репозитории
+                return _cg_fail('git push: ' + out[-400:])   # the edits are already in the local repository
         _cg['err'], _cg['last'] = '', time.strftime('%H:%M:%S')
         return jsonify({'ok': True, 'sent': sent, 'pulled': pulled, 'skipped': skipped})
 
@@ -2206,44 +2206,44 @@ def collab_js():
         with open('collab.js', 'r', encoding='utf-8') as f:
             src = f.read()
     except OSError:
-        src = '/* collab.js не найден */'
+        src = '/* collab.js not found */'
     return _no_cache(Response(src, mimetype='application/javascript'))
 
-# Откуда качать, если файла ещё нет локально — тот же список, что в
-# setup_termux.sh. Автозагрузка ниже делает сам setup_termux.sh не
-# обязательным: сервер докачивает недостающее по требованию сам.
+# Where to download from if there is no local file yet — the same list as in
+# setup_termux.sh. The autoload below makes setup_termux.sh itself
+# optional: the server downloads what's missing on demand by itself.
 VENDOR_SOURCES = {
-    # CodeMirror 5 (+ addon'ы для автодополнения) убраны — редактор скриптов
-    # теперь на CodeMirror 6, единым бандлом (см. cm6-bundle.min.js ниже):
-    # он же честно работает с мобильными клавиатурами, чего CM5 не умел.
+    # CodeMirror 5 (+ autocompletion addons) have been removed — the script editor
+    # is now on CodeMirror 6, as a single bundle (see cm6-bundle.min.js below):
+    # it also works properly with mobile keyboards, which CM5 couldn't do.
     'three.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
     'MTLLoader.js': 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js',
     'OBJLoader.js': 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js',
     'cannon.min.js': 'https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js',
     'fengari-web.js': 'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js',
-    # cm6-bundle.min.js — НЕ публичная CDN-библиотека, а свой собственный
-    # сборённый rollup'ом файл (см. entry.mjs/rollup.config.mjs в корне
-    # репозитория — оттуда его можно пересобрать заново: `npm install
+    # cm6-bundle.min.js is NOT a public CDN library but our own
+    # file built by rollup (see entry.mjs/rollup.config.mjs in the root
+    # of the repository — it can be rebuilt from there: `npm install
     # @codemirror/state @codemirror/view @codemirror/commands
     # @codemirror/language @codemirror/autocomplete @codemirror/legacy-modes
     # @codemirror/theme-one-dark @codemirror/search @lezer/highlight rollup
     # @rollup/plugin-node-resolve @rollup/plugin-terser && npx rollup -c`).
-    # У такого файла нет готового публичного CDN — качаем его из СВОЕГО ЖЕ
-    # репозитория на GitHub, тем же простым HTTP GET, что и все остальные
-    # vendor-файлы здесь. Для этого сам файл должен быть закоммичен в репо
-    # по пути vendor/cm6-bundle.min.js — если ссылка ниже не подходит
-    # (например, репозиторий переименован/перенесён), поправьте URL.
+    # Such a file has no ready public CDN — we download it from OUR OWN
+    # repository on GitHub, with the same plain HTTP GET as all the other
+    # vendor files here. For this the file itself must be committed to the repo
+    # at the path vendor/cm6-bundle.min.js — if the link below doesn't fit
+    # (for example, the repository was renamed/moved), fix the URL.
     'cm6-bundle.min.js': 'https://raw.githubusercontent.com/suscersal/roblox-studio-web/main/vendor/cm6-bundle.min.js',
 }
     
 
 def _download_vendor_file(fn):
-    """Качает fn с CDN прямо в VENDOR_DIR. True — успех (файл на диске)."""
+    """Downloads fn from the CDN straight into VENDOR_DIR. True — success (the file is on disk)."""
     url = VENDOR_SOURCES.get(fn)
     if not url:
         return False
-    # Запасные зеркала: jsdelivr/cdnjs часто недоступны без VPN, а
-    # github raw с копией из самого репозитория — обычно доступен.
+    # Fallback mirrors: jsdelivr/cdnjs are often unavailable without a VPN, while
+    # github raw with a copy from the repository itself is usually available.
     urls = [url]
     if (VENDOR_DIR / fn).suffix == '.js':
         urls.append('https://raw.githubusercontent.com/suscersal/roblox-studio-web/main/vendor/' + fn)
@@ -2261,27 +2261,27 @@ def _download_vendor_file(fn):
             except (_urlerr.URLError, _urlerr.HTTPError, OSError, TimeoutError) as e:
                 last_err = e
         if not data:
-            raise last_err or OSError('пустой ответ')
-        # Пишем во временный файл и переименовываем — если параллельный
-        # запрос на тот же файл долетит одновременно, никто не увидит
-        # частично записанный .js/.css.
+            raise last_err or OSError(_alang('пустой ответ', 'empty response'))
+        # We write to a temporary file and rename it — if a parallel
+        # request for the same file arrives at the same time, nobody will see a
+        # partially written .js/.css.
         tmp = VENDOR_DIR / (fn + '.part')
         tmp.write_bytes(data)
         tmp.replace(VENDOR_DIR / fn)
-        print(f'[RbxStudio] vendor: скачал {fn} ({len(data)} байт)')
+        print(f'[RbxStudio] vendor: downloaded {fn} ({len(data)} bytes)')
         return True
     except (_urlerr.URLError, _urlerr.HTTPError, OSError, TimeoutError) as e:
-        print(f'[RbxStudio] vendor: не смог скачать {fn}: {e}')
+        print(f'[RbxStudio] vendor: could not download {fn}: {e}')
         return False
 
 
 @flask_app.route('/vendor/<path:fn>')
 def vendor_files(fn):
-    # Локальные копии CodeMirror/Three.js/Cannon.js/fengari.
-    # index.html грузит их относительным путём 'vendor/...'; если файла
-    # ещё нет на диске (первый запуск, setup_termux.sh не запускали),
-    # качаем его сюда же по требованию — дальше все запуски офлайн,
-    # без сети вообще, потому что файл уже лежит в VENDOR_DIR.
+    # Local copies of CodeMirror/Three.js/Cannon.js/fengari.
+    # index.html loads them by the relative path 'vendor/...'; if the file
+    # isn't on disk yet (the first launch, setup_termux.sh wasn't run),
+    # we download it here on demand — after that all launches are offline,
+    # without a network at all, because the file already lies in VENDOR_DIR.
     path = VENDOR_DIR / fn
     if not path.exists():
         if not _download_vendor_file(fn):
@@ -2291,7 +2291,7 @@ def vendor_files(fn):
 
 @flask_app.route('/api/class_icons')
 def api_class_icons():
-    """Иконки классов (data-URI) для диалога «Add»: ?classes=Part,Script,..."""
+    """Class icons (data-URI) for the «Add» dialog: ?classes=Part,Script,..."""
     names = [c for c in (request.args.get('classes') or '').split(',') if c][:200]
     return jsonify({'ok': True, 'icons': {c: icon_src(c) for c in names}})
 
@@ -2303,13 +2303,13 @@ def serve_icon(fn):
     return '', 404
 
 
-# ============ Недавние (стартовый экран) ============
-# recent_files.json лежит в той же папке данных, что и roblox_auth.json
-# (RSW_DATA_DIR на Android, иначе рядом с app.py). Два вида записей:
-#   {'kind': 'file',   'path', 'name', 'opened'}  — локальный .rbxl/.rbxlx
-#   {'kind': 'roblox', 'placeId', 'universeId', 'name', 'opened'} — место с Roblox
-# Файлы, выбранные через <input type=file>, у сервера без пути на диске, поэтому
-# их копия кладётся в recent_files/ (максимум RECENTS_MAX штук, старые чистятся).
+# ============ Recent (the start screen) ============
+# recent_files.json lies in the same data folder as roblox_auth.json
+# (RSW_DATA_DIR on Android, otherwise next to app.py). Two kinds of entries:
+#   {'kind': 'file',   'path', 'name', 'opened'}  — a local .rbxl/.rbxlx
+#   {'kind': 'roblox', 'placeId', 'universeId', 'name', 'opened'} — a place from Roblox
+# Files chosen via <input type=file> have no path on disk on the server, so
+# their copy is put into recent_files/ (at most RECENTS_MAX of them, old ones are cleaned up).
 RECENTS_MAX = 12
 RECENTS_MAX_COPY = 100 * 1024 * 1024
 
@@ -2336,7 +2336,7 @@ def _recents_key(e):
 
 
 def _recents_save(items):
-    """Записывает список и чистит копии загрузок, на которые больше нет ссылок."""
+    """Writes the list and cleans up copies of downloads that are no longer referenced."""
     d = _recents_dir()
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / 'recent_files.json.tmp'
@@ -2355,7 +2355,7 @@ def _recents_save(items):
 
 
 def _recents_add(entry):
-    """Не должна ломать основной сценарий: любые ошибки глотаются."""
+    """Must not break the main scenario: any errors are swallowed."""
     try:
         import datetime
         entry['opened'] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
@@ -2368,7 +2368,7 @@ def _recents_add(entry):
 
 def _recents_add_file(path, name=None):
     p = Path(path)
-    if not name:   # повторное открытие: сохраняем прежнее (исходное) имя записи
+    if not name:   # reopening: we keep the previous (original) name of the entry
         key = ('file', os.path.normcase(str(p)))
         name = next((e.get('name') for e in _recents_load() if _recents_key(e) == key), None)
     _recents_add({'kind': 'file', 'path': str(p), 'name': name or p.name})
@@ -2376,12 +2376,12 @@ def _recents_add_file(path, name=None):
 
 @flask_app.route('/api/recents/remove', methods=['POST'])
 def api_recents_remove():
-    """Убрать запись из «недавних» (пункт ⋮ на карточке). Сам файл не удаляется,
-    кроме внутренней копии загрузки в recent_files/."""
+    """Remove an entry from «recent» (the ⋮ item on a card). The file itself is not deleted,
+    except the internal copy of a download in recent_files/."""
     body = request.get_json(silent=True) or {}
     kind = body.get('kind')
     if kind not in ('file', 'roblox'):
-        return jsonify({'ok': False, 'error': 'kind должен быть file или roblox'}), 400
+        return jsonify({'ok': False, 'error': _alang('kind должен быть file или roblox', 'kind must be file or roblox')}), 400
     probe = {'kind': kind, 'path': body.get('path', ''), 'placeId': body.get('placeId', '')}
     key = _recents_key(probe)
     items = _recents_load()
@@ -2395,7 +2395,7 @@ def api_recents_remove():
 
 @flask_app.route('/api/recents')
 def api_recents():
-    """Недавно открытые: локальные файлы (только существующие) и места с Roblox."""
+    """Recently opened: local files (existing ones only) and places from Roblox."""
     out = []
     for e in _recents_load():
         if e['kind'] == 'file' and not (e.get('path') and os.path.isfile(e['path'])):
@@ -2409,7 +2409,7 @@ def api_recents():
 def api_open():
     body = request.json or {}
     path = body.get('path', '')
-    shown = (body.get('name') or '').strip() or None   # настоящее имя файла (Android отдаёт копию imported_<цифры>.rbxl)
+    shown = (body.get('name') or '').strip() or None   # the real file name (Android hands over a copy imported_<digits>.rbxl)
     try:
         parsed = parse_rbxl(path)
         state['parsed'] = parsed
@@ -2423,25 +2423,25 @@ def api_open():
 @flask_app.route('/api/open/upload', methods=['POST'])
 @_collab_track('reload')
 def api_open_upload():
-    """Открытие .rbxl/.rbxlx, выбранного через ОБЫЧНЫЙ системный файловый
-    менеджер (<input type=file> на фронте, см. pickRbxlFileForOpen() в
-    index.html) — используется везде, кроме Android-APK с SAF-мостом (там
-    Kotlin уже кладёт файл в приватное хранилище приложения и передаёт
-    сюда обычный /api/open реальный путь на диске).
-
-    В отличие от /api/open, здесь путь на диске СЕРВЕРА для выбранного
-    пользователем файла в принципе не существует — браузер отдаёт только
-    БАЙТЫ (это касается и десктопа: сервер и вкладка браузера физически
-    не обязаны быть одной машиной). Поэтому сохраняем во временный файл
-    и парсим его как обычно."""
+    """Opening an .rbxl/.rbxlx chosen through an ORDINARY system file
+    manager (<input type=file> on the frontend, see pickRbxlFileForOpen() in
+    index.html) — used everywhere except the Android APK with the SAF bridge (there
+    Kotlin already puts the file into the app's private storage and passes
+    the ordinary /api/open a real path on disk).
+    
+    Unlike /api/open, a path on the SERVER's disk for a file chosen by
+    the user doesn't exist here in principle — the browser hands over only
+    BYTES (this applies to desktop too: the server and the browser tab are physically
+    not required to be the same machine). So we save to a temporary file
+    and parse it as usual."""
     import tempfile
 
     if 'file' not in request.files:
-        return jsonify({'ok': False, 'error': 'Файл не передан'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл не передан', 'No file provided')}), 400
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'ok': False, 'error': 'Имя файла пустое'}), 400
+        return jsonify({'ok': False, 'error': _alang('Имя файла пустое', 'The file name is empty')}), 400
 
     suffix = Path(file.filename).suffix or '.rbxl'
     try:
@@ -2449,17 +2449,17 @@ def api_open_upload():
             file.save(tmp.name)
             tmp_path = tmp.name
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'Не удалось сохранить файл: {e}'}), 500
+        return jsonify({'ok': False, 'error': f'Could not save the file: {e}'}), 500
 
     try:
         parsed = parse_rbxl(tmp_path)
         state['parsed'] = parsed
-        # Реального пути на диске пользователя у нас нет (временный файл
-        # сейчас будет удалён) — оставляем file_path пустым, чтобы Ctrl+S/
-        # saveFile() сам открыл "Сохранить как" вместо тихой записи в
-        # исчезнувший temp-файл.
+        # We have no real path on the user's disk (the temporary file
+        # will be deleted now) — we leave file_path empty so that Ctrl+S/
+        # saveFile() opens "Save as" itself instead of a silent write into a
+        # vanished temp file.
         state['file_path'] = None
-        try:   # копия для списка «недавних» (у загрузки нет пути на диске)
+        try:   # a copy for the «recent» list (the upload has no path on disk)
             if os.path.getsize(tmp_path) <= RECENTS_MAX_COPY:
                 import shutil
                 safe = _re.sub(r'[^\w.\- ]', '_', Path(file.filename).name)[:120] or 'place.rbxl'
@@ -2485,23 +2485,23 @@ def api_open_upload():
 
 
 def _rbx_get_place_bytes_cookie(place_id, version=None):
-    """Как делает сама Studio: AssetDelivery с сессией аккаунта
-    (.ROBLOSECURITY из входа). Работает для мест, которые аккаунт может
-    редактировать (свои, группы, Team Create) и для копируемых (uncopylocked).
-    Возвращает None, если входа нет."""
+    """As Studio itself does: AssetDelivery with the account session
+    (.ROBLOSECURITY from sign-in). Works for places the account can
+    edit (its own, groups, Team Create) and for copyable (uncopylocked) ones.
+    Returns None if there is no sign-in."""
     if _roblox_cookie() is None:
         return None
     url = f'https://assetdelivery.roblox.com/v1/asset/?id={int(place_id)}'
     if version:
         url += f'&version={int(version)}'
     r = _req.Request(url, headers=_roblox_headers())
-    with _req.urlopen(r, timeout=120) as resp:   # urllib сам идёт по редиректу на CDN
+    with _req.urlopen(r, timeout=120) as resp:   # urllib follows the redirect to the CDN itself
         return _rbx_maybe_gunzip(resp.read())
 
 
 def _rbx_get_place_bytes_key(place_id, version=None):
-    """Запасной путь: Open Cloud Asset Delivery с x-api-key (право
-    legacy-asset:manage). Возвращает None, если ключ не задан."""
+    """Fallback: Open Cloud Asset Delivery with x-api-key (the
+    legacy-asset:manage permission). Returns None if no key is set."""
     api_key = _roblox_api_key()
     if not api_key:
         return None
@@ -2515,20 +2515,20 @@ def _rbx_get_place_bytes_key(place_id, version=None):
         meta = json.loads(_rbx_maybe_gunzip(resp.read()).decode('utf-8', 'replace'))
     location = meta.get('location')
     if not location:
-        raise RuntimeError(f'Open Cloud ответил без location: {meta}')
+        raise RuntimeError(f'Open Cloud answered without a location: {meta}')
     cdn_req = _req.Request(location, headers={'Accept-Encoding': 'gzip'})
     with _req.urlopen(cdn_req, timeout=120) as resp:
         return _rbx_maybe_gunzip(resp.read())
 
 
 def _rbx_get_place_bytes(place_id, version=None):
-    """Скачивает файл места. Порядок: вход в аккаунт (как в Studio) →
-    Open Cloud-ключ. Возвращает (bytes, способ) или (None, None), если
-    не настроено ни то ни другое; если настроено, но всё упало, бросает
-    RuntimeError с причинами по каждому способу (+ .status от HTTPError)."""
+    """Downloads a place file. Order: account sign-in (as in Studio) →
+    Open Cloud key. Returns (bytes, method) or (None, None) if neither
+    is configured; if configured but everything failed, raises
+    RuntimeError with the reasons for each method (+ .status from HTTPError)."""
     errors, status = [], None
-    for name, fn in (('вход в аккаунт', _rbx_get_place_bytes_cookie),
-                     ('Open Cloud-ключ', _rbx_get_place_bytes_key)):
+    for name, fn in (('account sign-in', _rbx_get_place_bytes_cookie),
+                     ('Open Cloud key', _rbx_get_place_bytes_key)):
         try:
             data = fn(place_id, version)
         except _urlerr.HTTPError as e:
@@ -2548,9 +2548,9 @@ def _rbx_get_place_bytes(place_id, version=None):
 
 
 def _rbx_group_universes(archived='false', max_groups=30):
-    """Experiences групп текущего аккаунта. Группы: groups.roblox.com/v2/users/{id}/groups/roles; игры группы:
-    develop.roblox.com/v1/groups/{id}/universes (нужны права редактирования — для остальных групп Roblox отвечает
-    403, такие группы молча пропускаем). Параллельно, до max_groups групп и 3 страниц на группу."""
+    """Experiences of the current account's groups. Groups: groups.roblox.com/v2/users/{id}/groups/roles; group games:
+    develop.roblox.com/v1/groups/{id}/universes (edit rights are needed — for other groups Roblox answers
+    403, we silently skip such groups). In parallel, up to max_groups groups and 3 pages per group."""
     me = _rbx_get_json('https://users.roblox.com/v1/users/authenticated')
     uid = me.get('id') if isinstance(me, dict) else None
     if not uid:
@@ -2574,7 +2574,7 @@ def _rbx_group_universes(archived='false', max_groups=30):
             try:
                 dd = _rbx_get_json(url)
             except Exception:
-                return out      # нет прав на группу / сеть — пропускаем её
+                return out      # no rights to the group / network — skip it
             for u in (dd.get('data') or []) if isinstance(dd, dict) else []:
                 if not (u.get('id') and u.get('rootPlaceId')):
                     continue
@@ -2600,14 +2600,14 @@ def _rbx_group_universes(archived='false', max_groups=30):
 
 @flask_app.route('/api/roblox/experiences')
 def api_roblox_experiences():
-    """Список Experiences аккаунта — как стартовый экран Studio (My Recent
-    Experiences). develop.roblox.com/v1/user/universes (нужен вход в
-    аккаунт; ключ Open Cloud для него не подходит) + иконки с
-    thumbnails.roblox.com. Отдаём до 150 штук, свежие изменения сверху.
-    ?archived=1 — раздел Archive (архивированные experiences)."""
+    """The account's Experiences list — like Studio's start screen (My Recent
+    Experiences). develop.roblox.com/v1/user/universes (sign-in is required;
+    an Open Cloud key doesn't work for it) + icons from
+    thumbnails.roblox.com. We return up to 150, newest changes first.
+    ?archived=1 — the Archive section (archived experiences)."""
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'needLogin': True,
-                        'error': 'Нужен вход в аккаунт Roblox'}), 401
+                        'error': _alang('Нужен вход в аккаунт Roblox', 'Roblox account sign-in is required')}), 401
     archived = 'true' if request.args.get('archived') in ('1', 'true') else 'false'
     items, cursor = [], None
     try:
@@ -2635,8 +2635,8 @@ def api_roblox_experiences():
         needs = 'HTTP 401' in str(e) or 'HTTP 403' in str(e)
         return jsonify({'ok': False, 'needLogin': needs, 'error': str(e)}), (401 if needs else 502)
 
-    # Experiences ГРУПП, в которых состоит пользователь: /v1/user/universes отдаёт только личные игры, поэтому
-    # игры групп (как «Group Games» в Studio) тянем отдельно. Ошибки по группам не роняют весь список.
+    # Experiences of the GROUPS the user belongs to: /v1/user/universes returns only personal games, so
+    # group games (like «Group Games» in Studio) are fetched separately. Per-group errors don't bring down the whole list.
     group_err = None
     try:
         seen = {x['universeId'] for x in items}
@@ -2647,7 +2647,7 @@ def api_roblox_experiences():
     except Exception as e:
         group_err = str(e)
 
-    # иконки (необязательны: при ошибке остаются заглушки)
+    # icons (optional: on error placeholders remain)
     try:
         for i in range(0, len(items), 50):
             chunk = items[i:i + 50]
@@ -2666,25 +2666,25 @@ def api_roblox_experiences():
     return jsonify({'ok': True, 'experiences': items, 'groupError': group_err})
 
 
-# === Игры студии на стартовом экране ===
-# Список берётся из STUDIO_GAMES_DEFAULT ниже; можно переопределить файлом studio_games.json (в папке данных
-# приложения или рядом с app.py). groupId — id группы Roblox: её игры подтянутся автоматически (публичный API),
-# games — закреплённые вручную ({"name": "druns", "placeId": 123, "universeId": 456}; universeId необязателен).
+# === Studio games on the start screen ===
+# The list is taken from STUDIO_GAMES_DEFAULT below; it can be overridden by a studio_games.json file (in the app's data folder
+# or next to app.py). groupId — a Roblox group id: its games are pulled in automatically (public API),
+# games — manually pinned ({"name": "druns", "placeId": 123, "universeId": 456}; universeId is optional).
 STUDIO_GAMES_DEFAULT = {
-    'title': None,      # None — заголовок берётся из перевода интерфейса (st_studio); строка — показывается как есть
+    'title': None,      # None — the title is taken from the interface translation (st_studio); a string — shown as is
     'groupId': 0,
     'games': [],
 }
-# Список подгружается С СЕРВЕРА: JSON в репозитории (поменял файл, закоммитил — у всех обновилось без пересборки APK).
-# RSW_STUDIO_URL — своя ссылка; "url" в локальном studio_games.json тоже переопределяет. Нет сети — последняя
-# удачно загруженная копия (studio_games.cache.json в папке данных), потом то, что зашито выше.
+# The list is loaded FROM THE SERVER: a JSON in the repository (change the file, commit — everyone is updated without rebuilding the APK).
+# RSW_STUDIO_URL — your own link; "url" in a local studio_games.json overrides it too. No network — the last
+# successfully loaded copy (studio_games.cache.json in the data folder), then what is baked in above.
 STUDIO_GAMES_URL = os.environ.get('RSW_STUDIO_URL') or \
     'https://raw.githubusercontent.com/suscersal/roblox-studio-web/main/studio_games.json'
 _STUDIO_REMOTE = {'at': 0.0, 'cfg': None}
 
 
 def _studio_remote_config(url):
-    """Конфиг с сервера с кэшем на 5 минут и запасной копией на диске. Возвращает dict или None."""
+    """Config from the server with a 5-minute cache and a backup copy on disk. Returns a dict or None."""
     now = time.time()
     if _STUDIO_REMOTE['cfg'] is not None and now - _STUDIO_REMOTE['at'] < 300:
         return _STUDIO_REMOTE['cfg']
@@ -2715,8 +2715,8 @@ def _studio_remote_config(url):
 
 
 def _studio_config():
-    """Порядок (каждый следующий перекрывает предыдущий): зашитое в app.py → studio_games.json рядом с app.py (из репозитория)
-    → список с сервера → ручной studio_games.json в папке данных приложения (если она задана отдельно, RSW_DATA_DIR)."""
+    """Order (each next one overrides the previous): what is baked into app.py → studio_games.json next to app.py (from the repository)
+    → the list from the server → a manual studio_games.json in the app's data folder (if it is set separately, RSW_DATA_DIR)."""
     def read(f):
         try:
             if f.is_file():
@@ -2766,7 +2766,7 @@ def api_studio_games():
     if group_id:
         try:
             cursor = None
-            for _ in range(10):     # раньше брались только первые 50 игр группы
+            for _ in range(10):     # previously only the first 50 games of a group were taken
                 url = (f'https://games.roblox.com/v2/groups/{int(group_id)}/games'
                        '?accessFilter=2&limit=50&sortOrder=Desc')
                 if cursor:
@@ -2783,7 +2783,7 @@ def api_studio_games():
         except Exception as e:
             group_err = str(e)
 
-    # Конфиг не задан — автоматический режим: игры групп аккаунта, в который выполнен вход (как «Group Games» в Studio)
+    # No config set — automatic mode: games of the groups of the signed-in account (like «Group Games» in Studio)
     auto, need_login = False, False
     if not (group_id or cfg.get('games')):
         auto = True
@@ -2796,7 +2796,7 @@ def api_studio_games():
             except Exception as e:
                 group_err = str(e)
 
-    # иконки (необязательны)
+    # icons (optional)
     try:
         with_u = [x for x in items if x['universeId']]
         for i in range(0, len(with_u), 50):
@@ -2821,7 +2821,7 @@ _DOH_CACHE = {}
 
 
 def _doh_resolve(host):
-    """A-запись через DNS-over-HTTPS (обходит сломанный системный DNS)."""
+    """An A record via DNS-over-HTTPS (bypasses a broken system DNS)."""
     if host in _DOH_CACHE:
         return _DOH_CACHE[host]
     last = None
@@ -2836,10 +2836,10 @@ def _doh_resolve(host):
             if ips:
                 _DOH_CACHE[host] = ips
                 return ips
-            last = 'нет A-записей'
+            last = _alang('нет A-записей', 'no A records')
         except Exception as e:
             last = repr(e)
-    raise RuntimeError('DoH не сработал: ' + str(last))
+    raise RuntimeError(_alang('DoH не сработал: ', 'DoH did not work: ') + str(last))
 
 
 def _fetch_via_doh(pu, hdr):
@@ -2873,10 +2873,10 @@ _THUMB_CACHE_MAX = 400
 
 @flask_app.route('/api/roblox/thumb')
 def api_roblox_thumb():
-    """Прокси иконок experiences. WebView/браузер часто не может сам
-    открыть tr.rbxcdn.com (блокировка, нет VPN у приложения), хотя сервер
-    до Roblox достаёт — поэтому картинку отдаём с нашего же origin.
-    Разрешены только https-хосты *.rbxcdn.com (защита от SSRF)."""
+    """Experience icon proxy. A WebView/browser often can't open
+    tr.rbxcdn.com itself (blocking, the app has no VPN), although the server
+    reaches Roblox — so we serve the picture from our own origin.
+    Only https hosts *.rbxcdn.com are allowed (SSRF protection)."""
     u = request.args.get('u', '')
     try:
         pu = _urlparse.urlparse(u)
@@ -2889,18 +2889,18 @@ def api_roblox_thumb():
     if hit:
         ct, data = hit
     else:
-        hdr = dict(ROBLOX_HEADERS_BASE)       # без куки: CDN она не нужна
+        hdr = dict(ROBLOX_HEADERS_BASE)       # without the cookie: the CDN doesn't need it
         hdr['Referer'] = 'https://www.roblox.com/'
         hdr['Accept'] = 'image/avif,image/webp,image/png,image/*;q=0.8'
-        hdr.pop('Accept-Encoding', None)      # отдаём картинку как есть, без gzip
+        hdr.pop('Accept-Encoding', None)      # we return the image as is, without gzip
         try:
             r = _req.Request(u, headers=hdr)
             with _req.urlopen(r, timeout=15) as resp:
                 data = resp.read()
                 ct = resp.headers.get('Content-Type', 'image/png')
         except Exception as e1:
-            # Часто rbxcdn.com не резолвится системным DNS (gaierror) —
-            # тогда резолвим сами через DNS-over-HTTPS и ходим по IP.
+            # Often rbxcdn.com isn't resolved by the system DNS (gaierror) —
+            # then we resolve it ourselves via DNS-over-HTTPS and go by IP.
             try:
                 ct, data = _fetch_via_doh(pu, hdr)
             except Exception as e2:
@@ -2915,16 +2915,16 @@ def api_roblox_thumb():
 
 
 _TB_THUMB_CACHE = {}
-_TB_THUMB_SEM = _threading.Semaphore(4)   # не заваливаем сеть 24 одновременными запросами миниатюр
+_TB_THUMB_SEM = _threading.Semaphore(4)   # we don't flood the network with 24 simultaneous thumbnail requests
 _TB_PLACEHOLDER = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150"><rect width="150" height="150" fill="#111827"/>'
                    '<text x="75" y="95" font-size="56" text-anchor="middle">\U0001F9F0</text></svg>')
 
 
 @flask_app.route('/api/toolbox/thumb/<int:asset_id>')
 def api_toolbox_thumb(asset_id):
-    """Миниатюра ассета для карточек Toolbox. Прямой www.roblox.com/asset-thumbnail в WebView часто не открывается
-    (блокировка/DNS) и сыпал по ошибке на каждую карточку; здесь миниатюру достаёт сервер (с DoH-запасным путём).
-    Ответ всегда 200: если достать не вышло — отдаём SVG-заглушку (без кэша), и в консоли нет ни одной ошибки."""
+    """An asset thumbnail for Toolbox cards. A direct www.roblox.com/asset-thumbnail often doesn't open in a WebView
+    (blocking/DNS) and spewed an error for every card; here the server fetches the thumbnail (with a DoH fallback path).
+    The response is always 200: if fetching failed — we return an SVG placeholder (uncached), and there is not a single error in the console."""
     key = str(asset_id)
     data = _TB_THUMB_CACHE.get(key)
     if data is None:
@@ -2941,7 +2941,7 @@ def api_toolbox_thumb(asset_id):
                             _TB_THUMB_CACHE.pop(next(iter(_TB_THUMB_CACHE)))
                         _TB_THUMB_CACHE[key] = data
                 except Exception as e:
-                    print('[toolbox] thumb', key, 'не загрузилась:', repr(e)[:160])
+                    print('[toolbox] thumb', key, _alang('не загрузилась:', 'did not load:'), repr(e)[:160])
                     data = None
     if data:
         resp = Response(data, mimetype='image/png' if data[:4] == b'\x89PNG' else 'image/jpeg')
@@ -2954,10 +2954,10 @@ def api_toolbox_thumb(asset_id):
 
 @flask_app.route('/api/roblox/experience/places')
 def api_roblox_experience_places():
-    """Места внутри Experience (у многих одно — тогда клиент открывает его сразу)."""
+    """Places inside an Experience (many have one — then the client opens it right away)."""
     um = _re.search(r'\d+', request.args.get('universeId', ''))
     if not um:
-        return jsonify({'ok': False, 'error': 'universeId должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('universeId должен быть числом', 'universeId must be a number')}), 400
     root = request.args.get('rootPlaceId', '')
     try:
         d = _rbx_get_json(f'https://develop.roblox.com/v1/universes/{um.group()}'
@@ -2973,16 +2973,16 @@ def api_roblox_experience_places():
 @flask_app.route('/api/open/place', methods=['POST'])
 @_collab_track('reload')
 def api_open_place():
-    """Скачать место с Roblox по Place ID и открыть его в редакторе.
-    Тело: {place_id, version?}. Сначала используется вход в аккаунт
-    (как в Studio), если его нет или он не сработал — Open Cloud-ключ.
-    Результат открывается так же, как /api/open/upload; публикация
-    обратно — обычный /api/publish."""
+    """Download a place from Roblox by Place ID and open it in the editor.
+    Body: {place_id, version?}. The account sign-in is used first
+    (as in Studio), if there is none or it didn't work — the Open Cloud key.
+    The result is opened the same way as /api/open/upload; publishing
+    back is the ordinary /api/publish."""
     import tempfile
     body = request.get_json(silent=True) or {}
     m = _re.search(r'\d+', str(body.get('place_id', '')))
     if not m:
-        return jsonify({'ok': False, 'error': 'Нужен числовой Place ID'}), 400
+        return jsonify({'ok': False, 'error': _alang('Нужен числовой Place ID', 'A numeric Place ID is required')}), 400
     place_id = int(m.group())
     vm = _re.search(r'\d+', str(body.get('version', '') or ''))
     version = int(vm.group()) if vm else None
@@ -2991,29 +2991,28 @@ def api_open_place():
         data, via = _rbx_get_place_bytes(place_id, version)
     except Exception as e:
         hints = {
-            401: 'вход не принят или истёк — войди в аккаунт заново',
-            403: 'нет доступа к месту: нужен аккаунт с правом редактирования '
-                 '(владелец, группа, Team Create) или копируемое место',
-            404: 'место или версия не найдены',
+            401: _alang('вход не принят или истёк — войди в аккаунт заново', 'sign-in was not accepted or has expired — sign in to your account again'),
+            403: _alang('нет доступа к месту: нужен аккаунт с правом редактирования '
+                 '(владелец, группа, Team Create) или копируемое место', 'no access to the place: an account with edit rights is required (owner, group, Team Create) or a copyable place'),
+            404: _alang('место или версия не найдены', 'place or version not found'),
         }
         st = getattr(e, 'status', None)
         msg = str(e) + ((' — ' + hints[st]) if st in hints else '')
         return jsonify({'ok': False, 'status': st, 'error': msg}), 502
     if data is None:
         return jsonify({'ok': False,
-                        'error': 'Войди в аккаунт Roblox (кнопка Account) '
-                                 'или сохрани Open Cloud API-ключ'}), 400
+                        'error': _alang('Войди в аккаунт Roblox (кнопка Account) '
+                                 'или сохрани Open Cloud API-ключ', 'Sign in to your Roblox account (the Account button) or save an Open Cloud API key')}), 400
 
-    # .rbxl — бинарный ('<roblox!'), .rbxlx — XML ('<roblox ' / '<?xml').
-    # Всё остальное — не файл места (например, JSON с ошибкой): state не трогаем.
+    # .rbxl is binary ('<roblox!'), .rbxlx is XML ('<roblox ' / '<?xml').
+    # Everything else is not a place file (for example, JSON with an error): we don't touch state.
     if data[:8] == b'<roblox!':
         suffix = '.rbxl'
     elif data[:7] == b'<roblox' or data[:5] == b'<?xml':
         suffix = '.rbxlx'
     else:
         return jsonify({'ok': False,
-                        'error': f'Ответ не похож на файл места ({len(data)} байт, '
-                                 f'начало: {data[:40]!r})'}), 502
+                        'error': f'The response does not look like a place file ({len(data)} bytes, 'f'starts with: {data[:40]!r})'}), 502
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -3021,13 +3020,13 @@ def api_open_place():
             tmp_path = tmp.name
         parsed = parse_rbxl(tmp_path)
         state['parsed'] = parsed
-        state['file_path'] = None   # как у upload: Ctrl+S откроет «Сохранить как»
+        state['file_path'] = None   # as with upload: Ctrl+S will open «Save as»
         universe_id = None
         um = _re.search(r'\d+', str(body.get('universe_id', '') or ''))
         if um:
             universe_id = int(um.group())
         else:
-            try:   # Place ID -> Universe ID (публичный эндпоинт), нужен для Publish
+            try:   # Place ID -> Universe ID (a public endpoint), needed for Publish
                 d = _rbx_get_json(f'https://apis.roblox.com/universes/v1/places/{place_id}/universe')
                 if isinstance(d, dict) and d.get('universeId'):
                     universe_id = int(d['universeId'])
@@ -3039,7 +3038,7 @@ def api_open_place():
                         'place_id': place_id, 'universe_id': universe_id,
                         'bytes': len(data), 'via': via})
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'Скачано {len(data)} байт, но не разобралось как .rbxl: {e}'}), 400
+        return jsonify({'ok': False, 'error': f'Downloaded {len(data)} bytes, but could not parse it as .rbxl: {e}'}), 400
     finally:
         if tmp_path:
             try:
@@ -3048,12 +3047,12 @@ def api_open_place():
                 pass
 
 
-# ============ Шаблон «Baseplate» для кнопки New ============
-# Встроен в код (base64 от BASEPLATE.rbxl), а не лежит отдельным файлом: так он
-# одинаково доступен на десктопе, в Android-APK и в OTA-обновлениях (там __file__
-# указывает в другую папку, а sync-android-python.sh копирует только список файлов).
-# Хочешь свой шаблон без правки кода — положи templates/Baseplate.rbxl рядом с app.py:
-# если файл есть, берётся он.
+# ============ The «Baseplate» template for the New button ============
+# Built into the code (base64 of BASEPLATE.rbxl), rather than lying as a separate file: this way it is
+# equally available on desktop, in the Android APK and in OTA updates (there __file__
+# points to another folder, and sync-android-python.sh copies only a list of files).
+# Want your own template without editing code — put templates/Baseplate.rbxl next to app.py:
+# if the file exists, it is used.
 _BASEPLATE_B64 = (
     "PHJvYmxveCGJ/w0KGgoAAEwAAABPAAAAAAAAAAAAAABTU1RSEQAAABwAAAAAAAAAUAAAAAABBQAKAgBQAAAAAABJTlNUIAAAAB4A"
     "AAAAAAAA8A8AAAAADAAAAEFzc2V0U2VydmljZQEBAAAAAAAAXgFJTlNUHQAAABsAAAAAAAAA8AwBAAAACgAAAEF0bW9zcGhlcmUA"
@@ -3884,22 +3883,22 @@ def _baseplate_bytes():
 
 
 def _load_baseplate_into_state():
-    """Открывает шаблон Baseplate как свежую несохранённую сцену. Возвращает
-    число объектов; при любой ошибке бросает исключение (api_new откатится на
-    пустую сцену)."""
+    """Opens the Baseplate template as a fresh unsaved scene. Returns
+    the number of objects; on any error raises an exception (api_new falls back to
+    an empty scene)."""
     import tempfile
     tmp_path = None
     try:
         data = _baseplate_bytes()
-        # parse_rbxl на мусоре не падает, а отдаёт пустую сцену — проверяем сами
+        # parse_rbxl doesn't fail on garbage but returns an empty scene — we check ourselves
         if data[:8] != b'<roblox!':
-            raise RuntimeError('шаблон Baseplate — не бинарный .rbxl')
+            raise RuntimeError(_alang('шаблон Baseplate — не бинарный .rbxl', 'the Baseplate template is not a binary .rbxl'))
         with tempfile.NamedTemporaryFile(suffix='.rbxl', delete=False) as tmp:
             tmp.write(data)
             tmp_path = tmp.name
         parsed = parse_rbxl(tmp_path)
         if 'Workspace' not in parsed['referent_to_class'].values():
-            raise RuntimeError('в шаблоне Baseplate нет Workspace')
+            raise RuntimeError(_alang('в шаблоне Baseplate нет Workspace', 'the Baseplate template has no Workspace'))
     finally:
         if tmp_path:
             try:
@@ -3907,31 +3906,31 @@ def _load_baseplate_into_state():
             except Exception:
                 pass
     state['parsed'] = parsed
-    state['file_path'] = None   # Ctrl+S откроет «Сохранить как», шаблон не перезаписывается
+    state['file_path'] = None   # Ctrl+S will open «Save as», the template isn't overwritten
     return len(parsed['referent_to_class'])
 
 
 @flask_app.route('/api/new', methods=['POST'])
 @_collab_track('reload')
 def api_new():
-    """Новая сцена = шаблон Baseplate (см. _load_baseplate_into_state); если
-    он по какой-то причине не загрузился — пустая сцена, как раньше:
-    создаёт её в памяти сервера (без файла на диске) — набор
-    стандартных сервисов Roblox верхнего уровня, как в новом плейсе.
-    Нужно, чтобы фичи вроде импорта Instance (например, 3D-аватара)
-    работали даже без предварительно открытого .rbxl — раньше PUT
-    /api/instance молча отваливался с ok:false, если state['parsed']
-    был None, и объект оставался только визуальным в вьюпорте, не
-    попадая ни в Explorer, ни в сохраняемый файл. save_rbxl умеет
-    полностью пересобрать бинарник даже без _raw_chunks/_raw_data
-    (см. ветку "с нуля" в save_rbxl), так что Save/Save As после этого
-    работает как обычно — путь просто нужно будет выбрать при сохранении."""
+    """A new scene = the Baseplate template (see _load_baseplate_into_state); if
+    it for some reason failed to load — an empty scene, as before:
+    creates it in the server's memory (without a file on disk) — the set of
+    standard top-level Roblox services, as in a new place.
+    Needed so that features like importing an Instance (for example, a 3D avatar)
+    work even without a previously opened .rbxl — previously PUT
+    /api/instance silently failed with ok:false if state['parsed']
+    was None, and the object stayed only visual in the viewport, not
+    getting into either Explorer or the saved file. save_rbxl can
+    rebuild the binary completely even without _raw_chunks/_raw_data
+    (see the "from scratch" branch in save_rbxl), so Save/Save As afterwards
+    works as usual — the path just has to be chosen when saving."""
     want_empty = ((request.get_json(silent=True) or {}).get('template') == 'empty')
     if not want_empty:
         try:
             return jsonify({'ok': True, 'count': _load_baseplate_into_state(), 'template': 'Baseplate'})
         except Exception:
-            traceback.print_exc()   # шаблон не загрузился — делаем пустую сцену, как раньше
+            traceback.print_exc()   # the template failed to load — make an empty scene, as before
     services = [
         'Workspace', 'Lighting', 'ReplicatedStorage', 'ReplicatedFirst',
         'ServerScriptService', 'ServerStorage', 'StarterGui', 'StarterPack',
@@ -3953,12 +3952,12 @@ def api_new():
         'class_id_to_name': {},
         'class_id_to_referents': {},
         'skipped_prop_chunks': 0,
-        'service_refs': set(referent_to_class),  # все верхнеуровневые — сервисы
+        'service_refs': set(referent_to_class),  # all top-level ones are services
         '_modified': True,
-        # Намеренно НЕ добавляем '_raw_chunks'/'_raw_data' — их отсутствие
-        # заставляет save_rbxl собирать бинарник с нуля из
-        # referent_to_class/parent_map/props вместо попытки переиспользовать
-        # чужие сырые чанки.
+        # We deliberately do NOT add '_raw_chunks'/'_raw_data' — their absence
+        # makes save_rbxl build the binary from scratch from
+        # referent_to_class/parent_map/props instead of trying to reuse
+        # someone else's raw chunks.
     }
     state['file_path'] = None
     return jsonify({'ok': True, 'count': len(referent_to_class)})
@@ -3972,11 +3971,11 @@ _REF_PROP_CLASSES = ('RigidConstraint', 'WeldConstraint', 'Weld', 'ManualWeld', 
                     'NoCollisionConstraint', 'AnimationConstraint', 'HingeConstraint', 'SpringConstraint')
 
 
-# Классы, чьи свойства из файла раньше НЕ долетали до Lua (скрипт читал nil + предупреждение эмулятора):
-# новый Audio API (AudioPlayer/Wire/...), пост-эффекты Lighting, Atmosphere/Clouds, Beam, Smoke/Sparkles,
-# констрейнты, Highlight. Берём ВСЕ свойства из файла, кроме служебных.
+# Classes whose properties from the file used NOT to reach Lua (a script read nil + an emulator warning):
+# the new Audio API (AudioPlayer/Wire/...), Lighting post effects, Atmosphere/Clouds, Beam, Smoke/Sparkles,
+# constraints, Highlight. We take ALL properties from the file except service ones.
 _FILE_PROP_CLASSES = frozenset((
-    'Highlight', 'Decal',   # Decal: Texture/Transparency/Face/ZIndex читаются и меняются из Lua (экран ТВ, постеры)
+    'Highlight', 'Decal',   # Decal: Texture/Transparency/Face/ZIndex are read and changed from Lua (TV screens, posters)
     'AudioPlayer', 'AudioFader', 'AudioCompressor', 'AudioEqualizer', 'AudioEmitter', 'AudioListener',
     'AudioDeviceOutput', 'AudioReverb', 'AudioEcho', 'AudioDistortion', 'AudioFlanger', 'AudioChorus',
     'AudioPitchShifter', 'AudioLimiter', 'AudioTextToSpeech', 'AudioFilter', 'Wire', 'HapticEffect',
@@ -3986,20 +3985,20 @@ _FILE_PROP_CLASSES = frozenset((
     'CompressorSoundEffect', 'DistortionSoundEffect', 'EchoSoundEffect', 'ChorusSoundEffect',
     'FlangeSoundEffect', 'TremoloSoundEffect',
 ))
-# Terrain в файле несёт сотни свойств Part — берём только водные.
+# Terrain in the file carries hundreds of Part properties — we take only the water ones.
 _TERRAIN_PROPS = ('WaterColor', 'WaterReflectance', 'WaterTransparency', 'WaterWaveSize', 'WaterWaveSpeed', 'Decoration')
 _FILE_PROP_SKIP = frozenset((
     'AttributesSerialize', 'Capabilities', 'DefinesCapabilities', 'HistoryId', 'SerializedOverrides',
     'SourceAssetId', 'Tags', 'UniqueId', 'Name', 'Transparency', 'Color3', 'Color3uint8',
 ))
-# Имя в бинарном файле -> имя в Lua-API (где они расходятся)
+# The name in the binary file -> the name in the Lua API (where they differ)
 _FILE_PROP_RENAME = {('AudioPlayer', 'Asset'): 'AssetId'}
 
 
 def _file_props_for_client(cls, q, r2c):
-    """-> (gprops, tprops) для Lua-моста.
-    gprops: скаляры (bool/число/строка) — кладутся в «общий ящик» свойств;
-    tprops: типизированные — [kind, a, b, c]: c3 (Color3), v3 (Vector3), ref (ссылка на объект, -1 = nil)."""
+    """-> (gprops, tprops) for the Lua bridge.
+    gprops: scalars (bool/number/string) — put into the «junk drawer» of properties;
+    tprops: typed — [kind, a, b, c]: c3 (Color3), v3 (Vector3), ref (an object reference, -1 = nil)."""
     g, t = {}, {}
     if cls == 'Terrain':
         keys = [k for k in _TERRAIN_PROPS if k in q]
@@ -4011,7 +4010,7 @@ def _file_props_for_client(cls, q, r2c):
         if isinstance(v, bool):
             g[name] = v
         elif isinstance(v, int):
-            # ссылка на другой объект файла (Wire.SourceInstance, Beam.Attachment0, ...) или обычное число/enum
+            # a reference to another object of the file (Wire.SourceInstance, Beam.Attachment0, ...) or an ordinary number/enum
             if k in ('SourceInstance', 'TargetInstance', 'Attachment0', 'Attachment1', 'PositionInstance',
                      'Adornee', 'Player', 'Part0', 'Part1'):
                 t[name] = ['ref', v if v in r2c else -1]
@@ -4034,7 +4033,7 @@ def _file_props_for_client(cls, q, r2c):
 
 
 def _attachment_cf(q):
-    """Attachment.CFrame из свойств файла -> [x, y, z, R00..R22] (row-major, как CFrame:GetComponents())."""
+    """Attachment.CFrame from file properties -> [x, y, z, R00..R22] (row-major, like CFrame:GetComponents())."""
     import math as _m
     cf = q.get('CFrame') if isinstance(q.get('CFrame'), dict) else {}
     pos = cf.get('position') if isinstance(cf.get('position'), dict) else (q.get('Position') if isinstance(q.get('Position'), dict) else {})
@@ -4043,7 +4042,7 @@ def _attachment_cf(q):
     if isinstance(m, (list, tuple)) and len(m) == 9:
         rot = [float(v) for v in m]
     elif isinstance(cf.get('angles_deg'), (list, tuple)) and len(cf['angles_deg']) == 3:
-        rx, ry, rz = (_m.radians(float(v)) for v in cf['angles_deg'])   # Orientation: порядок Y, X, Z
+        rx, ry, rz = (_m.radians(float(v)) for v in cf['angles_deg'])   # Orientation: the order Y, X, Z
         cx, sx, cy, sy, cz, sz = _m.cos(rx), _m.sin(rx), _m.cos(ry), _m.sin(ry), _m.cos(rz), _m.sin(rz)
         rot = [cy * cz + sy * sx * sz, -cy * sz + sy * sx * cz, sy * cx,
                cx * sz, cx * cz, -sx,
@@ -4054,8 +4053,8 @@ def _attachment_cf(q):
 
 
 def _value_for_client(cls, v):
-    # Примитивы отдаём как есть; Vector3/CFrame/Color3/ObjectValue — в виде
-    # {'k': вид, 'v': [...]}, фронтенд соберёт из них Lua-значения.
+    # Primitives are returned as is; Vector3/CFrame/Color3/ObjectValue — as
+    # {'k': kind, 'v': [...]}, the frontend assembles Lua values from them.
     if v is None:
         return None
     if cls in ('StringValue',):
@@ -4080,11 +4079,11 @@ def _value_for_client(cls, v):
 
 
 def _decode_attributes(data):
-    """AttributesSerialize (бинарный формат атрибутов Roblox) -> {имя: значение} для string/bool/number.
-    Остальные типы (Color3, Vector, UDim...) пропускаются, но читаются до конца, чтобы не сбить следующие атрибуты.
-    Формат: u32 число атрибутов; для каждого: u32 длина имени, имя, u8 тип, значение (string: u32 длина + байты;
+    """AttributesSerialize (Roblox's binary attribute format) -> {name: value} for string/bool/number.
+    Other types (Color3, Vector, UDim...) are skipped but read to the end so as not to knock off the following attributes.
+    Format: u32 attribute count; for each: u32 name length, the name, u8 type, the value (string: u32 length + bytes;
     bool: 1; int32: 4; float: 4; double: 8; UDim 8; UDim2 16; BrickColor 4; Color3/Vector3 12; Vector2 8).
-    Сверено на реальных данных карты (30 инстансов, типы 0x02/0x03/0x06/0x0F/0x10, декодер доходит до конца)."""
+    Verified on real map data (30 instances, types 0x02/0x03/0x06/0x0F/0x10, the decoder reaches the end)."""
     import struct
     out = {}
     try:
@@ -4114,14 +4113,14 @@ def _decode_attributes(data):
             elif t == 0x0F or t == 0x11:
                 o += 12
             else:
-                break    # неизвестный тип — размер неизвестен, дальше читать нельзя
+                break    # an unknown type — the size is unknown, we can't read further
     except Exception:
         pass
     return out
 
 
 def _decode_tags(value, shared_strings):
-    """Свойство Tags (CollectionService) хранится как SharedString: строка тегов через \0."""
+    """The Tags property (CollectionService) is stored as a SharedString: a string of tags separated by NUL characters."""
     raw = None
     if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < len(shared_strings):
         raw = shared_strings[value][1]
@@ -4134,17 +4133,17 @@ def _decode_tags(value, shared_strings):
 
 @flask_app.route('/api/all_instances')
 def api_all_instances():
-    # Плоский СЫРОЙ список ВСЕХ инстансов карты — ref/class/name/parent, без
-    # фильтрации HIDDEN-классов, без ограничения глубины и без вложенной
-    # структуры children (в отличие от /api/tree, который строит именно то,
-    # что рисует Explorer, и намеренно урезан для этого).
+    # A flat RAW list of ALL instances of the map — ref/class/name/parent, without
+    # filtering HIDDEN classes, without a depth limit and without a nested
+    # children structure (unlike /api/tree, which builds exactly what
+    # Explorer draws and is deliberately trimmed for that).
     #
-    # Lua-мосту (см. index.html, startLuaScripts) нужна ПОЛНАЯ картина
-    # иерархии — script.Parent должен работать для любого скрипта, даже
-    # если он вложен внутрь чего-то, что Explorer прячет. Раньше Lua брал
-    # родителя из того же дерева, что и Explorer (/api/tree), и любой
-    # скрипт под отфильтрованной веткой получал Parent=nil без единой
-    # реальной причины на стороне самого скрипта.
+    # The Lua bridge (see index.html, startLuaScripts) needs the FULL picture of
+    # the hierarchy — script.Parent must work for any script, even
+    # if it is nested inside something Explorer hides. Lua used to take the
+    # parent from the same tree as Explorer (/api/tree), and any
+    # script under a filtered branch got Parent=nil with no
+    # real reason on the script's own side.
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False}), 400
@@ -4158,16 +4157,16 @@ def api_all_instances():
     for ref, cls in r2c.items():
         name = pr.get(ref, {}).get('Name', cls)
         item = {'ref': ref, 'cls': cls, 'name': name, 'parent': pm.get(ref, -1)}
-        # Атрибуты и теги объекта из файла (Tool: viewModel/damage/..., форсфилды: теги PinkForcefield и т.д.) —
-        # раньше не читались вообще, поэтому GetAttribute/GetTagged по объектам карты всегда возвращали nil/пусто.
+        # Attributes and tags of an object from the file (Tool: viewModel/damage/..., force fields: PinkForcefield tags etc.) —
+        # used not to be read at all, so GetAttribute/GetTagged on map objects always returned nil/empty.
         _pp = pr.get(ref, {})
         _ab = _pp.get('AttributesSerialize')
         if isinstance(_ab, (bytes, bytearray)) and _ab:
             _attrs = _decode_attributes(bytes(_ab))
             if _attrs:
                 item['attrs'] = _attrs
-        # Свойства Tool из файла (TextureId — иконка в хотбаре, ToolTip, CanBeDropped, ...): без них tool.TextureId был пуст
-        # и хотбар рисовал слоты без картинок.
+        # Tool properties from the file (TextureId — the hotbar icon, ToolTip, CanBeDropped, ...): without them tool.TextureId was empty
+        # and the hotbar drew slots without pictures.
         if cls == 'Tool':
             _tp = {}
             for _k in ('TextureId', 'ToolTip', 'CanBeDropped', 'RequiresHandle', 'Enabled', 'ManualActivationOnly'):
@@ -4179,14 +4178,14 @@ def api_all_instances():
         _tg = _decode_tags(_pp.get('Tags'), parsed.get('shared_strings') or [])
         if _tg:
             item['tags'] = _tg
-        # Model.WorldPivotData (OptionalCFrame, мировой): без него Model.WorldPivot/GetPivot считались
-        # по центру габаритов, а скрипты вроде ElevatorSpawner (ELEV1.WorldPivot) падали на nil.
+        # Model.WorldPivotData (OptionalCFrame, world): without it Model.WorldPivot/GetPivot were computed
+        # from the center of the bounds, and scripts like ElevatorSpawner (ELEV1.WorldPivot) failed on nil.
         _wp = _pp.get('WorldPivotData')
         if isinstance(_wp, dict):
             _wx, _wy, _wz = get_pos(_wp)
             item['pivot'] = {'p': [_wx, _wy, _wz], 'r': get_rot_matrix(_wp)}
-        # Model.PrimaryPart (ссылка на деталь): pivot модели = pivot этой детали. Без него скрипты вроде спавна комнат
-        # (room.PrimaryPart = маркер двери; room:PivotTo(...)) ставили комнату не по маркеру, а по центру габаритов.
+        # Model.PrimaryPart (a reference to a part): the model's pivot = this part's pivot. Without it scripts like room spawning
+        # (room.PrimaryPart = a door marker; room:PivotTo(...)) placed the room not by the marker but by the center of the bounds.
         if cls == 'Model':
             _ppr = _pp.get('PrimaryPart')
             if isinstance(_ppr, int) and not isinstance(_ppr, bool) and _ppr in r2c:
@@ -4195,32 +4194,32 @@ def api_all_instances():
             item['teamColor'] = _pp.get('TeamColor')
             item['autoAssignable'] = _pp.get('AutoAssignable', True)
         if cls == 'Sound':
-            # SoundId/Volume/Looped — заданные ПРЯМО В ФАЙЛЕ (а не через
-            # Instance.new(...).SoundId = ... из Lua) звуки. Раньше сюда
-            # не долетали: Lua-мост видел только cls/name/parent, поэтому
-            # реальный HTMLAudioElement (см. getOrCreateSoundEl в
-            # index.html) никогда не получал src для звуков, уже лежащих
-            # в карте при загрузке — audio.src оставался пустым, даже
-            # если Sound:Play() честно вызывался.
+            # SoundId/Volume/Looped — sounds set DIRECTLY IN THE FILE (rather than via
+            # Instance.new(...).SoundId = ... from Lua). They used not to
+            # reach here: the Lua bridge saw only cls/name/parent, so
+            # the real HTMLAudioElement (see getOrCreateSoundEl in
+            # index.html) never received a src for sounds already lying
+            # in the map at load — audio.src stayed empty even
+            # if Sound:Play() was honestly called.
             sp = pr.get(ref, {})
             item['soundId'] = sp.get('SoundId', '')
             item['volume'] = sp.get('Volume', 0.5)
             item['looped'] = sp.get('Looped', False)
-            # PlaybackSpeed — то же самое "задано прямо в файле, ни один
-            # скрипт этого не трогает" — что и Octave ниже: FNF-карты с
-            # готовым "sped up"-вариантом трека (PlaybackSpeed=2.0 у
-            # нескольких твоих Sound) звучали на обычной скорости, потому
-            # что раньше сюда попадали только soundId/volume/looped.
+            # PlaybackSpeed — the same "set right in the file, no script
+            # touches it" as Octave below: FNF maps with a
+            # ready-made "sped up" variant of a track (PlaybackSpeed=2.0 on
+            # several of your Sounds) played at normal speed, because
+            # only soundId/volume/looped used to get here.
             ps = sp.get('PlaybackSpeed', 1.0)
             if ps != 1.0:
                 item['playbackSpeed'] = ps
-            # PitchShiftSoundEffect — НАСТОЯЩИЙ Roblox-механизм питча (не
-            # устаревшее скалярное Sound.Pitch): отдельный дочерний
-            # инстанс с Octave (множитель скорости = 2^Octave). Раньше
-            # нигде не читался вообще — FNF-карты с "sped up"/замедленными
-            # вариантами трека (Octave задан ПРЯМО в файле, без единой
-            # строчки скрипта) звучали на обычной скорости, потому что
-            # эффект просто никак не подключался к реальному <audio>.
+            # PitchShiftSoundEffect — the REAL Roblox pitch mechanism (not the
+            # deprecated scalar Sound.Pitch): a separate child
+            # instance with Octave (speed multiplier = 2^Octave). It used to be
+            # read nowhere at all — FNF maps with "sped up"/slowed
+            # variants of a track (Octave set RIGHT in the file, without a single
+            # line of script) played at normal speed, because the
+            # effect simply wasn't connected to the real <audio> in any way.
             for child_ref in children_by_parent.get(ref, ()):
                 if r2c.get(child_ref) == 'PitchShiftSoundEffect':
                     cp = pr.get(child_ref, {})
@@ -4230,8 +4229,8 @@ def api_all_instances():
         elif cls == 'Attachment':
             item['att'] = _attachment_cf(pr.get(ref, {}))
         elif cls in _REF_PROP_CLASSES:
-            # Ссылки Part0/Part1/Attachment0/Attachment1 (сварки и констрейнты): скрипты находят по ним, что
-            # к чему прикреплено (например, аксессуар к голове через RigidConstraint).
+            # The Part0/Part1/Attachment0/Attachment1 references (welds and constraints): scripts use them to find what
+            # is attached to what (for example, an accessory to the head via a RigidConstraint).
             qq = pr.get(ref, {})
             refs = {}
             for key in ('Part0', 'Part1', 'Attachment0', 'Attachment1'):
@@ -4241,20 +4240,20 @@ def api_all_instances():
             if refs:
                 item['refs'] = refs
         elif cls in _VALUE_CLASSES:
-            # ValueBase.Value, лежащий В ФАЙЛЕ (IntValue/CFrameValue/...) — иначе
-            # Lua видит nil, пока скрипт сам что-нибудь не запишет в .Value.
+            # A ValueBase.Value lying IN THE FILE (IntValue/CFrameValue/...) — otherwise
+            # Lua sees nil until a script writes something to .Value itself.
             val = _value_for_client(cls, pr.get(ref, {}).get('Value'))
             if val is not None:
                 item['value'] = val
         if cls == 'Beam':
-            # Color — ColorSequence: для ленты берём цвет первой ключевой точки
+            # Color — a ColorSequence: for a ribbon we take the color of the first keypoint
             _bc = _pp.get('Color')
             if isinstance(_bc, list) and _bc and isinstance(_bc[0], dict):
                 item['beamColor'] = [float(_bc[0].get('r', 1)), float(_bc[0].get('g', 1)), float(_bc[0].get('b', 1))]
         if cls in _FILE_PROP_CLASSES or cls == 'Terrain':
             _g, _t = _file_props_for_client(cls, pr.get(ref, {}), r2c)
             if cls == 'Highlight':
-                # цвета числами: клиент рисует заливку/контур и по клонам (gprops копируются при Clone())
+                # colors as numbers: the client draws the fill/outline and for clones as well (gprops are copied on Clone())
                 _hq = pr.get(ref, {})
                 for _pn, _gn in (('FillColor', 'HL_Fill'), ('OutlineColor', 'HL_Out')):
                     _c = _hq.get(_pn)
@@ -4272,18 +4271,18 @@ def api_all_instances():
 
 @flask_app.route('/api/scripts')
 def api_scripts():
-    # Отдаёт все Script/LocalScript с исходником — используется Lua-рантаймом
-    # в Play (см. index.html, startLuaScripts/fengari) для запуска скриптов
-    # одним запросом, а не по одному через /api/instance/<ref> на каждый.
-    # ModuleScript тоже отдаём (поле 'runnable': False) — сами они НЕ
-    # запускаются автоматически (как и в настоящем Roblox), но их исходник
-    # нужен фронтенду заранее, чтобы require(moduleScriptInstance) мог
-    # скомпилировать/выполнить их по требованию (см. __require_module в
-    # index.html). Раньше ModuleScript сюда не входил вообще, и require()
-    # был не реализован — использовался голый require() из стандартной
-    # библиотеки Lua ("bad argument #1 to 'require' (string expected, got
-    # table)", поскольку скрипты зовут require(instance), а не
-    # require("имя_модуля")).
+    # Returns all Scripts/LocalScripts with their source — used by the Lua runtime
+    # in Play (see index.html, startLuaScripts/fengari) to start the scripts
+    # with one request, rather than one by one via /api/instance/<ref> for each.
+    # We return ModuleScripts too (the field 'runnable': False) — they do NOT
+    # start automatically themselves (as in real Roblox), but the frontend
+    # needs their source in advance so that require(moduleScriptInstance) can
+    # compile/execute them on demand (see __require_module in
+    # index.html). ModuleScript used not to be included here at all, and require()
+    # was not implemented — the bare require() from the standard
+    # Lua library was used ("bad argument #1 to 'require' (string expected, got
+    # table)", because scripts call require(instance), not
+    # require("module_name")).
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False}), 400
@@ -4298,8 +4297,8 @@ def api_scripts():
         enabled = props.get('Enabled', True)
         if isinstance(enabled, str):
             enabled = enabled.lower() in ('true', '1')
-        # В .rbxl флаг отключённого скрипта хранится как Disabled (а не Enabled) — раньше он игнорировался,
-        # и Script с Disabled=true всё равно запускался в Play.
+        # In .rbxl the disabled-script flag is stored as Disabled (not Enabled) — it used to be ignored,
+        # and a Script with Disabled=true still ran in Play.
         disabled = props.get('Disabled', False)
         if isinstance(disabled, str):
             disabled = disabled.lower() in ('true', '1')
@@ -4311,14 +4310,14 @@ def api_scripts():
             'source': props.get('Source', '') or '',
             'parent': pm.get(ref, -1),
             'runnable': cls in ('Script', 'LocalScript'),
-            # 'server' для Script, 'client' для LocalScript — см.
-            # SCRIPT_SIDE выше. Фронтенд использует это только для
-            # отображения (бейдж в Output/Properties), не для настоящей
-            # сетевой изоляции.
+            # 'server' for Script, 'client' for LocalScript — see
+            # SCRIPT_SIDE above. The frontend uses this only for
+            # display (a badge in Output/Properties), not for real
+            # network isolation.
             'side': ('client' if (cls == 'Script' and props.get('RunContext') == 2)
                      else SCRIPT_SIDE.get(cls, 'server')),
-            # Script.RunContext: 0 = Legacy (сервер), 1 = Server, 2 = Client — Script с Client
-            # исполняется на клиенте (там есть Players.LocalPlayer), а не на сервере
+            # Script.RunContext: 0 = Legacy (server), 1 = Server, 2 = Client — a Script with Client
+            # runs on the client (Players.LocalPlayer exists there), not on the server
             'runContext': props.get('RunContext'),
         })
     return jsonify({'ok': True, 'scripts': out})
@@ -4326,13 +4325,13 @@ def api_scripts():
 
 @flask_app.route('/api/gui_tree')
 def api_gui_tree():
-    # Плоский список всех GUI-инстансов (ScreenGui и его потомки —
-    # Frame/TextLabel/TextButton/TextBox/ImageLabel/ImageButton) с узким
-    # набором свойств (GUI_PROPS), которых достаточно, чтобы фронтенд
-    # (buildGuiOverlay в index.html) собрал DOM-дерево оверлея поверх
-    # 3D-вьюпорта в Play. По духу — то же самое, что /api/scripts делает
-    # для Script/LocalScript: один запрос вместо N обращений к
-    # /api/instance/<ref> на каждый GUI-объект.
+    # A flat list of all GUI instances (ScreenGui and its descendants —
+    # Frame/TextLabel/TextButton/TextBox/ImageLabel/ImageButton) with a narrow
+    # set of properties (GUI_PROPS), which is enough for the frontend
+    # (buildGuiOverlay in index.html) to assemble the overlay's DOM tree on top of the
+    # 3D viewport in Play. In spirit — the same as what /api/scripts does
+    # for Script/LocalScript: one request instead of N calls to
+    # /api/instance/<ref> for each GUI object.
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False}), 400
@@ -4356,8 +4355,8 @@ def api_gui_tree():
         for pname in GUI_PROPS:
             if pname in props:
                 v = props[pname]
-                # MaxDistance = inf (по умолчанию у BillboardGui) нельзя отдавать в JSON: Infinity невалиден,
-                # fetch().json() падает и весь Play. Нет поля = без ограничения дистанции.
+                # MaxDistance = inf (the default for BillboardGui) can't be sent in JSON: Infinity is invalid,
+                # fetch().json() fails and the whole of Play with it. No field = no distance limit.
                 if isinstance(v, float) and (v != v or v in (float('inf'), float('-inf'))):
                     continue
                 item[pname] = v
@@ -4369,7 +4368,7 @@ def api_gui_tree():
 def api_tree():
     parsed = state['parsed']
     if not parsed:
-        return jsonify({'ok': False, 'error': 'Файл не загружен'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл не загружен', 'No file loaded')}), 400
     r2c = parsed['referent_to_class']
     pm = parsed['parent_map']
     pr = parsed['props']
@@ -4385,16 +4384,16 @@ def api_tree():
         vis.add(ref)
         cls = r2c.get(ref, '?')
 
-        # Пропускаем скрытые классы
+        # Skip hidden classes
         if cls in HIDDEN:
             return None
 
         name = pr.get(ref, {}).get('Name', cls)
 
-        # Собираем детей (рекурсивно)
+        # Collect children (recursively)
         kids = []
         for c in sorted(children_of.get(ref, [])):
-            # Создаём копию vis для каждой ветки
+            # Create a vis copy for each branch
             child_node = node(c, depth + 1, vis.copy())
             if child_node:
                 kids.append(child_node)
@@ -4407,16 +4406,16 @@ def api_tree():
             'children': kids
         }
 
-    # Корневые элементы (parent = -1 или отсутствует в parent_map)
+    # Root elements (parent = -1 or missing from parent_map)
     roots = []
-    # Находим все ref, у которых parent = -1 или parent отсутствует в r2c
+    # Find all refs whose parent = -1 or whose parent is missing from r2c
     root_refs = set()
     for ref in r2c:
         parent = pm.get(ref, -1)
         if parent == -1 or parent not in r2c:
             root_refs.add(ref)
 
-    # Также добавляем явно указанных детей -1
+    # Also add explicitly specified children of -1
     for ref in children_of.get(-1, []):
         root_refs.add(ref)
 
@@ -4432,19 +4431,19 @@ def api_tree():
 
 @flask_app.route('/api/scene', methods=['GET', 'POST'])
 def api_scene():
-    # Шаблоны (ServerStorage/ReplicatedStorage): клиент в Play их не рисует, но данные нужны Clone() — отдаём ВСЕ сразу,
-    # без лимита по дистанции (иначе у дальних шаблонов комнат/врагов клоны остаются без меша).
+    # Templates (ServerStorage/ReplicatedStorage): the client doesn't draw them in Play, but Clone() needs the data — we return ALL at once,
+    # without a distance limit (otherwise clones of distant room/enemy templates remain without a mesh).
     if request.args.get('nw') == '1':
         if not state['parsed']:
             return jsonify({'ok': True, 'objects': []})
         return jsonify({'ok': True, 'objects': [o for o in build_all_scene_objects() if o.get('nw')]})
-    # POST с телом {cx,cy,cz,load_radius,limit,chunk} — используется
-    # Play-стримингом (см. index.html, refreshStreamedGeometry): просто
-    # "все объекты в радиусе load_radius от игрока", без рейкаста и без
-    # направления камеры (см. get_chunk_index/gather_objects_in_radius
-    # выше — chunk-based подход, как в Minecraft/UE5 World Partition).
-    # GET с query-параметрами остаётся как был для остальных вызовов
-    # (обычная загрузка сцены редактора) и для pts= из более старых версий.
+    # POST with the body {cx,cy,cz,load_radius,limit,chunk} — used by
+    # Play streaming (see index.html, refreshStreamedGeometry): simply
+    # "all objects within load_radius of the player", without raycasting and without
+    # the camera direction (see get_chunk_index/gather_objects_in_radius
+    # above — the chunk-based approach, as in Minecraft/UE5 World Partition).
+    # GET with query parameters stays as it was for the other calls
+    # (the editor's ordinary scene load) and for pts= from older versions.
     body = request.get_json(silent=True) if request.method == 'POST' else None
     body = body or {}
 
@@ -4468,30 +4467,30 @@ def api_scene():
 
     load_radius = num('load_radius')
     if load_radius is not None and cx is not None and cy is not None and cz is not None:
-        # Chunk-based путь: быстрый отбор кандидатов через сетку ячеек
-        # (gather_objects_in_radius), уже отсортированных по дистанции —
-        # берём просто ближайшие limit.
+        # Chunk-based path: fast candidate selection via the cell grid
+        # (gather_objects_in_radius), already sorted by distance —
+        # we just take the nearest limit.
         by_dist = gather_objects_in_radius(cx, cy, cz, load_radius)
         objs = [o for _, o in by_dist]
         total = len(objs)
         if chunk:
             objs = chunk_large_objects(objs)
-            # chunk_large_objects дробит крупные объекты уже ПОСЛЕ отбора
-            # по радиусу здесь (в отличие от get_chunk_index, где дробление
-            # идёт до раскладки по ячейкам) — порядок по дистанции при этом
-            # не портится: части одного большого объекта остаются рядом
-            # друг с другом в списке.
+            # chunk_large_objects splits large objects only AFTER the selection
+            # by radius here (unlike get_chunk_index, where the splitting
+            # happens before laying out into cells) — the distance order isn't
+            # spoiled by this: parts of one big object stay next
+            # to each other in the list.
         if limit is not None:
             objs = objs[:limit]
         return jsonify({'ok': True, 'objects': objs, 'total': total})
 
-    # Старый points-based путь (используется остальными вызовами —
-    # обычная загрузка сцены в редакторе, где рейкаст/радиус не нужны).
+    # The old points-based path (used by the other calls —
+    # the ordinary scene load in the editor, where raycast/radius aren't needed).
     points = []
     if cx is not None and cy is not None and cz is not None:
         points.append((cx, cy, cz))
 
-    # pts=x,y,z;x,y,z;... — обратная совместимость.
+    # pts=x,y,z;x,y,z;... — backward compatibility.
     pts_raw = body.get('pts') if 'pts' in body else request.args.get('pts')
     if pts_raw:
         groups = pts_raw if isinstance(pts_raw, list) else pts_raw.split(';')
@@ -4509,11 +4508,10 @@ def api_scene():
 
 @flask_app.route('/api/proximity_prompts')
 def api_proximity_prompts():
-    """Все ProximityPrompt на карте — сразу все и один раз (список обычно
-    маленький, не привязан к потоковой загрузке по радиусу, а сам объект
-    может понадобиться игроку ещё до того, как он попадёт в LOD-радиус
-    камеры). Клиент сам меряет дистанцию до parentRef каждый кадр — здесь
-    только статические данные из файла."""
+    """All ProximityPrompts on the map — all at once and once only (the list is usually
+    small, not tied to radius-based streaming, and the object itself
+    may be needed by the player before it gets into the camera's LOD radius). The client measures the distance to parentRef itself every frame — here
+    only the static data from the file."""
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False, 'error': 'nothing open'}), 400
@@ -4525,7 +4523,7 @@ def api_proximity_prompts():
         parent_ref = parsed['parent_map'].get(ref, -1)
         parent_cls = parsed['referent_to_class'].get(parent_ref)
         if parent_cls not in PART_CLASSES and parent_cls != 'Model':
-            continue  # подсказка не на детали/модели — дистанцию мерить не от чего
+            continue  # the prompt isn't on a part/model — there is nothing to measure the distance from
         enabled = props.get('Enabled', True)
         if isinstance(enabled, str):
             enabled = enabled.lower() in ('true', '1')
@@ -4550,14 +4548,14 @@ def api_proximity_prompts():
 
 @flask_app.route('/api/spawn')
 def api_spawn_point():
-    # Отдельная ручка, не зависящая от того, какой кусок сцены сейчас
-    # подгружен в редакторе — нужна, чтобы Play всегда находил точку
-    # спавна, даже если она не попала в текущий LOD-радиус камеры.
+    # A separate handler, independent of which piece of the scene is currently
+    # loaded in the editor — needed so that Play always finds the spawn
+    # point, even if it didn't fall into the camera's current LOD radius.
     #
-    # На карте может быть несколько SpawnLocation (командные спавны и
-    # т.п.). Предпочитаем Anchored=true — незакреплённый спавн часто
-    # висит в воздухе (декоративный/на движущейся платформе) и роняет
-    # игрока в пустоту, если он выбран первым просто по порядку в файле.
+    # A map may have several SpawnLocations (team spawns and
+    # the like). We prefer Anchored=true — an unanchored spawn often
+    # hangs in the air (decorative/on a moving platform) and drops the
+    # player into the void if it is chosen first just by file order.
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False, 'error': 'nothing open'}), 400
@@ -4584,9 +4582,9 @@ def api_spawn_point():
     if not candidates:
         return jsonify({'ok': False, 'error': 'no SpawnLocation in scene'})
 
-    # team=auto: как в Roblox, игрок при входе попадает в первую AutoAssignable-команду и появляется на SpawnLocation
-    # СВОЕЙ команды (TeamColor совпал, Neutral=false); нет такого — на нейтральном. Раньше брался просто первый спавн,
-    # и Pink-игрок оказывался в зелёной зоне, по ту сторону чужого форсфилда.
+    # team=auto: as in Roblox, on joining the player goes to the first AutoAssignable team and appears at the SpawnLocation
+    # of THEIR team (TeamColor matches, Neutral=false); if there is none — at a neutral one. Previously just the first spawn was taken,
+    # and a Pink player ended up in the green zone, on the other side of an enemy force field.
     if request.args.get('team') == 'auto':
         team_color = None
         for ref, cls in parsed['referent_to_class'].items():
@@ -4601,7 +4599,7 @@ def api_spawn_point():
             elif neutral_c:
                 candidates = neutral_c
 
-    candidates.sort(key=lambda c: not c[0])  # anchored=True первыми
+    candidates.sort(key=lambda c: not c[0])  # anchored=True first
     x, y, z = candidates[0][1], candidates[0][2], candidates[0][3]
     return jsonify({'ok': True, 'x': x, 'y': y, 'z': z, 'anchored': candidates[0][0]})
 
@@ -4614,10 +4612,10 @@ def api_get_instance(ref):
     cls = parsed['referent_to_class'].get(ref, '?')
     props = {k: serialize_prop(v)
              for k, v in parsed['props'].get(ref, {}).items()}
-    # Прослушивание звука прямо из Explorer (buildSoundPreviewRow) раньше
-    # играло его "как есть", без PlaybackSpeed/PitchShiftSoundEffect —
-    # звучало не так, как в реальной игре. Octave лежит не в самом Sound, а
-    # в дочернем PitchShiftSoundEffect, поэтому ищем его отдельно, как и в
+    # Listening to a sound right from Explorer (buildSoundPreviewRow) used to
+    # play it "as is", without PlaybackSpeed/PitchShiftSoundEffect —
+    # it sounded different from the real game. Octave lies not in the Sound itself but
+    # in the child PitchShiftSoundEffect, so we look for it separately, as in
     # /api/all_instances.
     pitch_octave = None
     if cls == 'Sound':
@@ -4638,7 +4636,7 @@ def api_get_instance(ref):
 
 
 def _rbx_post_json(url, data):
-    """Отправляет POST-запрос с JSON-телом и возвращает распарсенный JSON."""
+    """Sends a POST request with a JSON body and returns the parsed JSON."""
     req = _req.Request(url, data=data, headers=_roblox_headers())
     req.add_header('Content-Type', 'application/json')
     try:
@@ -4648,38 +4646,38 @@ def _rbx_post_json(url, data):
         return json.loads(raw_text)
     except _urlerr.HTTPError as e:
         body = _rbx_maybe_gunzip(e.read()).decode('utf-8', 'replace')[:300]
-        raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
+        raise RuntimeError(f'HTTP {e.code} from Roblox: {body}')
     except Exception as e:
         raise RuntimeError(str(e))
 
 
 @flask_app.route('/api/roblox/userid', methods=['GET'])
 def api_roblox_userid():
-    """Получить User ID по никнейму через официальный API Roblox.
-    Требуется наличие .ROBLOSECURITY (авторизация)."""
+    """Get a User ID by nickname via the official Roblox API.
+    Requires .ROBLOSECURITY (authorization)."""
     username = request.args.get('username', '').strip()
     if not username:
         return jsonify({'ok': False, 'error': 'Missing username'}), 400
 
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'error': 'not_logged_in',
-                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+                        'message': _alang('Сначала войдите в аккаунт Roblox.', 'Sign in to your Roblox account first.')}), 401
 
     try:
-        # Используем официальный эндпоинт Roblox
+        # We use the official Roblox endpoint
         resp = _rbx_post_json(
             'https://users.roblox.com/v1/usernames/users',
             json.dumps({'usernames': [username], 'excludeBannedUsers': False}).encode(
                 'utf-8')
         )
-        # _rbx_get_json по умолчанию делает GET. Нам нужно POST.
-        # Придётся немного изменить _rbx_get_json или написать отдельную функцию.
-        # Давайте перепишем _rbx_get_json, чтобы поддерживать POST.
-        # Или создадим новую функцию _rbx_post_json.
+        # _rbx_get_json does a GET by default. We need a POST.
+        # We'll have to change _rbx_get_json a little or write a separate function.
+        # Let's rewrite _rbx_get_json to support POST.
+        # Or create a new function _rbx_post_json.
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 502
 
-    # Обработка ответа
+    # Response handling
     if isinstance(resp, dict) and resp.get('data') and len(resp['data']) > 0:
         user_data = resp['data'][0]
         return jsonify({
@@ -4689,14 +4687,14 @@ def api_roblox_userid():
             'name': user_data.get('name', '')
         })
     else:
-        return jsonify({'ok': False, 'error': 'Пользователь не найден'}), 404
+        return jsonify({'ok': False, 'error': _alang('Пользователь не найден', 'User not found')}), 404
 
 
 def build_rot_matrix_from_deg(rx_deg, ry_deg, rz_deg):
-    """Строит 3x3-матрицу поворота (row-major, 9 элементов) из углов в
-    градусах — той же конвенцией, что get_rot_matrix() и разложение в
-    rbxl_parser.py (R = Rx(rx) * Ry(ry) * Rz(rz)), чтобы Rotation и CFrame
-    оставались согласованы в обе стороны."""
+    """Builds a 3x3 rotation matrix (row-major, 9 elements) from angles in
+    degrees — with the same convention as get_rot_matrix() and the decomposition in
+    rbxl_parser.py (R = Rx(rx) * Ry(ry) * Rz(rz)), so that Rotation and CFrame
+    stay consistent in both directions."""
     rx, ry, rz = math.radians(rx_deg), math.radians(
         ry_deg), math.radians(rz_deg)
     cx, sx = math.cos(rx), math.sin(rx)
@@ -4709,15 +4707,15 @@ def build_rot_matrix_from_deg(rx_deg, ry_deg, rz_deg):
     ]
 
 
-# ---- Трансформации (инструменты Move/Rotate/Scale/Pivot) --------------------------------------------------
-# Канонический CFrame, который понимает и сцена (get_pos/get_rot_matrix), и сохранение (s_cframe):
-# {'matrix': [R00..R22 по строкам], 'position': {x,y,z}}. Раньше правка Position/Rotation писала 12-элементную
-# матрицу с позицией внутри — s_cframe читал из неё только первые 9 чисел и терял позицию при сохранении.
+# ---- Transforms (the Move/Rotate/Scale/Pivot tools) --------------------------------------------------
+# The canonical CFrame understood by both the scene (get_pos/get_rot_matrix) and saving (s_cframe):
+# {'matrix': [R00..R22 by rows], 'position': {x,y,z}}. Editing Position/Rotation used to write a 12-element
+# matrix with the position inside — s_cframe read only the first 9 numbers from it and lost the position on save.
 _IDENT3 = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 
 
 def _m3_to_euler_deg(m):
-    """Обратное к build_rot_matrix_from_deg (R = Rx*Ry*Rz) -> (rx, ry, rz) в градусах."""
+    """The inverse of build_rot_matrix_from_deg (R = Rx*Ry*Rz) -> (rx, ry, rz) in degrees."""
     r00, r01, r02, r10, r11, r12, r20, r21, r22 = m
     ry = math.asin(max(-1.0, min(1.0, r02)))
     if abs(r02) < 0.99999:
@@ -4730,7 +4728,7 @@ def _m3_to_euler_deg(m):
 
 
 def _cf_read(cf, fallback_pos=None):
-    """CFrame-словарь -> (pos[3], rot[9])."""
+    """CFrame dict -> (pos[3], rot[9])."""
     if isinstance(cf, dict) and ('position' in cf or 'matrix' in cf):
         pos = list(get_pos(cf))
         if fallback_pos is not None and pos == [0.0, 0.0, 0.0]:
@@ -4750,15 +4748,15 @@ def _part_pose(props):
 
 
 def _part_set_size(props, size):
-    """Size в файле хранится под бинарным именем 'size' (его и пишет сериализатор), 'Size' — производное
-    поле для панели: правка только 'Size' при сохранении терялась."""
+    """Size is stored in the file under the binary name 'size' (the serializer writes it), 'Size' is a derived
+    field for the panel: editing only 'Size' was lost on save."""
     v = {'x': float(size[0]), 'y': float(size[1]), 'z': float(size[2])}
     props['Size'] = v
     props['size'] = dict(v)
 
 
 def _part_set_pose(props, pos, rot):
-    """Единая запись позы детали: CFrame + вспомогательные Position/Rotation (их читает панель Properties)."""
+    """A unified write of a part's pose: CFrame + the auxiliary Position/Rotation (read by the Properties panel)."""
     props['CFrame'] = _cf_make(pos, rot)
     props['Position'] = {'x': float(pos[0]), 'y': float(pos[1]), 'z': float(pos[2])}
     rx, ry, rz = _m3_to_euler_deg(rot)
@@ -4814,7 +4812,7 @@ def _part_size(props):
 
 
 def _part_pivot(props):
-    """Мировой pivot детали = CFrame * PivotOffset -> (pos, rot)."""
+    """A part's world pivot = CFrame * PivotOffset -> (pos, rot)."""
     pos, rot = _part_pose(props)
     po = props.get('PivotOffset')
     if isinstance(po, dict):
@@ -4826,7 +4824,7 @@ def _part_pivot(props):
 
 @flask_app.route('/api/transform_info')
 def api_transform_info():
-    """Для гизмо: pivot, габариты и (для детали) размер/поза выбранных объектов."""
+    """For the gizmo: the pivot, dimensions and (for a part) the size/pose of the selected objects."""
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False}), 400
@@ -4879,11 +4877,11 @@ def api_transform_info():
 
 @flask_app.route('/api/transform', methods=['POST'])
 def api_transform():
-    """Пакетная правка трансформаций (один запрос на весь жест в редакторе).
-    ops: [{ref, delta:{r:[9], t:[3], pivot:[3], k}}           — жёсткий сдвиг/поворот/равномерный масштаб ref и ВСЕХ его деталей-потомков,
-          {ref, cframe:{p:[3], r:[9]}, size:[3]}              — абсолютная поза/размер одной детали,
-          {ref, pivotOffset:{p,r}|null}                        — PivotOffset детали (null = сбросить),
-          {ref, worldPivot:{p,r}}                              — WorldPivot модели}"""
+    """Batch transform editing (one request for the whole gesture in the editor).
+    ops: [{ref, delta:{r:[9], t:[3], pivot:[3], k}}           — a rigid shift/rotation/uniform scale of ref and ALL its descendant parts,
+    {ref, cframe:{p:[3], r:[9]}, size:[3]}              — the absolute pose/size of one part,
+    {ref, pivotOffset:{p,r}|null}                        — a part's PivotOffset (null = reset),
+    {ref, worldPivot:{p,r}}                              — a model's WorldPivot}"""
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': False}), 400
@@ -4891,7 +4889,7 @@ def api_transform():
     if not isinstance(ops, list) or not ops:
         return jsonify({'ok': False, 'error': 'ops'}), 400
     r2c = parsed['referent_to_class']
-    changed = {}     # ref -> снимок «до»
+    changed = {}     # ref -> the «before» snapshot
 
     def touch(ref):
         if ref not in changed:
@@ -4986,8 +4984,8 @@ def api_set_prop(ref):
         parsed['_modified'] = True
         bump_scene_version()
 
-        # CFrame в make_scene_objects имеет приоритет над Position/Rotation — синхронизируем,
-        # и пишем в каноническом виде (см. _part_set_pose), иначе позиция терялась при сохранении.
+        # CFrame in make_scene_objects has priority over Position/Rotation — we synchronize,
+        # and write in canonical form (see _part_set_pose), otherwise the position was lost on save.
         if prop == 'Size' and isinstance(val, dict):
             _part_set_size(props, [safe_float(val.get('x', 1), 1), safe_float(val.get('y', 1), 1), safe_float(val.get('z', 1), 1)])
         if prop == 'Position' and isinstance(val, dict):
@@ -5001,7 +4999,7 @@ def api_set_prop(ref):
 
 
 def _m3_mul(a, b):
-    """3x3 (по строкам, 9 чисел) * 3x3."""
+    """3x3 (by rows, 9 numbers) * 3x3."""
     return [sum(a[i * 3 + k] * b[k * 3 + j] for k in range(3)) for i in range(3) for j in range(3)]
 
 
@@ -5018,12 +5016,12 @@ _PARTICLE_PROPS = (
 )
 
 
-# Контейнеры-склады шаблонов: объекты внутри не существуют в мире (появляются, только когда скрипт делает Clone() в Workspace)
+# Template-storage containers: the objects inside don't exist in the world (they appear only when a script does Clone() into Workspace)
 _NOT_IN_WORLD_ROOTS = ('ServerStorage', 'ReplicatedStorage', 'StarterPack')
 
 
 def _ref_in_world(ref, pmap, r2c):
-    """False, если объект лежит в ServerStorage/ReplicatedStorage/StarterPack (шаблон, а не часть мира)."""
+    """False if the object lies in ServerStorage/ReplicatedStorage/StarterPack (a template, not part of the world)."""
     root, g = ref, 0
     while pmap.get(root) in r2c and g < 500:
         root = pmap[root]
@@ -5033,10 +5031,10 @@ def _ref_in_world(ref, pmap, r2c):
 
 @flask_app.route('/api/particles')
 def api_particles():
-    """Все ParticleEmitter сцены: где они стоят (мировая позиция/поворот
-    эмиттера и относительная к детали) и их свойства. Рисует их клиент
-    (script.js, блок «ЧАСТИЦЫ»). Родитель эмиттера — Attachment (точка) или
-    сама деталь (тогда частицы появляются в объёме детали)."""
+    """All ParticleEmitters of the scene: where they stand (the emitter's world position/rotation
+    and the one relative to the part) and their properties. They are drawn by the client
+    (script.js, the «PARTICLES» block). The emitter's parent is an Attachment (a point) or
+    the part itself (then particles appear within the part's volume)."""
     parsed = state['parsed']
     if not parsed:
         return jsonify({'ok': True, 'emitters': []})
@@ -5046,7 +5044,7 @@ def api_particles():
         if cls != 'ParticleEmitter':
             continue
         if not _ref_in_world(ref, pmap, r2c):
-            continue    # эмиттеры шаблонов из ServerStorage раньше «горели» на месте шаблона в воздухе
+            continue    # emitters of ServerStorage templates used to «burn» in the air at the template's place
         parent = pmap.get(ref, -1)
         pcls = r2c.get(parent)
         if pcls == 'Attachment':
@@ -5097,9 +5095,9 @@ def api_add():
 
     props = {'Name': name}
     if cls in PART_CLASSES:
-        # Без начальных Position/Size/CFrame новый объект оказывается
-        # в (0,0,0) с нулевым/дефолтным размером и накладывается на
-        # другие части — визуально выглядит как "не появился".
+        # Without initial Position/Size/CFrame a new object ends up
+        # at (0,0,0) with a zero/default size and overlaps
+        # other parts — it visually looks like "it didn't appear".
         px, py, pz = data.get('px', 0), data.get('py', 5), data.get('pz', 0)
         dsx, dsy, dsz = _ADD_SIZE_DEFAULTS.get(cls, (4, 1, 2))
         sx, sy, sz = data.get('sx', dsx), data.get('sy', dsy), data.get('sz', dsz)
@@ -5108,8 +5106,8 @@ def api_add():
         props['Rotation'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         props['Size'] = {'x': safe_float(sx, 4), 'y': safe_float(
             sy, 1), 'z': safe_float(sz, 2)}
-        # Формат CFrame в props — 9 чисел поворота (по строкам) + отдельный position. Раньше сюда писали 12 чисел с позицией
-        # внутри matrix: позиция попадала в элементы поворота, и физтело новой детали получало мусорный (неединичный) поворот.
+        # The CFrame format in props is 9 rotation numbers (by rows) + a separate position. Previously 12 numbers were written here with the position
+        # inside matrix: the position got into the rotation elements, and the new part's physics body received a garbage (non-identity) rotation.
         props['CFrame'] = {
             'matrix': [1, 0, 0, 0, 1, 0, 0, 0, 1],
             'position': {'x': safe_float(px), 'y': safe_float(py, 5), 'z': safe_float(pz)},
@@ -5127,21 +5125,21 @@ def api_add():
 @flask_app.route('/api/reparent', methods=['POST'])
 @_collab_track('move')
 def api_reparent():
-    """Перенос объектов в другого родителя (drag & drop в Explorer).
-    Тело: {"refs": [..], "parent": ref}. Мировые координаты не меняются —
-    как в Roblox, меняется только дерево."""
+    """Moving objects to another parent (drag & drop in Explorer).
+    Body: {"refs": [..], "parent": ref}. World coordinates don't change —
+    as in Roblox, only the tree changes."""
     parsed = state['parsed']
     if not parsed:
-        return jsonify({'ok': False, 'error': 'Файл не загружен'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл не загружен', 'No file loaded')}), 400
     data = request.json or {}
     try:
         refs = [int(r) for r in (data.get('refs') or [])]
         parent = int(data.get('parent'))
     except (TypeError, ValueError):
-        return jsonify({'ok': False, 'error': 'Некорректные refs/parent'}), 400
+        return jsonify({'ok': False, 'error': _alang('Некорректные refs/parent', 'Invalid refs/parent')}), 400
     r2c, pm = parsed['referent_to_class'], parsed['parent_map']
     if parent not in r2c:
-        return jsonify({'ok': False, 'error': 'Родитель не найден'}), 400
+        return jsonify({'ok': False, 'error': _alang('Родитель не найден', 'Parent not found')}), 400
 
     def ancestors(ref):
         seen, cur = set(), ref
@@ -5158,10 +5156,10 @@ def api_reparent():
     for ref in refs:
         if ref not in r2c or ref == parent:
             skipped.append(ref); continue
-        # нельзя класть объект в самого себя или в своего потомка
+        # you can't put an object into itself or into its descendant
         if ref in parent_chain:
             skipped.append(ref); continue
-        # сервисы (корни без родителя) и Terrain/Camera не переносим
+        # we don't move services (roots without a parent) and Terrain/Camera
         if pm.get(ref, -1) in (-1, None) or pm.get(ref) not in r2c or r2c[ref] in ('Terrain', 'Camera'):
             skipped.append(ref); continue
         if pm.get(ref) == parent:
@@ -5191,11 +5189,11 @@ def api_delete(ref):
 def api_save():
     parsed = state['parsed']
     if not parsed:
-        return jsonify({'ok': False, 'error': 'Нет данных'}), 400
+        return jsonify({'ok': False, 'error': _alang('Нет данных', 'No data')}), 400
     data = request.json or {}
     path = data.get('path') or state['file_path']
     if not path:
-        return jsonify({'ok': False, 'error': 'Нет пути'}), 400
+        return jsonify({'ok': False, 'error': _alang('Нет пути', 'No path')}), 400
     try:
         p = Path(path)
         ext = p.suffix.lower()
@@ -5224,16 +5222,16 @@ def api_save():
 
 @flask_app.route('/api/publish', methods=['POST'])
 def api_publish():
-    """Публикация в Roblox. Сначала Open Cloud (POST universes/{id}/places/{id}/versions, нужен API-ключ),
-    потом запасной путь через сессию аккаунта (POST data.roblox.com/Data/Upload.ashx?assetid=<Place ID>,
-    как делают Rojo и др.). Куки-путь неофициальный (Roblox просит переходить на Open Cloud), только
-    для Published: у него нет «Saved» (версия без выкладки игрокам) и Universe ID не нужен.
-    Раньше уходил файл, лежащий на ДИСКЕ (state['file_path']): правки, не сохранённые кнопкой «Сохранить»,
-    в публикацию не попадали, а у нового проекта без файла публикация вообще не работала. Теперь
-    публикуется ТЕКУЩАЯ сцена: она сериализуется во временный .rbxl (локальный файл не трогаем)."""
+    """Publishing to Roblox. Open Cloud first (POST universes/{id}/places/{id}/versions, an API key is needed),
+    then the fallback through the account session (POST data.roblox.com/Data/Upload.ashx?assetid=<Place ID>,
+    as Rojo and others do). The cookie path is unofficial (Roblox asks to move to Open Cloud), only
+    for Published: it has no «Saved» (a version not rolled out to players) and no Universe ID is needed.
+    Previously the file lying on DISK (state['file_path']) was sent: edits not saved with the «Save» button
+    didn't get into the publication, and for a new project without a file publishing didn't work at all. Now
+    the CURRENT scene is published: it is serialized into a temporary .rbxl (the local file is not touched)."""
     parsed = state['parsed']
     if not parsed:
-        return jsonify({'ok': False, 'error': 'Файл не загружен'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл не загружен', 'No file loaded')}), 400
     data = request.json or {}
     universe_id = str(data.get('universe_id', '')).strip()
     place_id = str(data.get('place_id', '')).strip()
@@ -5243,13 +5241,13 @@ def api_publish():
         version_type = 'Published'
     has_cookie = _roblox_cookie() is not None
     if not place_id.isdigit():
-        return jsonify({'ok': False, 'error': 'Place ID должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('Place ID должен быть числом', 'Place ID must be a number')}), 400
     if api_key and not universe_id.isdigit() and not (has_cookie and version_type == 'Published'):
-        return jsonify({'ok': False, 'error': 'Universe ID должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('Universe ID должен быть числом', 'Universe ID must be a number')}), 400
     if not api_key and not has_cookie:
-        return jsonify({'ok': False, 'error': 'Нет API-ключа и входа в аккаунт: введите ключ в окне или настройте их в «Аккаунт»'}), 400
+        return jsonify({'ok': False, 'error': _alang('Нет API-ключа и входа в аккаунт: введите ключ в окне или настройте их в «Аккаунт»', 'No API key and no account sign-in: enter a key in the window or set them up in «Account»')}), 400
     if not api_key and version_type == 'Saved':
-        return jsonify({'ok': False, 'error': 'Saved работает только с API-ключом: через вход в аккаунт Roblox всегда публикует'}), 400
+        return jsonify({'ok': False, 'error': _alang('Saved работает только с API-ключом: через вход в аккаунт Roblox всегда публикует', 'Saved works only with an API key: publishing through a Roblox account sign-in always creates a new version')}), 400
     import tempfile
     fd, tmp_path = tempfile.mkstemp(suffix='.rbxl')
     os.close(fd)
@@ -5261,8 +5259,8 @@ def api_publish():
             via = 'api-key'
             if status == 200:
                 return jsonify({'ok': True, 'status': status, 'text': text, 'via': via})
-            key_note = f'ключ: HTTP {status}'
-        # запасной путь: нет ключа или он не принят (401/403) — только Published
+            key_note = f'key: HTTP {status}'
+        # fallback path: no key or it wasn't accepted (401/403) — Published only
         if has_cookie and version_type == 'Published' and (status is None or status in (401, 403)):
             with open(tmp_path, 'rb') as f:
                 raw = f.read()
@@ -5288,17 +5286,17 @@ def api_publish():
 
 @flask_app.route('/api/save/download')
 def api_save_download():
-    """Сохранение "как" через обычную браузерную загрузку (нативный
-    менеджер загрузок ОС/браузера) вместо самописного проводника по
-    файловой системе СЕРВЕРА (см. /api/browse ниже) — тот путь вообще
-    не имел смысла всякий раз, когда сервер и вкладка браузера физически
-    не одна машина (в первую очередь — мобильный кейс). Пишем во
-    временный файл на диске сервера (как уже делает Android-ветка
-    сохранения через SAF), читаем байты в память и отдаём как
-    attachment, временный файл сразу удаляем."""
+    """Saving "as" through an ordinary browser download (the native
+    download manager of the OS/browser) instead of a home-grown explorer over the
+    SERVER's file system (see /api/browse below) — that path made no sense at all
+    whenever the server and the browser tab are physically not
+    one machine (primarily the mobile case). We write to a
+    temporary file on the server's disk (as the Android branch of
+    saving via SAF already does), read the bytes into memory and return them as an
+    attachment, deleting the temporary file immediately."""
     parsed = state['parsed']
     if not parsed:
-        return jsonify({'ok': False, 'error': 'Нет данных'}), 400
+        return jsonify({'ok': False, 'error': _alang('Нет данных', 'No data')}), 400
 
     name = os.path.basename(request.args.get('name') or 'place.rbxl') or 'place.rbxl'
     ext = Path(name).suffix.lower()
@@ -5338,15 +5336,15 @@ def _rbxm_name(raw):
 
 @flask_app.route('/api/export/rbxm', methods=['GET', 'POST'])
 def api_export_rbxm():
-    """Экспорт выбранных объектов (со всеми потомками) в бинарный .rbxm.
-
-    GET  ?refs=1,2,3&name=model.rbxm — обычная браузерная загрузка (как
-         /api/save/download: blob-URL в Android WebView не работают).
-    POST {refs: [...], path: "..."} — запись файла на диск сервера; так
-         Android кладёт файл в приватную папку перед экспортом через SAF."""
+    """Export of selected objects (with all descendants) to a binary .rbxm.
+    
+    GET  ?refs=1,2,3&name=model.rbxm — an ordinary browser download (like
+    /api/save/download: blob URLs don't work in Android WebView).
+    POST {refs: [...], path: "..."} — writes the file to the server's disk; this is how
+    Android puts the file into the private folder before exporting via SAF."""
     parsed = state['parsed']
     if not parsed:
-        return jsonify({'ok': False, 'error': 'Нет данных'}), 400
+        return jsonify({'ok': False, 'error': _alang('Нет данных', 'No data')}), 400
     if request.method == 'POST':
         body = request.json or {}
         raw_refs = body.get('refs') or []
@@ -5355,7 +5353,7 @@ def api_export_rbxm():
     try:
         refs = [int(x) for x in raw_refs][:20000]
     except (TypeError, ValueError):
-        return jsonify({'ok': False, 'error': 'Некорректный список объектов'}), 400
+        return jsonify({'ok': False, 'error': _alang('Некорректный список объектов', 'Invalid list of objects')}), 400
     try:
         data, count, warnings = export_rbxm(parsed, refs)
     except ValueError as e:
@@ -5367,7 +5365,7 @@ def api_export_rbxm():
     if request.method == 'POST':
         path = (request.json or {}).get('path')
         if not path:
-            return jsonify({'ok': False, 'error': 'Нет пути'}), 400
+            return jsonify({'ok': False, 'error': _alang('Нет пути', 'No path')}), 400
         try:
             with open(path, 'wb') as f:
                 f.write(data)
@@ -5387,7 +5385,7 @@ def api_export_rbxm():
     )
 
 
-_PENDING_IMPORTS = {}   # token -> {'path', 'parent', 'ts'}: модели со скриптами ждут подтверждения пользователя
+_PENDING_IMPORTS = {}   # token -> {'path', 'parent', 'ts'}: models with scripts wait for the user's confirmation
 
 
 def _pending_cleanup():
@@ -5408,20 +5406,20 @@ def _pending_drop(tok):
 
 
 def _finish_rbxm_import(path, parent, confirmed=False):
-    """Импорт .rbxm в сцену. Если в модели есть скрипты и пользователь ещё не подтвердил — НИЧЕГО не импортируем, а
-    отдаём сводку (сколько скриптов, найденные опасные команды вроде require/loadstring/HttpService) и token: клиент
-    покажет окно и вызовет /api/import/rbxm/confirm (или /cancel). Так одинаково работают Toolbox, .rbxm с диска и Android."""
+    """Import of an .rbxm into the scene. If the model has scripts and the user hasn't confirmed yet — we import NOTHING and
+    return a summary (how many scripts, dangerous commands found such as require/loadstring/HttpService) and a token: the client
+    shows a window and calls /api/import/rbxm/confirm (or /cancel). Toolbox, an .rbxm from disk and Android all work the same way."""
     import shutil
     import tempfile
     if not state['parsed']:
-        api_new()   # нечего открывать — импортируем в новую пустую сцену
+        api_new()   # nothing to open — we import into a new empty scene
     if not confirmed:
         scan = scan_rbxm(path)
         if scan['scripts']['total']:
             _pending_cleanup()
             fd, keep = tempfile.mkstemp(suffix='.rbxm')
             os.close(fd)
-            shutil.copyfile(path, keep)   # исходный временный файл вызывающий удалит сразу после ответа
+            shutil.copyfile(path, keep)   # the caller will delete the source temporary file right after the response
             tok = _secrets.token_hex(8)
             _PENDING_IMPORTS[tok] = {'path': keep, 'parent': parent, 'ts': time.time()}
             return jsonify({'ok': False, 'needsConfirm': True, 'token': tok, 'scan': scan})
@@ -5440,11 +5438,11 @@ def _finish_rbxm_import(path, parent, confirmed=False):
 @flask_app.route('/api/import/rbxm/confirm', methods=['POST'])
 @_collab_track('import')
 def api_import_rbxm_confirm():
-    """Подтверждение импорта модели со скриптами: {token}. Файл уже лежит в _PENDING_IMPORTS."""
+    """Confirmation of importing a model with scripts: {token}. The file is already in _PENDING_IMPORTS."""
     tok = (request.get_json(silent=True) or {}).get('token')
     v = _PENDING_IMPORTS.get(tok)
     if not v:
-        return jsonify({'ok': False, 'error': 'Импорт устарел — повторите вставку модели'}), 404
+        return jsonify({'ok': False, 'error': _alang('Импорт устарел — повторите вставку модели', 'The import has expired — paste the model again')}), 404
     try:
         return _finish_rbxm_import(v['path'], v['parent'], confirmed=True)
     finally:
@@ -5460,12 +5458,12 @@ def api_import_rbxm_cancel():
 @flask_app.route('/api/import/rbxm', methods=['POST'])
 @_collab_track('import')
 def api_import_rbxm():
-    """Импорт .rbxm по пути на диске сервера (Android: Kotlin уже скопировал
-    выбранный через SAF файл в приватную папку приложения)."""
+    """Import of an .rbxm by a path on the server's disk (Android: Kotlin has already copied
+    the file chosen via SAF into the app's private folder)."""
     data = request.json or {}
     path = data.get('path')
     if not path or not os.path.isfile(path):
-        return jsonify({'ok': False, 'error': 'Файл не найден'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл не найден', 'File not found')}), 400
     parent = data.get('parent')
     return _finish_rbxm_import(path, int(parent) if parent is not None else None)
 
@@ -5473,21 +5471,21 @@ def api_import_rbxm():
 @flask_app.route('/api/import/rbxm/upload', methods=['POST'])
 @_collab_track('import')
 def api_import_rbxm_upload():
-    """Импорт .rbxm, выбранного обычным <input type=file> (см. /api/open/upload)."""
+    """Import of an .rbxm chosen with an ordinary <input type=file> (see /api/open/upload)."""
     import tempfile
     if 'file' not in request.files or not request.files['file'].filename:
-        return jsonify({'ok': False, 'error': 'Файл не передан'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл не передан', 'No file provided')}), 400
     parent = request.form.get('parent')
     try:
         parent = int(parent) if parent not in (None, '', 'null') else None
     except ValueError:
-        return jsonify({'ok': False, 'error': 'Некорректный родитель'}), 400
+        return jsonify({'ok': False, 'error': _alang('Некорректный родитель', 'Invalid parent')}), 400
     try:
         with tempfile.NamedTemporaryFile(suffix='.rbxm', delete=False) as tmp:
             request.files['file'].save(tmp.name)
             tmp_path = tmp.name
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'Не удалось сохранить файл: {e}'}), 500
+        return jsonify({'ok': False, 'error': f'Could not save the file: {e}'}), 500
     try:
         return _finish_rbxm_import(tmp_path, parent)
     finally:
@@ -5526,19 +5524,19 @@ def api_browse():
 
 
 def _roblox_auth_file():
-    """Путь к файлу с сохранённой .ROBLOSECURITY. На Android это
-    RSW_DATA_DIR/roblox_auth.json (см. bridge_launcher.py и
-    MainActivity.kt: RobloxLoginActivity пишет туда после логина). Вне
-    Android (обычный запуск python app.py) используем локальную папку —
-    так десктоп-версия тоже может подхватить куку, если её положить туда
-    вручную."""
+    """The path to the file with the saved .ROBLOSECURITY. On Android this is
+    RSW_DATA_DIR/roblox_auth.json (see bridge_launcher.py and
+    MainActivity.kt: RobloxLoginActivity writes there after login). Outside
+    Android (an ordinary python app.py run) we use a local folder —
+    so the desktop version can also pick up the cookie if it is placed there
+    by hand."""
     data_dir = os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)
     return Path(data_dir) / 'roblox_auth.json'
 
 
 def _roblox_cookie():
-    """Возвращает строку куки '.ROBLOSECURITY=...' или None, если логина
-    ещё не было / файл повреждён."""
+    """Returns the cookie string '.ROBLOSECURITY=...' or None if there has been no login
+    yet / the file is corrupted."""
     p = _roblox_auth_file()
     if not p.exists():
         return None
@@ -5556,11 +5554,11 @@ ROBLOX_HEADERS_BASE = {
         'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
     ),
     'Accept': 'application/json, text/plain, */*',
-    # КРИТИЧНО: без этого сервер может прислать тело в gzip, а urllib
-    # НЕ распаковывает его автоматически (это делают только requests/
-    # браузеры) — итог: JSON и даже сами файлы модели читались как сырые
-    # сжатые байты и превращались в нечитаемую "бинарную кашу" вместо
-    # текста/картинок. Проще всего попросить сервер вообще не сжимать.
+    # CRITICAL: without this the server may send the body gzipped, and urllib
+    # does NOT decompress it automatically (only requests/
+    # browsers do) — the result: JSON and even the model files themselves were read as raw
+    # compressed bytes and turned into unreadable "binary mush" instead of
+    # text/pictures. The simplest is to ask the server not to compress at all.
     'Accept-Encoding': 'identity',
 }
 
@@ -5580,19 +5578,19 @@ def api_roblox_auth_status():
 
 @flask_app.route('/api/roblox/cookie', methods=['POST'])
 def api_roblox_cookie_save():
-    """Вход на десктопе (в Android входит WebView, см. RobloxLoginActivity).
-    Тело: {cookie}: значение .ROBLOSECURITY (с префиксом или без). Кука
-    проверяется запросом к Roblox и сохраняется в roblox_auth.json (0600);
-    в ответ она НЕ возвращается. Только с локальной машины: кука даёт
-    полный доступ к аккаунту, а сервер слушает 0.0.0.0."""
+    """Sign-in on desktop (on Android the WebView signs in, see RobloxLoginActivity).
+    Body: {cookie}: the .ROBLOSECURITY value (with or without the prefix). The cookie is
+    verified with a request to Roblox and saved to roblox_auth.json (0600);
+    it is NOT returned in the response. Only from the local machine: the cookie gives
+    full access to the account, and the server listens on 0.0.0.0."""
     if request.remote_addr not in ('127.0.0.1', '::1'):
-        return jsonify({'ok': False, 'error': 'Только с локального устройства'}), 403
+        return jsonify({'ok': False, 'error': _alang('Только с локального устройства', 'Only from the local device')}), 403
     body = request.get_json(silent=True) or {}
     val = str(body.get('cookie') or '').strip().strip('"\'')
     if val.upper().startswith('.ROBLOSECURITY='):
         val = val.split('=', 1)[1].strip().strip('"\'')
     if len(val) < 100 or any(c in val for c in ' ;\r\n'):
-        return jsonify({'ok': False, 'error': 'Не похоже на значение .ROBLOSECURITY'}), 400
+        return jsonify({'ok': False, 'error': _alang('Не похоже на значение .ROBLOSECURITY', 'This does not look like a .ROBLOSECURITY value')}), 400
 
     p = _roblox_auth_file()
     old = p.read_text(encoding='utf-8') if p.exists() else None
@@ -5604,9 +5602,9 @@ def api_roblox_cookie_save():
             pass
         d = _rbx_get_json('https://users.roblox.com/v1/users/authenticated')
         if not (isinstance(d, dict) and d.get('id')):
-            raise RuntimeError('в ответе нет id')
+            raise RuntimeError(_alang('в ответе нет id', 'no id in the response'))
     except Exception as e:
-        # не прошла проверка — возвращаем прежнее состояние
+        # validation failed — we return the previous state
         try:
             if old is None:
                 p.unlink()
@@ -5614,7 +5612,7 @@ def api_roblox_cookie_save():
                 p.write_text(old, encoding='utf-8')
         except Exception:
             pass
-        return jsonify({'ok': False, 'error': f'Roblox не принял куку: {e}'}), 400
+        return jsonify({'ok': False, 'error': f'Roblox did not accept the cookie: {e}'}), 400
     return jsonify({'ok': True, 'name': d.get('name') or '', 'userId': d.get('id')})
 
 
@@ -5635,14 +5633,14 @@ def api_roblox_avatar3d_import_local_upload():
     import base64 as _b64
 
     if 'file' not in request.files:
-        return jsonify({'ok': False, 'error': 'Файл не передан'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл не передан', 'No file provided')}), 400
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'ok': False, 'error': 'Имя файла пустое'}), 400
+        return jsonify({'ok': False, 'error': _alang('Имя файла пустое', 'The file name is empty')}), 400
 
     try:
-        # Читаем содержимое загруженного файла в память
+        # We read the contents of the uploaded file into memory
         zip_bytes = file.read()
         with zipfile.ZipFile(io.BytesIO(zip_bytes), 'r') as zf:
             names = zf.namelist()
@@ -5651,7 +5649,7 @@ def api_roblox_avatar3d_import_local_upload():
             mtl_name = next(
                 (n for n in names if n.lower().endswith('.mtl')), None)
             if not obj_name or not mtl_name:
-                return jsonify({'ok': False, 'error': 'В архиве нет .obj или .mtl — это точно экспорт аватара?'}), 400
+                return jsonify({'ok': False, 'error': _alang('В архиве нет .obj или .mtl — это точно экспорт аватара?', 'There is no .obj or .mtl in the archive — is this really an avatar export?')}), 400
 
             obj_text = zf.read(obj_name).decode('utf-8', 'replace')
             mtl_text = zf.read(mtl_name).decode('utf-8', 'replace')
@@ -5666,16 +5664,16 @@ def api_roblox_avatar3d_import_local_upload():
                     })
         return jsonify({'ok': True, 'obj_text': obj_text, 'mtl_text': mtl_text, 'textures': textures})
     except zipfile.BadZipFile:
-        return jsonify({'ok': False, 'error': 'Файл повреждён или это не .zip'}), 400
+        return jsonify({'ok': False, 'error': _alang('Файл повреждён или это не .zip', 'The file is corrupted or is not a .zip')}), 400
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 def _rbx_maybe_gunzip(raw: bytes) -> bytes:
-    """Подстраховка: если какой-то узел всё же проигнорирует
-    Accept-Encoding: identity и пришлёт gzip (сигнатура байтов 1f 8b),
-    распаковываем сами — иначе на выходе будет нечитаемая бинарная каша
-    вместо настоящего JSON/OBJ/PNG."""
+    """Safety net: if some node nevertheless ignores
+    Accept-Encoding: identity and sends gzip (byte signature 1f 8b),
+    we decompress it ourselves — otherwise the output is an unreadable binary mush
+    instead of the real JSON/OBJ/PNG."""
     if len(raw) >= 2 and raw[0] == 0x1f and raw[1] == 0x8b:
         import gzip as _gzip
         return _gzip.decompress(raw)
@@ -5690,43 +5688,43 @@ def _rbx_get_json(url):
             raw_text = raw_bytes.decode('utf-8', 'replace')
     except _urlerr.HTTPError as e:
         body = _rbx_maybe_gunzip(e.read()).decode('utf-8', 'replace')[:300]
-        raise RuntimeError(f'HTTP {e.code} от Roblox: {body}')
+        raise RuntimeError(f'HTTP {e.code} from Roblox: {body}')
     try:
         return json.loads(raw_text)
     except json.JSONDecodeError:
-        # Не JSON — почти всегда значит, что вместо API-ответа пришла
-        # HTML-страница (антибот-проверка Cloudflare/PerimeterX, редирект
-        # на логин и т.п.). Показываем начало тела как есть — так сразу
-        # видно, что это не наш баг, а блокировка со стороны Roblox.
+        # Not JSON — almost always means that an HTML page came instead of an API response
+        # (a Cloudflare/PerimeterX anti-bot check, a redirect
+        # to login, etc.). We show the start of the body as is — this makes it immediately
+        # visible that it's not our bug but a block on Roblox's side.
         snippet = raw_text[:300].replace('\n', ' ')
         raise RuntimeError(
-            f'Roblox вернул не-JSON ответ (похоже на антибот-страницу): {snippet}')
+            f'Roblox returned a non-JSON response (looks like an anti-bot page): {snippet}')
 
 
 def _roblox_apikey_file():
-    """Путь к файлу с сохранённым Open Cloud API-ключом — то же место и
-    тот же принцип, что и _roblox_auth_file() для куки (см. рядом):
-    RSW_DATA_DIR на Android, локальная папка иначе. Отдельный файл, а не
-    внутри roblox_auth.json — ключ и кука это разные учётные данные с
-    разным жизненным циклом (ключ не привязан к конкретному логину)."""
+    """The path to the file with the saved Open Cloud API key — the same place and
+    the same principle as _roblox_auth_file() for the cookie (see nearby):
+    RSW_DATA_DIR on Android, a local folder otherwise. A separate file, not
+    inside roblox_auth.json — a key and a cookie are different credentials with
+    different life cycles (a key isn't tied to a particular login)."""
     data_dir = os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)
     return Path(data_dir) / 'roblox_apikey.json'
 
 
 def _roblox_api_key():
-    """Open Cloud API-ключ — официальная замена сессионной куки для
-    AssetDelivery. С 2 апреля 2025 Roblox закрыл анонимный доступ к
+    """The Open Cloud API key — the official replacement for the session cookie for
+    AssetDelivery. Since April 2, 2025 Roblox closed anonymous access to
     assetdelivery.roblox.com (see devforum "New Asset Delivery API
-    Endpoints for Community Tools") — без авторизации теперь 401 на
-    ЛЮБОЙ запрос, а не только на приватные ассеты. Ключ создаётся в
-    Creator Dashboard → Open Cloud → API Keys, с правом только на чтение
-    ассетов.
-
-    Порядок поиска: переменная окружения ROBLOX_API_KEY (для серверных
-    деплоев, где ключ задаётся при запуске) — если не задана, читаем
-    ключ, который пользователь ввёл сам через UI (/api/roblox/api-key,
-    см. ниже) и который лежит в _roblox_apikey_file(). Ключ НЕ хранится
-    в коде/репозитории ни в одном из вариантов."""
+    Endpoints for Community Tools") — without authorization it is now a 401 on
+    ANY request, not only for private assets. The key is created in
+    Creator Dashboard → Open Cloud → API Keys, with a read-only permission on
+    assets.
+    
+    Lookup order: the ROBLOX_API_KEY environment variable (for server
+    deployments where the key is set at launch) — if not set, we read the
+    key the user entered themselves via the UI (/api/roblox/api-key,
+    see below) and which lies in _roblox_apikey_file(). The key is NOT stored
+    in code/the repository in either variant."""
     env_key = os.environ.get('ROBLOX_API_KEY', '').strip()
     if env_key:
         return env_key
@@ -5743,12 +5741,12 @@ def _roblox_api_key():
 
 @flask_app.route('/api/roblox/api-key', methods=['GET', 'POST', 'DELETE'])
 def api_roblox_api_key():
-    """Управление Open Cloud API-ключом из UI — пользователь вводит его
-    сам (см. showRobloxApiKeyDialog в index.html), ключ сохраняется на
-    диск локально (та же папка, что и roblox_auth.json) и никогда не
-    уходит никуда, кроме прямых запросов к apis.roblox.com в
-    _rbx_get_bytes_opencloud. GET отдаёт только факт наличия ключа и его
-    последние 4 символа для опознания — сам ключ обратно не возвращаем."""
+    """Managing the Open Cloud API key from the UI — the user enters it
+    themselves (see showRobloxApiKeyDialog in index.html), the key is saved to
+    disk locally (the same folder as roblox_auth.json) and never
+    goes anywhere except direct requests to apis.roblox.com in
+    _rbx_get_bytes_opencloud. GET returns only the fact that a key exists and its
+    last 4 characters for recognition — the key itself is not returned."""
     p = _roblox_apikey_file()
 
     if request.method == 'GET':
@@ -5768,11 +5766,11 @@ def api_roblox_api_key():
         except Exception as e:
             return jsonify({'ok': False, 'error': str(e)}), 500
 
-    # POST — сохранить новый ключ
+    # POST — save a new key
     body = request.get_json(silent=True) or {}
     key = (body.get('api_key') or '').strip()
     if not key:
-        return jsonify({'ok': False, 'error': 'api_key пустой'}), 400
+        return jsonify({'ok': False, 'error': _alang('api_key пустой', 'api_key is empty')}), 400
     try:
         p.write_text(json.dumps({'api_key': key}), encoding='utf-8')
         return jsonify({'ok': True, 'last4': key[-4:]})
@@ -5782,16 +5780,16 @@ def api_roblox_api_key():
 
 @flask_app.route('/api/roblox/api-key/validate', methods=['POST'])
 def api_roblox_api_key_validate():
-    """Реальная проверка сохранённого ключа — раньше единственный способ
-    узнать, что ключ битый/без нужного скоупа, был подождать, пока
-    что-нибудь в игре не перестанет грузиться, и читать 502 из
-    /api/asset-proxy постфактум. Дёргаем тот же metadata-запрос Open
-    Cloud (без скачивания самого CDN-файла — незачем гонять байты ради
-    проверки), тестовым ID из тела запроса, если он есть (обычно берём
-    первый попавшийся реальный ассет прямо из сцены на фронте — так
-    проверка идёт по тому, что реально понадобится в игре), иначе просто
-    числом 1 (главное — отличить 401/403 по КЛЮЧУ от ошибки по
-    конкретному ассету)."""
+    """A real check of the saved key — previously the only way to
+    find out that a key is broken/lacks the needed scope was to wait until
+    something in the game stopped loading, and read 502 from
+    /api/asset-proxy after the fact. We fire the same Open Cloud metadata request
+    (without downloading the CDN file itself — no point moving bytes just for
+    a check), with the test ID from the request body if there is one (we usually take
+    the first real asset found in the scene on the frontend — so the
+    check covers what will really be needed in the game), otherwise just
+    the number 1 (the main thing is to tell a 401/403 about the KEY apart from an error about a
+    specific asset)."""
     api_key = _roblox_api_key()
     if not api_key:
         return jsonify({'ok': True, 'valid': False, 'reason': 'no_key'})
@@ -5812,23 +5810,23 @@ def api_roblox_api_key_validate():
         if e.code in (401, 403):
             return jsonify({'ok': True, 'valid': False, 'reason': 'unauthorized',
                             'status': e.code})
-        # Любая ДРУГАЯ ошибка (404 на конкретный тестовый ассет, 5xx у
-        # Roblox и т.п.) НЕ значит, что ключ плохой — сам факт того, что
-        # сервер ответил (а не отверг по x-api-key), уже означает, что
-        # ключ авторизовался нормально.
-        return jsonify({'ok': True, 'valid': True, 'note': f'HTTP {e.code} на тестовом ассете, но ключ авторизовался'})
+        # Any OTHER error (a 404 on a specific test asset, a 5xx at
+        # Roblox, etc.) does NOT mean the key is bad — the very fact that the
+        # server answered (rather than rejecting by x-api-key) already means
+        # the key authorized normally.
+        return jsonify({'ok': True, 'valid': True, 'note': f'HTTP {e.code} on the test asset, but the key authorized'})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
 def _rbx_get_bytes_opencloud(asset_id):
-    """GET /asset-delivery-api/v1/assetId/{id} с x-api-key → JSON с
-    полем location (временная подписанная CDN-ссылка, TTL несколько
-    минут) → обычный GET по этой ссылке уже без заголовков авторизации.
-    Возвращает None, если ключ не сконфигурирован (тогда вызывающий код
-    падает обратно на анонимный путь ниже), и бросает исключение при
-    реальной ошибке запроса — чтобы отличить "ключа просто нет" от
-    "ключ есть, но не работает"."""
+    """GET /asset-delivery-api/v1/assetId/{id} with x-api-key → JSON with
+    a location field (a temporary signed CDN link, TTL of a few
+    minutes) → an ordinary GET on that link, without authorization headers.
+    Returns None if no key is configured (then the calling code
+    falls back to the anonymous path below), and raises an exception on
+    a real request error — to tell "there is simply no key" apart from
+    "there is a key, but it doesn't work"."""
     api_key = _roblox_api_key()
     if not api_key:
         return None
@@ -5842,11 +5840,11 @@ def _rbx_get_bytes_opencloud(asset_id):
 
     location = meta.get('location')
     if not location:
-        raise RuntimeError(f'Open Cloud ответил без location: {meta}')
+        raise RuntimeError(f'Open Cloud answered without a location: {meta}')
 
-    # Сама CDN-ссылка уже подписана (signature+expiry в query, см.
-    # archiveteam wiki про AWS CloudFront) — второй раз x-api-key слать
-    # не нужно и не поможет, это просто обычный HTTPS GET.
+    # The CDN link itself is already signed (signature+expiry in the query, see the
+    # archiveteam wiki about AWS CloudFront) — there is no need to send x-api-key a second time and it won't help, this is just
+    # an ordinary HTTPS GET.
     cdn_req = _req.Request(location, headers={'Accept-Encoding': 'gzip'})
     with _req.urlopen(cdn_req, timeout=20) as resp:
         return _rbx_maybe_gunzip(resp.read())
@@ -5858,23 +5856,23 @@ def _rbx_get_bytes(url):
         return _rbx_maybe_gunzip(resp.read())
 
 
-# ====================== Open Cloud: Toolbox (Creator Store) и настройки experience ======================
-# Серверная часть cloud.js (блок /api/cloud/*). Порядок способов везде одинаковый: СНАЧАЛА Open Cloud
-# API-ключ (_roblox_api_key()), и если ключа нет или Roblox ответил 401/403 — запасной путь через
-# сессию аккаунта (.ROBLOSECURITY из «Аккаунт»; для записи нужен X-CSRF-TOKEN). Куки-эндпоинты у
-# Roblox неофициальные/legacy и могут меняться без предупреждения. Ключ и кука уходят только к
-# Roblox и в браузер не возвращаются. Права ключа: creator-store-product:read (поиск и детали),
-# legacy-asset:manage (скачивание модели), universe:read / universe:write (настройки).
+# ====================== Open Cloud: Toolbox (Creator Store) and experience settings ======================
+# The server part of cloud.js (the /api/cloud/* block). The order of methods is the same everywhere: FIRST the Open Cloud
+# API key (_roblox_api_key()), and if there is no key or Roblox answered 401/403 — the fallback through the
+# account session (.ROBLOSECURITY from «Account»; writing needs X-CSRF-TOKEN). The cookie endpoints at
+# Roblox are unofficial/legacy and may change without notice. The key and the cookie go only to
+# Roblox and are not returned to the browser. Key permissions: creator-store-product:read (search and details),
+# legacy-asset:manage (model download), universe:read / universe:write (settings).
 _OC_BASE = 'https://apis.roblox.com'
 _OC_TOOLBOX_CATEGORIES = ('Audio', 'Model', 'Decal', 'Plugin', 'MeshPart', 'Video', 'FontFamily')
-# поля Universe (cloud/v2), которые разрешаем менять из UI: имя -> тип
+# Universe fields (cloud/v2) that we allow to be changed from the UI: name -> type
 _OC_UNIVERSE_FIELDS = {
     'displayName': str, 'description': str, 'visibility': str,
     'voiceChatEnabled': bool, 'desktopEnabled': bool, 'mobileEnabled': bool,
     'tabletEnabled': bool, 'consoleEnabled': bool, 'vrEnabled': bool,
     'privateServerPriceRobux': int,
 }
-# что умеет куки-путь (develop.roblox.com v1): остальные поля пропускаются и возвращаются в 'skipped'
+# what the cookie path can do (develop.roblox.com v1): the other fields are skipped and returned in 'skipped'
 _OC_COOKIE_DEVICES = {'desktopEnabled': 'Computer', 'mobileEnabled': 'Phone',
                       'tabletEnabled': 'Tablet', 'consoleEnabled': 'Console'}
 _OC_COOKIE_UNIVERSE_FIELDS = ('displayName', 'description', 'visibility') + tuple(_OC_COOKIE_DEVICES)
@@ -5890,10 +5888,10 @@ def _oc_parse(status, raw):
 
 
 def _oc_call(method, path, body=None, query=None, timeout=30):
-    """Запрос к Open Cloud с x-api-key. Возвращает (status, data); data — JSON или {'message': текст}."""
+    """A request to Open Cloud with x-api-key. Returns (status, data); data is JSON or {'message': text}."""
     key = _roblox_api_key()
     if not key:
-        return 400, {'message': 'Нет API-ключа: сохраните его в окне «Аккаунт»'}
+        return 400, {'message': _alang('Нет API-ключа: сохраните его в окне «Аккаунт»', 'No API key: save it in the «Account» window')}
     url = _OC_BASE + path
     if query:
         q = {k: v for k, v in query.items() if v not in (None, '')}
@@ -5913,8 +5911,8 @@ def _oc_call(method, path, body=None, query=None, timeout=30):
 
 
 def _oc_csrf_token(force=False):
-    """X-CSRF-TOKEN для записи по куке: Roblox отдаёт его в заголовке 403-ответа на запрос без токена.
-    Берём у auth.roblox.com/v2/logout — без валидного токена этот запрос выйти из аккаунта не может."""
+    """X-CSRF-TOKEN for cookie-based writes: Roblox returns it in the header of a 403 response to a request without a token.
+    We take it from auth.roblox.com/v2/logout — without a valid token this request can't sign the account out."""
     if _OC_CSRF['token'] and not force:
         return _OC_CSRF['token']
     rq = _req.Request('https://auth.roblox.com/v2/logout', data=b'', headers=_roblox_headers(), method='POST')
@@ -5927,10 +5925,10 @@ def _oc_csrf_token(force=False):
 
 
 def _oc_cookie_call(method, url, body=None, query=None, timeout=30, raw=None, headers=None):
-    """Запрос с сессией аккаунта. Для не-GET добавляет X-CSRF-TOKEN и один раз повторяет при смене токена.
-    body — JSON-тело, raw — готовые байты (загрузка файла). Возвращает (status, data)."""
+    """A request with the account session. For non-GET it adds X-CSRF-TOKEN and retries once when the token changes.
+    body is a JSON body, raw is ready-made bytes (a file upload). Returns (status, data)."""
     if _roblox_cookie() is None:
-        return 400, {'message': 'Нет входа в аккаунт Roblox (окно «Аккаунт»)'}
+        return 400, {'message': _alang('Нет входа в аккаунт Roblox (окно «Аккаунт»)', 'No Roblox account sign-in («Account» window)')}
     if query:
         q = {k: v for k, v in query.items() if v not in (None, '')}
         if q:
@@ -5957,12 +5955,12 @@ def _oc_cookie_call(method, url, body=None, query=None, timeout=30, raw=None, he
                 _OC_CSRF['token'] = new_tok
                 continue
             return _oc_parse(e.code, e.read())
-    return 403, {'message': 'CSRF-токен не принят'}
+    return 403, {'message': _alang('CSRF-токен не принят', 'CSRF token was not accepted')}
 
 
 def _oc_dual(key_fn, cookie_fn):
-    """Сначала ключ, потом кука. key_fn/cookie_fn -> (status, data). Кука пробуется, если ключа нет или
-    ключ вернул 401/403. Возвращает (status, data, via): via — 'api-key' | 'cookie' | None."""
+    """Key first, then cookie. key_fn/cookie_fn -> (status, data). The cookie is tried if there is no key or
+    the key returned 401/403. Returns (status, data, via): via is 'api-key' | 'cookie' | None."""
     key_st = key_data = None
     if key_fn and _roblox_api_key():
         key_st, key_data = key_fn()
@@ -5972,11 +5970,11 @@ def _oc_dual(key_fn, cookie_fn):
         st, data = cookie_fn()
         if key_st is not None and not (200 <= st < 300):
             m = data.get('message') if isinstance(data, dict) else data
-            data = {'message': f'ключ: HTTP {key_st}; cookie: HTTP {st}: {m}'}
+            data = {'message': f'key: HTTP {key_st}; cookie: HTTP {st}: {m}'}
         return st, data, 'cookie'
     if key_st is not None:
         return key_st, key_data, 'api-key'
-    return 400, {'message': 'Нет ни API-ключа, ни входа в аккаунт: настройте любой в окне «Аккаунт»'}, None
+    return 400, {'message': _alang('Нет ни API-ключа, ни входа в аккаунт: настройте любой в окне «Аккаунт»', 'Neither an API key nor an account sign-in: set up either in the «Account» window')}, None
 
 
 def _oc_reply(status, data, via=None):
@@ -5986,16 +5984,16 @@ def _oc_reply(status, data, via=None):
         msg = data.get('message') if isinstance(data, dict) else None
         out['error'] = f'HTTP {status}: {msg or data}'
         if status in (401, 403) and via == 'api-key':
-            out['error'] += ' (проверьте API-ключ и его права)'
+            out['error'] += _alang(' (проверьте API-ключ и его права)', ' (check the API key and its permissions)')
     return jsonify(out)
 
 
 @flask_app.route('/api/cloud/toolbox/search')
 def api_cloud_toolbox_search():
-    """Поиск в Creator Store: GET toolbox-service/v2/assets:search (searchCategoryType обязателен)."""
+    """Creator Store search: GET toolbox-service/v2/assets:search (searchCategoryType is required)."""
     cat = request.args.get('category', 'Model')
     if cat not in _OC_TOOLBOX_CATEGORIES:
-        return jsonify({'ok': False, 'error': 'Неизвестная категория'}), 400
+        return jsonify({'ok': False, 'error': _alang('Неизвестная категория', 'Unknown category')}), 400
     q = {'searchCategoryType': cat, 'query': request.args.get('q', '').strip()[:200],
          'pageToken': request.args.get('pageToken', '')[:500],
          'maxPageSize': request.args.get('maxPageSize', '24')}
@@ -6004,42 +6002,42 @@ def api_cloud_toolbox_search():
         st, data, via = _oc_dual(lambda: _oc_call('GET', path, query=q),
                                  lambda: _oc_cookie_call('GET', _OC_BASE + path, query=q))
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+        return jsonify({'ok': False, 'error': f'No connection to Roblox: {e}'}), 502
     return _oc_reply(st, data, via)
 
 
 @flask_app.route('/api/cloud/toolbox/asset/<asset_id>')
 def api_cloud_toolbox_asset(asset_id):
-    """Детали ассета Creator Store: GET toolbox-service/v2/assets/{id}."""
+    """Creator Store asset details: GET toolbox-service/v2/assets/{id}."""
     if not asset_id.isdigit():
-        return jsonify({'ok': False, 'error': 'ID ассета должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('ID ассета должен быть числом', 'Asset ID must be a number')}), 400
     path = f'/toolbox-service/v2/assets/{asset_id}'
     try:
         st, data, via = _oc_dual(lambda: _oc_call('GET', path),
                                  lambda: _oc_cookie_call('GET', _OC_BASE + path))
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+        return jsonify({'ok': False, 'error': f'No connection to Roblox: {e}'}), 502
     return _oc_reply(st, data, via)
 
 
 @flask_app.route('/api/cloud/toolbox/insert', methods=['POST'])
 @_collab_track('import')
 def api_cloud_toolbox_insert():
-    """Вставка модели из Creator Store в сцену: скачивание (сначала Open Cloud Asset Delivery по ключу,
-    потом AssetDelivery с сессией аккаунта) -> бинарный .rbxm -> import_rbxm (как «Импорт .rbxm»).
-    Тело: {assetId, parent}."""
+    """Inserting a model from the Creator Store into the scene: download (Open Cloud Asset Delivery by key first,
+    then AssetDelivery with the account session) -> a binary .rbxm -> import_rbxm (like «Import .rbxm»).
+    Body: {assetId, parent}."""
     import tempfile
     data = request.get_json(silent=True) or {}
     asset_id = str(data.get('assetId', '')).strip()
     if not asset_id.isdigit():
-        return jsonify({'ok': False, 'error': 'ID ассета должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('ID ассета должен быть числом', 'Asset ID must be a number')}), 400
     parent = data.get('parent')
     try:
         parent = int(parent) if parent not in (None, '') else None
     except (TypeError, ValueError):
-        return jsonify({'ok': False, 'error': 'Некорректный родитель'}), 400
+        return jsonify({'ok': False, 'error': _alang('Некорректный родитель', 'Invalid parent')}), 400
     raw, errors = None, []
-    for name, fn in (('ключ', _rbx_get_bytes_opencloud), ('cookie', _rbx_get_place_bytes_cookie)):
+    for name, fn in (('key', _rbx_get_bytes_opencloud), ('cookie', _rbx_get_place_bytes_cookie)):
         try:
             got = fn(asset_id)
         except _urlerr.HTTPError as e:
@@ -6053,11 +6051,11 @@ def api_cloud_toolbox_insert():
             break
     if raw is None:
         if not errors:
-            return jsonify({'ok': False, 'error': 'Нет ни API-ключа, ни входа в аккаунт: настройте любой в окне «Аккаунт»'}), 400
-        hint = ' (для ключа нужно право legacy-asset:manage)' if 'ключ: HTTP 40' in ' '.join(errors) else ''
-        return jsonify({'ok': False, 'error': 'Не удалось скачать ассет — ' + '; '.join(errors) + hint}), 502
+            return jsonify({'ok': False, 'error': _alang('Нет ни API-ключа, ни входа в аккаунт: настройте любой в окне «Аккаунт»', 'Neither an API key nor an account sign-in: set up either in the «Account» window')}), 400
+        hint = _alang(' (для ключа нужно право legacy-asset:manage)', ' (the key needs the legacy-asset:manage permission)') if 'key: HTTP 40' in ' '.join(errors) else ''
+        return jsonify({'ok': False, 'error': _alang('Не удалось скачать ассет — ', 'Could not download the asset — ') + '; '.join(errors) + hint}), 502
     if raw[:8] != b'<roblox!':
-        return jsonify({'ok': False, 'error': 'Это не бинарная модель .rbxm (XML-формат импорт не поддерживает)'}), 400
+        return jsonify({'ok': False, 'error': _alang('Это не бинарная модель .rbxm (XML-формат импорт не поддерживает)', 'This is not a binary .rbxm model (the XML format is not supported by import)')}), 400
     with tempfile.NamedTemporaryFile(suffix='.rbxm', delete=False) as tmp:
         tmp.write(raw)
         tmp_path = tmp.name
@@ -6071,8 +6069,8 @@ def api_cloud_toolbox_insert():
 
 
 def _oc_cookie_universe_get(uid):
-    """Куки-путь: develop.roblox.com/v1/universes/{id}/configuration -> форма Universe из cloud/v2.
-    Полей, которых там нет (voiceChat, VR, цена приватного сервера), в ответе просто нет."""
+    """Cookie path: develop.roblox.com/v1/universes/{id}/configuration -> the Universe shape from cloud/v2.
+    Fields that aren't there (voiceChat, VR, private server price) are simply absent from the response."""
     st, d = _oc_cookie_call('GET', f'https://develop.roblox.com/v1/universes/{uid}/configuration')
     if not (200 <= st < 300) or not isinstance(d, dict):
         return st, d
@@ -6087,9 +6085,9 @@ def _oc_cookie_universe_get(uid):
 
 
 def _oc_cookie_universe_patch(uid, body):
-    """Куки-путь для PATCH: имя/описание/устройства — PATCH develop.roblox.com/v1/universes/{id}/configuration
-    (устройства: сперва читаем текущий список и меняем только присланные), доступ — POST .../activate|deactivate.
-    Остальные поля пропускаются (возвращаются в 'skipped')."""
+    """Cookie path for PATCH: name/description/devices — PATCH develop.roblox.com/v1/universes/{id}/configuration
+    (devices: we first read the current list and change only the ones sent), access — POST .../activate|deactivate.
+    The other fields are skipped (returned in 'skipped')."""
     base = f'https://develop.roblox.com/v1/universes/{uid}'
     skipped = [k for k in body if k not in _OC_COOKIE_UNIVERSE_FIELDS]
     cfg = {}
@@ -6122,11 +6120,11 @@ def _oc_cookie_universe_patch(uid, body):
 
 @flask_app.route('/api/cloud/universe/<universe_id>', methods=['GET', 'PATCH'])
 def api_cloud_universe(universe_id):
-    """Настройки experience. Сначала Open Cloud cloud/v2/universes/{id} (ключ), потом develop.roblox.com v1
-    (кука; умеет не все поля — остальные в 'skipped'). PATCH принимает только поля из _OC_UNIVERSE_FIELDS;
-    updateMask собирается из присланных полей."""
+    """Experience settings. Open Cloud cloud/v2/universes/{id} first (key), then develop.roblox.com v1
+    (cookie; it can't do all fields — the rest go to 'skipped'). PATCH accepts only fields from _OC_UNIVERSE_FIELDS;
+    updateMask is assembled from the fields sent."""
     if not universe_id.isdigit():
-        return jsonify({'ok': False, 'error': 'Universe ID должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('Universe ID должен быть числом', 'Universe ID must be a number')}), 400
     path = f'/cloud/v2/universes/{universe_id}'
     try:
         if request.method == 'GET':
@@ -6142,34 +6140,34 @@ def api_cloud_universe(universe_id):
                 try:
                     v = int(v)
                 except (TypeError, ValueError):
-                    return jsonify({'ok': False, 'error': f'{k}: нужно целое число'}), 400
+                    return jsonify({'ok': False, 'error': f'{k}: an integer is required'}), 400
             elif not isinstance(v, typ):
-                return jsonify({'ok': False, 'error': f'{k}: неверный тип'}), 400
+                return jsonify({'ok': False, 'error': f'{k}: wrong type'}), 400
             body[k] = v
         if body.get('visibility') not in (None, 'PUBLIC', 'PRIVATE'):
-            return jsonify({'ok': False, 'error': 'visibility: PUBLIC или PRIVATE'}), 400
+            return jsonify({'ok': False, 'error': _alang('visibility: PUBLIC или PRIVATE', 'visibility: PUBLIC or PRIVATE')}), 400
         if not body:
-            return jsonify({'ok': False, 'error': 'Нечего обновлять'}), 400
+            return jsonify({'ok': False, 'error': _alang('Нечего обновлять', 'Nothing to update')}), 400
         st, data, via = _oc_dual(
             lambda: _oc_call('PATCH', path, body=body, query={'updateMask': ','.join(body)}),
             lambda: _oc_cookie_universe_patch(universe_id, body))
         return _oc_reply(st, data, via)
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+        return jsonify({'ok': False, 'error': f'No connection to Roblox: {e}'}), 502
 
 
 @flask_app.route('/api/cloud/universe/<universe_id>/restart', methods=['POST'])
 def api_cloud_universe_restart(universe_id):
-    """Перезапуск серверов после публикации: POST cloud/v2/universes/{id}:restartServers (только ключ —
-    куки-аналога у этого метода нет)."""
+    """Restarting servers after publishing: POST cloud/v2/universes/{id}:restartServers (key only —
+    this method has no cookie analog)."""
     if not universe_id.isdigit():
-        return jsonify({'ok': False, 'error': 'Universe ID должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('Universe ID должен быть числом', 'Universe ID must be a number')}), 400
     if not _roblox_api_key():
-        return jsonify({'ok': False, 'error': 'Перезапуск серверов работает только с API-ключом (право universe:write)'}), 400
+        return jsonify({'ok': False, 'error': _alang('Перезапуск серверов работает только с API-ключом (право universe:write)', 'Restarting servers works only with an API key (universe:write permission)')}), 400
     try:
         st, data = _oc_call('POST', f'/cloud/v2/universes/{universe_id}:restartServers', body={})
     except Exception as e:
-        return jsonify({'ok': False, 'error': f'Нет связи с Roblox: {e}'}), 502
+        return jsonify({'ok': False, 'error': f'No connection to Roblox: {e}'}), 502
     return _oc_reply(st, data, 'api-key')
 
 
@@ -6179,78 +6177,78 @@ def cloud_js():
         with open('cloud.js', 'r', encoding='utf-8') as f:
             src = f.read()
     except OSError:
-        src = '/* cloud.js не найден */'
+        src = '/* cloud.js not found */'
     return _no_cache(Response(src, mimetype='application/javascript'))
 
 
-# Кэш байтов ассетов — картинки/звуки в игре (SongIcon.Image, звуковые
-# дорожки песен) грузились с этого эндпоинта заново КАЖДЫЙ раз, включая
-# после перезапуска самого приложения: _ASSET_PROXY_CACHE был только
-# in-memory и обнулялся при каждом старте процесса — то есть каждый
-# новый запуск приложения снова честно ходил в сеть к Roblox за теми же
-# самыми картинками/треками, которые уже качал минуту назад в прошлом
-# запуске. Теперь под ним ещё и постоянный дисковый кэш (RSW_DATA_DIR/
-# asset_cache — то же место, где уже лежит roblox_auth.json), переживающий
-# перезапуск: in-memory кэш — для повторов В ПРЕДЕЛАХ одного запуска
-# (без похода даже на диск), дисковый — для повторов МЕЖДУ запусками
-# (без похода в сеть). Размер диска не ограничиваем намеренно — это же
-# по сути локальная копия того, что и так уже сохранено в самом .rbxl
-# как id ассетов, а не что-то растущее бесконтрольно с каждым новым
-# файлом; при необходимости почистить — это просто папка, которую можно
-# удалить руками.
+# The asset bytes cache — pictures/sounds in the game (SongIcon.Image, the song
+# audio tracks) were loaded from this endpoint again EVERY time, including
+# after the app itself was restarted: _ASSET_PROXY_CACHE was only
+# in-memory and was reset on every process start — i.e. every
+# new launch of the app again honestly went to Roblox over the network for the same
+# pictures/tracks it had downloaded a minute ago in the previous
+# launch. Now there is also a persistent disk cache under it (RSW_DATA_DIR/
+# asset_cache — the same place where roblox_auth.json already lies), surviving a
+# restart: the in-memory cache — for repeats WITHIN one launch
+# (without even going to disk), the disk one — for repeats BETWEEN launches
+# (without going to the network). We deliberately don't limit the disk size — it is
+# essentially a local copy of what is already stored in the .rbxl itself
+# as asset ids, not something growing uncontrollably with every new
+# file; if it needs cleaning, it is just a folder that can be
+# deleted by hand.
 _ASSET_PROXY_CACHE = {}
 _ASSET_PROXY_CACHE_MAX = 64
 
 
-# --- Сжатие дискового кэша -------------------------------------------------
-# Файлы кэша бывают трёх видов (вид определяется по имени/сигнатуре, поэтому ничего
-# не ломается, если в папке лежит смесь):
-#   <имя>        — сырые байты (старый формат, до сжатия);
-#   <имя>.zst    — zstd (если установлен пакет zstandard — он уже нужен для .rbxl);
-#   <имя>.gz     — gzip (запасной вариант без zstandard).
-# Чтение понимает все три, а ещё сырой файл, внутри которого лежит готовый
-# zstd/gzip-поток (определяется по сигнатуре), так что уже сжатые кем-то кэши подхватываются.
-# Запись сжимает только то, что реально ужимается: JPEG/MP3/OGG/WEBP уже сжаты, а
-# сжатая копия оставляется лишь при выигрыше не меньше 10% — иначе лежит сырой файл.
-# Старые несжатые файлы сжимает фоновая задача (cache_compact), один раз на файл.
+# --- Disk cache compression -------------------------------------------------
+# Cache files come in three kinds (the kind is determined by name/signature, so nothing
+# breaks if the folder holds a mix):
+#   <name>        — raw bytes (the old format, before compression);
+#   <name>.zst    — zstd (if the zstandard package is installed — it is already needed for .rbxl);
+#   <name>.gz     — gzip (a fallback without zstandard).
+# Reading understands all three, and also a raw file with a ready zstd/gzip
+# stream inside (detected by signature), so caches already compressed by someone are picked up.
+# Writing compresses only what really shrinks: JPEG/MP3/OGG/WEBP are already compressed, and
+# a compressed copy is kept only with a gain of at least 10% — otherwise the raw file stays.
+# Old uncompressed files are compressed by a background task (cache_compact), once per file.
 import gzip as _cgzip
 import threading as _cthreading
 try:
     import zstandard as _czstd
-except Exception:  # пакета нет (например, урезанная сборка) — работаем через gzip
+except Exception:  # no package (for example, a trimmed build) — we work through gzip
     _czstd = None
 
 _CACHE_ZSTD_MAGIC = b'\x28\xb5\x2f\xfd'
 _CACHE_GZIP_MAGIC = b'\x1f\x8b'
 _CACHE_CODEC_SUFFIXES = ('.zst', '.gz')
 _CACHE_SKIP_COMPRESS_CT = {'image/jpeg', 'audio/mpeg', 'audio/ogg', 'image/webp', 'video/mp4'}
-_CACHE_MIN_SIZE = 256        # меньше — смысла нет
-_CACHE_MIN_GAIN = 0.90       # сжатая копия должна быть ≤ 90% оригинала
-_CACHE_SKIP_INDEX = 'compact_skip.json'   # имена, которые уже пробовали и сжать не удалось (не пробуем каждый запуск)
+_CACHE_MIN_SIZE = 256        # smaller — no point
+_CACHE_MIN_GAIN = 0.90       # the compressed copy must be ≤ 90% of the original
+_CACHE_SKIP_INDEX = 'compact_skip.json'   # names that we have already tried and failed to compress (we don't retry on every launch)
 _cache_compact_started = False
 _cache_compact_lock = _cthreading.Lock()
 
 
 def _cache_compress(raw):
-    """-> (суффикс, байты): zstd, если есть, иначе gzip."""
+    """-> (suffix, bytes): zstd if available, otherwise gzip."""
     if _czstd is not None:
         return '.zst', _czstd.ZstdCompressor(level=6).compress(raw)
     return '.gz', _cgzip.compress(raw, 6, mtime=0)
 
 
 def _cache_decode(data):
-    """Распаковывает zstd/gzip-поток по сигнатуре. Исключение — если распаковать нельзя."""
+    """Decompresses a zstd/gzip stream by signature. An exception if it can't be decompressed."""
     if data[:4] == _CACHE_ZSTD_MAGIC:
         if _czstd is None:
-            raise RuntimeError('запись сжата zstd, а пакет zstandard не установлен')
+            raise RuntimeError(_alang('запись сжата zstd, а пакет zstandard не установлен', 'the entry is zstd-compressed, but the zstandard package is not installed'))
         return _czstd.ZstdDecompressor().decompressobj().decompress(data)
     if data[:2] == _CACHE_GZIP_MAGIC:
         return _cgzip.decompress(data)
-    raise ValueError('не сжатый поток')
+    raise ValueError(_alang('не сжатый поток', 'not a compressed stream'))
 
 
 def _cache_read_file(f):
-    """Байты файла кэша с прозрачной распаковкой; None — прочитать/распаковать нельзя (= промах кэша)."""
+    """The bytes of a cache file with transparent decompression; None — can't read/decompress (= a cache miss)."""
     try:
         data = f.read_bytes()
     except OSError:
@@ -6260,14 +6258,14 @@ def _cache_read_file(f):
         try:
             return _cache_decode(data)
         except Exception:
-            # помеченный .zst/.gz, но битый/нераспаковываемый — промах; сырой файл, который лишь
-            # похож на поток по первым байтам, отдаём как есть
+            # marked .zst/.gz but corrupted/undecompressable — a miss; a raw file that merely
+            # looks like a stream by its first bytes is returned as is
             return None if coded else data
     return data
 
 
 def _cache_find(base):
-    """Файл кэша для <base> в любом виде (сжатый предпочтительнее — он новее после сжатия) или None."""
+    """The cache file for <base> in any form (compressed is preferred — it is newer after compression) or None."""
     for sfx in _CACHE_CODEC_SUFFIXES + ('',):
         f = base.with_name(base.name + sfx)
         if f.is_file():
@@ -6276,7 +6274,7 @@ def _cache_find(base):
 
 
 def _cache_store(base, raw, content_type):
-    """Атомарно пишет <base>[.zst|.gz]. Возвращает размер записанного файла или None при ошибке."""
+    """Atomically writes <base>[.zst|.gz]. Returns the size of the written file or None on error."""
     data, suffix = raw, ''
     if content_type not in _CACHE_SKIP_COMPRESS_CT and len(raw) >= _CACHE_MIN_SIZE:
         try:
@@ -6284,7 +6282,7 @@ def _cache_store(base, raw, content_type):
             if len(comp) <= len(raw) * _CACHE_MIN_GAIN:
                 data, suffix = comp, sfx
         except Exception:
-            pass  # сжать не вышло — пишем как есть
+            pass  # compression failed — we write as is
     target = base.with_name(base.name + suffix)
     tmp = target.with_name(target.name + '.tmp')
     try:
@@ -6300,7 +6298,7 @@ def _cache_store(base, raw, content_type):
 
 
 def _cache_name_ct(name):
-    """'123__image_png.bin(.zst)' -> 'image/png'; для остальных файлов — application/octet-stream."""
+    """'123__image_png.bin(.zst)' -> 'image/png'; for other files — application/octet-stream."""
     for sfx in _CACHE_CODEC_SUFFIXES:
         if name.endswith(sfx):
             name = name[:-len(sfx)]
@@ -6312,8 +6310,8 @@ def _cache_name_ct(name):
 
 
 def cache_stats():
-    """Размеры кэша: сколько файлов/байт сырых и сжатых (и сколько они занимали бы без сжатия — для сжатых
-    берём размер распакованного содержимого из заголовка zstd/gzip недёшево, поэтому показываем фактический)."""
+    """Cache sizes: how many files/bytes raw and compressed (and how much they would take without compression — for compressed ones
+    taking the decompressed content size from the zstd/gzip header is not cheap, so we show the actual one)."""
     d = _asset_cache_dir()
     st = {'codec': 'zstd' if _czstd is not None else 'gzip', 'raw_files': 0, 'raw_bytes': 0,
           'compressed_files': 0, 'compressed_bytes': 0, 'total_bytes': 0}
@@ -6332,8 +6330,8 @@ def cache_stats():
 
 
 def cache_compact():
-    """Сжимает старые несжатые файлы кэша. Безопасно к параллельному чтению: сначала пишется сжатая копия
-    (атомарно), потом удаляется сырой оригинал; дата изменения сохраняется (по ней считается TTL аватаров).
+    """Compresses old uncompressed cache files. Safe for parallel reading: the compressed copy is written first
+    (atomically), then the raw original is deleted; the modification date is preserved (the avatar TTL is computed from it).
     -> {'compressed': N, 'saved_bytes': B, 'skipped': M}."""
     import json as _json
     d = _asset_cache_dir()
@@ -6355,7 +6353,7 @@ def cache_compact():
                 continue
             raw = f.read_bytes()
             if raw[:4] == _CACHE_ZSTD_MAGIC or raw[:2] == _CACHE_GZIP_MAGIC:
-                # «уже сжатый» файл под именем .bin — переименовываем под настоящий вид, ничего не пережимая
+                # an «already compressed» file under the name .bin — we rename it to its real kind, recompressing nothing
                 target = f.with_name(name + ('.zst' if raw[:4] == _CACHE_ZSTD_MAGIC else '.gz'))
                 os.replace(f, target)
                 done += 1
@@ -6365,7 +6363,7 @@ def cache_compact():
                 continue
             sfx, comp = _cache_compress(raw)
             if len(comp) > len(raw) * _CACHE_MIN_GAIN:
-                skip[name] = stt.st_size; skip_changed = True   # не ужимается — не пробуем снова
+                skip[name] = stt.st_size; skip_changed = True   # doesn't shrink — we don't try again
                 skipped += 1
                 continue
             target = f.with_name(name + sfx)
@@ -6377,7 +6375,7 @@ def cache_compact():
             done += 1
             saved += len(raw) - len(comp)
         except Exception:
-            continue  # один проблемный файл не должен останавливать остальные
+            continue  # one problematic file must not stop the others
     if skip_changed:
         try:
             idx_path.write_text(_json.dumps(skip), encoding='utf-8')
@@ -6387,7 +6385,7 @@ def cache_compact():
 
 
 def _start_cache_compaction_once():
-    """Один раз за запуск: фоновая задача сжимает старые файлы кэша (отключается RSW_CACHE_COMPACT=0)."""
+    """Once per launch: a background task compresses old cache files (disabled by RSW_CACHE_COMPACT=0)."""
     global _cache_compact_started
     with _cache_compact_lock:
         if _cache_compact_started or os.environ.get('RSW_CACHE_COMPACT') == '0':
@@ -6396,7 +6394,7 @@ def _start_cache_compaction_once():
 
     def _run():
         import time as _t
-        _t.sleep(10)   # не мешаем старту приложения и первым запросам
+        _t.sleep(10)   # we don't interfere with the app start and the first requests
         try:
             cache_compact()
         except Exception:
@@ -6413,9 +6411,9 @@ def _asset_cache_dir():
 
 
 def _asset_cache_disk_get(asset_id):
-    """Ищет ассет на диске — имя файла кодирует content-type, чтобы не
-    городить отдельный файл-метаданные на каждый ассет. Сжатые записи
-    (.zst/.gz) и сырые читаются одинаково."""
+    """Looks for an asset on disk — the file name encodes the content type, so as not to
+    create a separate metadata file for every asset. Compressed entries
+    (.zst/.gz) and raw ones are read the same way."""
     try:
         for f in _asset_cache_dir().glob(f'{asset_id}__*'):
             if f.name.endswith('.tmp'):
@@ -6433,11 +6431,11 @@ def _asset_cache_disk_put(asset_id, content_type, raw_bytes):
     try:
         d = _asset_cache_dir()
         if any(not f.name.endswith('.tmp') for f in d.glob(f'{asset_id}__*')):
-            return  # уже есть (в любом виде)
+            return  # already exists (in any form)
         safe_ct = content_type.replace('/', '_')
         _cache_store(d / f'{asset_id}__{safe_ct}.bin', raw_bytes, content_type)
     except Exception:
-        pass  # дисковый кэш — best-effort, не должен ронять сам запрос
+        pass  # the disk cache is best-effort, it must not fail the request itself
 
 
 @flask_app.route('/api/cache/stats')
@@ -6447,15 +6445,15 @@ def api_cache_stats():
 
 @flask_app.route('/api/cache/compact', methods=['POST'])
 def api_cache_compact():
-    """Сжать старые файлы кэша сейчас (синхронно) и вернуть итог + новую статистику."""
+    """Compress old cache files now (synchronously) and return the result + the new statistics."""
     return jsonify({'ok': True, **cache_compact(), 'stats': cache_stats()})
 
 
 @flask_app.route('/api/union_mesh')
 def api_union_mesh():
-    """Геометрия UnionOperation: {'position': [...], 'normal': [...], 'triangles': N}.
-    Координаты локальные (относительно CFrame юниона). 404 — меша нет или
-    формат не поддержан (клиент оставляет box)."""
+    """UnionOperation geometry: {'position': [...], 'normal': [...], 'triangles': N}.
+    Coordinates are local (relative to the union's CFrame). 404 — no mesh or the
+    format isn't supported (the client keeps the box)."""
     parsed = state.get('parsed')
     ref = request.args.get('ref', type=int)
     if not parsed or ref is None or parsed['referent_to_class'].get(ref) != 'UnionOperation':
@@ -6466,8 +6464,8 @@ def api_union_mesh():
         m = union_mesh_from_parsed(parsed, ref)
         hit = union_mesh_render_json(m) if m else False
         if hit:
-            # Меш хранится в InitialSize, а Size детали мог быть изменён (масштаб) — в Roblox
-            # геометрия юниона растягивается на Size/InitialSize по каждой оси.
+            # The mesh is stored in InitialSize, while the part's Size could have been changed (scaling) — in Roblox
+            # the union's geometry is stretched by Size/InitialSize along each axis.
             _pp = parsed['props'].get(ref, {})
             _ini, _sz = _pp.get('InitialSize'), _pp.get('Size', _pp.get('size'))
             if isinstance(_ini, dict) and isinstance(_sz, dict):
@@ -6479,7 +6477,7 @@ def api_union_mesh():
                     pos, nrm = hit['position'], hit['normal']
                     hit = dict(hit)
                     hit['position'] = [pos[i] * k[i % 3] for i in range(len(pos))]
-                    nn = []   # нормаль при неравномерном масштабе: делим на k и нормируем
+                    nn = []   # the normal under non-uniform scaling: divide by k and normalize
                     for i in range(0, len(nrm), 3):
                         x, y, z = nrm[i] / k[0], nrm[i + 1] / k[1], nrm[i + 2] / k[2]
                         ln = (x * x + y * y + z * z) ** 0.5 or 1.0
@@ -6497,11 +6495,11 @@ _union_mesh_cache = {}
 
 
 def _asset_response(raw_bytes, content_type):
-    """Ассеты по id иммутабельны (rbxassetid:// не меняет содержимое под
-    тем же id) — раньше ответ уходил вообще без Cache-Control, и браузер
-    честно перезапрашивал одну и ту же картинку/звук при каждой
-    перерисовке GUI (например карточек песен в меню) заново через тот же
-    локальный сервер, хотя байты гарантированно те же самые."""
+    """Assets by id are immutable (rbxassetid:// doesn't change content under
+    the same id) — previously the response went out with no Cache-Control at all, and the browser
+    honestly re-requested the same picture/sound on every
+    GUI redraw (for example song cards in the menu) through the same
+    local server, although the bytes are guaranteed to be the same."""
     resp = Response(raw_bytes, mimetype=content_type)
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
@@ -6509,9 +6507,9 @@ def _asset_response(raw_bytes, content_type):
 
 @flask_app.route('/api/asset-export', methods=['POST'])
 def api_asset_export():
-    """Кладёт ассет (меш/текстуру/звук) во временный файл в папке данных приложения — для Android-моста
-    AndroidBridge.exportRbxlFile (системный диалог «Сохранить как», пользователь сам выбирает папку).
-    Берёт байты тем же путём, что /api/asset-proxy (память -> диск -> сеть)."""
+    """Puts an asset (mesh/texture/sound) into a temporary file in the app's data folder — for the Android bridge
+    AndroidBridge.exportRbxlFile (the system «Save as» dialog, the user picks the folder themselves).
+    Takes the bytes the same way as /api/asset-proxy (memory -> disk -> network)."""
     body = request.get_json(silent=True) or {}
     data_dir = Path(os.environ.get('RSW_DATA_DIR') or str(Path(__file__).parent)).resolve()
     ids = []
@@ -6520,7 +6518,7 @@ def api_asset_export():
         if mm and mm.group() not in ids:
             ids.append(mm.group())
     if len(ids) > 1:
-        # Несколько ассетов — один ZIP (удобно отдавать одним файлом). Недоступные пропускаем и перечисляем.
+        # Several assets — one ZIP (convenient to deliver as a single file). Unavailable ones are skipped and listed.
         import io as _io, zipfile as _zipfile, base64 as _b64
         buf = _io.BytesIO()
         got, missing = [], []
@@ -6538,7 +6536,7 @@ def api_asset_export():
                 zf.writestr('asset_%s%s' % (aid, ext), raw)
                 got.append(aid)
         if not got:
-            return jsonify({'ok': False, 'error': 'ни один ассет не получен: ' + ', '.join(missing)}), 502
+            return jsonify({'ok': False, 'error': _alang('ни один ассет не получен: ', 'no asset was received: ') + ', '.join(missing)}), 502
         zname = 'assets_%d.zip' % len(got)
         zbytes = buf.getvalue()
         res = {'ok': True, 'name': zname, 'size': len(zbytes), 'got': got, 'missing': missing}
@@ -6585,23 +6583,23 @@ _ASSET_THUMB_CACHE = {}
 
 @flask_app.route('/api/asset-proxy')
 def api_asset_proxy():
-    """Прокси-загрузка ассета Roblox по id — превращает rbxassetid://N
-    (то, что реально лежит в Image/SoundId у ImageLabel/Sound в файле) в
-    настоящий скачиваемый URL для браузера. Нужен именно прокси, а не
-    прямой fetch с клиента на assetdelivery.roblox.com/apis.roblox.com,
-    из-за CORS — эти домены не шлют заголовки, разрешающие браузеру
-    читать ответ с произвольного источника.
-
-    Порядок попыток (обе ветки реально пробуются, а не "либо/либо"):
-    1) Open Cloud (x-api-key, см. _rbx_get_bytes_opencloud) — официальный
-       путь, если сконфигурирован ROBLOX_API_KEY.
-    2) Кука/анонимный GET на /v1/asset/?id= (_roblox_headers сама решает,
-       слать куку или нет — см. _roblox_cookie) — пробуется, если шаг 1
-       не настроен ИЛИ настроен, но реально упал (сеть, невалидный ключ,
-       ассет вне прав ключа и т.п.). С 2 апреля 2025 Roblox требует
-       авторизацию на ЛЮБОЙ запрос к AssetDelivery, так что без ключа И
-       без куки этот шаг тоже обычно вернёт 401 — тогда возвращаем
-       ОБЕ ошибки, чтобы сразу было видно, что именно не сработало."""
+    """Proxy download of a Roblox asset by id — turns rbxassetid://N
+    (what really lies in Image/SoundId of an ImageLabel/Sound in the file) into a
+    real downloadable URL for the browser. A proxy is needed, not a
+    direct fetch from the client to assetdelivery.roblox.com/apis.roblox.com,
+    because of CORS — those domains don't send headers that allow the browser to
+    read the response from an arbitrary origin.
+    
+    Order of attempts (both branches are really tried, not "either/or"):
+    1) Open Cloud (x-api-key, see _rbx_get_bytes_opencloud) — the official
+    path, if ROBLOX_API_KEY is configured.
+    2) Cookie/anonymous GET on /v1/asset/?id= (_roblox_headers itself decides
+    whether to send the cookie or not — see _roblox_cookie) — tried if step 1
+    is not configured OR is configured but really failed (network, invalid key,
+    an asset outside the key's permissions, etc.). Since April 2, 2025 Roblox requires
+    authorization on ANY request to AssetDelivery, so without a key AND
+    without a cookie this step will usually return 401 too — then we return
+    BOTH errors so it is immediately visible what exactly didn't work."""
     raw_id = request.args.get('id', '').strip()
     m = _re.search(r'\d+', raw_id)
     if not m:
@@ -6616,8 +6614,8 @@ def api_asset_proxy():
     disk_cached = _asset_cache_disk_get(asset_id)
     if disk_cached:
         content_type, raw_bytes = disk_cached
-        # Подтягиваем и в in-memory тоже — следующие запросы в ЭТОЙ сессии
-        # не будут даже читать файл с диска.
+        # We pull into in-memory too — the next requests in THIS session
+        # won't even read the file from disk.
         if len(_ASSET_PROXY_CACHE) >= _ASSET_PROXY_CACHE_MAX:
             _ASSET_PROXY_CACHE.pop(next(iter(_ASSET_PROXY_CACHE)))
         _ASSET_PROXY_CACHE[asset_id] = (content_type, raw_bytes)
@@ -6638,9 +6636,9 @@ def api_asset_proxy():
         except Exception as e:
             cookie_error = str(e)
 
-    # Анонимный запасной путь только для иконок GUI (thumb=1): с 2025 года AssetDelivery требует авторизацию, а
-    # публичные миниатюры (thumbnails.roblox.com + CDN) отдаются без куки и ключа. Кладём в отдельный кэш — иначе
-    # PNG-миниатюра осела бы под id, который позже запросят как меш/звук.
+    # An anonymous fallback path only for GUI icons (thumb=1): since 2025 AssetDelivery requires authorization, while
+    # public thumbnails (thumbnails.roblox.com + CDN) are served without a cookie or key. We put them into a separate cache — otherwise a
+    # PNG thumbnail would settle under an id that is later requested as a mesh/sound.
     if raw_bytes is None and request.args.get('thumb'):
         thumb = _ASSET_THUMB_CACHE.get(asset_id)
         if thumb is None:
@@ -6654,7 +6652,7 @@ def api_asset_proxy():
                         _ASSET_THUMB_CACHE.pop(next(iter(_ASSET_THUMB_CACHE)))
                     _ASSET_THUMB_CACHE[asset_id] = thumb
             except Exception as e:
-                cookie_error = (cookie_error or '') + f' | миниатюра: {e}'
+                cookie_error = (cookie_error or '') + f' | thumbnail: {e}'
         if thumb:
             return _asset_response(thumb, 'image/png' if thumb[:4] == b'\x89PNG' else 'image/jpeg')
 
@@ -6665,13 +6663,13 @@ def api_asset_proxy():
         if cookie_error:
             has_cookie = _roblox_cookie() is not None
             parts.append(
-                f'{"кука" if has_cookie else "анонимно (нет куки)"}: {cookie_error}')
+                f'{"cookie" if has_cookie else "anonymous (no cookie)"}: {cookie_error}')
         return Response('asset fetch failed — ' + '; '.join(parts), status=502)
 
-    # Ассет может оказаться не картинкой, а XML-обёрткой (Decal, Shirt, Pants,
-    # Texture): внутри лежит id настоящего изображения. Идём по ссылке
-    # (не глубже двух уровней) — иначе <img>/TextureLoader получал XML и не
-    # мог его показать (текстуры одежды на теле не появлялись).
+    # An asset may turn out to be not an image but an XML wrapper (Decal, Shirt, Pants,
+    # Texture): the id of the real image lies inside. We follow the link
+    # (no deeper than two levels) — otherwise <img>/TextureLoader got XML and
+    # couldn't show it (clothing textures didn't appear on the body).
     for _ in range(2):
         head = raw_bytes[:400].lstrip()
         if not (head.startswith(b'<roblox') and not head.startswith(b'<roblox!')) and not head.startswith(b'<?xml'):
@@ -6695,9 +6693,9 @@ def api_asset_proxy():
             break
         raw_bytes = inner_bytes
 
-    # Тип контента — по сигнатуре байтов (см. тот же приём в убранной
-    # asset/fetch-фиче): Roblox отдаёт сырые байты картинки/звука без
-    # заголовка, который тут можно было бы просто перенести как есть.
+    # The content type — by the byte signature (see the same trick in the removed
+    # asset/fetch feature): Roblox serves raw bytes of the picture/sound without
+    # a header that could simply be carried over as is here.
     if raw_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
         content_type = 'image/png'
     elif raw_bytes[:3] == b'\xff\xd8\xff':
@@ -6705,22 +6703,22 @@ def api_asset_proxy():
     elif raw_bytes[:4] == b'OggS':
         content_type = 'audio/ogg'
     elif raw_bytes[:3] == b'ID3' or (raw_bytes[:1] == b'\xff' and len(raw_bytes) > 1 and (raw_bytes[1] & 0xe0) == 0xe0):
-        # MP3 без ID3-тега начинается сразу с фрейма: 11-битное синхрослово
-        # 0xFFE (первый байт FF, у второго байта старшие 3 бита тоже
-        # единицы) — младшие биты второго байта кодируют версию MPEG/layer
-        # и МЕНЯЮТСЯ от файла к файлу (0xFB — это только ОДИН конкретный
-        # вариант). Раньше проверялся именно этот один вариант байт-в-байт,
-        # так что любой трек с другой версией/битрейтом тихо улетал как
-        # application/octet-stream — браузер такое играть отказывается
+        # An MP3 without an ID3 tag starts right with a frame: the 11-bit sync word
+        # 0xFFE (the first byte FF, the second byte's top 3 bits are
+        # ones too) — the low bits of the second byte encode the MPEG version/layer
+        # and VARY from file to file (0xFB is just ONE particular
+        # variant). Previously exactly this one variant was checked byte for byte,
+        # so any track with another version/bitrate quietly went out as
+        # application/octet-stream — a browser refuses to play that
         # ("Failed to load because no supported source was found").
         content_type = 'audio/mpeg'
     elif raw_bytes[:4] == b'RIFF' and raw_bytes[8:12] == b'WEBP':
-        # RIFF — общий контейнерный формат: WAV и WEBP ОБА начинаются с
-        # "RIFF", различаются только по 4-байтовой метке форматa на
-        # смещении 8 ("WAVE" против "WEBP"). Раньше сюда попадал только
-        # WAV-случай, а Roblox реально отдаёт часть текстур именно в WEBP —
-        # такая картинка уходила с типом audio/wav, и TextureLoader/<img>
-        # закономерно не мог её декодировать ("Failed to load part texture").
+        # RIFF — a common container format: WAV and WEBP BOTH start with
+        # "RIFF", differing only by the 4-byte format tag at
+        # offset 8 ("WAVE" versus "WEBP"). Previously only the
+        # WAV case got here, while Roblox really serves some textures as WEBP —
+        # such a picture went out with the type audio/wav, and TextureLoader/<img>
+        # naturally couldn't decode it ("Failed to load part texture").
         content_type = 'image/webp'
     elif raw_bytes[:4] == b'RIFF':
         content_type = 'audio/wav'
@@ -6736,33 +6734,33 @@ def api_asset_proxy():
 
 
 def _rbx_download_cdn(hash_value):
-    """8 CDN-узлов Roblox равнозначны — здесь короткий таймаут на узел
-    (8с), чтобы один зависший узел не превращал скачивание в минуты
-    ожидания: суммарный худший случай — 8×8с=64с на один файл, что уже
-    приемлемо, а на практике первый же живой узел отвечает почти сразу."""
+    """Roblox's 8 CDN nodes are equivalent — here a short timeout per node
+    (8 s), so that one hung node doesn't turn a download into minutes
+    of waiting: the total worst case is 8×8 s = 64 s per file, which is
+    acceptable, and in practice the very first live node answers almost at once."""
     last_err = None
     for n in range(8):
         try:
             return _rbx_get_bytes(f'https://t{n}.rbxcdn.com/{hash_value}')
         except Exception as e:
             last_err = str(e)
-    raise RuntimeError(last_err or f'Не удалось скачать {hash_value}')
+    raise RuntimeError(last_err or f'Could not download {hash_value}')
 
 
 @flask_app.route('/api/roblox/avatar3d/status')
 def api_roblox_avatar3d_status():
-    """Один быстрый неблокирующий опрос состояния генерации у Roblox —
-    вызывается клиентом периодически (см. doDownloadAvatar3d в index.html),
-    а не ждётся одним долгим запросом. Roblox генерирует 3D-модель
-    асинхронно и может занять от нескольких секунд до ~минуты — раньше мы
-    ждали это одним запросом с фиксированным таймаутом, из-за чего при
-    медленной генерации запрос обрывался с невнятной ошибкой."""
+    """A single quick non-blocking poll of the generation state at Roblox —
+    called by the client periodically (see doDownloadAvatar3d in index.html),
+    rather than waited for in one long request. Roblox generates the 3D model
+    asynchronously and it can take from a few seconds to ~a minute — previously we
+    waited for it in one request with a fixed timeout, because of which, with
+    slow generation, the request was cut off with an unclear error."""
     user_id = request.args.get('userId', '').strip()
     if not user_id.isdigit():
-        return jsonify({'ok': False, 'error': 'userId должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('userId должен быть числом', 'userId must be a number')}), 400
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'error': 'not_logged_in',
-                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+                        'message': _alang('Сначала войдите в аккаунт Roblox.', 'Sign in to your Roblox account first.')}), 401
     try:
         resp = _rbx_get_json(
             f'https://thumbnails.roblox.com/v1/users/avatar-3d?userId={user_id}')
@@ -6770,25 +6768,25 @@ def api_roblox_avatar3d_status():
         if isinstance(resp, dict) and 'data' in resp and resp['data']:
             item = resp['data'][0]
         elif isinstance(resp, dict) and 'targetId' in resp and 'state' in resp:
-            # Roblox иногда отдаёт этот эндпоинт без обёртки {"data":[...]}
-            # — плоским объектом напрямую.
+            # Roblox sometimes serves this endpoint without the {"data":[...]} wrapper
+            # — as a flat object directly.
             item = resp
         elif isinstance(resp, dict) and resp.get('errors'):
-            reason = resp['errors'][0].get('message', 'нет описания')
+            reason = resp['errors'][0].get('message', _alang('нет описания', 'no description'))
             return jsonify({
                 'ok': False,
                 'error': reason,
-                'message': f'Roblox отклонил запрос: {reason}. Попробуйте выйти и войти в аккаунт заново.',
+                'message': f'Roblox rejected the request: {reason}. Try signing out and signing in again.',
             }), 502
         else:
-            # Незнакомый формат — показываем сырой ответ целиком, чтобы
-            # можно было понять, что реально прислал Roblox (например,
-            # HTML-страницу антибот-проверки вместо JSON).
+            # An unfamiliar format — we show the whole raw response so that
+            # it is possible to understand what Roblox really sent (for example,
+            # an anti-bot check HTML page instead of JSON).
             raw = json.dumps(resp, ensure_ascii=False)[:400]
             return jsonify({
                 'ok': False,
                 'error': 'unexpected_response_shape',
-                'message': f'Roblox вернул формат ответа, который скрипт не понимает. Сырой ответ: {raw}',
+                'message': f"Roblox returned a response format the script does not understand. Raw response: {raw}",
             }), 502
         state_ = item.get('state')
         return jsonify({
@@ -6803,21 +6801,21 @@ def api_roblox_avatar3d_status():
 
 @flask_app.route('/api/roblox/avatar3d/fetch')
 def api_roblox_avatar3d_fetch():
-    """Вызывается клиентом ТОЛЬКО после того, как /status вернул
-    ready=true — сразу скачивает obj/mtl/текстуры по уже готовому
-    bundleUrl (без повторного ожидания) и упаковывает их в ОДИН .zip,
-    записанный на диск (а не base64 в JSON — see below).
-
-    userId нужен для имени файла, savePath — папка, куда класть zip
-    (на Android клиент передаёт window.AndroidBridge.getDataDir(),
-    потому что писать напрямую в выбранное пользователем место сервер
-    не может — нет доступа к SAF-Uri; см. androidSaveConfirm() в
-    index.html, тот же паттерн, что уже используется для .rbxl).
-
-    Раньше файлы отдавались как base64 внутри JSON, а на клиенте
-    создавался <a download> с blob: URL — внутри Android WebView это
-    НЕ настоящее скачивание, ссылка просто "кликалась в никуда" и
-    пользователь не понимал, куда делись файлы."""
+    """Called by the client ONLY after /status returned
+    ready=true — immediately downloads obj/mtl/textures from the already ready
+    bundleUrl (without waiting again) and packs them into ONE .zip
+    written to disk (not base64 in JSON — see below).
+    
+    userId is needed for the file name, savePath is the folder to put the zip in
+    (on Android the client passes window.AndroidBridge.getDataDir(),
+    because the server can't write directly to a place chosen by the user —
+    it has no access to the SAF Uri; see androidSaveConfirm() in
+    index.html, the same pattern already used for .rbxl).
+    
+    Previously the files were returned as base64 inside JSON, and on the client
+    an <a download> with a blob: URL was created — inside Android WebView this is
+    NOT a real download, the link was just "clicked into nowhere" and
+    the user didn't understand where the files went."""
     import zipfile
     import tempfile as _tempfile
 
@@ -6825,18 +6823,18 @@ def api_roblox_avatar3d_fetch():
     user_id = request.args.get('userId', '').strip() or 'unknown'
     save_dir = request.args.get('savePath', '').strip()
     if not bundle_url.startswith('https://'):
-        return jsonify({'ok': False, 'error': 'bundleUrl отсутствует или некорректен'}), 400
+        return jsonify({'ok': False, 'error': _alang('bundleUrl отсутствует или некорректен', 'bundleUrl is missing or invalid')}), 400
     if not save_dir:
-        return jsonify({'ok': False, 'error': 'savePath отсутствует'}), 400
+        return jsonify({'ok': False, 'error': _alang('savePath отсутствует', 'savePath is missing')}), 400
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'error': 'not_logged_in',
-                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+                        'message': _alang('Сначала войдите в аккаунт Roblox.', 'Sign in to your Roblox account first.')}), 401
     try:
         bundle = _rbx_get_json(bundle_url)
 
-        # obj, mtl и каждая текстура — независимые скачивания с разных
-        # CDN-узлов; параллелим их вместо последовательного цикла, чтобы
-        # весь процесс не растягивался на сумму времени всех файлов.
+        # obj, mtl and each texture are independent downloads from different
+        # CDN nodes; we parallelize them instead of a sequential loop so that
+        # the whole process doesn't stretch to the sum of the time of all files.
         import concurrent.futures as _cf
 
         tex_hashes = bundle.get('textures', [])
@@ -6855,11 +6853,11 @@ def api_roblox_avatar3d_fetch():
                     fut.result(),
                 ))
 
-        # БАГ-ФИКС: Roblox отдаёт .mtl со ссылками на текстуры БЕЗ
-        # расширения (например "map_Kd 30DAY-abc123"), а сами файлы мы
-        # сохраняем как "30DAY-abc123.png" — без этой правки Blender и
-        # другие вьюеры не находят текстуры при импорте. Дописываем
-        # ".png" к каждой ссылке, которая совпадает с одним из hash.
+        # BUG FIX: Roblox serves .mtl with texture references WITHOUT
+        # an extension (for example "map_Kd 30DAY-abc123"), while we save the files
+        # themselves as "30DAY-abc123.png" — without this fix Blender and
+        # other viewers don't find the textures on import. We append
+        # ".png" to every reference that matches one of the hashes.
         mtl_text = mtl_bytes.decode('utf-8', 'replace')
         for tex_hash, _fname in zip(tex_hashes, [f[0] for f in tex_files]):
             mtl_text = _re.sub(
@@ -6887,10 +6885,10 @@ def api_roblox_avatar3d_fetch():
             'zipName': zip_name,
             'fileCount': 3 + len(tex_files),
         }
-        # Для импорта прямо в 3D-сцену редактора клиенту не нужен
-        # повторный поход на диск/сеть — сразу отдаём текст OBJ/MTL и
-        # текстуры как base64 (data URL). Это НЕ дублирует запись zip —
-        # zip всё равно нужен для варианта "просто скачать себе на диск".
+        # For importing straight into the editor's 3D scene the client doesn't need
+        # another trip to disk/network — we return the OBJ/MTL text and the
+        # textures right away as base64 (a data URL). This does NOT duplicate the zip write —
+        # the zip is needed anyway for the "just download to my disk" variant.
         if request.args.get('includeAssets') == '1':
             response['obj_text'] = obj_bytes.decode('utf-8', 'replace')
             response['mtl_text'] = mtl_text
@@ -6905,11 +6903,11 @@ def api_roblox_avatar3d_fetch():
 
 
 def _rgb01(c):
-    """Color3 {'r','g','b'} (0..1) -> [r,g,b] или None."""
+    """Color3 {'r','g','b'} (0..1) -> [r,g,b] or None."""
     if isinstance(c, dict) and all(k in c for k in ('r', 'g', 'b')):
         try:
             v = [float(c['r']), float(c['g']), float(c['b'])]
-            if max(v) > 1.5:  # на случай 0..255
+            if max(v) > 1.5:  # in case of 0..255
                 v = [x / 255.0 for x in v]
             return [round(max(0.0, min(1.0, x)), 4) for x in v]
         except (TypeError, ValueError):
@@ -6918,7 +6916,7 @@ def _rgb01(c):
 
 
 def _clock_hours(lp):
-    """ClockTime (часы, float) или TimeOfDay 'HH:MM:SS' -> часы 0..24."""
+    """ClockTime (hours, float) or TimeOfDay 'HH:MM:SS' -> hours 0..24."""
     ct = lp.get('ClockTime')
     try:
         if ct is not None:
@@ -6941,8 +6939,8 @@ MAX_MAP_LIGHTS = 400
 
 @flask_app.route('/api/lighting')
 def api_lighting():
-    """Настройки Lighting/Atmosphere карты и список PointLight/SpotLight с
-    позициями — клиент строит по ним свет и дешёвое свечение (одним Points)."""
+    """The map's Lighting/Atmosphere settings and a list of PointLight/SpotLight with
+    positions — the client builds light and a cheap glow from them (in a single Points)."""
     parsed = state.get('parsed')
     if not parsed:
         return jsonify({'ok': True, 'found': False})
@@ -6986,8 +6984,8 @@ def api_lighting():
         if lpr.get('Enabled') is False:
             continue
         if not _ref_in_world(r, pmap, r2c):
-            continue    # лампы шаблонов комнат из ServerStorage занимали слоты MAX_MAP_LIGHTS и светили в пустоту
-        # позиция — у ближайшего предка с CFrame (Part, либо Attachment внутри Part)
+            continue    # lamps of room templates from ServerStorage took MAX_MAP_LIGHTS slots and lit up empty space
+        # the position — from the nearest ancestor with a CFrame (a Part, or an Attachment inside a Part)
         anc, pos = pmap.get(r), None
         for _ in range(4):
             if anc is None or anc not in props:
@@ -7007,7 +7005,7 @@ def api_lighting():
                        'color': _rgb01(lpr.get('Color')) or [1.0, 1.0, 1.0]})
         if len(lights) >= MAX_MAP_LIGHTS:
             break
-    # Скайбокс (шесть граней) и цветокоррекция — только то, что можно применить без пост-обработки
+    # The skybox (six faces) and color correction — only what can be applied without post-processing
     sky = None
     cc = None
     for r, c in r2c.items():
@@ -7030,7 +7028,7 @@ _children_cache = {'pid': None, 'map': None}
 
 
 def _children_of(parsed):
-    """parent_map перевёрнутый в ref -> [дети]; кэшируется на распарсенную карту."""
+    """parent_map inverted into ref -> [children]; cached per parsed map."""
     pid = id(parsed)
     if _children_cache['pid'] != pid:
         m = {}
@@ -7041,17 +7039,17 @@ def _children_of(parsed):
 
 
 def _cf12(cf):
-    """CFrame -> [x, y, z, r00..r22] (матрица поворота по строкам)."""
+    """CFrame -> [x, y, z, r00..r22] (a rotation matrix by rows)."""
     return [float(v) for v in get_pos(cf)] + [float(v) for v in get_rot_matrix(cf)]
 
 
 @flask_app.route('/api/outfit_item/<int:ref>')
 def api_outfit_item(ref):
-    """Данные Accessory / BodyColors ИЗ ФАЙЛА для отрисовки на персонаже: скрипт карты
-    клонирует их в Character (морф костюма), а клиент по ref оригинала рисует."""
+    """Accessory / BodyColors data FROM THE FILE for drawing on the character: the map's script
+    clones them into the Character (an outfit morph), and the client draws by the original's ref."""
     parsed = state.get('parsed')
     if not parsed:
-        return jsonify({'ok': False, 'error': 'карта не открыта'})
+        return jsonify({'ok': False, 'error': _alang('карта не открыта', 'map is not open')})
     r2c, props = parsed['referent_to_class'], parsed['props']
     cls = r2c.get(ref)
     p = props.get(ref, {})
@@ -7066,12 +7064,12 @@ def api_outfit_item(ref):
                 cols[limb] = '#%02x%02x%02x' % tuple(int(round(v * 255)) for v in c)
         return jsonify({'ok': True, 'cls': 'BodyColors', 'colors': cols})
     if cls != 'Accessory':
-        return jsonify({'ok': False, 'error': 'не Accessory/BodyColors'})
+        return jsonify({'ok': False, 'error': _alang('не Accessory/BodyColors', 'not an Accessory/BodyColors')})
 
     parts = [k for k in kids.get(ref, []) if r2c.get(k) in ('Part', 'MeshPart')]
     handle = next((k for k in parts if props.get(k, {}).get('Name') == 'Handle'), parts[0] if parts else None)
     if handle is None:
-        return jsonify({'ok': False, 'error': 'у аксессуара нет Handle'})
+        return jsonify({'ok': False, 'error': _alang('у аксессуара нет Handle', 'the accessory has no Handle')})
     hp, hkids = props[handle], kids.get(handle, [])
     sz = hp.get('Size') if isinstance(hp.get('Size'), dict) else {}
     size = [safe_float(sz.get('x', 1), 1), safe_float(sz.get('y', 1), 1), safe_float(sz.get('z', 1), 1)]
@@ -7115,14 +7113,14 @@ def api_outfit_item(ref):
 
 @flask_app.route('/api/tool_item/<int:ref>')
 def api_tool_item(ref):
-    """Внешний вид Tool ИЗ ФАЙЛА для отрисовки в руке персонажа: все видимые детали Tool (Handle и остальное)
-    с CFrame относительно Handle + Tool.Grip. Клиент по ref оригинала строит модель и крепит к правой руке."""
+    """A Tool's appearance FROM THE FILE for drawing in the character's hand: all visible parts of the Tool (Handle and the rest)
+    with a CFrame relative to Handle + Tool.Grip. The client builds the model by the original's ref and attaches it to the right arm."""
     parsed = state.get('parsed')
     if not parsed:
-        return jsonify({'ok': False, 'error': 'карта не открыта'})
+        return jsonify({'ok': False, 'error': _alang('карта не открыта', 'map is not open')})
     r2c, props = parsed['referent_to_class'], parsed['props']
     if r2c.get(ref) != 'Tool':
-        return jsonify({'ok': False, 'error': 'не Tool'})
+        return jsonify({'ok': False, 'error': _alang('не Tool', 'not a Tool')})
     kids = _children_of(parsed)
     BASE = ('Part', 'MeshPart', 'WedgePart', 'CornerWedgePart', 'TrussPart')
     parts, stack = [], list(kids.get(ref, []))
@@ -7134,7 +7132,7 @@ def api_tool_item(ref):
     handle = next((k for k in kids.get(ref, []) if r2c.get(k) in BASE and props[k].get('Name') == 'Handle'),
                   parts[0] if parts else None)
     if handle is None:
-        return jsonify({'ok': False, 'error': 'у Tool нет Handle'})
+        return jsonify({'ok': False, 'error': _alang('у Tool нет Handle', 'the Tool has no Handle')})
     hcf = props[handle]['CFrame']
     hp, hr = get_pos(hcf), get_rot_matrix(hcf)
 
@@ -7150,7 +7148,7 @@ def api_tool_item(ref):
         pr = props[k]
         tr = safe_float(pr.get('Transparency', 0), 0)
         if tr >= 0.99:
-            continue  # невидимый Handle
+            continue  # an invisible Handle
         sz = pr.get('Size') if isinstance(pr.get('Size'), dict) else {}
         size = [safe_float(sz.get('x', 1), 1), safe_float(sz.get('y', 1), 1), safe_float(sz.get('z', 1), 1)]
         mesh = {'kind': 'box'}
@@ -7176,8 +7174,8 @@ def api_tool_item(ref):
                     'shape': {0: 'sphere', 2: 'cylinder'}.get(shape, 'box') if r2c[k] == 'Part' else 'box',
                     'mesh': mesh, 'cf': rel_cf(pr['CFrame'])})
     if not out:
-        return jsonify({'ok': False, 'error': 'у Tool нет видимых деталей'})
-    # суставы (Motor6D/Weld): клиент двигает Part1 относительно Handle, когда скрипт меняет joint.C0 (нажатие клавиши и т.п.)
+        return jsonify({'ok': False, 'error': _alang('у Tool нет видимых деталей', 'the Tool has no visible parts')})
+    # joints (Motor6D/Weld): the client moves Part1 relative to the Handle when a script changes joint.C0 (a key press etc.)
     joints, st = [], list(kids.get(ref, []))
     while st:
         k = st.pop()
@@ -7194,25 +7192,25 @@ def api_tool_item(ref):
 
 @flask_app.route('/api/roblox/me')
 def api_roblox_me():
-    """Ник/ID аккаунта, под которым выполнен вход (кука .ROBLOSECURITY).
-    Нет куки или она протухла — loggedIn=False (клиент тогда рисует
-    стандартного Roblox-«нуба» вместо аватара игрока)."""
+    """The nickname/ID of the account that is signed in (the .ROBLOSECURITY cookie).
+    No cookie or it has gone stale — loggedIn=False (the client then draws
+    the standard Roblox «noob» instead of the player's avatar)."""
     if _roblox_cookie() is None:
         return jsonify({'ok': True, 'loggedIn': False})
     try:
         d = _rbx_get_json('https://users.roblox.com/v1/users/authenticated')
         uid = d.get('id') if isinstance(d, dict) else None
         if not uid:
-            raise RuntimeError('в ответе нет id')
+            raise RuntimeError(_alang('в ответе нет id', 'no id in the response'))
         return jsonify({'ok': True, 'loggedIn': True, 'userId': uid,
                         'name': d.get('name') or '',
                         'displayName': d.get('displayName') or d.get('name') or ''})
     except Exception as e:
-        # HTTP 401 и т.п. — кука недействительна: считаем, что входа нет
+        # HTTP 401 etc. — the cookie is invalid: we consider that there is no sign-in
         return jsonify({'ok': True, 'loggedIn': False, 'error': str(e)})
 
 
-PLAY_AVATAR_TTL = 7 * 24 * 3600  # неделя: аватар меняется редко, а генерация у Roblox небыстрая (до минуты ожидания). Устаревшая копия отдаётся и позже (allowStale=1), если обновить не вышло
+PLAY_AVATAR_TTL = 7 * 24 * 3600  # a week: an avatar changes rarely, while Roblox's generation is slow (up to a minute of waiting). A stale copy is returned later too (allowStale=1) if the refresh failed
 
 
 def _play_avatar_cache_path(user_id):
@@ -7221,19 +7219,19 @@ def _play_avatar_cache_path(user_id):
 
 @flask_app.route('/api/roblox/play-avatar')
 def api_roblox_play_avatar():
-    """3D-аватар для персонажа в Play (OBJ+MTL+текстуры одним JSON, без zip).
-    1) userId без bundleUrl — отдаёт кэш с диска, если он свежий (или с allowStale=1 — любой), иначе
-       {ok, cached: false} (клиент тогда опрашивает /avatar3d/status и
-       приходит сюда снова уже с bundleUrl);
-    2) userId + bundleUrl — скачивает, кладёт в кэш и отдаёт."""
+    """A 3D avatar for the character in Play (OBJ+MTL+textures as one JSON, without a zip).
+    1) userId without bundleUrl — returns the disk cache if it is fresh (or with allowStale=1 — any), otherwise
+    {ok, cached: false} (the client then polls /avatar3d/status and
+    comes here again with a bundleUrl);
+    2) userId + bundleUrl — downloads, puts it into the cache and returns it."""
     import time as _time
     user_id = request.args.get('userId', '').strip()
     if not user_id.isdigit():
-        return jsonify({'ok': False, 'error': 'userId должен быть числом'}), 400
+        return jsonify({'ok': False, 'error': _alang('userId должен быть числом', 'userId must be a number')}), 400
     cp = _play_avatar_cache_path(user_id)
     try:
         cf = _cache_find(cp)
-        allow_stale = request.args.get('allowStale', '') == '1'   # клиент просит копию любого возраста (обновление не удалось)
+        allow_stale = request.args.get('allowStale', '') == '1'   # the client asks for a copy of any age (the refresh failed)
         if cf is not None and (allow_stale or _time.time() - cf.stat().st_mtime < PLAY_AVATAR_TTL):
             cached_json = _cache_read_file(cf)
             if cached_json is not None:
@@ -7244,10 +7242,10 @@ def api_roblox_play_avatar():
     if not bundle_url:
         return jsonify({'ok': True, 'cached': False})
     if not bundle_url.startswith('https://'):
-        return jsonify({'ok': False, 'error': 'bundleUrl некорректен'}), 400
+        return jsonify({'ok': False, 'error': _alang('bundleUrl некорректен', 'bundleUrl is invalid')}), 400
     if _roblox_cookie() is None:
         return jsonify({'ok': False, 'error': 'not_logged_in',
-                        'message': 'Сначала войдите в аккаунт Roblox.'}), 401
+                        'message': _alang('Сначала войдите в аккаунт Roblox.', 'Sign in to your Roblox account first.')}), 401
     try:
         import concurrent.futures as _cf
         bundle = _rbx_get_json(bundle_url)
@@ -7259,7 +7257,7 @@ def api_roblox_play_avatar():
             obj_bytes, mtl_bytes = obj_f.result(), mtl_f.result()
             tex_files = [(_re.sub(r'[^a-zA-Z0-9._-]+', '_', h) + '.png', f.result())
                          for h, f in zip(tex_hashes, tex_f)]
-        # как в /avatar3d/fetch: Roblox пишет в .mtl текстуры без расширения
+        # as in /avatar3d/fetch: Roblox writes textures in .mtl without an extension
         mtl_text = mtl_bytes.decode('utf-8', 'replace')
         for h in tex_hashes:
             mtl_text = _re.sub(r'(?<![\w.])' + _re.escape(h) + r'(?!\.\w)', h + '.png', mtl_text)
@@ -7271,7 +7269,7 @@ def api_roblox_play_avatar():
                           _b64.b64encode(d).decode('ascii')} for n, d in tex_files],
         }
         try:
-            for sfx in ('',) + _CACHE_CODEC_SUFFIXES:   # старую запись (в любом виде) заменяем новой
+            for sfx in ('',) + _CACHE_CODEC_SUFFIXES:   # we replace the old entry (in any form) with a new one
                 try:
                     cp.with_name(cp.name + sfx).unlink()
                 except OSError:
@@ -7284,7 +7282,7 @@ def api_roblox_play_avatar():
         return jsonify({'ok': False, 'error': str(e)}), 502
 
 
-SERVER_BUILD = '2026-11-10 · tween-easing'   # должна совпадать с BUILD_LABEL в script.js и --css-build в style.css
+SERVER_BUILD = '2026-11-10 · tween-easing'   # must match BUILD_LABEL in script.js and --css-build in style.css
 
 
 @flask_app.route('/api/status')
@@ -7299,18 +7297,18 @@ def api_status():
     })
 
 
-# Лог-файлы Lua Output — каждый запуск Play пишет в свой файл под logs/, а
-# не только в браузерную панель Output (которая пропадает при закрытии
-# вкладки/обновлении страницы). Одна запись на строку JSON — удобно и
-# смотреть глазами (less/tail), и парсить скриптом при желании.
+# Lua Output log files — each Play run writes to its own file under logs/, and
+# not only to the browser Output panel (which disappears when the
+# tab is closed/the page is refreshed). One JSON entry per line — convenient both
+# to look at by eye (less/tail) and to parse with a script if desired.
 LOG_DIR = Path(__file__).resolve().parent / 'logs'
 _log_state = {'file': None, 'session': None}
 
 
 def _current_log_path():
-    # Новый файл на каждую Play-сессию (см. 'session' в теле запроса —
-    # фронтенд генерирует один id при старте Play и шлёт его с каждой
-    # строкой лога этой сессии), не на каждую отдельную запись.
+    # A new file for every Play session (see 'session' in the request body —
+    # the frontend generates one id when Play starts and sends it with every
+    # log line of that session), not for each separate entry.
     return _log_state['file']
 
 
@@ -7334,8 +7332,8 @@ def api_log():
             f.write(json.dumps(line, ensure_ascii=False) + '\n')
         return jsonify({'ok': True})
     except Exception as e:
-        # Логирование не должно ронять саму игру — если писать не
-        # получилось (нет прав на диск и т.п.), просто молча отвечаем ok:false.
+        # Logging must not fail the game itself — if writing
+        # failed (no disk permissions etc.), we just quietly answer ok:false.
         return jsonify({'ok': False, 'error': str(e)}), 200
 
 
@@ -7352,8 +7350,8 @@ def api_log_list():
 @flask_app.route('/api/log/<path:name>')
 def api_log_get(name):
     try:
-        # Только файлы вида play_*.log из LOG_DIR — не отдаём произвольный
-        # путь по запросу.
+        # Only play_*.log files from LOG_DIR — we don't serve an arbitrary
+        # path on request.
         safe = Path(name).name
         if not safe.startswith('play_') or not safe.endswith('.log'):
             return jsonify({'ok': False, 'error': 'bad name'}), 400
@@ -7362,10 +7360,10 @@ def api_log_get(name):
         return jsonify({'ok': False, 'error': str(e)}), 404
 
 
-# Чтение HTML/CSS/JS — раньше все три были одним файлом (index.html),
-# из-за чего он разросся почти до 10000 строк в одном месте; теперь
-# разложены на отдельные файлы рядом с app.py (index.html/style.css/
-# script.js), index.html подключает их через <link>/<script src>.
+# Reading HTML/CSS/JS — previously all three were one file (index.html),
+# because of which it grew to almost 10000 lines in one place; now they
+# are split into separate files next to app.py (index.html/style.css/
+# script.js), and index.html includes them via <link>/<script src>.
 with open("index.html", "r", encoding="utf-8") as file:
     HTML_TEMPLATE = file.read()
 with open("style.css", "r", encoding="utf-8") as file:
@@ -7375,9 +7373,9 @@ with open("script.js", "r", encoding="utf-8") as file:
 
 
 def _no_cache(resp):
-    # index/style/script читаются с диска ОДИН раз при старте, а WebView/
-    # браузер раньше мог держать старую копию script.js — после правки
-    # старая версия продолжала работать. no-cache заставляет перепроверять.
+    # index/style/script are read from disk ONCE at start, while a WebView/
+    # browser could previously keep an old copy of script.js — after an edit
+    # the old version kept working. no-cache forces revalidation.
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
@@ -7398,8 +7396,8 @@ def _asset_version():
 
 @flask_app.route('/')
 def index():
-    # ?v=<хэш> в ссылках на script.js/style.css — WebView не может отдать
-    # старую копию из кеша после замены файлов.
+    # ?v=<hash> in the links to script.js/style.css — a WebView can't serve
+    # an old copy from its cache after the files are replaced.
     v = _asset_version()
     html = HTML_TEMPLATE.replace('src="script.js"', 'src="script.js?v=%s"' % v) \
                         .replace('href="style.css"', 'href="style.css?v=%s"' % v)
@@ -7416,18 +7414,18 @@ def script_js():
     return _no_cache(Response(JS_TEMPLATE, mimetype='application/javascript'))
 
 
-# ============ ИИ-АССИСТЕНТ ============
-# Любой OpenAI-совместимый провайдер (OpenRouter, Groq, Mistral, Ollama,
-# российские агрегаторы...): адрес, ключ и модель задаются в панели «🤖 AI».
-# Ключ хранится только на сервере (в браузер не отдаётся), по умолчанию
-# эндпоинты принимают запросы только с 127.0.0.1 — сервер слушает 0.0.0.0,
-# и без этого любой в локальной сети мог бы тратить чужой ключ.
-# RSW_ASSISTANT_ALLOW_REMOTE=1 снимает это ограничение.
+# ============ AI ASSISTANT ============
+# Any OpenAI-compatible provider (OpenRouter, Groq, Mistral, Ollama,
+# Russian aggregators...): the address, key and model are set in the «🤖 AI» panel.
+# The key is stored only on the server (it isn't sent to the browser), by default the
+# endpoints accept requests only from 127.0.0.1 — the server listens on 0.0.0.0,
+# and without this anyone on the local network could spend someone else's key.
+# RSW_ASSISTANT_ALLOW_REMOTE=1 lifts this restriction.
 try:
     with open("assistant.js", "r", encoding="utf-8") as file:
         ASSISTANT_JS = file.read()
-except OSError:   # нет файла (старая сборка) — редактор работает без ассистента
-    ASSISTANT_JS = "/* assistant.js не найден */"
+except OSError:   # no file (an old build) — the editor works without the assistant
+    ASSISTANT_JS = '/* assistant.js not found */'
 
 
 def _assistant_cfg_path():
@@ -7464,8 +7462,13 @@ def _assistant_save(cfg):
 
 
 def _alang(ru, en):
-    """Сообщение на языке интерфейса (заголовок X-Lang от assistant.js)."""
-    return ru if (request.headers.get('X-Lang') or '').lower().startswith('ru') else en
+    """A message in the interface language (the X-Lang header sent by the frontend).
+    Outside a request (background threads, startup) English is used."""
+    try:
+        lang = (request.headers.get('X-Lang') or '').lower()
+    except RuntimeError:
+        lang = ''
+    return ru if lang.startswith('ru') else en
 
 
 def _assistant_guard():
@@ -7509,9 +7512,9 @@ _AI_SAFETY_LINE = _re_ai.compile(r"(?im)^[ \t]*(User Safety|Response Safety|Safe
 
 
 def _ai_strip_done_actions(text):
-    """Старые блоки действий заменяем заглушкой (если клиент не подставил сводку «Патч применён»):
-    иначе бесплатные модели копируют их по шаблону и лезут в сцену на любой вопрос.
-    Служебные строки Safety (утекают у nemotron-safety и подобных) тоже убираем."""
+    """We replace old action blocks with a placeholder (if the client didn't substitute the «Patch applied» summary):
+    otherwise free models copy them by template and go poking into the scene for any question.
+    Safety service lines (leaked by nemotron-safety and the like) are removed too."""
     text = _AI_ACT_BLOCK.sub('[блок действий уже обработан]', text)
     return _AI_SAFETY_LINE.sub('', text)
 
@@ -7547,7 +7550,7 @@ props/set: Position, Rotation, Size ([x,y,z]), Color ("#RRGGBB"), Transparency, 
 Чтобы изменить код существующего скрипта: {"op":"set","ref":R,"prop":"Source","value":"новый код целиком"}.
 В JSON переводы строк в source пиши как \n, кавычки экранируй: настоящих переводов строк внутри строки JSON быть не должно. Держи блок компактным (длина ответа ограничена): без лишних комментариев и дублирования кода. Максимум 30 действий в блоке.
 
-Запуск и проверка игры: play запускает игру (S — 1..60 секунд, потом редактор сам её остановит), stop останавливает. Чтобы проверить свою работу, поставь play ПОСЛЕДНИМ действием блока, например {"op":"play","seconds":8}. Вывод игры (print/warn/error) придёт тебе в блоке «Вывод игры» контекста: найди причину ошибок и исправь. Запускай игру только если пользователь просит запустить/проверить/протестировать или это нужно, чтобы понять ошибку. Пометка [Ошибка патча: ...] в истории значит, что патч применился не полностью: исправь причину и пришли блок только для невыполненной части.
+Запуск и проверка игры: play запускает игру (S — 1..60 секунд, потом редактор сам её остановит), stop останавливает. Чтобы проверить свою работу, поставь play ПОСЛЕДНИМ действием блока, например {"op":"play","seconds":8}. Вывод игры (print/warn/error) придёт тебе в блоке «Вывод игры» контекста: найди причину ошибок и исправь. Запускай игру только если пользователь просит запустить/проверить/протестировать или это нужно, чтобы понять ошибку. Пометка [Patch error: ...] в истории значит, что патч применился не полностью: исправь причину и пришли блок только для невыполненной части.
 
 Формат ответа на просьбу изменить сцену: 1–2 фразы о плане, затем сразу блок rbx-actions. Пример (вращающийся куб):
 Создаю куб и скрипт, который его вращает.
@@ -7584,7 +7587,7 @@ Script placement:
 To change an existing script's code: {"op":"set","ref":R,"prop":"Source","value":"the whole new code"}.
 In JSON write newlines inside source as \n and escape quotes: a JSON string must contain no real line breaks. Keep the block compact (the reply length is limited): no needless comments or duplicated code. At most 30 actions per block.
 
-Running and testing the game: play starts the game (S is 1..60 seconds, then the editor stops it itself), stop stops it. To test your work put play as the LAST action of the block, e.g. {"op":"play","seconds":8}. The game output (print/warn/error) reaches you in the "Game output" part of the context: find the cause of the errors and fix them. Run the game only when the user asks to run/check/test, or when you need it to understand an error. A note [Ошибка патча: ...] in the history means the patch was not fully applied: fix the cause and send a block only for the part that is not done.
+Running and testing the game: play starts the game (S is 1..60 seconds, then the editor stops it itself), stop stops it. To test your work put play as the LAST action of the block, e.g. {"op":"play","seconds":8}. The game output (print/warn/error) reaches you in the "Game output" part of the context: find the cause of the errors and fix them. Run the game only when the user asks to run/check/test, or when you need it to understand an error. A note [Patch error: ...] in the history means the patch was not fully applied: fix the cause and send a block only for the part that is not done.
 
 Reply format for a scene-change request: 1-2 sentences with the plan, then the rbx-actions block right away. Example (spinning cube):
 Creating a cube and a script that spins it.
@@ -7603,7 +7606,7 @@ _ASSISTANT_SYSTEM = {
         "(User Safety, Response Safety, safe/unsafe, moderation и т.п.), не комментируй безопасность запроса.\n"
         "Вопрос или просьба «только текст» — ответь текстом (2–5 предложений, код в блоках), "
         "без блока rbx-actions. Если данных не хватает — задай один уточняющий вопрос.\n"
-        "Контекст редактора ниже — источник правды о сцене; в истории пометки вида [Патч применён: ...] "
+        "Контекст редактора ниже — источник правды о сцене; в истории пометки вида [Patch applied: ...] "
         "описывают уже выполненные изменения (с ref объектов), не повторяй их. "
         "Если скрипт в контексте помечен [script truncated], не переписывай его Source целиком.\n"
         + _ASSISTANT_ACTIONS_RU
@@ -7624,26 +7627,26 @@ _ASSISTANT_SYSTEM = {
 }
 
 
-# ---------- Контекст редактора: бюджет, оценка токенов, окно модели ----------
-_AI_CTX_MAX = {'selection': 2000, 'scene': 4000, 'output': 3000, 'script': 12000}   # символов
-_AI_CTX_ORDER = ('selection', 'scene', 'output', 'script')    # сцена с ref'ами — раньше скрипта: скрипт режем первым
-_AI_DEFAULT_WINDOW = 32768       # если провайдер не сообщает размер окна
-_AI_REPLY_RESERVE = 3000         # минимальный запас под ответ (если окно неизвестно — см. _ai_reply_tokens)
-_AI_REPLY_MAX = 12000            # потолок max_tokens: код в rbx-actions + reasoning-токены не влезали в 3000
+# ---------- Editor context: budget, token estimate, model window ----------
+_AI_CTX_MAX = {'selection': 2000, 'scene': 4000, 'output': 3000, 'script': 12000}   # characters
+_AI_CTX_ORDER = ('selection', 'scene', 'output', 'script')    # the scene with refs — before the script: the script is cut first
+_AI_DEFAULT_WINDOW = 32768       # if the provider doesn't report the window size
+_AI_REPLY_RESERVE = 3000         # a minimum reserve for the reply (if the window is unknown — see _ai_reply_tokens)
+_AI_REPLY_MAX = 12000            # the max_tokens ceiling: code in rbx-actions + reasoning tokens didn't fit into 3000
 
 
 def _ai_reply_tokens(window):
-    """Сколько токенов просить у модели на ответ: до 12k, но не больше четверти окна."""
+    """How many tokens to ask the model for the reply: up to 12k, but no more than a quarter of the window."""
     if window:
         return max(_AI_REPLY_RESERVE, min(_AI_REPLY_MAX, window // 4))
     return 6000
-_AI_WIN_CACHE = {}               # (base_url, model) -> (окно | None, время запроса)
-_AI_CALIB = {}                   # model -> поправка оценки по реальному usage провайдера
+_AI_WIN_CACHE = {}               # (base_url, model) -> (window | None, request time)
+_AI_CALIB = {}                   # model -> an estimate correction from the provider's real usage
 _AI_WIN_KEYS = ('context_length', 'context_window', 'max_model_len', 'max_context_length', 'n_ctx')
 
 
 def _ai_est_tokens(text):
-    """Грубая оценка: кириллица ~2.3 символа/токен, остальное (английский, код) ~3.5."""
+    """A rough estimate: Cyrillic ~2.3 characters/token, the rest (English, code) ~3.5."""
     if not text:
         return 0
     cyr = sum(1 for ch in text if '\u0400' <= ch <= '\u04ff')
@@ -7655,7 +7658,7 @@ def _ai_raw_tokens(system, msgs):
 
 
 def _ai_calibrate(model, real, raw):
-    """Подгоняем оценку под реальный prompt_tokens, если провайдер его прислал."""
+    """We adjust the estimate to the real prompt_tokens if the provider sent it."""
     if real > 0 and raw > 0:
         old = _AI_CALIB.get(model, 1.0)
         _AI_CALIB[model] = max(0.5, min(2.5, 0.6 * old + 0.4 * real / float(raw)))
@@ -7675,7 +7678,7 @@ def _ai_window_from_item(m):
 
 
 def _ai_remember_windows(base, j):
-    """Запоминает размер окна из ответа /models; возвращает {id: окно}."""
+    """Remembers the window size from the /models response; returns {id: window}."""
     items = j.get('data') if isinstance(j, dict) else j
     now = time.time()
     found = {}
@@ -7689,13 +7692,13 @@ def _ai_remember_windows(base, j):
 
 
 def _ai_window(cfg):
-    """Окно выбранной модели в токенах или None, если провайдер его не сообщает."""
+    """The selected model's window in tokens or None if the provider doesn't report it."""
     if not cfg.get('model'):
         return None
     base = cfg['base_url'].rstrip('/')
     key = (base, cfg['model'])
     hit = _AI_WIN_CACHE.get(key)
-    if hit and (hit[0] or time.time() - hit[1] < 300):     # неудачу не повторяем 5 минут
+    if hit and (hit[0] or time.time() - hit[1] < 300):     # we don't retry a failure for 5 minutes
         return hit[0]
     try:
         with _assistant_http(base + '/models', cfg['api_key'], timeout=8) as resp:
@@ -7709,7 +7712,7 @@ def _ai_window(cfg):
 
 
 def _ai_cut(text, limit, tail=0.0, note=''):
-    """-> (текст, обрезан ли). tail — доля лимита, сохраняемая с конца."""
+    """-> (text, whether truncated). tail — the share of the limit kept from the end."""
     if len(text) <= limit:
         return text, False
     t = int(limit * tail)
@@ -7718,16 +7721,16 @@ def _ai_cut(text, limit, tail=0.0, note=''):
 
 
 def _ai_context(d, window):
-    """Контекст редактора -> (текст, был ли сокращён). Порядок: выбор, сцена, скрипт.
-    Раньше всё резалось по ctx[:5000], и сводка сцены (с ref'ами) стояла в самом конце —
-    при длинном скрипте она отваливалась первой, и модель выдумывала ref'ы.
-    Теперь у каждой части свой лимит, а скрипт получает остаток бюджета."""
+    """Editor context -> (text, whether it was shortened). Order: selection, scene, script.
+    Previously everything was cut by ctx[:5000], and the scene summary (with refs) stood at the very end —
+    with a long script it fell off first, and the model made up refs.
+    Now each part has its own limit, and the script gets the remainder of the budget."""
     total = sum(_AI_CTX_MAX.values())
     if window:
         total = min(total, max(3000, int(window * 3 * 0.4)))
     ctx = d.get('ctx')
     if not isinstance(ctx, dict):
-        legacy = d.get('context')           # старый клиент присылал одну строку
+        legacy = d.get('context')           # an old client sent a single string
         ctx = {'selection': legacy[:total]} if isinstance(legacy, str) else {}
     out, truncated, used = [], False, 0
     for k in _AI_CTX_ORDER:
@@ -7741,7 +7744,7 @@ def _ai_context(d, window):
         else:
             share = {'selection': 0.12, 'scene': 0.25, 'output': 0.2}[k]
             lim = min(_AI_CTX_MAX[k], int(total * share))
-            # вывод игры: сохраняем заголовок и ПОСЛЕДНИЕ строки — свежие ошибки важнее старых
+            # game output: we keep the header and the LAST lines — fresh errors matter more than old ones
             v, tr = _ai_cut(v, max(300, lim), tail=0.85 if k == 'output' else 0.0)
         truncated = truncated or tr
         used += len(v)
@@ -7750,15 +7753,15 @@ def _ai_context(d, window):
 
 
 def _ai_prepare(d, cfg):
-    """Общая подготовка для чата и индикатора: история, контекст, тег режима, подгонка под окно."""
+    """Shared preparation for the chat and the indicator: history, context, mode tag, fitting to the window."""
     window = _ai_window(cfg)
     msgs = []
-    for m in (d.get('messages') or [])[-12:]:                # 6 пар user/assistant
+    for m in (d.get('messages') or [])[-12:]:                # 6 user/assistant pairs
         if not (isinstance(m, dict) and m.get('role') in ('user', 'assistant')
                 and isinstance(m.get('content'), str)):
             continue
         msgs.append({'role': m['role'], 'content': m['content']})
-    # старые assistant-сообщения режем до головы+хвоста (блок rbx-actions уже выполнен)
+    # old assistant messages are cut to head+tail (the rbx-actions block has already been executed)
     for m in msgs:
         if m['role'] == 'assistant':
             m['content'] = _ai_strip_done_actions(m['content'])
@@ -7787,7 +7790,7 @@ def _ai_prepare(d, cfg):
                 "Без длинных рассуждений. Если это вопрос — только текст.]",
                 "\n\n[If the scene must change: 1-2 sentence plan, then the ```rbx-actions block right away. "
                 "No long reasoning. If it is a question - text only.]")
-    # если известное окно переполняется — выкидываем самые старые сообщения
+    # if the known window overflows — we throw out the oldest messages
     dropped = 0
     if window:
         k = _AI_CALIB.get(cfg.get('model'), 1.0)
@@ -7849,14 +7852,14 @@ def assistant_models():
         if isinstance(mid, str):
             ids.append(mid)
     ids = ids[:500]
-    contexts = _ai_remember_windows(cfg['base_url'].rstrip('/'), j)    # {id: окно в токенах}, если провайдер сообщает
+    contexts = _ai_remember_windows(cfg['base_url'].rstrip('/'), j)    # {id: window in tokens}, if the provider reports it
     known = set(ids)
     return jsonify({'ok': True, 'models': ids, 'contexts': {k: v for k, v in contexts.items() if k in known}})
 
 
 @flask_app.route('/api/assistant/usage', methods=['POST'])
 def assistant_usage():
-    """Сколько окна модели займёт следующий запрос (оценка): система + контекст редактора + история + ввод."""
+    """How much of the model's window the next request will take (an estimate): system + editor context + history + input."""
     deny = _assistant_guard()
     if deny:
         return deny
@@ -7876,7 +7879,7 @@ def assistant_usage():
              'editor': int(_ai_est_tokens(p['ctx_text']) * k),
              'history': int(hist * k), 'input': int(inp * k)}
     if d.get('has_image'):
-        parts['image'] = 1100     # скриншот ≤1024 px — порядка 1k токенов у большинства vision-моделей
+        parts['image'] = 1100     # a screenshot ≤1024 px — on the order of 1k tokens for most vision models
     used = sum(parts.values())
     window = p['window'] or _AI_DEFAULT_WINDOW
     return jsonify({'ok': True, 'used': used, 'window': window, 'assumed': not p['window'],
@@ -7903,7 +7906,7 @@ def assistant_chat():
 
     base = cfg['base_url'].rstrip('/')
     is_or = 'openrouter.ai' in base
-    # скриншот сцены (только в последнее user-сообщение; в историю он не попадает)
+    # a scene screenshot (only into the last user message; it doesn't go into the history)
     img = d.get('image')
     if not (isinstance(img, str) and len(img) < 6000000 and img.startswith(
             ('data:image/jpeg;base64,', 'data:image/png;base64,', 'data:image/webp;base64,'))):
@@ -7922,11 +7925,11 @@ def assistant_chat():
     def make(messages, reasoning, mt=None):
         pl = {'model': cfg['model'], 'stream': True, 'temperature': 0.3, 'max_tokens': mt or reply_mt, 'messages': messages}
         if reasoning:
-            pl['reasoning'] = {'effort': 'low'}   # бесплатные reasoning-модели иначе думают минутами до первого токена
+            pl['reasoning'] = {'effort': 'low'}   # free reasoning models otherwise think for minutes before the first token
         return pl
 
-    # варианты запроса по порядку: с картинкой (+reasoning), с картинкой без reasoning,
-    # без картинки (+reasoning), без картинки без reasoning. Переходим дальше только на 400/404/422.
+    # request variants in order: with an image (+reasoning), with an image without reasoning,
+    # without an image (+reasoning), without an image without reasoning. We move on only on 400/404/422.
     variants = []
     if img_msgs:
         variants.append((make(img_msgs, is_or), True))
@@ -7935,7 +7938,7 @@ def assistant_chat():
     variants.append((make(plain_msgs, is_or), False))
     if is_or:
         variants.append((make(plain_msgs, False), False))
-    if reply_mt > 3000:     # провайдер не принял большой max_tokens — последняя попытка со старым лимитом
+    if reply_mt > 3000:     # the provider didn't accept a large max_tokens — a last attempt with the old limit
         variants.append((make(plain_msgs, False, 3000), False))
     resp, last_err, sent_image = None, None, False
     for pl, with_img in variants:
@@ -7955,13 +7958,13 @@ def assistant_chat():
     msg_noimg = _alang('📷 [Модель не принимает изображения — запрос отправлен без скриншота. Выбери модель с поддержкой картинок.]\n\n',
                        '📷 [This model does not accept images — sent without the screenshot. Pick a vision model.]\n\n')
 
-    # сообщения готовим заранее: внутри генератора контекста запроса уже нет
+    # we prepare messages in advance: the request context is no longer inside the generator
     msg_prov = _alang('\n\n[Ошибка провайдера: %s]', '\n\n[Provider error: %s]')
     msg_stream = _alang('\n\n[Ошибка потока: %s]', '\n\n[Stream error: %s]')
 
     def gen():
-        # \x1f — служебный «пульс»: модель думает (reasoning-токены наружу не отдаём),
-        # клиент показывает «думаю…» и не выглядит зависшим
+        # \x1f — a service «pulse»: the model is thinking (reasoning tokens aren't sent out),
+        # the client shows «thinking…» and doesn't look frozen
         last_ping = 0.0
         if img_dropped:
             yield msg_noimg
@@ -8013,21 +8016,21 @@ if __name__ == '__main__':
                 state['parsed'] = parsed
                 state['file_path'] = p
                 print(
-                    f'[RbxStudio] Загружен: {p} ({len(parsed["referent_to_class"])} объектов)')
+                    f'[RbxStudio] Loaded: {p} ({len(parsed["referent_to_class"])} objects)')
             except Exception as e:
-                print(f'[RbxStudio] Ошибка загрузки: {e}')
+                print(f'[RbxStudio] Load error: {e}')
 
     url = f'http://127.0.0.1:{PORT}'
-    print(f'[RbxStudio] Запуск: {url}')
+    print(f'[RbxStudio] Starting: {url}')
 
     def open_browser():
         time.sleep(2)
-        # На Termux нет обычного GUI-браузера, который понимает
-        # стандартный python webbrowser.open() — он там может найти
-        # текстовый браузер (links/w3m/lynx) и открыть его ПРЯМО В
-        # ТЕРМИНАЛЕ, что выглядит как "дамп" HTML вместо реального
-        # запуска сервера. termux-open-url (из пакета Termux:API)
-        # корректно передаёт ссылку системному Android-браузеру.
+        # On Termux there is no ordinary GUI browser that understands
+        # the standard python webbrowser.open() — it may find there
+        # a text browser (links/w3m/lynx) and open it RIGHT IN THE
+        # TERMINAL, which looks like a "dump" of HTML instead of a real
+        # server launch. termux-open-url (from the Termux:API package)
+        # correctly hands the link to the system Android browser.
         try:
             subprocess.run(
                 ['termux-open-url', url],
@@ -8039,8 +8042,8 @@ if __name__ == '__main__':
             return
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
-        # Не на Termux (или Termux:API не установлен) — пробуем обычный
-        # способ, но только если это НЕ похоже на текстовый браузер.
+        # Not on Termux (or Termux:API isn't installed) — we try the ordinary
+        # way, but only if it does NOT look like a text browser.
         if sys.platform != 'linux' or os.environ.get('TERMUX_VERSION'):
             return
         try:
@@ -8049,10 +8052,10 @@ if __name__ == '__main__':
             pass
 
     threading.Thread(target=open_browser, daemon=True).start()
-    # threaded=True обязателен: без него однопоточный dev-сервер Flask
-    # блокирует ВООБЩЕ ВСЕ запросы (включая обычную работу редактора) на
-    # всё время выполнения долгого /api/roblox/avatar3d/fetch — именно из-за
-    # этого приложение выглядело "зависшим" целиком, а не только диалог
-    # скачивания аватара.
+    # threaded=True is mandatory: without it Flask's single-threaded dev server
+    # blocks ALL requests whatsoever (including the editor's ordinary work) for
+    # the whole duration of a long /api/roblox/avatar3d/fetch — exactly because of
+    # this the app looked "frozen" as a whole, not only the
+    # avatar download dialog.
     flask_app.run(host='0.0.0.0', port=PORT, debug=False,
                   use_reloader=False, threaded=True)

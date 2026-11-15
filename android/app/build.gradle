@@ -14,14 +14,14 @@ android {
         minSdk 26
         targetSdk 34
 
-        // Версия прилетает из CI (см. .github/workflows/build-and-release.yml).
-        // Локально, если переменной ANDROID_VERSION_CODE нет, versionCode
-        // берём из файла android/.local_version_code и увеличиваем на 1 на
-        // каждой сборке. Это нужно, чтобы OtaUpdater.invalidateHotpatchIfAppWasUpdated()
-        // видел рост versionCode и сам стирал старый скачанный hotpatch —
-        // иначе он продолжает перекрывать свежие правки в app.py/index.html
-        // даже после переустановки APK (см. bridge_launcher.py: hotpatch
-        // всегда в начале sys.path, если папка существует).
+        // The version comes from CI (see .github/workflows/build-and-release.yml).
+        // Locally, if the ANDROID_VERSION_CODE variable is absent, versionCode
+        // is taken from the file android/.local_version_code and increased by 1 on
+        // every build. This is needed so that OtaUpdater.invalidateHotpatchIfAppWasUpdated()
+        // sees the versionCode growth and erases the old downloaded hotpatch itself —
+        // otherwise it keeps overriding fresh edits in app.py/index.html
+        // even after reinstalling the APK (see bridge_launcher.py: hotpatch
+        // is always at the start of sys.path if the folder exists).
         def localVersionFile = file("${rootProject.projectDir}/.local_version_code")
         def verCode = System.getenv("ANDROID_VERSION_CODE")?.toInteger()
         if (verCode == null) {
@@ -33,8 +33,8 @@ android {
         versionCode verCode
         versionName verName
 
-        // arm64-v8a покрывает подавляющее большинство актуальных устройств
-        // и заметно ускоряет сборку по сравнению с multi-ABI.
+        // arm64-v8a covers the vast majority of current devices
+        // and noticeably speeds up the build compared with multi-ABI.
         ndk {
             abiFilters "arm64-v8a"
         }
@@ -44,10 +44,10 @@ android {
         }
     }
 
-    // Постоянная подпись — чтобы APK можно было обновлять поверх старой
-    // версии, а не только переустанавливать. Ключ подкладывается в CI из
-    // GitHub Secret (см. workflow), локально при отсутствии переменных
-    // используется обычный debug-ключ Android Studio/Gradle.
+    // A permanent signature — so that the APK can be updated over the old
+    // version, not only reinstalled. The key is supplied in CI from a
+    // GitHub Secret (see the workflow), locally, when the variables are absent,
+    // the ordinary Android Studio/Gradle debug key is used.
     def hasCustomSigning = System.getenv("ANDROID_KEYSTORE_PATH") != null
 
     if (hasCustomSigning) {
@@ -83,7 +83,7 @@ android {
         jvmTarget = '17'
     }
 
-    // app.py / rbxl_parser.py / index.html / icons.txt лежат здесь.
+    // app.py / rbxl_parser.py / index.html / icons.txt lie here.
     sourceSets {
         main {
             python.srcDirs = ["src/main/python"]
@@ -94,8 +94,8 @@ android {
 chaquopy {
     defaultConfig {
         pip {
-            // rbxl_parser.py использует только стандартную библиотеку —
-            // единственная внешняя зависимость приложения это Flask.
+            // rbxl_parser.py uses only the standard library —
+            // the app's only external dependency is Flask.
             install "flask"
             install "zstandard"
         }

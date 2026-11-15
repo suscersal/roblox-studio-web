@@ -2,7 +2,7 @@
 
 Guide for AI agents working in the **roblox-studio-web** repository: a web-based `.rbxl` editor (a Roblox Studio clone) built on Python/Flask, with a 3D viewport and an Android wrapper.
 
-Language note: code comments, log messages and the README are mostly in Russian. Keep new comments and commit messages consistent with the surrounding code.
+Language note: code comments and developer-facing log messages are in English; the README files are still in Russian. The UI defaults to English on first visit (the saved choice from the 🌐 button wins afterwards) and every user-visible string must exist in both the `en` and `ru` dictionaries (`I18N` in `script.js`, the `DICT` objects in `assistant.js`/`collab.js`/`cloud.js`, `values`/`values-ru` on Android). Server messages shown in the UI should go through `_alang(ru, en)` in `app.py`.
 
 ## Stack
 

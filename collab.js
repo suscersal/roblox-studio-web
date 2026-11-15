@@ -1,11 +1,11 @@
-/* Совместная работа: хост нажимает «Начать», второй человек открывает тот же
-   адрес (http://<ip-хоста>:порт), вводит код комнаты — и оба правят одну карту.
-   Самодостаточный файл по образцу assistant.js: сам добавляет кнопку 👥 в
-   верхнюю панель и свои стили; серверная часть — блок /api/collab/* в app.py. */
+/* Collaboration: the host presses «Start», the second person opens the same
+   address (http://<host-ip>:port), enters the room code — and both edit one map.
+   A self-contained file modelled on assistant.js: it adds the 👥 button to the
+   top bar and its own styles; the server side is the /api/collab/* block in app.py. */
 (function () {
     'use strict';
 
-    // ---------- язык ----------
+    // ---------- language ----------
     const DICT = {
         ru: {
             btn_title: 'Совместная работа',
@@ -119,8 +119,8 @@
         },
     };
     function lang() {
-        try { if (typeof LANG !== 'undefined' && DICT[LANG]) return LANG; } catch (e) { /* LANG ещё не объявлен */ }
-        return /^ru/i.test(navigator.language || '') ? 'ru' : 'en';
+        try { if (typeof LANG !== 'undefined' && DICT[LANG]) return LANG; } catch (e) { /* LANG is not declared yet */ }
+        return 'en';
     }
     function T(k, v) {
         let s = (DICT[lang()] || DICT.en)[k] || DICT.en[k] || k;
@@ -130,13 +130,13 @@
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-    // ---------- личность: id вкладки, имя, код комнаты ----------
+    // ---------- identity: tab id, name, room code ----------
     function store(area, key, val) {
         try {
             const st = window[area];
             if (val === undefined) return st.getItem(key);
             if (val === null) st.removeItem(key); else st.setItem(key, val);
-        } catch (e) { /* без хранилища — работаем в памяти вкладки */ }
+        } catch (e) { /* no storage — keep state in tab memory */ }
         return null;
     }
     const myId = store('sessionStorage', 'rsw_co_id') || (Math.random().toString(36).slice(2, 10) + Date.now().toString(36));
@@ -144,8 +144,8 @@
     let myName = store('localStorage', 'rsw_co_name') || '';
     let token = store('sessionStorage', 'rsw_co_token') || '';
 
-    // Все запросы к /api/ несут id/имя/код — сервер по ним ведёт журнал и
-    // пускает гостя на запись. script.js при этом не трогаем.
+    // Every /api/ request carries the id/name/code — the server uses them to keep the log and
+    // let a guest write. script.js is not touched.
     const origFetch = window.fetch.bind(window);
     window.fetch = function (input, init) {
         try {
@@ -159,18 +159,18 @@
                 if (token) h.set('X-Collab-Token', token);
                 init.headers = h;
             }
-        } catch (e) { /* не ломаем чужие запросы */ }
+        } catch (e) { /* don't break other people's requests */ }
         return origFetch(input, init);
     };
     async function jget(url) { return (await fetch(url)).json(); }
     async function jpost(url, body) {
         const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-        let d = {}; try { d = await r.json(); } catch (e) { /* не JSON */ }
+        let d = {}; try { d = await r.json(); } catch (e) { /* not JSON */ }
         d._status = r.status;
         return d;
     }
 
-    // ---------- состояние ----------
+    // ---------- state ----------
     const S = { git: null, gitKey: '', gitRemote: '', gitOpen: false, gitBusy: false, gitMsg: '', gitOk: false, gitToken: '', on: false, local: true, joined: false, rev: 0, base: 0, peers: [], feed: [], token: '', urls: [], net: true };
     let loopId = 0;
 
@@ -199,7 +199,7 @@
         }
     }
 
-    // ---------- обновление редактора после чужих правок ----------
+    // ---------- refreshing the editor after someone else's edits ----------
     const STRUCT = { add: 1, del: 1, move: 1, import: 1, revert: 1, reload: 1 };
     let tTree = null, tScene = null, scenePending = false;
 
@@ -208,16 +208,16 @@
             if (typeof loadTree === 'function') await loadTree();
             const sel = curSel();
             if (reselect && sel !== null && typeof selectRef === 'function') await selectRef(sel);
-        } catch (e) { /* интерфейс обновится при следующем действии */ }
+        } catch (e) { /* the UI will refresh on the next action */ }
         markPeers();
     }
     function refreshScene() {
         try {
-            if (typeof isPlaying !== 'undefined' && isPlaying) { scenePending = true; return; }   // в Play сцену не трогаем
+            if (typeof isPlaying !== 'undefined' && isPlaying) { scenePending = true; return; }   // don't touch the scene during Play
             if (typeof reloadScene === 'function') reloadScene();
-        } catch (e) { /* ждём следующей правки */ }
+        } catch (e) { /* wait for the next edit */ }
     }
-    // Сцена перестраивается целиком — не чаще раза в ~1.2 с, как бы быстро ни сыпались правки.
+    // The scene is rebuilt as a whole — at most once per ~1.2 s, however fast edits pour in.
     function applyRemote(ops) {
         const struct = ops.some(o => STRUCT[o.type] || (o.type === 'set' && o.prop === 'Name'));
         const sel = curSel();
@@ -235,18 +235,18 @@
             if (typeof notify === 'function') {
                 for (const o of ops.filter(x => x.type !== 'set' || x.prop === 'Source').slice(-3)) notify(opText(o));
             }
-        } catch (e) { /* без тостов */ }
+        } catch (e) { /* no toasts */ }
     }
     function fullRefresh() {
         clearTimeout(tTree); clearTimeout(tScene);
         refreshTree(true).then(refreshScene);
     }
-    // вышли из Play — догружаем сцену, которую откладывали
+    // left Play — load the scene that was postponed
     setInterval(() => {
         try { if (scenePending && !(typeof isPlaying !== 'undefined' && isPlaying)) { scenePending = false; refreshScene(); } } catch (e) { /* ok */ }
     }, 1500);
 
-    // ---------- подсветка объекта, который выбрал другой человек ----------
+    // ---------- highlight of the object another person selected ----------
     function markPeers() {
         const tree = document.getElementById('tree');
         if (!tree) return;
@@ -260,7 +260,7 @@
     try {
         const tree = document.getElementById('tree');
         if (tree) new MutationObserver(() => { if (S.joined) markPeers(); }).observe(tree, { childList: true });
-    } catch (e) { /* без подсветки */ }
+    } catch (e) { /* no highlight */ }
 
     // ---------- long-poll ----------
     function onPoll(d) {
@@ -271,7 +271,7 @@
             fullRefresh();
         } else {
             for (const o of d.ops || []) {
-                // подряд идущие правки одного свойства сервер склеивает в одну запись — заменяем, а не дублируем
+                // consecutive edits of the same property are merged into one entry by the server — replace, don't duplicate
                 const f = S.feed[0];
                 if (o.type === 'set' && f && f.type === 'set' && f.byId === o.byId && f.ref === o.ref && f.prop === o.prop) S.feed[0] = o;
                 else S.feed.unshift(o);
@@ -309,7 +309,7 @@
         try {
             const h = await jget('/api/collab/history?limit=150');
             if (h.ok) { S.feed = h.ops; S.rev = Math.max(S.rev, h.rev); S.base = h.base; renderFeed(); }
-        } catch (e) { /* лента заполнится по poll */ }
+        } catch (e) { /* the feed will fill in on the next poll */ }
     }
     async function join() {
         if (!myName) myName = S.local ? 'Host' : '';
@@ -330,7 +330,7 @@
         if (badCode) setMsg(T('bad_code'));
     }
 
-    // ---------- статус комнаты ----------
+    // ---------- room status ----------
     async function refreshStatus() {
         try {
             const st = await jget('/api/collab/status');
@@ -344,7 +344,7 @@
             }
             renderAll(); updateBadge();
             if (S.local) refreshGit();
-        } catch (e) { /* сервер недоступен — повторим */ }
+        } catch (e) { /* server unavailable — will retry */ }
     }
     async function refreshGit() {
         try {
@@ -352,11 +352,11 @@
             if (!g.ok) return;
             const k = JSON.stringify(g);
             if (k !== S.gitKey) { S.gitKey = k; S.git = g; renderGit(); }
-        } catch (e) { /* без git-блока */ }
+        } catch (e) { /* no git block */ }
     }
     setInterval(() => { if (!document.hidden && !S.joined) refreshStatus(); }, 6000);
 
-    // ---------- интерфейс ----------
+    // ---------- interface ----------
     const css = document.createElement('style');
     css.textContent = `
 #co-panel{--f:calc(13px*var(--fs,1));--b:calc(30px*var(--bs,1));position:fixed;right:12px;top:52px;width:340px;max-width:calc(100vw - 24px);max-height:calc(100vh - 70px);display:none;flex-direction:column;background:#111827;border:1px solid #374151;border-radius:8px;color:#e5e7eb;z-index:9100;box-shadow:0 8px 28px rgba(0,0,0,.55);font:var(--f)/1.45 system-ui,sans-serif;overflow:hidden}
@@ -410,8 +410,8 @@
     function setMsg(t) { if (msgEl) msgEl.textContent = t || ''; else pendingMsg = t; }
     let pendingMsg = '';
 
-    // Каркас перерисовывается только при смене режима; ленту и людей обновляем точечно,
-    // чтобы не терять фокус в полях ввода.
+    // The skeleton is redrawn only when the mode changes; the feed and people are updated in place,
+    // so input fields don't lose focus.
     let mode = '';
     function renderAll() {
         document.getElementById('co-title').textContent = T('title');
@@ -536,8 +536,8 @@
         if (!el) return;
         if (!S.feed.length) { el.innerHTML = '<div class="co-muted">' + T('empty') + '</div>'; return; }
         el.innerHTML = S.feed.slice(0, 80).map((o, i) => {
-            // «вернуть до этой точки» = вернуть карту к состоянию сразу ПОСЛЕ этой записи;
-            // у самой свежей записи откатывать нечего
+            // «revert to this point» = return the map to the state right AFTER this entry;
+            // the newest entry has nothing to revert
             const can = i > 0;
             return '<div class="co-op"><div>' + esc(opText(o)) + '</div><small>' + esc(ago(o.t)) + ' · #' + o.rev + '</small>'
                 + (can ? '<button class="co-undo" data-rev="' + o.rev + '">' + T('undo') + '</button>' : '') + '</div>';
@@ -553,17 +553,17 @@
             };
         });
     }
-    // смена выбранного объекта уходит сразу (а не со следующим poll) — другие видят подсветку без задержки
+    // a change of the selected object is sent immediately (not with the next poll) — others see the highlight without delay
     let lastSel;
     setInterval(() => {
         if (!S.joined) return;
         const s = curSel();
         if (s !== lastSel) { lastSel = s; fetch('/api/collab/ping' + (s !== null ? '?sel=' + s : '')).catch(() => { /* ok */ }); }
     }, 500);
-    // время в ленте «тикает» без новых правок
+    // the time in the feed «ticks» without new edits
     setInterval(() => { if (panel.classList.contains('open') && S.joined) renderFeed(); }, 30000);
 
-    // ---------- кнопка в верхней панели ----------
+    // ---------- button in the top bar ----------
     let badge = null;
     function updateBadge() {
         if (!badge) return;
@@ -589,5 +589,5 @@
     }
 
     renderAll();
-    refreshStatus();   // если комната уже идёт (страницу перезагрузили) — тихо входим обратно
+    refreshStatus();   // if the room is already running (page was reloaded) — quietly rejoin
 })();

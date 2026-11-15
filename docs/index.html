@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Roblox Studio Web — редактор .rbxl в браузере и на Android</title>
-<meta name="description" content="Roblox Studio Web: открывай, смотри в 3D и редактируй .rbxl прямо в браузере или в Android-приложении.">
+<title>Roblox Studio Web — an .rbxl editor in the browser and on Android</title>
+<meta name="description" content="Roblox Studio Web: open, view in 3D and edit .rbxl files right in the browser or in the Android app.">
 <style>
 :root{--bg:#0b1220;--bg2:#111827;--panel:#1f2937;--btn:#374151;--line:#374151;--text:#f3f4f6;--muted:#9ca3af;--accent:#3b82f6;--accent-h:#2563eb;--green:#16a34a;--purple:#7c3aed}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -299,14 +299,14 @@ python3 app.py</pre>
 </div></section>
 
 <footer><div class="wrap">Roblox Studio Web · <a href="https://github.com/suscersal/roblox-studio-web" target="_blank" rel="noopener">github.com/suscersal/roblox-studio-web</a> · GPL-3.0<br>
-<small>Неофициальный проект, не связан с Roblox Corporation.</small></div></footer>
+<small data-ru="Неофициальный проект, не связан с Roblox Corporation." data-en="Unofficial project, not affiliated with Roblox Corporation.">Неофициальный проект, не связан с Roblox Corporation.</small></div></footer>
 
 <script src="three.min.js"></script>
 <script>
 (function(){
 var $=function(s){return document.querySelector(s)},$$=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
-/* ---------- язык ---------- */
-var lang='ru';
+/* ---------- language ---------- */
+var lang='en'; // English on first visit; the 🌐 button switches to Russian
 var TXT={
  ru:{hint:'🖱 ЛКМ — вращать | ПКМ/Shift — двигать | колесо — зум<br>👆 тач: 1 палец — вращать, 2 — зум',play:'🕹 Джойстик — ходить, ⬆⬇ — высота',
   loaded:'Демо загружено',sel:'Выбрано: ',added:'Добавлено: ',deleted:'Удалено: ',playOn:'Play: запуск — Hello from RbxStudio Web!',playOff:'Play: остановлено',
@@ -328,7 +328,7 @@ $('#lang').addEventListener('click',function(ev){ev.preventDefault();lang=lang==
 $('#bLang').onclick=function(){$('#lang').click()};
 function setHint(){$('#hint').innerHTML=playing?T('play'):T('hint');}
 
-/* ---------- сцена ---------- */
+/* ---------- scene ---------- */
 var vp=$('#vp'),studio=$('#studio');
 var renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.shadowMap.enabled=true;
@@ -347,7 +347,7 @@ function updCam(){
 }
 var grid=new THREE.GridHelper(40,40,0x1e3a8a,0x1e3a8a);grid.position.y=.04;grid.material.opacity=.35;grid.material.transparent=true;scene.add(grid);
 
-/* ---------- объекты ---------- */
+/* ---------- objects ---------- */
 var rad=Math.PI/180,parts=[],counter=0,selected=null,box=null,playing=false;
 var geoBox=new THREE.BoxGeometry(1,1,1),geoBall=new THREE.SphereGeometry(.5,28,20),geoCyl=new THREE.CylinderGeometry(.5,.5,1,28);
 var ws=new THREE.Shape();ws.moveTo(-.5,-.5);ws.lineTo(.5,-.5);ws.lineTo(-.5,.5);ws.lineTo(-.5,-.5);
@@ -376,13 +376,13 @@ function initScene(){
 var CODE='<span class="c">-- ServerScriptService.Script</span>\n<span class="k">local</span> part = workspace:<span class="nm">FindFirstChild</span>(<span class="s">"Cube"</span>)\n\n<span class="k">while</span> part <span class="k">do</span>\n    part.Color = Color3.<span class="nm">fromHSV</span>(tick() % <span class="nm">5</span> / <span class="nm">5</span>, <span class="nm">1</span>, <span class="nm">1</span>)\n    <span class="nm">print</span>(<span class="s">"Hello from RbxStudio Web!"</span>)\n    <span class="nm">task</span>.wait(<span class="nm">1</span>)\n<span class="k">end</span>';
 $('#code').innerHTML=CODE;
 
-/* ---------- вывод ---------- */
+/* ---------- output ---------- */
 function log(t,c){var o=$('#out'),d=document.createElement('div');if(c)d.className=c;
   d.textContent=new Date().toTimeString().slice(0,8)+'  '+t;o.appendChild(d);o.scrollTop=o.scrollHeight;}
 $('#outf').onchange=function(){$('#out').dataset.f=this.value};
 $('#outClr').onclick=function(){$('#out').innerHTML=''};
 
-/* ---------- история (undo / redo) ---------- */
+/* ---------- history (undo / redo) ---------- */
 var hist=[],hi=-1;
 function snapshot(){return {sel:parts.indexOf(selected),parts:parts.map(function(m){var u=m.userData;return {n:u.name,c:u.cls,g:u.geo,col:m.material.color.getHex(),a:u.anchored,p:m.position.toArray(),q:m.quaternion.toArray(),s:m.scale.toArray(),mo:u.model}})};}
 function restore(s,si){
@@ -496,7 +496,7 @@ function select(o){
   hilite();renderProps();buildGizmo();
 }
 
-/* ---------- гизмо: Move / Rotate / Scale ---------- */
+/* ---------- gizmo: Move / Rotate / Scale ---------- */
 var tool='select',space='world',snapOn=true,snapMove=1,snapRot=15,giz=new THREE.Group();giz.visible=false;scene.add(giz);
 var AX=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0),new THREE.Vector3(0,0,1)],COL=[0xef4444,0x22c55e,0x3b82f6],Yv=new THREE.Vector3(0,1,0),Zv=new THREE.Vector3(0,0,1);
 function gm(c,o){return new THREE.MeshBasicMaterial({color:c,depthTest:false,depthWrite:false,transparent:true,opacity:o==null?.95:o})}
@@ -579,7 +579,7 @@ function dragMove(e){
   drag.moved=true;renderProps();
 }
 
-/* ---------- камера: мышь / тач ---------- */
+/* ---------- camera: mouse / touch ---------- */
 var ptrs=new Map(),moved=0;
 function pan(dx,dy){
   var k=dist*.0016,rx=Math.cos(theta),rz=-Math.sin(theta);
@@ -621,7 +621,7 @@ $('#bTop').onclick=function(){view(theta,.02)};
 $('#bFront').onclick=function(){view(0,Math.PI/2)};
 $('#bRight').onclick=function(){view(Math.PI/2,Math.PI/2)};
 
-/* ---------- Add / Delete / меню ---------- */
+/* ---------- Add / Delete / menu ---------- */
 var cols=[0x38bdf8,0xfb923c,0xf472b6,0x34d399,0xe879f9];
 function pops(){return $$('.pop')}
 function closePops(){pops().forEach(function(p){p.classList.remove('show')});}
@@ -679,7 +679,7 @@ function physics(dt){
     if(Math.abs(u.vy)>0.01||m.position.y>floor+.01)m.rotation.y+=dt*.8;
   });
 }
-/* джойстик + высота (Play) */
+/* joystick + height (Play) */
 (function(){
   var joy=$('#joy'),knob=joy.firstElementChild,pid=null;
   function mv(e){var r=joy.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,dx=e.clientX-cx,dy=e.clientY-cy,mx=r.width/2-8,l=Math.hypot(dx,dy);
@@ -695,7 +695,7 @@ function physics(dt){
   setInterval(function(){if(playing&&hold){target.y=Math.max(-1,Math.min(20,target.y+hold*.15));}},16);
 })();
 
-/* ---------- качество / UI-масштаб / сплиттеры ---------- */
+/* ---------- quality / UI scale / splitters ---------- */
 var qual=1;
 function setQ(q){
   qual=q;renderer.setPixelRatio([.6,Math.min(devicePixelRatio,1.5),Math.min(devicePixelRatio,2)][q]);
@@ -725,7 +725,7 @@ function resize(){
 }
 new ResizeObserver(resize).observe(vp);
 
-/* ---------- горячие клавиши ---------- */
+/* ---------- hotkeys ---------- */
 document.addEventListener('keydown',function(e){
   if(/INPUT|TEXTAREA|SELECT/.test((e.target.tagName||'')))return;
   var k=e.key.toLowerCase();
@@ -736,7 +736,7 @@ document.addEventListener('keydown',function(e){
   else if(k==='f')focusSel();else if(k==='escape')select(null);else if(k==='delete'||k==='backspace'){e.preventDefault();$('#bDel').click();}
 });
 
-/* ---------- цикл ---------- */
+/* ---------- loop ---------- */
 var last=performance.now(),frames=0,fl=last,visible=true;
 new IntersectionObserver(function(en){visible=en[0].isIntersecting},{threshold:0}).observe(vp);
 function loop(t){
@@ -755,6 +755,7 @@ function loop(t){
 initScene();stamp();hist=[snapshot()];hi=0;histBtns();
 buildTree();renderProps();setHint();setQ(1);resize();log(T('loaded'),'i');requestAnimationFrame(loop);
 })();
+onLang(); // apply the default (English) language to the static markup
 </script>
 </body>
 </html>

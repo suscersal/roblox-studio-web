@@ -1,18 +1,18 @@
 name: Cleanup old releases
 
 on:
-  # Раз в неделю: понедельник, 03:00 UTC
+  # Once a week: Monday, 03:00 UTC
   schedule:
     - cron: '0 3 * * 1'
-  # Ручной запуск; по умолчанию dry-run, чтобы сначала посмотреть список
+  # Manual run; dry-run by default, so that you can look at the list first
   workflow_dispatch:
     inputs:
       keep:
-        description: 'Сколько свежих релизов оставить (минимум 5)'
+        description: 'How many recent releases to keep (minimum 5)'
         required: false
         default: '5'
       apply:
-        description: 'Реально удалять (false = только dry-run)'
+        description: 'Actually delete (false = dry run only)'
         type: boolean
         required: false
         default: false
@@ -30,8 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # По расписанию inputs пустые -> keep=5 и удаление включено.
-      # При ручном запуске удаляем только если поставлена галка apply.
+      # On a schedule the inputs are empty -> keep=5 and deletion is on.
+      # On a manual run we delete only if the apply checkbox is ticked.
       - name: Delete old releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

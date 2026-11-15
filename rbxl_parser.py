@@ -56,22 +56,22 @@ def read_chunks(path):
         name = data[pos:pos+4]
         compsize = int.from_bytes(data[pos+4:pos+8], 'little')
         uncompsize = int.from_bytes(data[pos+8:pos+12], 'little')
-        # compsize == 0 по спецификации значит «чанк не сжат»: сами данные
-        # лежат сразу за заголовком и занимают uncompsize байт (так хранится
-        # END-чанк, и так же пишут файлы, например, Rojo без сжатия).
+        # compsize == 0 by the specification means «the chunk is not compressed»: the data itself
+        # lies right after the header and takes uncompsize bytes (this is how the
+        # END chunk is stored, and how some tools write files, for example Rojo without compression).
         stored_len = compsize if compsize else uncompsize
         raw = data[pos+16:pos+16+stored_len]
         payload = None
         if compsize == 0:
             payload = raw[:uncompsize]
         elif raw[:4] == b'\x28\xb5\x2f\xfd':
-            # Zstandard frame magic — новые версии Roblox Studio (2024+)
-            # сжимают чанки zstd вместо lz4 (старый Castle Warfare.rbxl был
-            # ещё lz4, отсюда и падение на UTF-8: lz4_decompress() тихо
-            # съедала zstd-байты как будто это lz4-поток и отдавала мусор).
+            # Zstandard frame magic — new versions of Roblox Studio (2024+)
+            # compress chunks with zstd instead of lz4 (the old Castle Warfare.rbxl was
+            # still lz4, hence the UTF-8 failure: lz4_decompress() quietly
+            # swallowed zstd bytes as if they were an lz4 stream and returned garbage).
             if _zstd is None:
                 raise RuntimeError(
-                    "Этот .rbxl сжат zstd, а пакет 'zstandard' не установлен "
+                    "This .rbxl is zstd-compressed, but the 'zstandard' package is not installed "
                     "(pip install zstandard --break-system-packages)"
                 )
             try:
@@ -105,10 +105,10 @@ def read_chunks(path):
 
 
 def write_chunk(name: bytes, payload: bytes) -> bytes:
-    # Несжатый чанк: compressed length = 0, uncompressed length = len(payload)
-    # (см. комментарий в read_chunks). Раньше сюда писали len(payload) в оба
-    # поля — формально это «сжатый» чанк, который настоящие читатели пытаются
-    # распаковать как LZ4.
+    # An uncompressed chunk: compressed length = 0, uncompressed length = len(payload)
+    # (see the comment in read_chunks). Previously len(payload) was written into both
+    # fields — formally that is a «compressed» chunk, which real readers try to
+    # decompress as LZ4.
     header = struct.pack('<4sIII',
         name,
         0,
@@ -139,24 +139,24 @@ def untransform_i64(v):
     return (v >> 1) ^ -(v & 1)
 
 def transform_i32(v):
-    # БАГ-ФИКС: раньше маскирование "v &= 0xFFFFFFFF" выполнялось ДО
-    # проверки знака. В Python это приводит к тому, что отрицательные v
-    # после маскирования превращаются в большие положительные числа
-    # (двоичное дополнение), поэтому "if v >= 0" была ВСЕГДА истинной —
-    # ветка для отрицательных чисел никогда не выполнялась, и zigzag-
-    # кодирование отрицательных дельт референсов было битым. Это ломало
-    # родительские связи (PRNT-чанк) при полной пересборке .rbxl с нуля
-    # (см. save_rbxl), как только порядок referent'ов давал отрицательную
-    # дельту между соседними записями — типичный случай, когда новый
-    # объект вставляется куда-то в середину дерева. Проверяем знак ДО
-    # маскирования.
+    # BUG FIX: previously the masking "v &= 0xFFFFFFFF" was performed BEFORE
+    # the sign check. In Python this makes negative v
+    # turn into large positive numbers after masking
+    # (two's complement), so "if v >= 0" was ALWAYS true —
+    # the branch for negative numbers never ran, and the zigzag
+    # encoding of negative referent deltas was broken. This broke
+    # parent links (the PRNT chunk) on a full rebuild of an .rbxl from scratch
+    # (see save_rbxl), whenever the referent order gave a negative
+    # delta between neighboring records — the typical case when a new
+    # object is inserted somewhere in the middle of the tree. We check the sign BEFORE
+    # masking.
     if v >= 0:
         return (v << 1) & 0xFFFFFFFF
     else:
         return ((-v << 1) - 1) & 0xFFFFFFFF
 
 def transform_i64(v):
-    # Тот же фикс, что и в transform_i32 — см. комментарий выше.
+    # The same fix as in transform_i32 — see the comment above.
     if v >= 0:
         return (v << 1) & 0xFFFFFFFFFFFFFFFF
     else:
@@ -193,23 +193,23 @@ def write_interleaved_u64_array(vals):
     return write_interleaved_array(vals, 8)
 
 def untransform_referent_delta(v):
-    # Обычный zigzag-декод (как и untransform_i32), ПЛЮС компенсация старого
-    # бага в transform_i32 (см. комментарий у него): та версия маскировала
-    # v в 0xFFFFFFFF ДО проверки знака, из-за чего отрицательные дельты
-    # референсов кодировались как ((v & 0xFFFFFFFF) << 1) вместо честного
-    # zigzag. Файлы, пересохранённые ТОЙ версией (например, если карта
-    # когда-то была открыта/сохранена этим инструментом до фикса),
-    # физически содержат испорченные PRNT/INST-referent'ы — при обычном
-    # zigzag-декодировании такая запись даёт дельту, отличающуюся от
-    # настоящей ровно на 2^31 (или -2^31), и поскольку это ДЕЛЬТА,
-    # прибавляемая к аккумулятору, одна испорченная запись сдвигает ВСЕ
-    # референсы после неё на миллиарды — что и превращало parent_map в
-    # мусор для virtualtually каждого объекта после первого же такого
-    # случая. Настоящие дельты референсов в файле с несколькими тысячами
-    # объектов заведомо малы (даже в огромной карте не превышают
-    # текущего количества объектов), так что неправдоподобно большая
-    # дельта — надёжный признак именно этой порчи, а не осознанного
-    # большого шага.
+    # An ordinary zigzag decode (like untransform_i32), PLUS compensation for the old
+    # bug in transform_i32 (see the comment there): that version masked
+    # v with 0xFFFFFFFF BEFORE the sign check, because of which negative
+    # referent deltas were encoded as ((v & 0xFFFFFFFF) << 1) instead of a proper
+    # zigzag. Files re-saved by THAT version (for example, if a map
+    # was once opened/saved by this tool before the fix)
+    # physically contain corrupted PRNT/INST referents — with ordinary
+    # zigzag decoding such a record yields a delta that differs from the
+    # real one by exactly 2^31 (or -2^31), and since it is a DELTA
+    # added to the accumulator, one corrupted record shifts ALL the
+    # referents after it by billions — which turned parent_map into
+    # garbage for virtually every object after the first such
+    # case. Real referent deltas in a file with several thousand
+    # objects are certainly small (even in a huge map they don't exceed
+    # the current number of objects), so an implausibly large
+    # delta is a reliable sign of exactly this corruption, not of a deliberate
+    # big step.
     delta = (v >> 1) ^ -(v & 1)
     if delta > (1 << 30):
         delta -= (1 << 31)
@@ -305,8 +305,8 @@ def write_inst(class_id: int, class_name: str, referents: list, service_flags=No
     name_bytes = class_name.encode('utf-8')
     buf.extend(struct.pack('<I', len(name_bytes)))
     buf.extend(name_bytes)
-    # object_format 1 = у класса есть сервисы: после referent'ов идёт по
-    # байту-флагу на каждый инстанс (1 — это сервис, например Workspace).
+    # object_format 1 = the class has services: after the referents comes one
+    # flag byte per instance (1 — it is a service, for example Workspace).
     has_services = bool(service_flags) and any(service_flags)
     buf.append(1 if has_services else 0)
     buf.extend(struct.pack('<I', len(referents)))
@@ -317,15 +317,15 @@ def write_inst(class_id: int, class_name: str, referents: list, service_flags=No
 
 
 def parse_inst_service_flags(payload, count):
-    """Флаги «этот инстанс — сервис» из INST-чанка с object_format == 1."""
+    """The «this instance is a service» flags from an INST chunk with object_format == 1."""
     name_len = int.from_bytes(payload[4:8], 'little')
     pos = 8 + name_len + 1 + 4 + 4 * count
     return list(payload[pos:pos + count])
 
 
 def parse_sstr(payload):
-    """SSTR-чанк -> список (md5-хеш 16 байт, данные). Индекс в списке — это
-    значение свойств типа SharedString (0x1c)."""
+    """The SSTR chunk -> a list of (md5 hash of 16 bytes, data). The index in the list is the
+    value of SharedString-typed properties (0x1c)."""
     count = int.from_bytes(payload[4:8], 'little')
     pos = 8
     out = []
@@ -457,11 +457,11 @@ _CFRAME_ANGLE_IDS = {
     0x19:(0,0,-90), 0x1b:(0,-90,-90), 0x1c:(0,-180,-90), 0x1e:(0,90,-90),
     0x1f:(90,0,-90), 0x20:(0,90,0), 0x22:(-90,0,90), 0x23:(0,-90,180),
 }
-# Таблица сверена с матрицами из формата rbx (rbx-dom): 18 из 24 id совпадали,
-# 6 (0x0d, 0x10, 0x15, 0x18, 0x1f, 0x22) были с неверными углами — детали с
-# такой ориентацией оказывались повёрнуты зеркально (у холодильника полость
-# смотрела в сторону, противоположную двери: «нет задней стенки»). Проверка
-# на модели: у двери явная матрица (-1,0,0, 0,0,1, 0,1,0) == матрица id 0x15.
+# The table was checked against the matrices from the rbx format (rbx-dom): 18 of 24 ids matched,
+# 6 (0x0d, 0x10, 0x15, 0x18, 0x1f, 0x22) had wrong angles — parts with
+# such an orientation came out mirrored (a fridge's cavity
+# faced away from the door: «no back wall»). Checked
+# on a model: a door has an explicit matrix (-1,0,0, 0,0,1, 0,1,0) == the matrix of id 0x15.
 
 def t_cframe(buf, count):
     pos = 0
@@ -479,11 +479,11 @@ def t_cframe(buf, count):
     return entries
 
 def t_optionalcframe(buf, count):
-    """OptionalCFrame (0x1e, напр. Model.WorldPivotData): внутри лежат подряд
-    CFrame-массив (с собственным байтом типа 0x10) и Bool-массив (0x02)
-    «значение задано». None — значение не задано."""
+    """OptionalCFrame (0x1e, e.g. Model.WorldPivotData): inside lie, one after another,
+    a CFrame array (with its own type byte 0x10) and a Bool array (0x02)
+    «value is set». None — the value is not set."""
     if not buf or buf[0] != 0x10:
-        raise ValueError('OptionalCFrame: ожидался вложенный тип 0x10')
+        raise ValueError('OptionalCFrame: a nested type 0x10 was expected')
     pos = 1
     for _ in range(count):
         cid = buf[pos]; pos += 1
@@ -492,7 +492,7 @@ def t_optionalcframe(buf, count):
     pos += 12 * count
     cfs = t_cframe(buf[1:pos], count)
     if pos >= len(buf) or buf[pos] != 0x02:
-        raise ValueError('OptionalCFrame: ожидался вложенный тип 0x02')
+        raise ValueError('OptionalCFrame: a nested type 0x02 was expected')
     flags = t_bool(buf[pos + 1:], count)
     return [cf if (i < len(flags) and flags[i]) else None for i, cf in enumerate(cfs)]
 
@@ -587,29 +587,29 @@ def t_uniqueid(buf, count):
     return out
 
 def t_capabilities(buf, count):
-    # SecurityCapabilities (тип 0x21, свойство "Capabilities" у любого
-    # инстанса) — сравнительно новый тип формата, раньше отсутствовал в
-    # словаре декодеров вообще, из-за чего терялся у КАЖДОГО объекта карты
-    # (Part.Capabilities, Script.Capabilities, Model.Capabilities и т.д. —
-    # ровно то, что было в предупреждении при импорте .rbxm). По той же
-    # раскладке байт, что и обычный Int64 (rbx-dom кодирует его тем же
-    # путём, битовая маска прав хранится как знаковое 64-битное число) —
-    # то есть перемежённые (interleaved) байты + zigzag-преобразование.
+    # SecurityCapabilities (type 0x21, the "Capabilities" property of any
+    # instance) — a relatively new type of the format, it was absent from the
+    # decoder dictionary altogether, because of which it was lost for EVERY map object
+    # (Part.Capabilities, Script.Capabilities, Model.Capabilities, etc. —
+    # exactly what the warning during .rbxm import was about). It has the same byte
+    # layout as an ordinary Int64 (rbx-dom encodes it the same
+    # way, the permission bit mask is stored as a signed 64-bit number) —
+    # i.e. interleaved bytes + a zigzag transform.
     raw = read_interleaved_u64_array(buf, count)
     return [untransform_i64(v) for v in raw]
 
 
 class _ContentStr(str):
-    """Строка Content, помнящая тег источника из файла (в новых версиях Studio Uri помечен 2, в старых — 1):
-    s_content пишет тот же тег обратно, поэтому пересохранение не меняет смысл значения."""
+    """A Content string that remembers the source tag from the file (in new Studio versions Uri is marked 2, in old ones — 1):
+    s_content writes the same tag back, so re-saving doesn't change the meaning of the value."""
     ctype = 1
 
 
 def t_content(buf, count):
-    """Content (0x22, напр. SurfaceAppearance.EmissiveMaskContent): массив
-    типов источника (u32, interleaved: 0 — пусто, 1 — Uri, 2 — Object),
-    затем u32 число Uri и сами строки, затем u32 число Object-ссылок
-    (ссылки на экземпляры не поддерживаем — для них значение '')."""
+    """Content (0x22, e.g. SurfaceAppearance.EmissiveMaskContent): an array
+    of source types (u32, interleaved: 0 — empty, 1 — Uri, 2 — Object),
+    then a u32 Uri count and the strings themselves, then a u32 count of Object references
+    (references to instances aren't supported — the value is '' for them)."""
     types = read_interleaved_u32_array(buf, count)
     pos = 4 * count
     n_uri = int.from_bytes(buf[pos:pos + 4], 'little'); pos += 4
@@ -617,8 +617,8 @@ def t_content(buf, count):
     for _ in range(n_uri):
         l = int.from_bytes(buf[pos:pos + 4], 'little'); pos += 4
         uris.append(buf[pos:pos + l].decode('utf-8', 'replace')); pos += l
-    # Строки относятся к записям с тегом Uri. В новых файлах Studio (MeshContent/TextureContent/Sky*Content…) это 2,
-    # в старых — 1: берём тот тег, количество которого совпадает с числом строк (иначе MeshPart оставались без меша).
+    # The strings belong to records with the Uri tag. In new Studio files (MeshContent/TextureContent/Sky*Content…) it is 2,
+    # in old ones — 1: we take the tag whose count matches the number of strings (otherwise MeshParts were left without a mesh).
     uri_tag = 1
     if n_uri:
         for cand in (2, 1):
@@ -636,8 +636,8 @@ def t_content(buf, count):
 
 
 def t_ignored(buf, count):
-    """Тип, содержимое которого нам не нужно (напр. Terrain.VoxelGridAssetContentMap, 0x23):
-    читаем как «пусто», чтобы не сыпать предупреждениями."""
+    """A type whose content we don't need (e.g. Terrain.VoxelGridAssetContentMap, 0x23):
+    we read it as «empty» so as not to spew warnings."""
     return [None] * count
 
 
@@ -658,8 +658,8 @@ def t_font(buf, count):
 # ====================== TYPE SERIALIZERS (write) ======================
 
 def s_string(vals):
-    # bytes (не-UTF-8 строки, например AttributesSerialize) остаются как есть:
-    # раньше str(v) превращал их в литерал "b'...'" и портил данные при записи.
+    # bytes (non-UTF-8 strings, for example AttributesSerialize) are left as they are:
+    # previously str(v) turned them into a "b'...'" literal and corrupted the data on write.
     return write_string_array([
         v if isinstance(v, (str, bytes)) else ('' if v is None else str(v))
         for v in vals
@@ -667,15 +667,15 @@ def s_string(vals):
 
 def s_content(vals):
     uris = [v for v in vals if isinstance(v, str) and v]
-    types = [(getattr(v, 'ctype', 1) if isinstance(v, str) and v else 0) for v in vals]   # тег источника из файла сохраняем
+    types = [(getattr(v, 'ctype', 1) if isinstance(v, str) and v else 0) for v in vals]   # we keep the source tag from the file
     out = write_interleaved_u32_array(types)
     out += len(uris).to_bytes(4, 'little')
     for u in uris:
         b = u.encode('utf-8')
         out += len(b).to_bytes(4, 'little') + b
-    out += (0).to_bytes(4, 'little')   # число Object-ссылок
-    # Studio за ними пишет ещё один нулевой u32 (в файлах 2025+ после типов идут
-    # три счётчика, а не два) — без него хвост короче, чем у настоящего файла.
+    out += (0).to_bytes(4, 'little')   # the count of Object references
+    # Studio writes one more zero u32 after them (in 2025+ files three counters
+    # follow the types, not two) — without it the tail is shorter than in a real file.
     out += (0).to_bytes(4, 'little')
     return out
 
@@ -843,23 +843,23 @@ def s_vector3int16(vals):
     return bytes(buf)
 
 def _valid_numseq(v):
-    """NumberSequence в Roblox обязана иметь >= 2 ключевых точек (времена 0 и 1).
-    Пустой список (его получали из None / числа / нечитаемого значения) Studio
-    отвергает целиком — файл не открывается. Валидные последовательности не трогаем."""
+    """A NumberSequence in Roblox must have >= 2 keypoints (times 0 and 1).
+    Studio rejects an empty list (which was obtained from None / a number / an unreadable value)
+    entirely — the file doesn't open. Valid sequences are left untouched."""
     kps = [k for k in v if isinstance(k, dict)] if isinstance(v, list) else []
     if len(kps) >= 2:
         return kps
     if kps:
         val = float(kps[0].get('value', 0))
     elif isinstance(v, (int, float)) and not isinstance(v, bool):
-        val = float(v)     # число (например из поля свойств) = константная последовательность
+        val = float(v)     # a number (for example from a properties field) = a constant sequence
     else:
         val = 0.0
     return [{'time': 0.0, 'value': val, 'envelope': 0.0},
             {'time': 1.0, 'value': val, 'envelope': 0.0}]
 
 def _valid_colorseq(v):
-    """То же для ColorSequence (пустая -> белая)."""
+    """The same for ColorSequence (empty -> white)."""
     kps = [k for k in v if isinstance(k, dict)] if isinstance(v, list) else []
     if len(kps) >= 2:
         return kps
@@ -961,7 +961,7 @@ def s_sharedstring(vals):
     return write_interleaved_u32_array([int(v) if v is not None else 0 for v in vals])
 
 def s_uniqueid(vals):
-    # Точная обратная пара к t_uniqueid: 16 байт на значение, interleaved.
+    # The exact inverse of t_uniqueid: 16 bytes per value, interleaved.
     raw = []
     for v in vals:
         if isinstance(v, dict):
@@ -1028,8 +1028,8 @@ TYPE_SERIALIZERS = {
 
 
 def _infer_type_id(sample_value):
-    """Угадывает type_id по Python-значению. Только запасной вариант для
-    свойств, тип которых не известен из файла (созданных в редакторе)."""
+    """Guesses the type_id from a Python value. Only a fallback for
+    properties whose type isn't known from the file (created in the editor)."""
     type_id = 0x01
     if sample_value is not None:
         if isinstance(sample_value, str):
@@ -1052,15 +1052,15 @@ def _infer_type_id(sample_value):
             elif 'x' in sample_value and 'y' in sample_value and 'z' in sample_value:
                 type_id = 0x0e
             elif 'x' in sample_value and 'y' in sample_value:
-                # UDim2 (x/y — вложенные {scale, offset}) отличаем от
-                # Vector2 (x/y — голые числа, например GuiObject.
-                # AnchorPoint — то, что реально есть почти в любом
-                # UI-меню). Раньше здесь безусловно делали
-                # sample_value.get('x', {}) и тут же проверяли
-                # 'scale' in <результат> — для Vector2 результат был
-                # float, а не dict, и "in" на float падал с
-                # TypeError, спуская ЛЮБОЕ сохранение файла с хотя бы
-                # одним Vector2-свойством где-то в дереве.
+                # We tell UDim2 (x/y — nested {scale, offset}) apart from
+                # Vector2 (x/y — bare numbers, for example GuiObject.
+                # AnchorPoint — which really is in almost any
+                # UI menu). Previously sample_value.get('x', {}) was
+                # done unconditionally here and then 'scale' in <the result>
+                # was checked — for a Vector2 the result was a
+                # float, not a dict, and "in" on a float failed with a
+                # TypeError, sinking ANY file save with at least
+                # one Vector2 property somewhere in the tree.
                 xval = sample_value.get('x')
                 if isinstance(xval, dict) and 'scale' in xval:
                     type_id = 0x07
@@ -1079,22 +1079,22 @@ def _infer_type_id(sample_value):
     return type_id
 
 
-# ====================== Запись бинарного формата (rbxl / rbxm) ======================
+# ====================== Writing the binary format (rbxl / rbxm) ======================
 
-RBX_MAGIC = b'<roblox!\x89\xff\r\n\x1a\n\x00\x00'   # сигнатура + версия формата (u16 = 0)
+RBX_MAGIC = b'<roblox!\x89\xff\r\n\x1a\n\x00\x00'   # signature + format version (u16 = 0)
 
-# Служебные ключи, которые parse_rbxl добавляет для удобства редактора — в
-# реальном файле таких свойств нет, писать их нельзя.
+# Service keys that parse_rbxl adds for the editor's convenience — a
+# real file has no such properties, they must not be written.
 _SYNTHETIC_PROPS = {'_assets'}
-# Производные имена: настоящее свойство лежит под другим именем (size,
-# Color3uint8/BrickColor, TextureID...). Пишем их, только если файл сам
-# содержал свойство с таким именем у этого класса.
+# Derived names: the real property lies under another name (size,
+# Color3uint8/BrickColor, TextureID...). We write them only if the file itself
+# contained a property with that name for this class.
 _DERIVED_PROPS = {'Size', 'Color3', 'Transparency', 'Texture', 'Decal'}
-# Значения свойств по умолчанию (только отличающиеся от нулевых), из
-# rbx_reflection_database (rojo-rbx/rbx-dom, MIT). Studio не пишет свойства,
-# у которых все объекты класса имеют дефолт, поэтому у импортированных или
-# созданных объектов их нет, а массив свойства в файле обязан покрывать все
-# объекты класса. Формат: {класс: {свойство: значение}}, zlib+base64.
+# Default property values (only those different from zero), from
+# rbx_reflection_database (rojo-rbx/rbx-dom, MIT). Studio doesn't write properties
+# for which all objects of the class have the default, so imported or
+# created objects don't have them, while a property array in the file must cover all
+# objects of the class. Format: {class: {property: value}}, zlib+base64.
 _DEFAULTS_B64 = (
     "eNrtfWtz2ziy6F9J6XMyJcmyHc+XW7YUx961Y41kO3vOZusWREISrymCy4dtzZT/++1uACQlEQApJ9nJbKZmxiLQeAONfuOPzqnn"
     "8TQVybrz6x+d08RbBo9sFvLOr1mS87edqcgTj5+mKc8u/c6v73ovb8siI556SRBngYjqS4/z+TyIALjzaw/q8hhm/dF5ps81/f93"
@@ -1240,13 +1240,13 @@ _DEFAULTS_B64 = (
     "yGy6WoAMZZyLfaSgVBrj5u5VOGEx4A44+OpKWqlY4G/3PChQ35XpNardECcylD1aoebzeVCopE0162C6zW6Sl/8Pgxw7VQ=="
 )
 _defaults_cache = None
-# В файле эти свойства лежат под другими именами, чем в базе рефлексии.
+# In the file these properties lie under other names than in the reflection database.
 _BINARY_TO_REFLECTION_NAME = {'Color3uint8': 'Color', 'size': 'Size', 'shape': 'Shape', 'formFactorRaw': 'FormFactor'}
 
 
-# В базе дефолтов (reflection) нет NumberSequence/ColorSequence, поэтому объект, созданный
-# в редакторе (в файле у него нет этих свойств), получал пустые последовательности.
-# Значения по умолчанию ParticleEmitter в Studio: размер 1, прозрачность 0, squash 0, цвет белый.
+# The defaults database (reflection) has no NumberSequence/ColorSequence, so an object created
+# in the editor (the file has no such properties for it) got empty sequences.
+# ParticleEmitter defaults in Studio: size 1, transparency 0, squash 0, color white.
 def _ns_const(v):
     return [{'time': 0.0, 'value': float(v), 'envelope': 0.0}, {'time': 1.0, 'value': float(v), 'envelope': 0.0}]
 _WHITE_CS = [{'time': 0.0, 'r': 1.0, 'g': 1.0, 'b': 1.0}, {'time': 1.0, 'r': 1.0, 'g': 1.0, 'b': 1.0}]
@@ -1269,9 +1269,9 @@ def _class_defaults(cls):
 
 
 def _norm_cframe(cf):
-    """CFrame в двух внутренних видах -> {'matrix': 9 чисел, 'position': {...}}.
-    Парсер отдаёт 9 чисел + position, а редактор при правке Rotation/Position
-    пишет 12 чисел построчно (r00 r01 r02 px r10 ...)."""
+    """CFrame in two internal forms -> {'matrix': 9 numbers, 'position': {...}}.
+    The parser gives 9 numbers + position, while the editor, when editing Rotation/Position,
+    writes 12 numbers row by row (r00 r01 r02 px r10 ...)."""
     if isinstance(cf, dict):
         mat = cf.get('matrix')
         if isinstance(mat, (list, tuple)) and len(mat) >= 12:
@@ -1284,29 +1284,29 @@ def _norm_cframe(cf):
 
 
 def _writable_props(cls, p, known):
-    """Оставляет только то, что реально существует как свойство в файле Roblox.
-    known — имена свойств этого класса, увиденные в исходном файле."""
+    """Keeps only what really exists as a property in a Roblox file.
+    known — the property names of this class seen in the source file."""
     out = {}
     has_cframe = 'CFrame' in p
     for name, val in p.items():
         if name in _SYNTHETIC_PROPS:
             continue
-        # У частей Position/Rotation — производные от CFrame, а у GuiObject
-        # это настоящие свойства (UDim2 / float): их отличает CFrame.
+        # For parts Position/Rotation are derived from CFrame, while for a GuiObject
+        # they are real properties (UDim2 / float): the CFrame tells them apart.
         if name in ('Position', 'Rotation') and has_cframe and name not in known:
             continue
         if known and name not in known and name in _DERIVED_PROPS:
             continue
         out[name] = val
-    # Копии *Content-свойств под старыми именами (MeshId/TextureID/SkyboxBk…, см. _alias_content_props) в файл не
-    # пишем, пока значение совпадает с исходным Content-свойством: иначе в файл добавлялись бы лишние PROP.
+    # Copies of *Content properties under old names (MeshId/TextureID/SkyboxBk…, see _alias_content_props) aren't
+    # written to the file while the value equals the source Content property: otherwise extra PROPs would be added to the file.
     for new_name, old_name in _CONTENT_ALIASES.get(cls, {}).items():
         if (old_name in out and old_name not in known and new_name in p
                 and str(p.get(old_name)) == str(p.get(new_name))):
             out.pop(old_name, None)
-    # Часть, созданная в редакторе: есть CFrame и Size, но нет настоящих
-    # size/Color3uint8. (Без CFrame не трогаем: парсер сам подставляет
-    # дефолтный Size частям без size, это не пользовательские данные.)
+    # A part created in the editor: it has a CFrame and Size, but no real
+    # size/Color3uint8. (Without a CFrame we don't touch it: the parser itself substitutes
+    # a default Size for parts without size, this is not user data.)
     sz = p.get('Size')
     if has_cframe and 'size' not in p and 'Size' not in known and isinstance(sz, dict) and 'z' in sz:
         out['size'] = sz
@@ -1320,8 +1320,8 @@ def _writable_props(cls, p, known):
 
 
 def _meta_payload(parsed):
-    """Распакованное содержимое чанка META исходного файла (ExplicitAutoJoints и т.п.)
-    или None. Писатель его раньше терял: в записанном файле META просто не было."""
+    """The unpacked content of the source file's META chunk (ExplicitAutoJoints etc.)
+    or None. The writer used to lose it: the written file simply had no META."""
     for ch in parsed.get('_raw_chunks', []):
         if ch['name'] == b'META':
             return ch['payload']
@@ -1330,15 +1330,15 @@ def _meta_payload(parsed):
 
 def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types=None,
                      shared_strings=None, service_refs=None, renumber=True, meta=None):
-    """Собирает бинарный .rbxl/.rbxm. Возвращает (bytes, warnings).
-
-    refs — какие инстансы писать и в каком порядке (по умолчанию все, по
-    возрастанию referent'а); родитель, которого нет в refs, превращается в
-    «нет родителя» (-1) — так у rbxm появляются корни. Referent'ы в файле
-    перенумеровываются 0..N-1 (renumber=True; для rbxm), либо остаются как
-    есть (renumber=False; для сохранения сцены — номера стабильны между
-    сохранениями). Ссылки-свойства (Part0, PrimaryPart...) на инстансы вне
-    refs становятся nil."""
+    """Builds a binary .rbxl/.rbxm. Returns (bytes, warnings).
+    
+    refs — which instances to write and in what order (all by default, in
+    ascending referent order); a parent that isn't in refs becomes
+    «no parent» (-1) — this is how rbxm gets roots. Referents in the file are
+    renumbered 0..N-1 (renumber=True; for rbxm), or stay
+    as they are (renumber=False; for saving a scene — numbers are stable between
+    saves). Reference properties (Part0, PrimaryPart...) to instances outside
+    refs become nil."""
     warnings = []
     refs = sorted(referent_to_class) if refs is None else [r for r in refs if r in referent_to_class]
     idx = {r: i for i, r in enumerate(refs)} if renumber else {r: r for r in refs}
@@ -1359,9 +1359,9 @@ def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types
     class_id = {c: i for i, c in enumerate(class_order)}
     if not renumber:
         for c in class_order:
-            by_class[c].sort()   # как в исходных файлах: referent'ы класса по возрастанию
+            by_class[c].sort()   # as in the source files: a class's referents in ascending order
 
-    sstr_new, sstr_map = [], {}   # старый индекс SSTR -> новый
+    sstr_new, sstr_map = [], {}   # the old SSTR index -> the new one
 
     inst_chunks, prop_chunks = [], []
     for c in class_order:
@@ -1382,7 +1382,7 @@ def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types
                 cd = _class_defaults(c)
                 dv = cd.get(_BINARY_TO_REFLECTION_NAME.get(name, name))
                 if dv is None and type_id == 0x0b:
-                    dv = 194   # BrickColor 0 невалиден; 194 = Medium stone grey (серый по умолчанию)
+                    dv = 194   # BrickColor 0 is invalid; 194 = Medium stone grey (the default gray)
                 if dv is None:
                     dv = _SEQUENCE_DEFAULTS.get((c, name))
                 if dv is not None:
@@ -1404,7 +1404,7 @@ def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types
                                 sstr_new.append(shared_strings[v])
                             v = sstr_map[v]
                         remapped.append(v)
-                    # значения без SSTR-записи -> пустая строка в конце списка
+                    # values without an SSTR entry -> an empty string at the end of the list
                     if any(v == -1 for v in remapped):
                         empty = len(sstr_new)
                         sstr_new.append((b'\x00' * 16, b''))
@@ -1412,10 +1412,10 @@ def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types
                     vals = remapped
                 serializer = TYPE_SERIALIZERS.get(type_id)
                 if serializer is None:
-                    raise ValueError('нет сериализатора для типа 0x%02x' % type_id)
+                    raise ValueError('no serializer for type 0x%02x' % type_id)
                 payload = write_prop_header(class_id[c], name, type_id) + serializer(vals)
             except Exception as e:
-                warnings.append('%s.%s пропущено: %s' % (c, name, e))
+                warnings.append('%s.%s skipped: %s' % (c, name, e))
                 continue
             prop_chunks.append(write_chunk(b'PROP', payload))
 
@@ -1441,11 +1441,11 @@ def build_rbx_binary(referent_to_class, parent_map, props, refs=None, prop_types
     return bytes(out), warnings
 
 
-# ====================== rbxm: экспорт выбранных объектов / импорт в сцену ======================
+# ====================== rbxm: exporting selected objects / importing into the scene ======================
 
-# Сервисы нельзя положить в модель (rbxm — набор обычных инстансов). Основной
-# признак — флаги object_format из файла (parsed['service_refs']), это — запасной
-# список для файлов, где флагов нет.
+# Services can't be put into a model (an rbxm is a set of ordinary instances). The main
+# indicator is the object_format flags from the file (parsed['service_refs']), this is a fallback
+# list for files that have no flags.
 _CORE_SERVICES = {
     'DataModel', 'Workspace', 'Lighting', 'ReplicatedStorage', 'ReplicatedFirst',
     'ServerScriptService', 'ServerStorage', 'StarterGui', 'StarterPack',
@@ -1455,10 +1455,10 @@ _CORE_SERVICES = {
 
 
 def collect_subtree(parsed, root_refs):
-    """Выбранные корни -> (roots, refs). roots — без дублей и без потомков других
-    выбранных (иначе объект попал бы в файл дважды); refs — все инстансы
-    поддеревьев в порядке обхода в глубину (порядок детей как в сцене).
-    ValueError, если выбран сервис или несуществующий объект."""
+    """The selected roots -> (roots, refs). roots — without duplicates and without descendants of other
+    selected ones (otherwise an object would get into the file twice); refs — all instances of the
+    subtrees in depth-first order (children's order as in the scene).
+    ValueError if a service or a nonexistent object is selected."""
     r2c = parsed['referent_to_class']
     pmap = parsed['parent_map']
     services = parsed.get('service_refs') or ()
@@ -1467,14 +1467,14 @@ def collect_subtree(parsed, root_refs):
     for r in root_refs:
         r = int(r)
         if r not in r2c:
-            raise ValueError('Объект %d не найден' % r)
+            raise ValueError('Object %d not found' % r)
         if r in services or r2c[r] in _CORE_SERVICES:
-            raise ValueError('«%s» — сервис, его нельзя экспортировать как модель. '
-                             'Выберите объекты внутри него.' % parsed['props'].get(r, {}).get('Name', r2c[r]))
+            raise ValueError('«%s» is a service, it cannot be exported as a model. '
+                             'Select objects inside it.' % parsed['props'].get(r, {}).get('Name', r2c[r]))
         if r not in wanted:
             wanted.append(r)
     if not wanted:
-        raise ValueError('Ничего не выбрано')
+        raise ValueError('Nothing selected')
 
     chosen = set(wanted)
     roots = []
@@ -1489,7 +1489,7 @@ def collect_subtree(parsed, root_refs):
             roots.append(r)
 
     children_of = {}
-    for child, parent in pmap.items():          # порядок dict = порядок детей (PRNT)
+    for child, parent in pmap.items():          # dict order = children's order (PRNT)
         if child in r2c:
             children_of.setdefault(parent, []).append(child)
 
@@ -1506,31 +1506,31 @@ def collect_subtree(parsed, root_refs):
 
 
 def export_rbxm(parsed, root_refs):
-    """Выбранные объекты со всеми потомками -> байты .rbxm.
-    Возвращает (bytes, count, warnings)."""
+    """The selected objects with all descendants -> .rbxm bytes.
+    Returns (bytes, count, warnings)."""
     roots, refs = collect_subtree(parsed, root_refs)
     data, warnings = build_rbx_binary(
         parsed['referent_to_class'], parsed['parent_map'], parsed['props'], refs=refs,
         prop_types=parsed.get('prop_types'), shared_strings=parsed.get('shared_strings'),
         renumber=True, meta=_meta_payload(parsed),
     )
-    # Свойства, которые парсер не умеет читать, при открытии файла были
-    # потеряны — честно говорим об этом, а не молчим.
+    # Properties the parser can't read were
+    # lost when the file was opened — we honestly say so rather than stay silent.
     classes = {parsed['referent_to_class'][r] for r in refs}
     lost = sorted({'%s.%s' % (c, n) for (c, n, _t) in parsed.get('skipped_props', []) if c in classes})
     if lost:
-        warnings.append('не удалось прочитать при открытии файла и потому не попало в rbxm: ' + ', '.join(lost[:8])
+        warnings.append('could not be read when the file was opened and therefore didn\'t make it into the rbxm: ' + ', '.join(lost[:8])
                         + (' …' if len(lost) > 8 else ''))
     return data, len(refs), warnings
 
 
-# --- Безопасность импорта: что за скрипты лежат в модели --------------------------------------------------------------
+# --- Import safety: what scripts lie in the model --------------------------------------------------------------
 _SCRIPT_CLASSES = ('Script', 'LocalScript', 'ModuleScript')
-# Объекты неба/света: в сцене осмысленен один Sky/Atmosphere/Clouds и по одному эффекту каждого класса.
+# Sky/lighting objects: in a scene one Sky/Atmosphere/Clouds and one effect of each class make sense.
 LIGHTING_CLASSES = ('Sky', 'Atmosphere', 'Clouds', 'BloomEffect', 'BlurEffect', 'ColorCorrectionEffect',
                     'DepthOfFieldEffect', 'SunRaysEffect')
-# (id правила, regexp по коду без комментариев). Любое совпадение заставляет клиент показать окно подтверждения,
-# даже если пользователь отметил «больше не показывать».
+# (rule id, a regexp over code without comments). Any match makes the client show a confirmation window,
+# even if the user ticked «don't show again».
 _DANGER_RULES = [
     ('require_id', r'\brequire\s*\(\s*(?:\d{5,}|["\']?(?:rbxassetid|https?)[^)]*)'),
     ('require', r'\brequire\s*\('),
@@ -1547,12 +1547,12 @@ _LUA_COMMENT = re.compile(r'--\[(=*)\[.*?\]\1\]|--[^\n]*', re.S)
 
 
 def _blank_comments(src):
-    """Комментарии -> пробелы с сохранением переводов строк (номера строк остаются верными)."""
+    """Comments -> spaces while keeping line breaks (line numbers stay correct)."""
     return _LUA_COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), src)
 
 
 def scan_lua_source(src):
-    """-> [(rule_id, номер_строки, фрагмент)] — по одному на правило."""
+    """-> [(rule_id, line_number, fragment)] — one per rule."""
     if not isinstance(src, str) or not src.strip():
         return []
     code = _blank_comments(src)
@@ -1573,7 +1573,7 @@ def scan_lua_source(src):
         if rid == 'require' and 'require_id' in seen:
             continue
         add(rid, code.count('\n', 0, m.start()) + 1)
-    # обфускация: строка с кучей \ddd / \xHH, длинный base64-подобный литерал, много string.char
+    # obfuscation: a string with lots of \ddd / \xHH, a long base64-like literal, many string.char
     for i, ln in enumerate(code.split('\n'), 1):
         if (len(re.findall(r'\\\d{1,3}', ln)) >= 25 or len(re.findall(r'\\x[0-9a-fA-F]{2}', ln)) >= 25
                 or re.search(r'["\'][A-Za-z0-9+/=]{300,}["\']', ln) or ln.count('string.char') >= 5):
@@ -1583,9 +1583,9 @@ def scan_lua_source(src):
 
 
 def scan_rbxm(path):
-    """Читает .rbxm и возвращает сводку по скриптам без изменения сцены:
+    """Reads an .rbxm and returns a summary of the scripts without changing the scene:
     {'scripts': {'total', 'Script', 'LocalScript', 'ModuleScript'}, 'findings': [...], 'danger': bool}.
-    Любая ошибка разбора -> пустая сводка (импорт сам выдаст нормальное сообщение об ошибке)."""
+    Any parse error -> an empty summary (the import itself gives a proper error message)."""
     empty = {'scripts': {'total': 0, 'Script': 0, 'LocalScript': 0, 'ModuleScript': 0}, 'findings': [], 'danger': False}
     try:
         other = parse_rbxl(path)
@@ -1616,7 +1616,7 @@ def scan_rbxm(path):
 
 
 def _drop_subtree(parsed, ref):
-    """Удаляет объект и всех его потомков из сцены (три словаря + сервисы)."""
+    """Deletes an object and all its descendants from the scene (three dicts + services)."""
     r2c, pmap, props = parsed['referent_to_class'], parsed['parent_map'], parsed['props']
     kids = {}
     for c, p in pmap.items():
@@ -1636,26 +1636,26 @@ def _drop_subtree(parsed, ref):
 
 
 def import_rbxm(parsed, path, parent=None, info=None):
-    """Читает .rbxm и добавляет его объекты в parsed под родителя parent.
-    Возвращает (новые_корни, количество_объектов, warnings). Если передан словарь info, в info['lighting'] кладётся
-    список {'cls', 'name', 'replaced'} объектов неба/света, которые заменили такие же в Lighting."""
+    """Reads an .rbxm and adds its objects to parsed under the parent parent.
+    Returns (new_roots, object_count, warnings). If an info dict is passed, info['lighting'] receives
+    a list of {'cls', 'name', 'replaced'} sky/lighting objects that replaced the same ones in Lighting."""
     with open(path, 'rb') as f:
         head = f.read(16)
     if not head.startswith(b'<roblox!'):
         if head.lstrip().startswith(b'<roblox') or head.lstrip().startswith(b'<?xml'):
-            raise ValueError('XML-модели (.rbxmx) не поддерживаются — сохраните как бинарный .rbxm')
-        raise ValueError('Это не файл Roblox (.rbxm)')
+            raise ValueError('XML models (.rbxmx) aren\'t supported — save as a binary .rbxm')
+        raise ValueError('This is not a Roblox file (.rbxm)')
     other = parse_rbxl(path)
     if other.get('service_refs'):
-        raise ValueError('В файле есть сервисы — это сцена (.rbxl), а не модель. Откройте её через Open.')
+        raise ValueError('The file contains services — it is a scene (.rbxl), not a model. Open it via Open.')
     if not other['referent_to_class']:
-        raise ValueError('В файле нет объектов')
+        raise ValueError('The file has no objects')
 
     r2c, pmap, props = parsed['referent_to_class'], parsed['parent_map'], parsed['props']
     if parent is None or parent == -1:
         parent = next((r for r, c in r2c.items() if c == 'Workspace'), -1)
     elif parent not in r2c:
-        raise ValueError('Родитель %s не найден' % parent)
+        raise ValueError('Parent %s not found' % parent)
 
     base = max(r2c.keys(), default=-1) + 1
     old_refs = sorted(other['referent_to_class'])
@@ -1677,14 +1677,14 @@ def import_rbxm(parsed, path, parent=None, info=None):
         pr = copy.deepcopy(other['props'].get(old, {}))
         for name in list(pr):
             tid = other['prop_types'].get((cls, name))
-            if tid == 0x13:            # ссылка на другой инстанс модели
+            if tid == 0x13:            # a reference to another instance of the model
                 pr[name] = mapping.get(pr[name], -1)
-            elif tid == 0x1c and pr[name] is not None:   # индекс в SSTR
+            elif tid == 0x1c and pr[name] is not None:   # an index into SSTR
                 pr[name] = pr[name] + sstr_offset
         props[new] = pr
 
     roots = []
-    # порядок детей = порядок записей PRNT исходного файла
+    # children's order = the order of the PRNT records of the source file
     for old in [r for r in other['parent_map'] if r in mapping] + \
                [r for r in old_refs if r not in other['parent_map']]:
         par = other['parent_map'].get(old, -1)
@@ -1694,9 +1694,9 @@ def import_rbxm(parsed, path, parent=None, info=None):
             pmap[mapping[old]] = parent
             roots.append(mapping[old])
 
-    # Небо/свет из модели (Sky, Atmosphere, Bloom…) в сцене нужны ровно по одному на класс и живут в Lighting: переносим их
-    # туда и УДАЛЯЕМ прежние объекты того же класса — иначе повторный импорт «Realistic Sky» копит дубликаты, а старое
-    # небо продолжает перебивать новое.
+    # Sky/lighting from a model (Sky, Atmosphere, Bloom…) are needed in a scene exactly one per class and live in Lighting: we move them
+    # there and DELETE the previous objects of the same class — otherwise re-importing «Realistic Sky» piles up duplicates, and the old
+    # sky keeps overriding the new one.
     lighting_info = []
     light_ref = next((r for r, c in r2c.items() if c == 'Lighting'), None)
     new_refs = set(mapping.values())
@@ -1722,7 +1722,7 @@ def import_rbxm(parsed, path, parent=None, info=None):
                 wrappers.add(old_par)
             lighting_info.append({'cls': r2c[n], 'name': str(props.get(n, {}).get('Name', r2c[n])),
                                   'replaced': r2c[n] in replaced_cls})
-        # опустевшие обёртки (Model/Folder, где лежали только небо/свет) убираем
+        # emptied wrappers (a Model/Folder that held only sky/lighting) are removed
         for w in sorted(wrappers, reverse=True):
             g = 0
             while w in new_refs and w in r2c and g < 50:
@@ -1744,14 +1744,14 @@ def import_rbxm(parsed, path, parent=None, info=None):
     warnings = []
     if other.get('skipped_props'):
         lost = sorted({'%s.%s' % (c, n) for (c, n, _t) in other['skipped_props']})
-        warnings.append('не удалось прочитать свойства: ' + ', '.join(lost[:8]) + (' …' if len(lost) > 8 else ''))
+        warnings.append('could not read the properties: ' + ', '.join(lost[:8]) + (' …' if len(lost) > 8 else ''))
     return roots, len(old_refs), warnings
 
 
 # ====================== Parse / Save ======================
 
-# Новые версии Studio хранят ссылки на ассеты в *Content-свойствах (тип Content), а app.py и клиент читают
-# старые имена (MeshId, TextureID, Texture, SkyboxBk…). Копируем значение под старым именем, если его там нет.
+# New Studio versions store asset references in *Content properties (the Content type), while app.py and the client read
+# the old names (MeshId, TextureID, Texture, SkyboxBk…). We copy the value under the old name if it isn't there.
 _CONTENT_ALIASES = {
     'MeshPart': {'MeshContent': 'MeshId', 'TextureContent': 'TextureID'},
     'SpecialMesh': {'MeshContent': 'MeshId', 'TextureContent': 'TextureId'},
@@ -1777,13 +1777,13 @@ def _alias_content_props(class_name, obj_props):
 
 
 def parse_rbxl(path):
-    """Парсит .rbxl файл и возвращает структуру данных"""
+    """Parses an .rbxl file and returns a data structure"""
     chunks = read_chunks(path)
     class_id_to_referents = {}
     class_id_to_name = {}
     referent_to_class = {}
-    service_refs = set()   # инстансы-сервисы (Workspace и т.п.) — нужны при записи
-    shared_strings = []    # SSTR: значения свойств SharedString — индексы сюда
+    service_refs = set()   # service instances (Workspace etc.) — needed when writing
+    shared_strings = []    # SSTR: the values of SharedString properties are indexes into this
     
     for chunk in chunks:
         if chunk['name'] == b'INST':
@@ -1809,10 +1809,10 @@ def parse_rbxl(path):
 
     props = {}
     skipped = 0
-    # (класс, свойство) -> type_id из файла. Нужен при записи: тип нельзя
-    # надёжно угадать по значению (enum и referent выглядят как обычный int).
+    # (class, property) -> the type_id from the file. Needed when writing: the type can't be
+    # reliably guessed from the value (an enum and a referent look like an ordinary int).
     prop_types = {}
-    skipped_props = []   # (класс, свойство, type_id), которые не удалось разобрать
+    skipped_props = []   # (class, property, type_id) that could not be parsed
     for chunk in chunks:
         if chunk['name'] == b'PROP':
             class_name = prop_name = type_id = None
@@ -1836,7 +1836,7 @@ def parse_rbxl(path):
                     skipped_props.append((class_name, prop_name, type_id))
                 continue
 
-    # Пост-обработка: разбиваем CFrame на Position и Rotation
+    # Post-processing: we split the CFrame into Position and Rotation
     for ref, obj_props in props.items():
         _alias_content_props(referent_to_class.get(ref), obj_props)
         if 'CFrame' in obj_props:
@@ -1844,13 +1844,13 @@ def parse_rbxl(path):
             
             if isinstance(cf, dict) and 'matrix' in cf:
                 matrix = cf['matrix']
-                # Канонический вид (его пишут сохранение и инструменты трансформации): 9 чисел поворота + отдельная
-                # 'position'. Приводим к 12-элементной раскладке ниже, иначе Position/Rotation читались как нули.
+                # The canonical form (written by saving and the transform tools): 9 rotation numbers + a separate
+                # 'position'. We convert to the 12-element layout below, otherwise Position/Rotation were read as zeros.
                 if len(matrix) == 9 and isinstance(cf.get('position'), dict):
                     _pp = cf['position']
                     matrix = [*matrix[0:3], _pp.get('x', 0.0), *matrix[3:6], _pp.get('y', 0.0), *matrix[6:9], _pp.get('z', 0.0)]
                 
-                # Безопасно извлекаем позицию
+                # Safely extract the position
                 position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
                 if len(matrix) > 3:
                     position['x'] = float(matrix[3])
@@ -1861,7 +1861,7 @@ def parse_rbxl(path):
                 
                 obj_props['Position'] = position
                 
-                # Безопасно извлекаем rotation
+                # Safely extract the rotation
                 if len(matrix) >= 12:
                     m00 = float(matrix[0]) if len(matrix) > 0 else 1.0
                     m01 = float(matrix[1]) if len(matrix) > 1 else 0.0
@@ -1873,8 +1873,8 @@ def parse_rbxl(path):
                     m21 = float(matrix[9]) if len(matrix) > 9 else 0.0
                     m22 = float(matrix[10]) if len(matrix) > 10 else 1.0
                     
-                    # Матрица собрана как R = Rx(rx) * Ry(ry) * Rz(rz)
-                    # (см. app.py: rot_matrix), поэтому раскладываем в тех же осях.
+                    # The matrix is assembled as R = Rx(rx) * Ry(ry) * Rz(rz)
+                    # (see app.py: rot_matrix), so we decompose in the same axes.
                     cy = math.sqrt(m00*m00 + m01*m01)
                     singular = cy < 1e-6
                     
@@ -1883,7 +1883,7 @@ def parse_rbxl(path):
                         ry = math.atan2(m02, cy)
                         rz = math.atan2(-m01, m00)
                     else:
-                        # Gimbal lock: ry = ±90°, ось X и Z сливаются, берём rz = 0
+                        # Gimbal lock: ry = ±90°, the X and Z axes merge, we take rz = 0
                         ry = math.pi / 2 if m02 > 0 else -math.pi / 2
                         rx = math.atan2(m10, m11) if m02 > 0 else -math.atan2(m10, m11)
                         rz = 0
@@ -1914,7 +1914,7 @@ def parse_rbxl(path):
                 obj_props['Position'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
                 obj_props['Rotation'] = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         
-        # Обработка Size
+        # Size handling
         cls = referent_to_class.get(ref, '')
         if cls in ('Part', 'WedgePart', 'SpherePart', 'MeshPart', 'TrussPart', 
                     'CornerWedgePart', 'SpawnLocation', 'Seat', 'VehicleSeat'):
@@ -1939,10 +1939,10 @@ def parse_rbxl(path):
             else:
                 obj_props['Size'] = {'x': 4.0, 'y': 1.2, 'z': 2.0}
         
-        # Обработка цвета
-        # Color3 — производное имя (из Color3uint8/BrickColor). Но у Texture, Decal,
-        # Shirt, Pants это НАСТОЯЩЕЕ свойство: пересчёт с round(…, 3) портил значение
-        # (0.529412 -> 0.529) и при сохранении оно уходило в файл уже искажённым.
+        # Color handling
+        # Color3 is a derived name (from Color3uint8/BrickColor). But for Texture, Decal,
+        # Shirt, Pants it is a REAL property: recomputing with round(…, 3) corrupted the value
+        # (0.529412 -> 0.529) and on save it went into the file already distorted.
         if (cls, 'Color3') not in prop_types and (
                 'Color3' in obj_props or 'Color' in obj_props or 'BrickColor' in obj_props):
             color = obj_props.get('Color3') or obj_props.get('Color') or obj_props.get('BrickColor')
@@ -1986,13 +1986,13 @@ def parse_rbxl(path):
             else:
                 obj_props['Color3'] = {'r': 0.6, 'g': 0.6, 'b': 0.6}
         
-        # Обработка прозрачности
+        # Transparency handling
         if 'Transparency' in obj_props:
             trans = obj_props['Transparency']
             if isinstance(trans, list):
-                # NumberSequence (ParticleEmitter.Transparency и т.п.): это не
-                # число, затирать нулём нельзя — при записи получилась бы
-                # последовательность без ключевых точек, и Studio не открывает файл.
+                # NumberSequence (ParticleEmitter.Transparency etc.): it is not a
+                # number, it must not be overwritten with zero — on write a
+                # sequence without keypoints would result, and Studio doesn't open the file.
                 pass
             elif isinstance(trans, (int, float)):
                 obj_props['Transparency'] = max(0.0, min(1.0, float(trans)))
@@ -2001,7 +2001,7 @@ def parse_rbxl(path):
         else:
             obj_props['Transparency'] = 0.0
         
-        # Обработка текстур
+        # Texture handling
         if 'Texture' in obj_props or 'TextureID' in obj_props:
             texture = obj_props.get('Texture') or obj_props.get('TextureID')
             if isinstance(texture, str):
@@ -2022,7 +2022,7 @@ def parse_rbxl(path):
                 except:
                     pass
         
-        # Собираем пути к ассетам
+        # Collect the asset paths
         asset_paths = []
         for key in ['Texture', 'TextureID', 'Decal', 'MeshId', 'Image', 'SoundId']:
             val = obj_props.get(key)
@@ -2032,7 +2032,7 @@ def parse_rbxl(path):
         if asset_paths:
             obj_props['_assets'] = asset_paths
 
-    # Сохраняем сырые данные
+    # Save the raw data
     raw_data = open(path, 'rb').read()
     file_size = os.path.getsize(path)
     
@@ -2055,7 +2055,7 @@ def parse_rbxl(path):
 
 
 def save_rbxl(parsed: dict, path: str):
-    """Сохранить в бинарный формат RBXL"""
+    """Save to the binary RBXL format"""
     
     if not parsed.get('_modified', False) and '_raw_data' in parsed:
         with open(path, 'wb') as f:
@@ -2081,8 +2081,8 @@ def save_rbxl(parsed: dict, path: str):
     
     r2c = parsed['referent_to_class']
     pmap = parsed['parent_map']
-    # Порядок детей у Roblox = порядок записей в PRNT, а parent_map (dict)
-    # его сохраняет: пишем в этом порядке, новые инстансы — в конец.
+    # The order of children in Roblox = the order of PRNT records, and parent_map (a dict)
+    # preserves it: we write in this order, new instances — at the end.
     refs = [r for r in pmap if r in r2c] + [r for r in sorted(r2c) if r not in pmap]
 
     data, warnings = build_rbx_binary(
@@ -2102,7 +2102,7 @@ def save_rbxl(parsed: dict, path: str):
 
 
 def publish_place(rbxl_path, universe_id, place_id, api_key, version_type="Published"):
-    """Публикует плейс в Roblox через Open Cloud API"""
+    """Publishes a place to Roblox via the Open Cloud API"""
     url = f"https://apis.roblox.com/universes/v1/{universe_id}/places/{place_id}/versions"
     params = {"versionType": version_type}
     headers = {"x-api-key": api_key, "Content-Type": "application/octet-stream"}
@@ -2123,21 +2123,21 @@ def publish_place(rbxl_path, universe_id, place_id, api_key, version_type="Publi
             return e.code, e.read().decode()
 
 # ====================== UnionOperation: SolidMeshHolder ======================
-# Форма юниона (деталь с уже вычтенными NegateOperation) лежит в свойстве
-# SolidMeshHolder (SharedString). Старые MeshData/MeshData2 (CSGMDL) у таких
-# файлов пустые. Формат расшифрован по образцам (little-endian):
+# A union's shape (a part with NegateOperations already subtracted) lies in the
+# SolidMeshHolder property (SharedString). The old MeshData/MeshData2 (CSGMDL) of such
+# files are empty. The format was decoded from samples (little-endian):
 #   u8 0x03, u8 0x01, u32 size, u32 0, u32 size, b'SolidMesh', u32 0
-#   дальше каналы, у каждого заголовок  u32 count, u32 0:
+#   then channels, each with a header  u32 count, u32 0:
 #     1) positions   count * vec3 f32
-#     2) normals     count * vec3 f32   (уникальные нормали)
-#     3) пустой канал (UV; если непустой — формат не разобран)
-#     4) канал X     count * vec3 f32   (в образцах везде (1,0,0), для рендера не нужен)
-#     5) index_pos    3*N значений: signed LEB128 дельты (большие шаги — 80/FF + int16 BE) -> индекс в positions
-#     6) index_normal 3*N значений: то же -> индекс в normals
-#     7) пустой канал
-#     8) index_x      3*N значений (для рендера не нужен)
-# Сверено на реальных юнионах: объём меша == UnscaledVolume, нормали граней
-# совпадают с геометрическими.
+#     2) normals     count * vec3 f32   (unique normals)
+#     3) an empty channel (UV; if non-empty — the format isn't understood)
+#     4) channel X     count * vec3 f32   (everywhere (1,0,0) in the samples, not needed for rendering)
+#     5) index_pos    3*N values: signed LEB128 deltas (big steps — 80/FF + int16 BE) -> an index into positions
+#     6) index_normal 3*N values: the same -> an index into normals
+#     7) an empty channel
+#     8) index_x      3*N values (not needed for rendering)
+# Checked on real unions: the mesh volume == UnscaledVolume, the face normals
+# match the geometric ones.
 
 def _sleb128(buf, pos):
     result = shift = 0
@@ -2154,12 +2154,12 @@ def _sleb128(buf, pos):
 
 def decode_solid_mesh(blob):
     """blob (bytes) -> {'positions','normals','index','normal_index','triangles'}.
-    Бросает ValueError на неизвестный формат — вызывающий откатывается на box."""
+    Raises ValueError on an unknown format — the caller falls back to the box."""
     blob = bytes(blob)
     if len(blob) < 40 or blob[0] != 3 or blob[14:23] != b'SolidMesh':
-        raise ValueError('не SolidMesh-блоб')
+        raise ValueError('not a SolidMesh blob')
     if struct.unpack_from('<I', blob, 2)[0] != len(blob) - 14:
-        raise ValueError('неожиданный размер SolidMesh')
+        raise ValueError('unexpected SolidMesh size')
     pos = 27
 
     def hdr():
@@ -2178,8 +2178,8 @@ def decode_solid_mesh(blob):
         nonlocal pos
         out, prev = [], 0
         for _ in range(n):
-            # Большие шаги (|дельта| >= 64) кодируются 3 байтами: маркер 0x80 или 0xFF + знаковый int16 big-endian
-            # (80 00 BA = +186, FF FF 06 = -250). Остальные — обычный signed LEB128.
+            # Big steps (|delta| >= 64) are encoded with 3 bytes: the marker 0x80 or 0xFF + a signed int16 big-endian
+            # (80 00 BA = +186, FF FF 06 = -250). The rest are an ordinary signed LEB128.
             if blob[pos] in (0x80, 0xFF):
                 d = struct.unpack_from('>h', blob, pos + 1)[0]
                 pos += 3
@@ -2193,19 +2193,19 @@ def decode_solid_mesh(blob):
         positions = vec3(hdr())
         normals = vec3(hdr())
         if hdr():
-            raise ValueError('непустой UV-канал: формат не разобран')
+            raise ValueError('non-empty UV channel: the format isn\'t understood')
         vec3(hdr())
         index = idx(hdr())
         normal_index = idx(hdr())
     except (struct.error, IndexError):
-        raise ValueError('SolidMesh обрезан')
+        raise ValueError('SolidMesh is truncated')
     if (not index or len(index) % 3 or max(index) >= len(positions) or min(index) < 0):
-        raise ValueError('индексы SolidMesh вне диапазона')
+        raise ValueError('SolidMesh indexes are out of range')
     if (len(normal_index) != len(index)
             or max(normal_index) >= len(normals) or min(normal_index) < 0):
-        # Канал индексов нормалей у части юнионов (со скруглениями) закодирован иначе, чем в
-        # разобранных образцах. Геометрия (positions + index) при этом верна — нормали
-        # считаем сами: плоские, по граням.
+        # The normal index channel of some unions (with rounded edges) is encoded differently than in the
+        # decoded samples. The geometry (positions + index) is correct though — we compute
+        # the normals ourselves: flat, per face.
         normals, normal_index = [], []
         for t in range(0, len(index), 3):
             a, b, c = (positions[index[t]], positions[index[t + 1]], positions[index[t + 2]])
@@ -2220,7 +2220,7 @@ def decode_solid_mesh(blob):
 
 
 def union_mesh_from_parsed(parsed, ref):
-    """Меш UnionOperation (локальные координаты, центр = pivot детали) или None."""
+    """A UnionOperation mesh (local coordinates, center = the part's pivot) or None."""
     idx = parsed['props'].get(ref, {}).get('SolidMeshHolder')
     ss = parsed.get('shared_strings') or []
     if not isinstance(idx, int) or not (0 <= idx < len(ss)) or not ss[idx][1]:
@@ -2232,8 +2232,8 @@ def union_mesh_from_parsed(parsed, ref):
 
 
 def union_mesh_render_json(m):
-    """Плоские массивы под THREE.BufferGeometry (без индексов: у граней
-    плоские нормали, вершины разворачиваются по углам треугольников)."""
+    """Flat arrays for THREE.BufferGeometry (without indexes: the faces have
+    flat normals, vertices are unrolled by the triangle corners)."""
     pos, nrm = [], []
     for k, i in enumerate(m['index']):
         pos.extend(m['positions'][i])

@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Удаляет старые GitHub-релизы (и их теги), оставляя самые свежие.
+"""Deletes old GitHub releases (and their tags), keeping the newest ones.
 
-Правила (что остаётся):
-  1. минимум KEEP релизов (по умолчанию 5, меньше 5 задать нельзя) —
-     самые новые по дате создания;
-  2. минимум один stable-релиз (не prerelease, не draft). В CI stable —
-     это полный релиз с APK (тег v1.N), а hot-update релизы (тег hot-N)
-     помечены prerelease. Если среди свежих KEEP релизов stable нет
-     (например, подряд вышли одни hot-update), дополнительно сохраняется
-     самый новый stable из более старых — чтобы releases/latest и ссылка
-     на app-debug.apk не сломались.
+Rules (what stays):
+  1. at least KEEP releases (5 by default, it can't be set below 5) —
+     the newest by creation date;
+  2. at least one stable release (not a prerelease, not a draft). In CI a stable one is
+     a full release with an APK (tag v1.N), while hot-update releases (tag hot-N)
+     are marked prerelease. If there is no stable one among the newest KEEP releases
+     (for example, only hot-updates came out in a row), the newest stable one among the older ones is additionally kept —
+     so that releases/latest and the link
+     to app-debug.apk don't break.
 
-Draft-релизы не трогаем вообще.
+Draft releases are not touched at all.
 
-По умолчанию — dry-run (только показывает, что будет удалено).
-Реальное удаление — с флагом --apply.
+By default — a dry run (it only shows what would be deleted).
+Real deletion — with the --apply flag.
 
-Использование:
-  export GITHUB_TOKEN=ghp_...        # нужен scope repo (для --apply)
-  python3 .github/scripts/cleanup-releases.py                  # dry-run
-  python3 .github/scripts/cleanup-releases.py --apply          # удалить
+Usage:
+  export GITHUB_TOKEN=ghp_...        # the repo scope is needed (for --apply)
+  python3 .github/scripts/cleanup-releases.py                  # dry run
+  python3 .github/scripts/cleanup-releases.py --apply          # delete
   python3 .github/scripts/cleanup-releases.py --keep 8 --apply
   python3 .github/scripts/cleanup-releases.py --apply --keep-tags
 
-Только стандартная библиотека Python 3, зависимостей нет.
+Python 3 standard library only, no dependencies.
 """
 import argparse
 import json
@@ -41,7 +41,7 @@ DEFAULT_REPO = "suscersal/roblox-studio-web"
 
 
 def detect_repo():
-    """owner/name из git remote origin; если не вышло — репозиторий по умолчанию."""
+    """owner/name from git remote origin; if that fails — the default repository."""
     try:
         url = subprocess.check_output(
             ["git", "remote", "get-url", "origin"],
@@ -85,22 +85,22 @@ def is_stable(rel):
 
 
 def plan(releases, keep):
-    """Возвращает (оставить, удалить). releases — любые, draft игнорируются."""
+    """Returns (keep, delete). releases — any, drafts are ignored."""
     published = [r for r in releases if not r["draft"]]
     published.sort(key=lambda r: r["created_at"], reverse=True)
 
     kept = published[:keep]
     rest = published[keep:]
 
-    # Гарантируем хотя бы один stable среди оставленных.
+    # We guarantee at least one stable among the kept ones.
     if not any(is_stable(r) for r in kept):
         extra = next((r for r in rest if is_stable(r)), None)
         if extra:
             kept.append(extra)
             rest.remove(extra)
         else:
-            print("ВНИМАНИЕ: в репозитории вообще нет stable-релизов "
-                  "(все prerelease) — условие 'минимум один stable' выполнить нечем.",
+            print("WARNING: the repository has no stable releases at all "
+                  "(all are prereleases) — there is nothing to satisfy the 'at least one stable' condition with.",
                   file=sys.stderr)
     return kept, rest
 
@@ -111,50 +111,50 @@ def label(rel):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Удаление старых GitHub-релизов")
-    ap.add_argument("--repo", default=None, help="owner/name (по умолчанию из git remote)")
+    ap = argparse.ArgumentParser(description="Deleting old GitHub releases")
+    ap.add_argument("--repo", default=None, help="owner/name (from git remote by default)")
     ap.add_argument("--keep", type=int, default=MIN_KEEP,
-                    help=f"сколько свежих релизов оставить (минимум {MIN_KEEP})")
+                    help=f"how many fresh releases to keep (minimum {MIN_KEEP})")
     ap.add_argument("--apply", action="store_true",
-                    help="реально удалять (без флага — только dry-run)")
+                    help="really delete (without the flag — dry run only)")
     ap.add_argument("--keep-tags", action="store_true",
-                    help="не удалять git-теги удалённых релизов")
+                    help="don't delete the git tags of deleted releases")
     ap.add_argument("--delay", type=float, default=1.0,
-                    help="пауза между удалениями, сек (защита от secondary rate limit)")
+                    help="pause between deletions, sec (protection from the secondary rate limit)")
     args = ap.parse_args()
 
     if args.keep < MIN_KEEP:
-        ap.error(f"--keep не может быть меньше {MIN_KEEP}")
+        ap.error(f"--keep cannot be less than {MIN_KEEP}")
 
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if args.apply and not token:
-        sys.exit("Для --apply нужен токен: export GITHUB_TOKEN=...")
+        sys.exit("--apply needs a token: export GITHUB_TOKEN=...")
 
     repo = args.repo or detect_repo()
-    print(f"Репозиторий: {repo}")
+    print(f"Repository: {repo}")
 
     try:
         releases = list_releases(repo, token)
     except urllib.error.HTTPError as e:
-        sys.exit(f"Не удалось получить релизы: HTTP {e.code} {e.reason}")
+        sys.exit(f"Could not get releases: HTTP {e.code} {e.reason}")
 
     kept, to_delete = plan(releases, args.keep)
-    print(f"Всего релизов (без draft): {len(kept) + len(to_delete)}")
+    print(f"Total releases (without drafts): {len(kept) + len(to_delete)}")
 
-    print(f"\nОставляем ({len(kept)}):")
+    print(f"\nKeeping ({len(kept)}):")
     for r in kept:
         print("  +", label(r))
 
     if not to_delete:
-        print("\nУдалять нечего.")
+        print("\nNothing to delete.")
         return
 
-    print(f"\nУдаляем ({len(to_delete)}):")
+    print(f"\nDeleting ({len(to_delete)}):")
     for r in to_delete:
         print("  -", label(r))
 
     if not args.apply:
-        print("\nЭто dry-run. Для удаления запусти с --apply.")
+        print("\nThis is a dry run. To delete, run with --apply.")
         return
 
     print()
@@ -162,13 +162,13 @@ def main():
     for r in to_delete:
         try:
             request("DELETE", f"/repos/{repo}/releases/{r['id']}", token)
-            msg = f"удалён релиз {r['tag_name']}"
+            msg = f"release deleted {r['tag_name']}"
             if not args.keep_tags and r.get("tag_name"):
                 try:
                     request("DELETE", f"/repos/{repo}/git/refs/tags/{r['tag_name']}", token)
-                    msg += " + тег"
+                    msg += " + tag"
                 except urllib.error.HTTPError as e:
-                    # 404/422 — тега уже нет, это нормально
+                    # 404/422 — the tag is already gone, that's fine
                     if e.code not in (404, 422):
                         raise
             print("  ✓", msg)
@@ -178,8 +178,8 @@ def main():
         time.sleep(args.delay)
 
     if failed:
-        sys.exit(f"Готово, но {failed} не удалось удалить.")
-    print("\nГотово.")
+        sys.exit(f"Done, but {failed} could not be deleted.")
+    print("\nDone.")
 
 
 if __name__ == "__main__":

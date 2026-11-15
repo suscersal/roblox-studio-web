@@ -1,39 +1,39 @@
 #!/usr/bin/env bash
-# Готовит пакет для OTA-обновления: берёт "горячие" файлы (те, что не требуют
-# пересборки APK — чистый Python и статика) из android/app/src/main/python
-# (куда их уже разложил scripts/sync-android-python.sh), считает их sha256
-# и складывает вместе с version.json в папку ota/ — она заливается как
-# GitHub Release asset и скачивается приложением на устройстве.
+# Prepares a package for an OTA update: takes the "hot" files (those that don't require
+# rebuilding the APK — pure Python and static files) from android/app/src/main/python
+# (where scripts/sync-android-python.sh has already placed them), computes their sha256
+# and puts them together with version.json into the ota/ folder — it is uploaded as a
+# GitHub Release asset and downloaded by the app on the device.
 #
-# Использование:
+# Usage:
 #   bash scripts/generate-ota-manifest.sh <version>
 #
-# <version> — например "1.7" (то же значение, что ANDROID_VERSION_NAME в CI).
+# <version> — for example "1.7" (the same value as ANDROID_VERSION_NAME in CI).
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-VERSION="${1:?Использование: generate-ota-manifest.sh <version>}"
+VERSION="${1:?Usage: generate-ota-manifest.sh <version>}"
 SRC="android/app/src/main/python"
 OUT_DIR="ota"
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-# Список "горячих" файлов — тех, что грузятся Python/Flask как обычные
-# файлы (не требуют компиляции и не влияют на нативный Kotlin/Java-код).
-# icons.txt и icons/ сюда намеренно НЕ входят: любое изменение иконок
-# теперь всегда идёт через полную сборку APK (см. HOT_REGEX в
-# build-and-release.yml) — заливать иконки как OTA-ассеты слишком легко
-# упирается в лимиты GitHub Releases API, а трафик на докачку каждой
-# отдельной иконки того не стоит.
-# Если добавляешь новый файл в корень репозитория, который должен
-# обновляться без пересборки APK, — впиши его сюда тоже.
-# style.css/script.js — раньше были частью index.html (единый файл),
-# после разделения на отдельные файлы забыть их тут означало бы, что
-# OTA-обновление доедет только до разметки, а CSS/JS останутся старыми.
+# The list of "hot" files — those loaded by Python/Flask as ordinary
+# files (they need no compilation and don't affect native Kotlin/Java code).
+# icons.txt and icons/ are deliberately NOT included here: any icon change
+# now always goes through a full APK build (see HOT_REGEX in
+# build-and-release.yml) — uploading icons as OTA assets too easily
+# runs into the GitHub Releases API limits, and the traffic for downloading each
+# separate icon isn't worth it.
+# If you add a new file to the repository root that should
+# update without rebuilding the APK — add it here too.
+# style.css/script.js — used to be part of index.html (a single file),
+# after the split into separate files forgetting them here would mean that an
+# OTA update reaches only the markup while CSS/JS stay old.
 HOT_FILES=(app.py rbxl_parser.py index.html style.css script.js assistant.js collab.js cloud.js)
 
 python3 - "$VERSION" "$SRC" "$OUT_DIR" "${HOT_FILES[@]}" <<'PYEOF'
@@ -59,10 +59,10 @@ for name in files:
     if os.path.isfile(path):
         hash_and_copy(name, path)
     else:
-        print(f"[ota] предупреждение: {path} не найден, пропускаю", file=sys.stderr)
+        print(f"[ota] warning: {path} not found, skipping", file=sys.stderr)
 
 with open(os.path.join(out_dir, "version.json"), "w", encoding="utf-8") as f:
     json.dump(manifest, f, ensure_ascii=False, indent=2)
 
-print(f"[ota] version.json готов: version={version}, файлов={len(manifest['files'])}")
+print(f"[ota] version.json ready: version={version}, files={len(manifest['files'])}")
 PYEOF

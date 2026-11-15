@@ -27,38 +27,38 @@ import android.webkit.WebChromeClient
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        // Состояние процесса, а не Activity — сервер должен стартовать
-        // только один раз за жизнь процесса (см. комментарий в maxclient:
-        // повторный вызов app.run() на уже занятом порту упадёт).
+        // Process state, not Activity state — the server must start
+        // only once per process lifetime (see the comment in maxclient:
+        // a repeated app.run() call on an already busy port will fail).
         private var serverStarted = false
-        private const val PORT = 47182 // держим синхронно с PORT в app.py; 8080 часто занят другими приложениями/ADB
+        private const val PORT = 47182 // keep in sync with PORT in app.py; 8080 is often taken by other apps/ADB
     }
 
     private lateinit var webView: WebView
-    private var lastBackPressAt = 0L   // для «нажмите «Назад» ещё раз для выхода»
+    private var lastBackPressAt = 0L   // for «press Back again to exit»
 
-    // Импорт .rbxl-файла через системный пикер (SAF) — единственный
-    // надёжный способ достать файл, выбранный пользователем, при scoped
-    // storage на Android 10+. Копируем в приватную папку приложения и
-    // сообщаем странице через JS-колбэк.
+    // Importing an .rbxl file through the system picker (SAF) — the only
+    // reliable way to get a file chosen by the user under scoped
+    // storage on Android 10+. We copy it into the app's private folder and
+    // tell the page through a JS callback.
     //
-    // Раньше использовалось ФИКСИРОВАННОЕ имя "imported.rbxl" — если
-    // предыдущая копия этого файла по какой-то причине осталась с
-    // испорченными правами (например, MIUI/HyperOS "Очистка памяти"/
-    // "Диспетчер безопасности" иногда трогает файлы приложений в рамках
-    // своей оптимизации хранилища, либо файл достался от восстановления
-    // данных при переустановке — и то, и другое вживую воспроизвести из
-    // песочницы нельзя, но оба честно объясняют Permission denied НА
-    // ЧТЕНИИ файла, который сам же процесс перед этим спокойно
-    // перезаписал), КАЖДЫЙ следующий импорт утыкался в тот же самый
-    // испорченный файл. Теперь — новое имя на каждый импорт (метка
-    // времени), а если старый файл с фиксированным именем ещё валяется
-    // от прошлых версий приложения — пробуем стереть его тоже (не
-    // критично, если не получится). Плюс: ошибка копирования больше не
-    // падает необработанным исключением молча — сообщаем странице явно.
-    // Настоящее имя выбранного файла (SAF отдаёт Uri вида content://…/msf:1234 —
-    // по нему имя не получить, нужен запрос DISPLAY_NAME). Без этого в «Недавних»
-    // файл назывался по имени нашей внутренней копии: imported_<цифры>.rbxl.
+    // A FIXED name "imported.rbxl" used to be used — if
+    // the previous copy of that file for some reason stayed with
+    // broken permissions (for example, MIUI/HyperOS "Memory cleanup"/
+    // "Security manager" sometimes touches app files as part of
+    // its storage optimization, or the file came from a data
+    // restore on reinstall — neither can be reproduced live from a
+    // sandbox, but both honestly explain Permission denied ON
+    // READING a file that the very same process had just calmly
+    // overwritten), EVERY following import ran into the same
+    // broken file. Now — a new name for every import (a
+    // timestamp), and if an old file with the fixed name is still lying around
+    // from earlier app versions — we try to delete it too (not
+    // critical if it fails). Plus: a copy error no longer
+    // silently fails with an unhandled exception — we tell the page explicitly.
+    // The real name of the chosen file (SAF gives a Uri like content://…/msf:1234 —
+    // the name can't be derived from it, a DISPLAY_NAME query is needed). Without this «Recent»
+    // showed the file under the name of our internal copy: imported_<digits>.rbxl.
     private fun displayNameOf(uri: Uri): String? = try {
         contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
@@ -66,9 +66,9 @@ class MainActivity : AppCompatActivity() {
         null
     }
 
-    // Приложение работает с КОПИЕЙ выбранного файла (imported_<время>.rbxl в приватной папке), поэтому «Сохранить»
-    // раньше менял только копию, а оригинал оставался нетронутым. Помним Uri оригинала (SharedPreferences —
-    // переживает перезапуск, copyPath -> uri) и после записи копии переписываем им оригинал.
+    // The app works with a COPY of the chosen file (imported_<time>.rbxl in the private folder), so «Save»
+    // used to change only the copy, while the original stayed untouched. We remember the original's Uri (SharedPreferences —
+    // survives a restart, copyPath -> uri) and after writing the copy we rewrite the original with it.
     private val srcPrefs by lazy { getSharedPreferences("rsw_source_uris", MODE_PRIVATE) }
 
     private fun rememberSourceUri(copyPath: String, uri: Uri) {
@@ -86,13 +86,13 @@ class MainActivity : AppCompatActivity() {
     ) { result ->
         val uri: Uri? = if (result.resultCode == RESULT_OK) result.data?.data else null
         if (uri == null) return@registerForActivityResult
-        File(filesDir, "imported.rbxl").delete() // старое фиксированное имя — best-effort уборка
+        File(filesDir, "imported.rbxl").delete() // the old fixed name — best-effort cleanup
         val shownName: String? = displayNameOf(uri)
         val dest = File(filesDir, "imported_${System.currentTimeMillis()}.rbxl")
         try {
             contentResolver.openInputStream(uri)?.use { input ->
                 dest.outputStream().use { output -> input.copyTo(output) }
-            } ?: throw java.io.IOException("contentResolver вернул пустой поток для $uri")
+            } ?: throw java.io.IOException("contentResolver returned an empty stream for $uri")
             rememberSourceUri(dest.absolutePath, uri)
             webView.evaluateJavascript(
                 "window.onAndroidFileImported && window.onAndroidFileImported(${
@@ -111,10 +111,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Импорт произвольного локального файла (zip с моделью аватара,
-    // выбранного/скачанного пользователем заранее) — тот же SAF-паттерн,
-    // что и filePickerLauncher для .rbxl, но пишет в отдельный файл и
-    // зовёт свой JS-колбэк, чтобы не путать с открытием сцены.
+    // Importing an arbitrary local file (a zip with an avatar model
+    // chosen/downloaded by the user beforehand) — the same SAF pattern
+    // as filePickerLauncher for .rbxl, but it writes to a separate file and
+    // calls its own JS callback so as not to be confused with opening a scene.
     private val avatarFilePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -135,16 +135,16 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // Путь временного файла (в приватном хранилище приложения), который
-    // Flask-сервер только что записал через /api/save — сохраняем его здесь
-    // между запуском SAF-диалога "Сохранить как" (exportRbxlFile) и
-    // получением выбранного пользователем Uri в saveFileLauncher.
+    // The path of the temporary file (in the app's private storage) that the
+    // Flask server has just written via /api/save — we keep it here
+    // between launching the SAF "Save as" dialog (exportRbxlFile) and
+    // receiving the Uri chosen by the user in saveFileLauncher.
     private var pendingExportSourcePath: String? = null
 
-    // Файл, где хранится .ROBLOSECURITY между запусками приложения — тот же
-    // filesDir, что уже прокидывается в Python как RSW_DATA_DIR (см.
-    // bridge_launcher.start_server), так что app.py читает куку напрямую
-    // оттуда, без дополнительного канала передачи.
+    // The file where .ROBLOSECURITY is kept between app launches — the same
+    // filesDir that is already passed into Python as RSW_DATA_DIR (see
+    // bridge_launcher.start_server), so app.py reads the cookie directly
+    // from there, without an additional transfer channel.
     private val robloxAuthFile: File
         get() = File(filesDir, "roblox_auth.json")
 
@@ -168,10 +168,10 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // Экспорт через системный пикер (SAF, ACTION_CREATE_DOCUMENT) —
-    // единственный способ дать пользователю сохранить файл в выбранное им
-    // место (Загрузки, другое приложение и т.п.) при scoped storage.
-    // Сервер сам писать туда не может — не имеет доступа к SAF-Uri.
+    // Export through the system picker (SAF, ACTION_CREATE_DOCUMENT) —
+    // the only way to let the user save a file to a place of their choice
+    // (Downloads, another app, etc.) under scoped storage.
+    // The server can't write there itself — it has no access to the SAF Uri.
     private val saveFileLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -200,22 +200,22 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // «Открыть с помощью» из файлового менеджера (ACTION_VIEW на .rbxl): копируем файл так же, как после пикера,
-    // и передаём странице через window.onAndroidFileImported. Если страница ещё не загрузилась (холодный старт) —
-    // результат ждёт в pendingIncomingJs до onPageFinished.
+    // «Open with» from a file manager (ACTION_VIEW on an .rbxl): we copy the file the same way as after the picker,
+    // and pass it to the page via window.onAndroidFileImported. If the page hasn't loaded yet (a cold start) —
+    // the result waits in pendingIncomingJs until onPageFinished.
     @Volatile private var pendingIncomingJs: String? = null
 
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null || intent.action != Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
-        intent.data = null   // не обрабатывать повторно при пересоздании
+        intent.data = null   // don't process again when recreated
         Thread {
             val dest = File(filesDir, "imported_${System.currentTimeMillis()}.rbxl")
             val js: String = try {
                 val shownName = displayNameOf(uri) ?: uri.lastPathSegment
                 contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }
-                } ?: throw java.io.IOException("contentResolver вернул пустой поток для $uri")
+                } ?: throw java.io.IOException("contentResolver returned an empty stream for $uri")
                 rememberSourceUri(dest.absolutePath, uri)
                 "window.onAndroidFileImported(${org.json.JSONObject.quote(dest.absolutePath)}, null, " +
                     "${shownName?.let { org.json.JSONObject.quote(it) } ?: "null"});"
@@ -223,7 +223,7 @@ class MainActivity : AppCompatActivity() {
                 dest.delete()
                 "window.onAndroidFileImported(null, ${org.json.JSONObject.quote(e.message ?: e.toString())});"
             }
-            // функция появляется, когда загрузится script.js — ждём её до ~15 с
+            // the function appears once script.js loads — we wait for it up to ~15 s
             pendingIncomingJs = "(function t(n){ if (window.onAndroidFileImported) { $js } else if (n < 50) setTimeout(function(){ t(n + 1); }, 300); })(0);"
             runOnUiThread { flushIncoming() }
         }.start()
@@ -232,7 +232,7 @@ class MainActivity : AppCompatActivity() {
     private fun flushIncoming() {
         val js = pendingIncomingJs ?: return
         val url = webView.url ?: return
-        if (!url.startsWith("http://127.0.0.1")) return   // приложение ещё грузится — вызовем из onPageFinished
+        if (!url.startsWith("http://127.0.0.1")) return   // the app is still loading — we'll call it from onPageFinished
         pendingIncomingJs = null
         webView.evaluateJavascript(js, null)
     }
@@ -254,8 +254,8 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        // Без WebChromeClient WebView молча возвращает false из window.confirm() и игнорирует alert(): из-за этого
-        // «Открыть из Roblox» при уже открытом мире отменялось без единого диалога («Несохранённые изменения пропадут…»).
+        // Without a WebChromeClient the WebView silently returns false from window.confirm() and ignores alert(): because of this
+        // «Open from Roblox» with a world already open was cancelled without a single dialog («Unsaved changes will be lost…»).
         webView.webChromeClient = object : WebChromeClient() {
             override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult): Boolean {
                 if (isFinishing) { result.cancel(); return true }
@@ -278,20 +278,20 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
-        // WebGL для 3D-вьюпорта — включено по умолчанию в современном
-        // системном WebView, явных флагов не требуется.
+        // WebGL for the 3D viewport — enabled by default in the modern
+        // system WebView, no explicit flags are needed.
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
-                // страница приложения загружена — отдаём ей .rbxl, с которым нас открыли из файлового менеджера
+                // the app page has loaded — we hand it the .rbxl we were opened with from the file manager
                 if (url != null && url.startsWith("http://127.0.0.1")) flushIncoming()
             }
         }
         webView.addJavascriptInterface(AndroidBridge(), "AndroidBridge")
         handleIncomingIntent(intent)
 
-        // «Назад»: сначала даём странице закрыть самый верхний слой (диалог, меню, Play, «Панели» → «Сцена»…) —
-        // window.__handleBack() возвращает true, если что-то закрыла. Иначе — история WebView, а выход из приложения
-        // только по второму нажатию в течение 2 секунд.
+        // «Back»: first we let the page close the topmost layer (a dialog, a menu, Play, «Panels» → «Scene»…) —
+        // window.__handleBack() returns true if it closed something. Otherwise — WebView history, and exiting the app
+        // only on a second press within 2 seconds.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 webView.evaluateJavascript(
@@ -307,7 +307,7 @@ class MainActivity : AppCompatActivity() {
                         finish()
                     } else {
                         lastBackPressAt = now
-                        Toast.makeText(this@MainActivity, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, getString(R.string.back_press_exit), Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -316,30 +316,30 @@ class MainActivity : AppCompatActivity() {
         val loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         loadingStatus.visibility = View.VISIBLE
 
-        // OtaUpdater.checkAndUpdate сама ловит сетевые ошибки и не должна
-        // зависать дольше своих HTTP-таймаутов (~8-16 сек), но если сети нет
-        // вообще (DNS-резолвинг иногда виснет дольше connectTimeout) —
-        // подстраховываемся отдельным таймером, чтобы приложение в любом
-        // случае стартовало на уже скачанном ранее hotpatch'е (или на коде
-        // из APK, если ничего ещё не скачивалось), а не стояло на заставке
-        // бесконечно.
+        // OtaUpdater.checkAndUpdate catches network errors itself and shouldn't
+        // hang longer than its HTTP timeouts (~8-16 s), but if there is no network
+        // at all (DNS resolution sometimes hangs longer than connectTimeout) —
+        // we hedge with a separate timer so that the app starts in any
+        // case on the previously downloaded hotpatch (or on the code
+        // from the APK, if nothing has been downloaded yet), rather than sitting on the splash
+        // forever.
         val proceededOnce = java.util.concurrent.atomic.AtomicBoolean(false)
 
         fun proceedWithHotpatch(hotpatchDir: File?) {
             if (!proceededOnce.compareAndSet(false, true)) return
-            loadingStatus.text = "Запуск…"
+            loadingStatus.text = getString(R.string.loading_start)
             startPythonServerOnce(hotpatchDir)
             waitForServerThenLoad()
         }
 
-        // Стартовали ли мы уже через 5-секундный fallback (значит, сервер
-        // работает на СТАРОМ коде, пока OTA ещё тянулась по медленной сети).
-        // Если да и позже придёт updated=true — НЕ убиваем процесс: игрок
-        // может уже активно работать в редакторе, а Runtime.exit(0) посреди
-        // сессии выглядит как "приложение само перезапускается/падает".
-        // Новый hotpatch уже полностью на диске и его версия уже сохранена
-        // в SharedPreferences (см. OtaUpdater.checkAndUpdate) — он просто
-        // подхватится сам на следующем обычном запуске.
+        // Whether we have already started via the 5-second fallback (meaning the server
+        // runs on OLD code while the OTA was still dragging on over a slow network).
+        // If so and updated=true arrives later — we do NOT kill the process: the player
+        // may already be actively working in the editor, and Runtime.exit(0) in the middle of a
+        // session looks like "the app restarts/crashes by itself".
+        // The new hotpatch is already fully on disk and its version is already saved
+        // in SharedPreferences (see OtaUpdater.checkAndUpdate) — it simply
+        // gets picked up on the next ordinary launch.
         val startedViaTimeoutFallback = java.util.concurrent.atomic.AtomicBoolean(false)
 
         android.os.Handler(mainLooper).postDelayed({
@@ -348,7 +348,7 @@ class MainActivity : AppCompatActivity() {
                     if (it.exists() && it.listFiles()?.isNotEmpty() == true) it else null
                 }
                 startedViaTimeoutFallback.set(true)
-                loadingStatus.text = "Нет соединения, запуск без обновлений…"
+                loadingStatus.text = getString(R.string.loading_no_connection)
                 proceedWithHotpatch(existing)
             }
         }, 5000)
@@ -362,18 +362,18 @@ class MainActivity : AppCompatActivity() {
                 override fun onFinished(hotpatchDir: File?, updated: Boolean) {
                     runOnUiThread {
                         if (updated && serverStarted && !startedViaTimeoutFallback.get()) {
-                            // Сервер в этом процессе уже когда-то запускался
-                            // со старым кодом — "на лету" его не подменить
-                            // (модуль app уже импортирован и закэширован
-                            // Python'ом, порт уже занят). Единственный
-                            // надёжный способ подхватить свежескачанный
-                            // app.py — перезапустить процесс целиком.
+                            // The server in this process was already started at some point
+                            // with the old code — it can't be swapped "on the fly"
+                            // (the app module is already imported and cached by
+                            // Python, the port is already taken). The only
+                            // reliable way to pick up the freshly downloaded
+                            // app.py is to restart the whole process.
                             //
-                            // Этот путь возможен только если сервер стартовал
-                            // НЕ через 5-секундный fallback (тот случай
-                            // обработан выше отдельно) — например, при
-                            // повторном заходе на уже созданную Activity.
-                            loadingStatus.text = "Обновление готово, перезапуск…"
+                            // This path is possible only if the server started
+                            // NOT via the 5-second fallback (that case is
+                            // handled separately above) — for example, on
+                            // re-entering an already created Activity.
+                            loadingStatus.text = getString(R.string.loading_update_ready)
                             restartProcessToApplyUpdate()
                             return@runOnUiThread
                         }
@@ -384,8 +384,8 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** Полный перезапуск приложения — единственный надёжный способ подхватить
-     * hot-patch, скачанный поверх уже работающего в этом процессе сервера. */
+    /** A full app restart — the only reliable way to pick up a
+     * hot patch downloaded on top of a server already running in this process. */
     private fun restartProcessToApplyUpdate() {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
         intent?.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -395,9 +395,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun startPythonServerOnce(hotpatchDir: File?) {
         if (serverStarted) {
-            // Сервер в этом процессе уже поднят — просто грузим страницу.
-            // Порт мог отличаться от PORT (см. waitForServerThenLoad), берём
-            // его из того же файла, а не константы.
+            // The server in this process is already up — we just load the page.
+            // The port may differ from PORT (see waitForServerThenLoad), we take
+            // it from the same file rather than from the constant.
             val portFile = File(filesDir, "server_port.txt")
             val resolvedPort = portFile.takeIf { it.exists() }
                 ?.readText()?.trim()?.toIntOrNull() ?: PORT
@@ -406,9 +406,9 @@ class MainActivity : AppCompatActivity() {
         }
         serverStarted = true
 
-        // Чистим файл от предыдущего (возможно, уже мёртвого) запуска,
-        // чтобы waitForServerThenLoad не подключился по ошибке к порту,
-        // на котором давно никто не слушает.
+        // We clean up the file from the previous (possibly already dead) launch
+        // so that waitForServerThenLoad doesn't connect by mistake to a port
+        // on which nobody has been listening for a long time.
         File(filesDir, "server_port.txt").delete()
 
         val hotpatchPath = hotpatchDir?.absolutePath ?: ""
@@ -419,9 +419,9 @@ class MainActivity : AppCompatActivity() {
                 val launcher = py.getModule("bridge_launcher")
                 launcher.callAttr("start_server", PORT, filesDir.absolutePath, hotpatchPath)
             } catch (e: Exception) {
-                Log.e("MainActivity", "Ошибка запуска сервера", e)
+                Log.e("MainActivity", "Server start failed", e)
                 runOnUiThread {
-                    findViewById<TextView>(R.id.loadingStatus).text = "Ошибка: ${e.message}"
+                    findViewById<TextView>(R.id.loadingStatus).text = getString(R.string.loading_error, e.message)
                 }
             }
     }.start()
@@ -429,13 +429,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun waitForServerThenLoad() {
         Thread {
-            // bridge_launcher.py может уйти на PORT+1..+20, если исходный
-            // порт ещё не освободился с прошлого запуска процесса (см.
-            // комментарий в bridge_launcher.start_server). Раньше здесь
-            // всегда стучались в фиксированный PORT и не замечали, что
-            // сервер реально поднялся на другом порту — сервер работал,
-            // но webView никогда не подключался. Файл server_port.txt
-            // пишется Python-стороной сразу после успешного bind().
+            // bridge_launcher.py may move to PORT+1..+20 if the original
+            // port hasn't been released since the process's previous launch (see the
+            // comment in bridge_launcher.start_server). Previously the code here
+            // always knocked on the fixed PORT and didn't notice that the
+            // server had really come up on another port — the server worked,
+            // but the webView never connected. The server_port.txt file
+            // is written by the Python side right after a successful bind().
             val portFile = File(filesDir, "server_port.txt")
             var resolvedPort = PORT
             var up = false
@@ -460,45 +460,45 @@ class MainActivity : AppCompatActivity() {
                     status.visibility = View.GONE
                     webView.loadUrl("http://127.0.0.1:$resolvedPort/")
                 } else {
-                    status.text = "Не удалось запустить локальный сервер.\n Restart app."
+                    status.text = getString(R.string.server_start_failed)
                 }
             }
         }.start()
     }
 
-    /** Доступно из JS страницы как window.AndroidBridge.<метод>(). */
+    /** Available from the page's JS as window.AndroidBridge.<method>(). */
     inner class AndroidBridge {
         @JavascriptInterface
         fun pickRbxlFile() {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
-                // право на запись + «запомнить» — чтобы «Сохранить» могло перезаписать выбранный файл, а не только копию
+                // write permission + «remember» — so that «Save» can overwrite the chosen file, not only the copy
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                         Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
             }
             filePickerLauncher.launch(intent)
         }
 
-        /** Приватная папка приложения — сюда сервер пишет временные файлы
-         * перед экспортом через SAF (сам сервер SAF-Uri не видит). */
+        /** The app's private folder — the server writes temporary files here
+         * before exporting via SAF (the server itself doesn't see the SAF Uri). */
         @JavascriptInterface
         fun getDataDir(): String = filesDir.absolutePath
 
-        /** versionCode установленного APK (= номер запуска CI, тег v1.N). */
+        /** The versionCode of the installed APK (= the CI run number, tag v1.N). */
         @JavascriptInterface
         fun getAppVersionCode(): Int = try {
             packageManager.getPackageInfo(packageName, 0).versionCode
         } catch (e: Exception) { 0 }
 
-        /** Записывает сохранённую копию (copyPath = imported_*.rbxl) обратно в ИСХОДНЫЙ файл, выбранный в пикере.
-         * Возвращает "ok", "nosource" (у этого файла нет исходного Uri — открыт не через пикер) или "err:<причина>". */
+        /** Writes the saved copy (copyPath = imported_*.rbxl) back into the ORIGINAL file chosen in the picker.
+         * Returns "ok", "nosource" (this file has no source Uri — it wasn't opened via the picker) or "err:<reason>". */
         @JavascriptInterface
         fun writeBackToSource(copyPath: String): String {
             val uriStr = srcPrefs.getString(copyPath, null) ?: return "nosource"
             return try {
                 val uri = Uri.parse(uriStr)
-                val out = contentResolver.openOutputStream(uri, "wt") ?: return "err:нет потока записи"
+                val out = contentResolver.openOutputStream(uri, "wt") ?: return "err:no output stream"
                 File(copyPath).inputStream().use { input -> out.use { input.copyTo(it) } }
                 "ok"
             } catch (e: Exception) {
@@ -506,16 +506,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        /** Открывает ссылку (страницу релиза) во внешнем браузере. */
+        /** Opens a link (the release page) in an external browser. */
         @JavascriptInterface
         fun openUrl(url: String) {
             if (!url.startsWith("https://github.com/")) return
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
 
-        /** sourcePath — файл, который сервер уже записал в приватное
-         * хранилище (см. getDataDir). suggestedName — имя по умолчанию
-         * в диалоге "Сохранить как". */
+        /** sourcePath — a file that the server has already written into private
+         * storage (see getDataDir). suggestedName — the default name
+         * in the "Save as" dialog. */
         @JavascriptInterface
         fun exportRbxlFile(sourcePath: String, suggestedName: String) {
             pendingExportSourcePath = sourcePath
@@ -527,12 +527,12 @@ class MainActivity : AppCompatActivity() {
             saveFileLauncher.launch(intent)
         }
 
-        /** Открывает экран логина roblox.com. Результат (успех/неудача)
-         * приходит на страницу через window.onRobloxAuthUpdated(bool). */
-        /** Открывает системный пикер для выбора .zip с аватаром (тот, что
-         * скачан ранее через "Скачать .zip", или любой другой с таким же
-         * набором файлов внутри: avatar.obj, avatar.mtl, текстуры).
-         * Результат приходит в window.onAvatarFilePicked(path|null). */
+        /** Opens the roblox.com login screen. The result (success/failure)
+         * arrives at the page via window.onRobloxAuthUpdated(bool). */
+        /** Opens the system picker to choose a .zip with an avatar (the one
+         * downloaded earlier via "Download .zip", or any other with the same
+         * set of files inside: avatar.obj, avatar.mtl, textures).
+         * The result arrives in window.onAvatarFilePicked(path|null). */
         @JavascriptInterface
         fun pickAvatarZipFile() {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -548,9 +548,9 @@ class MainActivity : AppCompatActivity() {
             robloxLoginLauncher.launch(Intent(this@MainActivity, RobloxLoginActivity::class.java))
         }
 
-        /** true, если ранее уже успешно логинились и кука ещё сохранена
-         * локально (её актуальность на сервере Roblox не проверяется —
-         * это делает сам Python при первом запросе). */
+        /** true if we have already logged in successfully before and the cookie is still stored
+         * locally (its validity on the Roblox server isn't checked —
+         * the Python side does that itself on the first request). */
         @JavascriptInterface
         fun isRobloxLoggedIn(): Boolean = robloxAuthFile.exists()
 

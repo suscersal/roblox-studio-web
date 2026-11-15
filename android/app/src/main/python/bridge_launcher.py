@@ -1,8 +1,8 @@
 """
-Вызывается из MainActivity.kt. Запускает Flask-приложение из app.py прямо
-в этом процессе, на 127.0.0.1.
+Called from MainActivity.kt. Starts the Flask app from app.py right
+in this process, on 127.0.0.1.
 
-start_server() блокирует поток — Kotlin запускает её в отдельном Thread.
+start_server() blocks the thread — Kotlin runs it in a separate Thread.
 """
 
 import os
@@ -12,63 +12,63 @@ import sys
 def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     os.environ.setdefault("FLASK_DEBUG", "False")
 
-    # ВАЖНО: этот модуль (bridge_launcher.py) сам НИКОГДА не проходит через
-    # OTA-хотфикс — Kotlin-сторона качает только
-    # app.py/rbxl_parser.py/index.html/style.css/script.js (см. OtaUpdater.kt), а bridge_launcher.py грузится
-    # исключительно из того, что зашито в APK при сборке. Поэтому его
-    # собственный __file__ в момент вызова этой функции — это всегда
-    # ПОСТОЯННЫЙ (baked-in) путь внутри APK, и именно рядом с ним лежат
-    # icons/ и icons.txt, никогда не подменяемые хотфиксом. Запоминаем
-    # этот путь ДО того, как ниже подменим sys.path/cwd на hotpatch_dir.
+    # IMPORTANT: this module (bridge_launcher.py) itself NEVER goes through the
+    # OTA hotfix — the Kotlin side downloads only
+    # app.py/rbxl_parser.py/index.html/style.css/script.js (see OtaUpdater.kt), while bridge_launcher.py is loaded
+    # exclusively from what is baked into the APK at build time. Therefore its
+    # own __file__ at the moment this function is called is always the
+    # PERMANENT (baked-in) path inside the APK, and right next to it lie
+    # icons/ and icons.txt, which a hotfix never replaces. We remember
+    # this path BEFORE below we swap sys.path/cwd for hotpatch_dir.
     baked_dir = os.path.dirname(os.path.abspath(__file__))
     os.environ["RSW_ICONS_DIR"] = baked_dir
 
-    # Если Kotlin-сторона скачала обновлённые app.py/index.html/style.css/script.js (см.
-    # MainActivity.checkForOtaUpdate -> OtaUpdater), они лежат в
-    # hotpatch_dir. Подсовываем эту папку В НАЧАЛО sys.path, чтобы
-    # `import app` нашёл именно скачанную версию, а не ту, что зашита в APK
-    # при сборке. icons.txt и icons/ в hotpatch_dir НЕ приезжают (см.
-    # комментарий в OtaUpdater.kt) — раньше это молча гасило все иконки в
-    # Explorer/Properties, т.к. app.py вычислял ICONS_DIR относительно
-    # своего __file__ (который после этой подмены указывает в hotpatch_dir).
-    # Явный RSW_ICONS_DIR выше чинит это — app.py теперь всегда берёт
-    # иконки из baked_dir, даже когда сам код запущен из hotpatch_dir.
+    # If the Kotlin side has downloaded updated app.py/index.html/style.css/script.js (see
+    # MainActivity.checkForOtaUpdate -> OtaUpdater), they lie in
+    # hotpatch_dir. We put this folder AT THE START of sys.path so that
+    # `import app` finds exactly the downloaded version, not the one baked into the APK
+    # at build time. icons.txt and icons/ do NOT come to hotpatch_dir (see the
+    # comment in OtaUpdater.kt) — this used to silently turn off all icons in
+    # Explorer/Properties, since app.py computed ICONS_DIR relative to
+    # its own __file__ (which after this swap points into hotpatch_dir).
+    # The explicit RSW_ICONS_DIR above fixes this — app.py now always takes
+    # icons from baked_dir, even when the code itself runs from hotpatch_dir.
     if hotpatch_dir and os.path.isdir(hotpatch_dir):
         sys.path.insert(0, hotpatch_dir)
         here = hotpatch_dir
     else:
         here = baked_dir
 
-    # app.py открывает index.html/icons.txt по ОТНОСИТЕЛЬНОМУ пути
-    # (open("index.html", ...)) — это работало локально только потому,
-    # что вы запускали `python app.py` из той же папки. Chaquopy стартует
-    # процесс с другим текущим каталогом, поэтому переключаемся в папку,
-    # где реально лежат app.py/index.html/style.css/script.js/icons.txt (обычная сборка) или в
-    # hotpatch_dir (после OTA-обновления) — иначе open("index.html", ...)
-    # найдёт старую версию файла из первой попавшейся папки на sys.path.
+    # app.py opens index.html/icons.txt by a RELATIVE path
+    # (open("index.html", ...)) — this worked locally only because
+    # you ran `python app.py` from the same folder. Chaquopy starts the
+    # process with a different current directory, so we switch to the folder
+    # where app.py/index.html/style.css/script.js/icons.txt really lie (an ordinary build) or to
+    # hotpatch_dir (after an OTA update) — otherwise open("index.html", ...)
+    # would find an old version of the file from the first folder on sys.path.
     os.chdir(here)
 
-    # data_dir — приватная папка приложения (filesDir), куда Kotlin-сторона
-    # копирует .rbxl-файлы, выбранные пользователем через системный пикер
-    # (см. MainActivity.importRbxlFile). Прокидываем как переменную
-    # окружения — app.py может ориентироваться на неё для /api/browse,
-    # если вы решите ограничить обзор файлов только этой папкой, а не
-    # Path.home() (на Android 10+ произвольный обзор ФС всё равно не
-    # сработает из-за scoped storage).
+    # data_dir — the app's private folder (filesDir), where the Kotlin side
+    # copies the .rbxl files chosen by the user through the system picker
+    # (see MainActivity.importRbxlFile). We pass it as an environment
+    # variable — app.py can rely on it for /api/browse,
+    # if you decide to limit file browsing to only this folder rather than
+    # Path.home() (on Android 10+ arbitrary file system browsing won't work
+    # anyway because of scoped storage).
     if data_dir:
         os.environ["RSW_DATA_DIR"] = data_dir
 
-    # app.py содержит `_ensure('flask')` и подобные проверки — они
-    # безвредны при импорте, т.к. flask уже установлен через chaquopy pip.
-    import app as rsw_app  # это ваш существующий app.py
+    # app.py contains `_ensure('flask')` and similar checks — they are
+    # harmless on import, since flask is already installed via chaquopy pip.
+    import app as rsw_app  # this is your existing app.py
 
-    # Подстраховка от SystemExit(1) из werkzeug при "Address already in
-    # use": пробуем запрошенный порт, а если занят — перебираем следующие
-    # 20. Реальный порт нигде дополнительно не публикуется — Kotlin-сторона
-    # всё равно ждёт именно исходный PORT в waitForServerThenLoad(), так
-    # что это чисто аварийный fallback для случая внешнего конфликта (не
-    # спасёт от повторного вызова start_server в этом же процессе — тот
-    # случай уже прикрыт флагом serverStarted в MainActivity.kt).
+    # A safety net against SystemExit(1) from werkzeug on "Address already in
+    # use": we try the requested port, and if it is taken — we try the next
+    # 20. The real port isn't published anywhere else — the Kotlin side
+    # still waits for the original PORT in waitForServerThenLoad(), so
+    # this is purely an emergency fallback for the case of an external conflict (it won't
+    # save from a repeated start_server call in this same process — that
+    # case is already covered by the serverStarted flag in MainActivity.kt).
     import socket as _socket
 
     def _port_free(p):
@@ -88,12 +88,12 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
                 actual_port = candidate
                 break
 
-    # Публикуем реальный порт для Kotlin-стороны: waitForServerThenLoad()
-    # раньше был жёстко привязан к исходному PORT и никогда не узнавал,
-    # что сервер фактически поднялся на port+1 (см. комментарий выше) —
-    # из-за этого "через раз" ждал подключения не туда и молча падал по
-    # таймауту, сколько бы попыток ни давали. Файл кладём в data_dir
-    # (filesDir), он читается в MainActivity.waitForServerThenLoad().
+    # We publish the real port for the Kotlin side: waitForServerThenLoad()
+    # used to be rigidly tied to the original PORT and never learned
+    # that the server had actually come up on port+1 (see the comment above) —
+    # because of this it «every other time» waited for a connection in the wrong place and silently failed
+    # on timeout, however many attempts were given. We put the file in data_dir
+    # (filesDir), it is read in MainActivity.waitForServerThenLoad().
     if data_dir:
         try:
             with open(os.path.join(data_dir, "server_port.txt"), "w") as f:
@@ -102,9 +102,9 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
             pass
 
     rsw_app.flask_app.run(
-        # 0.0.0.0, как в десктопной версии: иначе комната (collab) недоступна
-        # другим устройствам. Чувствительные эндпоинты в app.py и так
-        # принимают только loopback, а запись гостей требует X-Collab-Token.
+        # 0.0.0.0, as in the desktop version: otherwise the room (collab) is unavailable to
+        # other devices. Sensitive endpoints in app.py accept only loopback anyway,
+        # and guest writes require X-Collab-Token.
         host="0.0.0.0",
         port=actual_port,
         debug=False,

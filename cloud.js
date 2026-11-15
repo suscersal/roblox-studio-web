@@ -1,7 +1,7 @@
-/* Open Cloud из редактора: «☁💾» — быстрое сохранение в Roblox (versionType=Saved), «🧰» — Toolbox
-   (поиск по Creator Store и вставка моделей в сцену), «⚙» — настройки experience (cloud/v2/universes).
-   Самодостаточный файл по образцу collab.js/assistant.js: сам добавляет кнопки в верхнюю панель;
-   серверная часть — блок /api/cloud/* в app.py. Ключ API хранится на сервере («Аккаунт»), сюда не приходит. */
+/* Open Cloud from the editor: «☁💾» — quick save to Roblox (versionType=Saved), «🧰» — Toolbox
+   (Creator Store search and inserting models into the scene), «⚙» — experience settings (cloud/v2/universes).
+   A self-contained file modelled on collab.js/assistant.js: it adds its own buttons to the top bar;
+   the server side is the /api/cloud/* block in app.py. The API key is stored on the server («Account») and never reaches this file. */
 (function () {
     'use strict';
 
@@ -100,8 +100,8 @@
         },
     };
     function lang() {
-        try { if (typeof LANG !== 'undefined' && DICT[LANG]) return LANG; } catch (e) { /* LANG ещё не объявлен */ }
-        return /^ru/i.test(navigator.language || '') ? 'ru' : 'en';
+        try { if (typeof LANG !== 'undefined' && DICT[LANG]) return LANG; } catch (e) { /* LANG is not declared yet */ }
+        return 'en';
     }
     function T(k, v) {
         let s = (DICT[lang()] || DICT.en)[k] || DICT.en[k] || k;
@@ -124,7 +124,7 @@
     const origin = () => window._rbxOrigin || null;
     const viaText = v => v === 'api-key' ? T('via_api') : v === 'cookie' ? T('via_cookie') : '';
 
-    // ---------- быстрое сохранение в Roblox (Saved) ----------
+    // ---------- quick save to Roblox (Saved) ----------
     async function quickSave() {
         const o = origin();
         if (!o || !o.universeId || !o.placeId) {
@@ -144,7 +144,7 @@
     const TB = { cat: 'Model', q: '', next: '' };
     const CATS = ['Model', 'Audio', 'Decal', 'Plugin', 'MeshPart', 'Video', 'FontFamily'];
 
-    // Форма ответа toolbox-service не зафиксирована в доках — достаём поля защитно.
+    // The toolbox-service response shape is not documented — read the fields defensively.
     function pickItems(data) {
         if (!data || typeof data !== 'object') return [];
         if (Array.isArray(data)) return data;
@@ -237,7 +237,7 @@
         tbSearch(false);
     }
 
-    // ---------- настройки experience ----------
+    // ---------- experience settings ----------
     const FLAGS = [['voiceChatEnabled', 'ex_voice'], ['desktopEnabled', 'ex_desktop'], ['mobileEnabled', 'ex_mobile'],
         ['tabletEnabled', 'ex_tablet'], ['consoleEnabled', 'ex_console'], ['vrEnabled', 'ex_vr']];
 
@@ -277,14 +277,14 @@
         exLoaded = {};
         $('cx-name').value = exLoaded.displayName = u.displayName || '';
         $('cx-desc').value = exLoaded.description = u.description || '';
-        // доступ: если источник его не отдал, показываем «—» и не трогаем, пока пользователь не выберет сам
+        // access: if the source did not return it, show «—» and leave it alone until the user picks a value
         const vis = u.visibility === 'PRIVATE' ? 'PRIVATE' : u.visibility === 'PUBLIC' ? 'PUBLIC' : '';
         const sel = $('cx-vis');
         const blank = sel.querySelector('option[value=""]');
         if (!vis && !blank) sel.insertAdjacentHTML('afterbegin', '<option value="">—</option>');
         if (vis && blank) blank.remove();
         sel.value = exLoaded.visibility = vis;
-        // флаги и цена, которых источник не знает (cookie-путь), отключаем — иначе «false» ушло бы как изменение
+        // disable flags and prices the source does not know about (cookie path) — otherwise «false» would be sent as a change
         FLAGS.forEach(f => {
             const el = $('cx-' + f[0]);
             const known = typeof u[f[0]] === 'boolean';
@@ -301,7 +301,7 @@
     }
     async function exApply() {
         const id = $('cx-uid').value.trim();
-        // отправляем только то, что пользователь изменил: так не затираются поля, которые мы не смогли прочитать
+        // send only what the user changed: this way fields we could not read are not overwritten
         const now = { displayName: $('cx-name').value, description: $('cx-desc').value, visibility: $('cx-vis').value };
         FLAGS.forEach(f => { const el = $('cx-' + f[0]); now[f[0]] = el.disabled ? undefined : el.checked; });
         const ps = $('cx-ps');
@@ -333,7 +333,7 @@
         if (/^\d+$/.test($('cx-uid').value)) exLoad();
     }
 
-    // ---------- кнопки в верхней панели (после «☁ Публикация») ----------
+    // ---------- buttons in the top bar (after «☁ Publish») ----------
     const bar = document.getElementById('toolbar-top');
     if (bar) {
         const mk = (label, title, fn, cls) => {

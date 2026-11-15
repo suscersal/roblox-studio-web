@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Нужно даже для соединений на 127.0.0.1 — Android требует INTERNET
-         для любого сокета, включая loopback. -->
+    <!-- Needed even for connections to 127.0.0.1 — Android requires INTERNET
+         for any socket, including loopback. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Для чтения выбранных пользователем .rbxl-файлов через системный
-         пикер (SAF) разрешение не требуется. Это — только если решите
-         добавить обход произвольных папок как в /api/browse. -->
+    <!-- Reading .rbxl files chosen by the user through the system
+         picker (SAF) needs no permission. This is only if you decide to
+         add browsing of arbitrary folders as in /api/browse. -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
@@ -18,8 +18,8 @@
     android:networkSecurityConfig="@xml/network_security_config"
     android:usesCleartextTraffic="true"
     android:theme="@style/Theme.RSW">
-        <!-- android:icon не задан, чтобы не тащить бинарные PNG в шаблон —
-             добавьте свой @mipmap/ic_launcher и пропишите здесь при желании. -->
+        <!-- android:icon isn't set, so as not to drag binary PNGs into the template —
+             add your own @mipmap/ic_launcher and set it here if you wish. -->
 
         <activity
             android:name=".MainActivity"
@@ -32,8 +32,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- «Открыть с помощью» для .rbxl из файлового менеджера. pathPattern в Android не умеет «любое число точек»,
-                 поэтому шаблонов несколько (имя с точками внутри). mimeType */* — у менеджеров он почти всегда разный. -->
+            <!-- «Open with» for .rbxl from a file manager. Android's pathPattern can't do «any number of dots»,
+                 so there are several patterns (a name with dots inside). mimeType */* — file managers almost always differ in it. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -48,9 +48,9 @@
                 <data android:pathPattern=".*\\..*\\..*\\..*\\.rbxl" />
             </intent-filter>
 
-            <!-- Запасной вариант без проверки пути: Telegram и др. открывают неизвестные файлы как text/plain, а MIUI/HyperOS
-                 «Проводник» — как application/octet-stream, и путь у content://-Uri не всегда оканчивается на .rbxl.
-                 Побочный эффект: приложение предлагается и для других текстовых/неопознанных файлов. -->
+            <!-- A fallback without a path check: Telegram and others open unknown files as text/plain, while MIUI/HyperOS
+                 «Explorer» uses application/octet-stream, and a content:// Uri's path doesn't always end with .rbxl.
+                 Side effect: the app is offered for other text/unrecognized files too. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -62,9 +62,9 @@
             </intent-filter>
         </activity>
 
-        <!-- Отдельный экран для входа в аккаунт Roblox через обычную
-             веб-форму (WebView) — см. RobloxLoginActivity.kt. Не exported:
-             запускается только изнутри приложения. -->
+        <!-- A separate screen for signing in to a Roblox account through an ordinary
+             web form (WebView) — see RobloxLoginActivity.kt. Not exported:
+             it is launched only from inside the app. -->
         <activity
             android:name=".RobloxLoginActivity"
             android:exported="false"

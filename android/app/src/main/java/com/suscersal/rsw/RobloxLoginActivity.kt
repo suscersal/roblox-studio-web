@@ -10,17 +10,17 @@ import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 
 /**
- * Показывает обычную страницу логина roblox.com в WebView (тот же
- * системный WebView, что и основной экран — отдельный от него, чтобы не
- * подмешивать куки Roblox в куки локального сервера 127.0.0.1).
+ * Shows the ordinary roblox.com login page in a WebView (the same
+ * system WebView as the main screen — but separate from it, so as not to
+ * mix Roblox cookies into the local server's 127.0.0.1 cookies).
  *
- * Как только в CookieManager для домена .roblox.com появляется валидный
- * .ROBLOSECURITY (он выставляется только после успешного входа), забираем
- * его и закрываем экран с RESULT_OK, вернув куку через extra.
+ * As soon as a valid .ROBLOSECURITY appears in the CookieManager for the .roblox.com domain
+ * (it is set only after a successful sign-in), we take
+ * it and close the screen with RESULT_OK, returning the cookie via an extra.
  *
- * Kotlin-сторона больше нигде эту куку не использует — просто сохраняет
- * в приватный файл приложения, откуда её читает Python (app.py) для
- * авторизованных запросов к Roblox API.
+ * The Kotlin side uses this cookie nowhere else — it just saves it
+ * into a private app file, from which Python (app.py) reads it for
+ * authorized requests to the Roblox API.
  */
 class RobloxLoginActivity : AppCompatActivity() {
 
@@ -28,19 +28,19 @@ class RobloxLoginActivity : AppCompatActivity() {
         const val EXTRA_COOKIE = "roblox_cookie"
         private const val LOGIN_URL = "https://www.roblox.com/login"
         private const val COOKIE_DOMAIN = "https://www.roblox.com"
-        // Проверяем куки не после каждой отдельной micro-навигации внутри
-        // SPA-логина, а по таймеру — так надёжнее ловим момент, когда
-        // сервер Roblox реально проставил .ROBLOSECURITY после логина.
+        // We check cookies not after every single micro-navigation inside the
+        // login SPA, but on a timer — this catches more reliably the moment when the
+        // Roblox server really set .ROBLOSECURITY after login.
         private const val POLL_INTERVAL_MS = 700L
     }
 
     private lateinit var webView: WebView
     private val handler = Handler(Looper.getMainLooper())
     private var finished = false
-    // true, как только WebView хоть раз показал именно /login — нужно,
-    // чтобы отличать "мы ещё не покидали страницу входа" (кука может уже
-    // быть, но это гостевая/техническая) от "юзер реально залогинился и
-    // Roblox увёл его на другую страницу".
+    // true as soon as the WebView has shown /login at least once — needed
+    // to tell "we haven't left the sign-in page yet" (the cookie may already
+    // exist, but it's a guest/technical one) from "the user really logged in and
+    // Roblox moved them to another page".
     private var sawLoginPage = false
 
     private val pollCookies = object : Runnable {
@@ -57,11 +57,11 @@ class RobloxLoginActivity : AppCompatActivity() {
         }
     }
 
-    /** true, если текущий URL WebView больше не страница логина —
-     * значит форма отправлена и Roblox увёл нас дальше (домой/на
-     * подтверждение и т.п.). Именно ЭТОТ момент, а не факт наличия
-     * .ROBLOSECURITY, надёжно говорит о реальном входе: гостевая версия
-     * куки присутствует уже на самой странице /login, до ввода пароля. */
+    /** true if the WebView's current URL is no longer the login page —
+     * meaning the form was submitted and Roblox took us further (home/to
+     * confirmation, etc.). Exactly THIS moment, not the mere presence of
+     * .ROBLOSECURITY, reliably indicates a real sign-in: the guest version of the
+     * cookie is present already on the /login page itself, before the password is entered. */
     private fun loggedInByUrl(): Boolean {
         val url = webView.url ?: return false
         return !url.contains("/login", ignoreCase = true) &&
@@ -74,31 +74,31 @@ class RobloxLoginActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_roblox_login)
 
-        // Отдельная WebView для логина не должна делить куки с обычным
-        // просмотром сайтов пользователя вне приложения — но обязана
-        // делить их между собственными запросами (JS fetch на самой
-        // странице логина использует тот же CookieManager). Это поведение
-        // по умолчанию для android.webkit.CookieManager — он один на
-        // процесс, поэтому явных действий не требуется.
+        // A separate WebView for login mustn't share cookies with the user's ordinary
+        // browsing outside the app — but must
+        // share them between its own requests (a JS fetch on the
+        // login page itself uses the same CookieManager). This is the default behavior
+        // for android.webkit.CookieManager — there is one per
+        // process, so no explicit action is needed.
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
 
         webView = findViewById(R.id.loginWebView)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        // Без этих двух флагов WebView рендерит страницу в фиксированном
-        // "desktop" viewport (~980px) и потом сжимает её под экран —
-        // отсюда эффект "всё мелкое/масштабировано не под реальное
-        // разрешение". useWideViewPort включает уважение к <meta
-        // viewport>, loadWithOverviewMode подгоняет начальный масштаб под
-        // ширину экрана.
+        // Without these two flags the WebView renders the page in a fixed
+        // "desktop" viewport (~980px) and then shrinks it to the screen —
+        // hence the effect "everything is small/scaled not for the real
+        // resolution". useWideViewPort makes it honor <meta
+        // viewport>, loadWithOverviewMode fits the initial scale to
+        // the screen width.
         webView.settings.useWideViewPort = true
         webView.settings.loadWithOverviewMode = true
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
-        // Roblox отдаёt урезанную/иначе свёрстанную страницу под desktop
-        // User-Agent — подменяем на мобильный Chrome, чтобы получить
-        // нормальную мобильную вёрстку логина.
+        // Roblox serves a trimmed/differently laid out page for a desktop
+        // User-Agent — we swap in a mobile Chrome one to get
+        // a normal mobile login layout.
         webView.settings.userAgentString =
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
@@ -128,8 +128,8 @@ class RobloxLoginActivity : AppCompatActivity() {
             .map { it.trim() }
             .firstOrNull { it.startsWith(".ROBLOSECURITY=") }
             ?: return null
-        // Кука валидна только если значение непустое и это не техническая
-        // "гостевая" версия — на всякий случай проверяем минимальную длину.
+        // A cookie is valid only if the value is non-empty and it isn't the technical
+        // "guest" version — just in case we check a minimum length.
         val value = pair.substringAfter("=")
         return if (value.length > 20) pair else null
     }

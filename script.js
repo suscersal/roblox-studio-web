@@ -1,7 +1,7 @@
-        // ============ ИНСТРУМЕНТЫ ТРАНСФОРМАЦИИ: Move / Rotate / Scale / Pivot ============
-        // Как в Roblox Studio: стрелки (перемещение по осям), кольца (поворот), ручки граней (размер), режим Pivot
-        // (правка PivotOffset детали / WorldPivot модели), World/Local и привязка к шагу. Во время жеста меши
-        // двигаются живьём (без перезагрузки сцены), а по отпусканию уходит ОДИН запрос /api/transform.
+        // ============ TRANSFORM TOOLS: Move / Rotate / Scale / Pivot ============
+        // As in Roblox Studio: arrows (move along axes), rings (rotate), face handles (size), Pivot mode
+        // (editing a part's PivotOffset / a model's WorldPivot), World/Local and step snapping. During a gesture the meshes
+        // move live (without reloading the scene), and on release ONE /api/transform request is sent.
         const _gzT = (ru, en) => (LANG === 'ru' ? ru : en);
         const GZ = {
             tool: 'select', pivotMode: false, local: false, snap: true, centered: false,
@@ -38,7 +38,7 @@
                 m.renderOrder = 1000; m.frustumCulled = false;
                 grp.add(m); return m;
             };
-            // --- стрелки перемещения (ось Y по умолчанию -> поворачиваем на нужную) ---
+            // --- move arrows (Y axis by default -> rotate to the needed one) ---
             const mvG = new THREE.Group(), rtG = new THREE.Group();
             for (let i = 0; i < 3; i++) {
                 const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axes[i]);
@@ -50,7 +50,7 @@
                 hit.position.set(0, 0.58, 0); hit.userData.h = { type: 'move', axis: i };
                 g.add(hit); GZ.hitsMove.push(hit);
                 mvG.add(g);
-                // --- кольцо поворота (тор лежит в плоскости XY, ось Z) ---
+                // --- rotation ring (the torus lies in the XY plane, Z axis) ---
                 const qr = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), axes[i]);
                 const rg = new THREE.Group(); rg.quaternion.copy(qr);
                 addVis(rg, new THREE.TorusGeometry(0.9, 0.016, 6, 72), mk(_GZ_COLORS[i]));
@@ -63,11 +63,11 @@
             GZ.mvG = mvG; GZ.rtG = rtG;
             scene.add(root);
             GZ.root = root;
-            // --- метка pivot ---
+            // --- pivot marker ---
             const pm = new THREE.Group(); pm.visible = false;
             addVis(pm, new THREE.SphereGeometry(0.07, 12, 8), mk(0xfacc15, 1));
             GZ.pivotMark = pm; root.add(pm);
-            // --- ручки размера: 6 граней + центр (позиции задаются каждый кадр) ---
+            // --- size handles: 6 faces + center (positions are set every frame) ---
             const scl = new THREE.Group(); scl.visible = false;
             GZ.sclFaces = [];
             for (let i = 0; i < 3; i++) for (const sg of [1, -1]) {
@@ -137,7 +137,7 @@
             mkStep('scale', '⤢', _gzT('Шаг размера, стад', 'Scale step, studs'));
             bar.appendChild(steps);
             vp.appendChild(bar);
-            // Жесты на ручках — в capture-фазе вьюпорта, раньше орбиты камеры и выбора по тапу.
+            // Handle gestures run in the viewport's capture phase, before camera orbit and tap selection.
             vp.addEventListener('mousedown', gzOnMouseDown, true);
             vp.addEventListener('touchstart', gzOnTouchStart, { capture: true, passive: false });
             window.addEventListener('keydown', gzOnKey);
@@ -161,7 +161,7 @@
             if (t === 'select' || t === 'scale') GZ.pivotMode = false;
         }
 
-        // ---- выбор и данные ----
+        // ---- selection and data ----
         function gzTopRefs() {
             const sel = new Set(selectedRefs);
             return [...sel].filter(r => {
@@ -178,7 +178,7 @@
             }
             return null;
         }
-        // Детали выделения, которые сейчас есть в сцене (потомки моделей тоже).
+        // Selected parts that currently exist in the scene (descendants of models too).
         function gzParts() {
             const out = [];
             const walk = (n) => {
@@ -223,7 +223,7 @@
             GZ.anchor = { p: new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2), q: main.pivot ? gzM3Quat(main.pivot.r) : new THREE.Quaternion() };
         }
 
-        // ---- покадровое обновление (из animate) ----
+        // ---- per-frame update (from animate) ----
         function gzTick() {
             if (!GZ.ui) gzBuildUI();
             if (typeof THREE === 'undefined' || !scene || !camera) return;
@@ -265,7 +265,7 @@
             }
         }
 
-        // ---- ввод ----
+        // ---- input ----
         const _gzRC = { rc: null, v: null };
         function gzRay(cx, cy) {
             const vp = document.getElementById('viewport');
@@ -316,10 +316,10 @@
             const find = (ev) => Array.from(ev.touches).find(t => t.identifier === id);
             const tm = (ev) => { const t = find(ev); if (!t) return; ev.preventDefault(); ev.stopPropagation(); gzUpdate(t.clientX, t.clientY); };
             const te = (ev) => {
-                if (find(ev)) return;     // палец ещё на экране (отпустили другой)
+                if (find(ev)) return;     // a finger is still on the screen (the other one was lifted)
                 ev.stopPropagation();
                 window.removeEventListener('touchmove', tm, true); window.removeEventListener('touchend', te, true); window.removeEventListener('touchcancel', te, true);
-                _lastTouchEndT = performance.now();    // не считать хвост жеста тапом выбора
+                _lastTouchEndT = performance.now();    // don't treat the tail of the gesture as a selection tap
                 gzEnd();
             };
             window.addEventListener('touchmove', tm, { capture: true, passive: false });
@@ -429,7 +429,7 @@
             if (window._selBox) for (const b of window._selBox.children) { try { b.update(); } catch (e) { emuWarn('swallow:gz-selbox', 'selbox: ' + _errText(e)); } }
         }
 
-        // ---- коммит ----
+        // ---- commit ----
         const _gzNear = (v) => Math.abs(v) < 1e-9;
         async function gzEnd() {
             const d = GZ.drag;
@@ -474,7 +474,7 @@
                 const o2 = d.o.clone().add(cur.T);
                 inv = tops.map(ref => ({ ref, delta: { r: Rt, t: [-tl[0], -tl[1], -tl[2]], pivot: o2.toArray(), k: 1 / cur.k } }));
                 needReload = cur.k !== 1;
-                // кэш поз мешей — для следующего жеста без перезагрузки сцены
+                // cache of mesh poses — for the next gesture without reloading the scene
                 if (!needReload) {
                     for (const p of d.parts) {
                         const D = p.mesh.matrix.clone().multiply(p.M0.clone().invert());
@@ -493,7 +493,7 @@
             gzSyncUI();
             if (needReload) await reloadScene();
             highlightSelected(selectedRef);
-            GZ.sig += '*';              // принудительно перечитать pivot/габариты
+            GZ.sig += '*';              // force re-reading the pivot/bounds
             gzRefreshPanel();
         }
         async function gzPost(ops) {
@@ -542,11 +542,11 @@
             else if (k === 'y' || (k === 'z' && e.shiftKey)) { if (GZ.redo.length) { e.preventDefault(); gzRedo(); } }
         }
 
-        // ============ МОБИЛЬНЫЙ ИНТЕРФЕЙС: два режима — «Сцена» и «Панели» ============
-        // Десктопная раскладка (3 колонки + Output) на телефоне оставляла 3D-вьюпорту ~17% экрана, а Properties
-        // уезжали за край. На телефоне (touch + короткая сторона экрана ≤ 700px) включается класс body.m-ui:
-        // «Сцена» — вьюпорт на весь экран, «Панели» — Объекты / Свойства / Скрипт / Вывод на весь экран.
-        // Все существующие кнопки и обработчики те же, меняется только раскладка. ?mobile=1 / ?mobile=0 — принудительно.
+        // ============ MOBILE UI: two modes — «Scene» and «Panels» ============
+        // The desktop layout (3 columns + Output) left the 3D viewport ~17% of the screen on a phone, and Properties
+        // slid off the edge. On a phone (touch + short screen side ≤ 700px) the body.m-ui class is enabled:
+        // «Scene» — the viewport fullscreen, «Panels» — Objects / Properties / Script / Output fullscreen.
+        // All existing buttons and handlers are the same, only the layout changes. ?mobile=1 / ?mobile=0 — force it.
         const MUI = { on: false, mode: 'scene', panel: 'explorer', fullH: 0, fullW: 0, built: false, lang: '' };
         function muiIsPhone() {
             const q = new URLSearchParams(location.search).get('mobile');
@@ -559,13 +559,13 @@
             MUI.built = true;
             const tb = document.getElementById('toolbar-top');
             const main = document.getElementById('main');
-            // ☰ — раскрывает все остальные кнопки верхней панели
+            // ☰ — expands all the other top bar buttons
             const menu = document.createElement('button');
             menu.id = 'm-menu-btn'; menu.className = 'm-keep'; menu.textContent = '☰';
             menu.addEventListener('click', (e) => { e.stopPropagation(); document.body.classList.toggle('m-menu-open'); });
             tb.insertBefore(menu, tb.firstChild);
             for (const el of [document.getElementById('play-btn'), tb.querySelector('button[onclick="saveFile()"]')]) if (el) el.classList.add('m-keep');
-            // нажатие любой кнопки в раскрытом меню закрывает его (кроме «Файл» — у неё свой выпадающий список)
+            // pressing any button in the expanded menu closes it (except «File» — it has its own dropdown)
             tb.addEventListener('click', (e) => {
                 const b = e.target.closest('button');
                 if (!b || b.id === 'm-menu-btn' || b.id === 'file-menu-btn') return;
@@ -574,7 +574,7 @@
             document.addEventListener('click', (e) => {
                 if (document.body.classList.contains('m-menu-open') && !e.target.closest('#toolbar-top, #file-menu')) document.body.classList.remove('m-menu-open');
             }, true);
-            // подвкладки режима «Панели»
+            // sub-tabs of the «Panels» mode
             const sub = document.createElement('div');
             sub.id = 'm-subtabs';
             for (const p of ['explorer', 'props', 'script', 'output']) {
@@ -583,7 +583,7 @@
                 sub.appendChild(b);
             }
             main.appendChild(sub);
-            // нижняя навигация: Сцена / Панели
+            // bottom navigation: Scene / Panels
             const nav = document.createElement('div');
             nav.id = 'm-nav';
             for (const m of ['scene', 'panels']) {
@@ -592,7 +592,7 @@
                 nav.appendChild(b);
             }
             document.body.appendChild(nav);
-            // в Play панели недоступны — отдельная кнопка показывает/прячет плавающий Output
+            // panels are unavailable in Play — a separate button shows/hides the floating Output
             const out = document.createElement('button');
             out.id = 'm-out-toggle';
             out.addEventListener('click', () => document.body.classList.toggle('m-out-open'));
@@ -623,20 +623,20 @@
             document.body.classList.remove('m-menu-open');
             muiApply();
             if (m === 'panels') muiSetPanel(MUI.panel);
-            else window.dispatchEvent(new Event('resize'));        // вьюпорт снова виден — пусть пересчитает размер канваса
+            else window.dispatchEvent(new Event('resize'));        // the viewport is visible again — let it recompute the canvas size
             muiMeasure();
         }
         function muiSetPanel(p) {
             MUI.panel = p;
-            if (p === 'props' || p === 'script') switchTab(p);     // сам rightpanel один — показывает нужную из двух вкладок
+            if (p === 'props' || p === 'script') switchTab(p);     // rightpanel itself is one — it shows the needed one of the two tabs
             muiApply();
             if (p === 'script') refreshCM();
             if (p === 'output') renderLuaOutput();
             muiMeasure();
         }
-        // Клавиатура: раньше всё «съезжало» — браузер панорамирует визуальную область, а fixed/100dvh-раскладка остаётся.
-        // Тело страницы привязываем к visualViewport: в «Панелях» оно ужимается до видимой области (поля свойств/скрипт
-        // остаются над клавиатурой), в «Сцене»/Play высота не меняется (клавиатура просто накрывает низ, 3D не сплющивается).
+        // Keyboard: everything used to «shift» — the browser pans the visual viewport while the fixed/100dvh layout stays.
+        // Bind the page body to visualViewport: in «Panels» it shrinks to the visible area (property/script fields
+        // stay above the keyboard), in «Scene»/Play the height doesn't change (the keyboard just covers the bottom, 3D isn't squashed).
         function muiMeasure() {
             if (!MUI.on) return;
             const vv = window.visualViewport;
@@ -661,24 +661,24 @@
             if (!MUI.on) return;
             const was = document.body.classList.contains('m-playing');
             document.body.classList.toggle('m-playing', !!isPlaying);
-            // панели скрылись/вернулись — вьюпорт изменил размер без события resize: пересчитать канвас и GUI
+            // panels hid/came back — the viewport changed size without a resize event: recompute the canvas and the GUI
             if (was !== !!isPlaying) requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
             if (isPlaying && MUI.mode !== 'scene') muiSetMode('scene');
             if (MUI.lang !== LANG) muiRelabel();
         }
-        // switchTab (в т.ч. из selectRef(скрипт)) запоминает выбранную подвкладку и в режиме «Панели» переключает её
+        // switchTab (including from selectRef(script)) remembers the selected sub-tab and switches it in «Panels» mode
         const _muiSwitchTab = switchTab;
         switchTab = function (n) {
             _muiSwitchTab.apply(this, arguments);
             if (MUI.on && (n === 'props' || n === 'script')) { MUI.panel = n; if (MUI.mode === 'panels') muiApply(); }
         };
-        // Запуск — после выполнения всего скрипта (здесь ниже по файлу ещё не объявлены LANG и другие const)
+        // Start — after the whole script has run (LANG and other consts are not declared yet further down the file)
         setTimeout(() => {
             muiDetect();
             window.addEventListener('resize', muiDetect);
             window.addEventListener('orientationchange', () => {
                 const ae = document.activeElement;
-                if (!(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) MUI.fullH = 0;   // при открытой клавиатуре высоту «без неё» не теряем
+                if (!(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) MUI.fullH = 0;   // with the keyboard open we don't lose the «without it» height
                 setTimeout(muiDetect, 300);
             });
             if (window.visualViewport) { window.visualViewport.addEventListener('resize', muiMeasure); window.visualViewport.addEventListener('scroll', muiMeasure); }
@@ -687,15 +687,17 @@
             setInterval(muiTick, 250);
         }, 0);
 
-        // ============ МЕТКА СБОРКИ ============
-        // Меняйте строку при каждой правке — по ней в Output видно, что WebView
-        // загрузил свежий script.js, а не кэш.
+        // ============ BUILD LABEL ============
+        // Change the string on every edit — it shows in Output that the WebView
+        // loaded the fresh script.js and not a cached one.
         const BUILD_LABEL = '2026-11-10 · tween-easing';
         window.BUILD_LABEL = BUILD_LABEL;
 
         // ============ I18N ============
         const I18N = {
             en: {
+                tb_lang_title: 'Switch language',
+                gui_scale: 'GUI scale',
                 stop_title: 'Stop',
                 no_output: '(no output)',
                 pub_ver_published: 'Published',
@@ -950,6 +952,8 @@
                 preview_stop: 'Stop',
             },
             ru: {
+                tb_lang_title: 'Сменить язык',
+                gui_scale: 'Масштаб интерфейса',
                 stop_title: 'Стоп',
                 no_output: '(нет вывода)',
                 pub_ver_published: 'Опубликовать (Published)',
@@ -1205,17 +1209,14 @@
             },
         };
 
-        // Language auto-detection:
+        // Language selection (saved choice, otherwise English):
         function detectLang() {
             try {
                 const saved = localStorage.getItem('rbxstudio-lang');
                 if (saved && I18N[saved]) return saved;
             } catch (e) { emuWarn('swallow:detectLang:504', 'detectLang: ' + _errText(e) + ''); }
-            const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || 'en'];
-            for (const l of langs) {
-                const short = (l || '').slice(0, 2).toLowerCase();
-                if (I18N[short]) return short;
-            }
+            // First visit: always English. The browser language is intentionally
+            // not used; the user switches with the 🌐 button and the choice is remembered.
             return 'en';
         }
         const LANG = detectLang();
@@ -1236,21 +1237,21 @@
             document.documentElement.lang = LANG;
             const langBtn = document.getElementById('lang-btn');
             if (langBtn) {
-                // Кнопка показывает язык, НА КОТОРЫЙ переключит (не текущий) —
-                // так интуитивнее, как переключатели языка в большинстве приложений.
+                // The button shows the language it will switch TO (not the current one) —
+                // more intuitive, like language switchers in most apps.
                 langBtn.textContent = LANG === 'ru' ? '🌐 EN' : '🌐 RU';
             }
         }
         applyStaticI18n();
 
-        // Простой переключатель между двумя языками (en/ru).
+        // A simple switch between two languages (en/ru).
         function toggleLang() {
             const next = LANG === 'ru' ? 'en' : 'ru';
             try { localStorage.setItem('rbxstudio-lang', next); } catch (e) { emuWarn('swallow:localStorage.setItem:540', 'localStorage.setItem: ' + _errText(e) + ''); }
             location.reload();
         }
 
-        // Three.js загрузка
+        // Three.js loading
         (function () {
             const scripts = [
                 'vendor/three.min.js',
@@ -1259,7 +1260,7 @@
             let loaded = false;
             function tryLoad(i) {
                 if (i >= scripts.length) {
-                    console.error('Three.js не загружен');
+                    console.error('Three.js failed to load');
                     document.getElementById('fps-counter').textContent = t('err_3d');
                     return;
                 }
@@ -1268,12 +1269,12 @@
                 s.onload = () => {
                     if (!loaded) {
                         loaded = true;
-                        console.log('Three.js загружен из: ' + scripts[i]);
+                        console.log('Three.js loaded from: ' + scripts[i]);
                         initThree();
                     }
                 };
                 s.onerror = () => {
-                    console.warn('Не удалось загрузить: ' + scripts[i]);
+                    console.warn('Failed to load: ' + scripts[i]);
                     tryLoad(i + 1);
                 };
                 document.head.appendChild(s);
@@ -1281,7 +1282,7 @@
             tryLoad(0);
         })();
 
-        // OBJLoader/MTLLoader грузятся ЛЕНИВО, только когда реально нужен
+        // OBJLoader/MTLLoader are loaded LAZILY, only when really needed
         let _objMtlLoadersPromise = null;
         function ensureObjMtlLoaders() {
             if (_objMtlLoadersPromise) return _objMtlLoadersPromise;
@@ -1299,7 +1300,7 @@
                         const fb = document.createElement('script');
                         fb.src = cdn;
                         fb.onload = () => { if (--remaining === 0) resolve(); };
-                        fb.onerror = () => reject(new Error('Не удалось загрузить ' + cdn));
+                        fb.onerror = () => reject(new Error('Failed to load ' + cdn));
                         document.head.appendChild(fb);
                     };
                     document.head.appendChild(s);
@@ -1308,7 +1309,7 @@
             return _objMtlLoadersPromise;
         }
 
-        // Cannon.js загрузка (физика для Play-режима)
+        // Cannon.js loading (physics for Play mode)
         (function () {
             const scripts = [
                 'vendor/cannon.min.js',
@@ -1317,7 +1318,7 @@
             let loaded = false;
             function tryLoad(i) {
                 if (i >= scripts.length) {
-                    console.error('Cannon.js не загружен — Play-режим недоступен');
+                    console.error('Cannon.js failed to load — Play mode is unavailable');
                     return;
                 }
                 const s = document.createElement('script');
@@ -1325,7 +1326,7 @@
                 s.onload = () => {
                     if (!loaded) {
                         loaded = true;
-                        console.log('Cannon.js загружен из: ' + scripts[i]);
+                        console.log('Cannon.js loaded from: ' + scripts[i]);
                     }
                 };
                 s.onerror = () => tryLoad(i + 1);
@@ -1337,13 +1338,13 @@
         // ============ ANDROID (SAF) ============
         const IS_ANDROID = typeof window.AndroidBridge !== 'undefined';
 
-        // Цвет неба (фон сцены + туман) — единая константа, чтобы оба места
+        // Sky color (scene background + fog) — a single constant so both places
         const SKY_COLOR = 0x87ceeb;
 
         // ============ CODEMIRROR ============
 
         const ROBLOX_LUA_KEYWORDS = [
-            // Глобальные функции / стандартная библиотека Lua
+            // Global functions / Lua standard library
             'print', 'warn', 'error', 'assert', 'tick', 'wait', 'require',
             'typeof', 'type', 'pairs', 'ipairs', 'next', 'select', 'unpack',
             'collectgarbage', 'tonumber', 'tostring', 'pcall', 'xpcall',
@@ -1366,10 +1367,10 @@
             'coroutine', 'coroutine.create', 'coroutine.resume',
             'coroutine.yield', 'coroutine.wrap', 'coroutine.status',
 
-            // Глобальные объекты окружения скрипта
+            // Global objects of the script environment
             'game', 'workspace', 'script', 'shared', '_G',
 
-            // Сервисы (game:GetService('...'))
+            // Services (game:GetService('...'))
             'Workspace', 'Lighting', 'ReplicatedStorage', 'ReplicatedFirst',
             'ServerScriptService', 'ServerStorage', 'StarterGui',
             'StarterPack', 'StarterPlayer', 'SoundService', 'Players',
@@ -1380,7 +1381,7 @@
             'ProximityPromptService', 'BadgeService', 'InsertService',
             'GetService',
 
-            // Конструкторы дататипов
+            // Datatype constructors
             'Instance', 'Instance.new', 'Vector3', 'Vector3.new', 'Vector2',
             'Vector2.new', 'CFrame', 'CFrame.new', 'CFrame.Angles',
             'CFrame.lookAt', 'Color3', 'Color3.new', 'Color3.fromRGB',
@@ -1391,7 +1392,7 @@
             'NumberRange', 'TweenInfo', 'TweenInfo.new',
             'Enum', 'EnumItem',
 
-            // Классы Instance
+            // Instance classes
             'BasePart', 'Part', 'MeshPart', 'WedgePart', 'CornerWedgePart',
             'TrussPart', 'SpawnLocation', 'Model', 'Folder', 'Humanoid',
             'HumanoidDescription', 'Tool', 'Accessory', 'Weld', 'WeldConstraint',
@@ -1415,7 +1416,7 @@
             'UIStroke', 'UIGradient', 'UIAspectRatioConstraint',
             'UISizeConstraint', 'UITextSizeConstraint',
 
-            // Часто используемые методы Instance
+            // Commonly used Instance methods
             'FindFirstChild', 'FindFirstChildOfClass', 'FindFirstChildWhichIsA',
             'FindFirstAncestor', 'FindFirstAncestorOfClass', 'WaitForChild',
             'GetChildren', 'GetDescendants', 'GetFullName', 'IsA',
@@ -1426,7 +1427,7 @@
             'MoveTo', 'BreakJoints', 'GetMass', 'ApplyImpulse',
             'ToWorldSpace', 'ToObjectSpace', 'PointToWorldSpace',
 
-            // Часто используемые свойства
+            // Commonly used properties
             'Name', 'Parent', 'ClassName', 'Position', 'Orientation',
             'Rotation', 'Size', 'Anchored', 'CanCollide', 'CanTouch',
             'Transparency', 'Reflectance', 'Color', 'BrickColor', 'Material',
@@ -1438,7 +1439,7 @@
             'PlayerToHideFrom', 'Character', 'CharacterAdded', 'UserId',
             'DisplayName', 'Team',
 
-            // Часто используемые события
+            // Commonly used events
             'Changed', 'ChildAdded', 'ChildRemoved', 'DescendantAdded',
             'DescendantRemoving', 'Touched', 'TouchEnded', 'Died',
             'MouseEnter', 'MouseLeave', 'MouseButton1Click',
@@ -1450,21 +1451,21 @@
         ];
 
 
-        // Раньше здесь была отдельная robloxSubstringHint-функция для
+        // There used to be a separate robloxSubstringHint function here for
 
-        // ---- CodeMirror 6 вместо CodeMirror 5 ----
+        // ---- CodeMirror 6 instead of CodeMirror 5 ----
         let cmEditor = null;
         window.addEventListener('DOMContentLoaded', function () {
             try {
                 if (!window.CM6) {
-                    console.error('CM6 не найден — vendor/cm6-bundle.min.js не загрузился (проверьте путь/файл на сервере)');
+                    console.error('CM6 not found — vendor/cm6-bundle.min.js failed to load (check the path/file on the server)');
                     return;
                 }
                 cmEditor = window.CM6.fromTextArea(document.getElementById('script-editor'), {
                     words: ROBLOX_LUA_KEYWORDS,
                 });
             } catch (e) {
-                console.error('CodeMirror 6 не загрузился:', e);
+                console.error('CodeMirror 6 failed to load:', e);
             }
         });
 
@@ -1476,7 +1477,7 @@
             });
         }
 
-        // ============ КАЧЕСТВО 3D ============
+        // ============ 3D QUALITY ============
         const QUALITY_PRESETS = {
             low: {
                 antialias: false,
@@ -1492,10 +1493,10 @@
                 maxObjects: 1000,
                 lodDistance: 50,
                 renderDistance: 250,
-                playBodies: 500, // потолок Play-объектов один на все пресеты — см. medium/high ниже
-                // Раньше здесь была плотность веера лучей (rayGrid) —
+                playBodies: 500, // a single Play-object ceiling for all presets — see medium/high below
+                // There used to be a ray fan density (rayGrid) here —
                 loadRadius: 350,
-                // Раньше физика (playBodies) и рендер были одним и тем же
+                // Physics (playBodies) and rendering used to be one and the same
                 visualRadius: 2000,
                 visualBodies: 3000,
             },
@@ -1513,9 +1514,9 @@
                 maxObjects: 3000,
                 lodDistance: 100,
                 renderDistance: 500,
-                playBodies: 500, // было 900 — при 4-6к-парт картах (Castle Warfare)
-                // даже это заметно роняло FPS на мобильном GPU; единый
-                // потолок 500 держит Play play лёгким на всех пресетах,
+                playBodies: 500, // was 900 — on 4-6k-part maps (Castle Warfare)
+                // even that noticeably dropped FPS on a mobile GPU; a single
+                // ceiling of 500 keeps Play light on all presets,
                 loadRadius: 550,
                 visualRadius: 2000,
                 visualBodies: 3000,
@@ -1534,8 +1535,8 @@
                 maxObjects: 99999,
                 lodDistance: 200,
                 renderDistance: 1200,
-                playBodies: 500, // было 1600 — тот самый случай из скриншота
-                // (High, 10 FPS, 4000+ обj):
+                playBodies: 500, // was 1600 — exactly the case from the screenshot
+                // (High, 10 FPS, 4000+ objects):
                 loadRadius: 900,
                 visualRadius: 2000,
                 visualBodies: 3000,
@@ -1543,7 +1544,7 @@
         }
 
         let currentQuality = 'low';
-        let currentSkyColor = SKY_COLOR; // меняется applyMapLighting() по ClockTime карты
+        let currentSkyColor = SKY_COLOR; // changed by applyMapLighting() from the map's ClockTime
         let qualitySettings = QUALITY_PRESETS.low;
 
         function setQuality(level) {
@@ -1557,22 +1558,22 @@
                 resize();
             }
             if (scene) {
-                // См. комментарий у инициализации scene.fog — при переключении
+                // See the comment at the scene.fog initialization — when switching
                 const far = isPlaying ? STREAM_PRUNE_DIST : (qualitySettings.fog ? 400 : qualitySettings.renderDistance);
                 scene.fog = new THREE.Fog(currentSkyColor, 50, far);
-                buildSceneLights(); // свет зависит от пресета (число источников) — пересобираем
+                buildSceneLights(); // lights depend on the preset (number of sources) — rebuild them
             }
             updateHelpers();
             reloadScene();
             notify(t('notify_quality') + level.toUpperCase());
         }
 
-        // ============ РАЗДЕЛИТЕЛИ ПАНЕЛЕЙ ============
+        // ============ PANEL DIVIDERS ============
         function initResizers() {
             const resizers = document.querySelectorAll('.resizer');
             let currentResizer = null, startX = 0, startWidth = 0, startRightWidth = 0;
 
-            // === Вертикальные ресайзеры (мышь) ===
+            // === Vertical resizers (mouse) ===
             resizers.forEach(resizer => {
                 resizer.addEventListener('mousedown', (e) => {
                     currentResizer = resizer;
@@ -1589,7 +1590,7 @@
                 });
             });
 
-            // === Горизонтальный ресайзер (мышь) ===
+            // === Horizontal resizer (mouse) ===
             const hResizer = document.getElementById('resizer-h');
             if (hResizer) {
                 let startY = 0, startHeight = 0;
@@ -1616,11 +1617,11 @@
                         document.body.style.userSelect = '';
                         try {
                             localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
-                        } catch (e) { emuWarn('swallow:L910', 'блок около script.js:910: ' + _errText(e) + ''); }
+                        } catch (e) { emuWarn('swallow:L910', 'block near script.js:910: ' + _errText(e) + ''); }
                     }
                 });
 
-                // === Горизонтальный ресайзер (touch) ===
+                // === Horizontal resizer (touch) ===
                 hResizer.addEventListener('touchstart', (e) => {
                     hResizer.classList.add('active');
                     startY = e.touches[0].clientY;
@@ -1636,11 +1637,11 @@
                     panel.style.height = newH + 'px';
                 }, { passive: true });
 
-                // touchend ИЛИ touchcancel — браузер иногда шлёт cancel вместо end
-                // (жест прерван системой), и без этого userSelect:none навсегда
-                // застревал на body — после чего переставали работать ЛЮБЫЕ
-                // текстовые поля на странице (промокод, скрипты и т.д.), пока
-                // страницу не перезагружали.
+                // touchend OR touchcancel — the browser sometimes sends cancel instead of end
+                // (the gesture was interrupted by the system), and without this userSelect:none
+                // got stuck on body forever — after which ANY
+                // text fields on the page stopped working (promo code, scripts, etc.) until
+                // the page was reloaded.
                 const endHResize = () => {
                     if (hResizer.classList.contains('active')) {
                         hResizer.classList.remove('active');
@@ -1648,14 +1649,14 @@
                         document.body.style.webkitUserSelect = '';
                         try {
                             localStorage.setItem('rbxstudio-bottom-height', document.getElementById('bottom-panel').offsetHeight);
-                        } catch (e) { emuWarn('swallow:L942', 'блок около script.js:942: ' + _errText(e) + ''); }
+                        } catch (e) { emuWarn('swallow:L942', 'block near script.js:942: ' + _errText(e) + ''); }
                     }
                 };
                 document.addEventListener('touchend', endHResize);
                 document.addEventListener('touchcancel', endHResize);
             }
 
-            // === Общие обработчики для вертикальных ресайзеров (mousemove/mouseup) ===
+            // === Shared handlers for vertical resizers (mousemove/mouseup) ===
             document.addEventListener('mousemove', (e) => {
                 if (!currentResizer) return;
                 if (currentResizer.id === 'resizer-1') {
@@ -1681,7 +1682,7 @@
             };
             document.addEventListener('mouseup', endVResize);
 
-            // === Touch-поддержка для вертикальных ресайзеров ===
+            // === Touch support for vertical resizers ===
             resizers.forEach(resizer => {
                 resizer.addEventListener('touchstart', (e) => {
                     currentResizer = resizer;
@@ -1714,8 +1715,8 @@
             document.addEventListener('touchcancel', endVResize);
         }
 
-        // ============ НАСТРОЙКИ ИНТЕРФЕЙСА (размер текста/кнопок, ползунки-разделители) ============
-        const UI_DEFAULTS = { fs: 1, bs: 1, rz: 0, sb: 0 }; // rz/sb = 0 → значение по умолчанию из CSS
+        // ============ INTERFACE SETTINGS (text/button size, divider sliders) ============
+        const UI_DEFAULTS = { fs: 1, bs: 1, rz: 0, sb: 0 }; // rz/sb = 0 → the default value from CSS
         let uiCfg = { ...UI_DEFAULTS };
         function applyUiSettings() {
             const st = document.documentElement.style;
@@ -1792,18 +1793,18 @@
                     document.getElementById('explorer').style.width = layout.explorer || '220px';
                     document.getElementById('rightpanel').style.width = layout.rightpanel || '260px';
                 }
-                // Восстанавливаем высоту нижней панели
+                // Restore the bottom panel height
                 const h = localStorage.getItem('rbxstudio-bottom-height');
                 if (h) {
                     document.getElementById('bottom-panel').style.height = h + 'px';
                 }
-            } catch (e) { emuWarn('swallow:L1091', 'блок около script.js:1091: ' + _errText(e) + ''); }
+            } catch (e) { emuWarn('swallow:L1091', 'block near script.js:1091: ' + _errText(e) + ''); }
         }
 
         function resetLayout() {
             document.getElementById('explorer').style.width = '220px';
             document.getElementById('rightpanel').style.width = '260px';
-            // Сбрасываем высоту нижней панели на дефолтную
+            // Reset the bottom panel height to the default
             document.getElementById('bottom-panel').style.height = '180px';
             localStorage.removeItem('rbxstudio-layout');
             localStorage.removeItem('rbxstudio-bottom-height');
@@ -1812,18 +1813,18 @@
             notify(t('notify_layout_reset'));
         }
 
-        // ============ THREE.JS ПЕРЕМЕННЫЕ ============
-        let selectedRef = null;          // «главный» выбранный объект: его свойства в панели Properties
-        let selectedRefs = new Set();     // все выбранные (мультивыделение); selectedRef всегда входит сюда
-        let selAnchorRef = null;          // от чего считается диапазон по Shift+клик
-        let multiSelectMode = false;      // тап добавляет/убирает из выделения (для экранов без Ctrl/Shift)
-        // Ref открытого сейчас в CodeMirror скрипта и его последний
+        // ============ THREE.JS VARIABLES ============
+        let selectedRef = null;          // the «main» selected object: its properties are in the Properties panel
+        let selectedRefs = new Set();     // all selected (multi-selection); selectedRef is always included
+        let selAnchorRef = null;          // what the Shift+click range is computed from
+        let multiSelectMode = false;      // a tap adds/removes from the selection (for screens without Ctrl/Shift)
+        // Ref of the script currently open in CodeMirror and its last
         let currentScriptRef = null;
         let currentScriptOrigSource = null;
         async function saveCurrentScriptIfDirty() {
             if (currentScriptRef === null || !cmEditor) return;
             const src = cmEditor.getValue();
-            if (src === currentScriptOrigSource) return; // ничего не поменялось — лишний запрос не нужен
+            if (src === currentScriptOrigSource) return; // nothing changed — no extra request needed
             await api('POST', '/api/instance/' + currentScriptRef, { prop: 'Source', value: src });
             currentScriptOrigSource = src;
         }
@@ -1841,7 +1842,7 @@
         let spherical = { theta: Math.PI / 4, phi: Math.PI / 3, r: 30 };
         let target = { x: 0, y: 2, z: 0 };
         let keysPressed = {};
-        let joyVector = { x: 0, y: 0 }; // аналоговый стик: x — влево/вправо, y — вперёд/назад
+        let joyVector = { x: 0, y: 0 }; // analog stick: x — left/right, y — forward/back
         let moveSpeed = 1.0;
         let fpsFrames = 0;
         acseration = 0;
@@ -1853,9 +1854,9 @@
         const CAMERA_UPDATE_INTERVAL = 2000;
         let lastReloadTarget = { x: null, y: null, z: null };
 
-        // Раньше подгрузка триггерилась только WASD-движением, да ещё с
+        // Loading used to be triggered only by WASD movement, and with
         function maybeReloadNearby(now) {
-            if (isPlaying) return; // у Play своя отдельная подгрузка вокруг персонажа
+            if (isPlaying) return; // Play has its own separate loading around the character
             if (now - lastCameraUpdate < CAMERA_UPDATE_INTERVAL) return;
             const moved = lastReloadTarget.x === null
                 ? Infinity
@@ -1865,14 +1866,14 @@
             reloadScene();
         }
 
-        // Кеш для raycasting
+        // Cache for raycasting
         let raycasterCache = {
             lastUpdate: 0,
             objects: [],
             updateInterval: 100
         };
 
-        // ============ УВЕДОМЛЕНИЯ ============
+        // ============ NOTIFICATIONS ============
         function notify(msg, type = 'ok') {
             const d = document.createElement('div');
             d.className = 'notif' + (type === 'err' ? ' err' : type === 'warn' ? ' warn' : '');
@@ -1884,7 +1885,8 @@
         async function api(method, url, body) {
             const opts = {
                 method: method,
-                headers: { 'Content-Type': 'application/json' }
+                // X-Lang lets the server localize its error messages (see _alang in app.py)
+                headers: { 'Content-Type': 'application/json', 'X-Lang': (typeof LANG !== 'undefined' ? LANG : 'en') }
             };
             if (body) {
                 opts.body = JSON.stringify(body);
@@ -1893,20 +1895,20 @@
             return r.json();
         }
 
-        // ============ СВЕТ (дёшево по дизайну) ============
-        // Почему не лагает: НИКАКИХ теневых карт и НИКАКИХ настоящих точечных
-        // источников. MeshLambertMaterial в three r128 считает свет по вершинам,
-        // поэтому PointLight на больших боксах всё равно выглядел бы криво, а
-        // каждый такой источник — это ещё и пересборка шейдеров всех материалов.
-        // Вместо этого: Hemisphere (+Directional «солнце» на medium/high) —
-        // число источников зависит только от пресета и не меняется во время игры;
-        // свет по настройкам карты (ClockTime, Brightness, Ambient) считается ОДИН
-        // раз при загрузке карты, а не каждый кадр; лампы карты (PointLight/SpotLight)
-        // рисуются как свечение — ВСЕ одним THREE.Points (1 draw call).
+        // ============ LIGHTING (cheap by design) ============
+        // Why it doesn't lag: NO shadow maps and NO real point
+        // lights. MeshLambertMaterial in three r128 computes lighting per vertex,
+        // so a PointLight on large boxes would look wrong anyway, and
+        // every such light also means recompiling the shaders of all materials.
+        // Instead: Hemisphere (+ a Directional «sun» on medium/high) —
+        // the number of lights depends only on the preset and doesn't change during play;
+        // lighting from the map settings (ClockTime, Brightness, Ambient) is computed ONCE
+        // when the map loads, not every frame; the map's lamps (PointLight/SpotLight)
+        // are drawn as a glow — ALL in one THREE.Points (1 draw call).
         let hemiLight = null, sunLight = null;
-        let mapLighting = null;       // ответ /api/lighting (или null — карта без Lighting)
+        let mapLighting = null;       // the /api/lighting response (or null — the map has no Lighting)
         let _glowTex = null;
-        let _dayFactor = 1;           // 0 ночь .. 1 день — по ClockTime карты
+        let _dayFactor = 1;           // 0 night .. 1 day — from the map's ClockTime
 
         function _lerpN(a, b, t) { return a + (b - a) * t; }
 
@@ -1923,7 +1925,7 @@
                 scene.add(sunLight);
             }
             applyMapLighting();
-            applyMapSky();   // low — без скайбокса, medium/high — с ним
+            applyMapSky();   // low — no skybox, medium/high — with it
         }
 
         function applyMapLighting() {
@@ -1936,27 +1938,27 @@
             let bright = 1;
             _dayFactor = 1;
             if (ml) {
-                const ang = (ml.clockTime - 6) / 12 * Math.PI;        // 6ч восход, 12ч зенит, 18ч закат
+                const ang = (ml.clockTime - 6) / 12 * Math.PI;        // 6h sunrise, 12h zenith, 18h sunset
                 const elev = Math.sin(ang);
                 let day = Math.max(0, Math.min(1, (elev + 0.1) / 0.4));
-                day = day * day * (3 - 2 * day);                       // плавный рассвет/закат
+                day = day * day * (3 - 2 * day);                       // smooth dawn/dusk
                 _dayFactor = day;
                 sunDir.set(-Math.cos(ang), Math.max(elev, 0.05), 0.35).normalize();
-                const warm = Math.max(0, Math.min(1, 1 - elev / 0.45)); // низкое солнце — тёплое
+                const warm = Math.max(0, Math.min(1, 1 - elev / 0.45)); // low sun — warm
                 sunCol.setRGB(1, _lerpN(1, 0.72, warm), _lerpN(1, 0.5, warm));
-                // Ambient в Roblox тёмный (у него ещё есть свет неба) — подтягиваем к белому,
-                // но не ниже пола, иначе сцена на телефоне станет чёрной.
+                // Ambient in Roblox is dark (it also has sky light) — pull it toward white,
+                // but not below the floor, otherwise the scene on a phone will go black.
                 const oa = ml.outdoorAmbient || [0.5, 0.5, 0.5], am = ml.ambient || oa;
                 const floorSky = sunLight ? 0.45 : 0.7, floorGnd = sunLight ? 0.25 : 0.4;
                 skyCol.setRGB(Math.max(floorSky, _lerpN(oa[0], 1, 0.5)), Math.max(floorSky, _lerpN(oa[1], 1, 0.5)), Math.max(floorSky, _lerpN(oa[2], 1, 0.5)));
                 gndCol.setRGB(Math.max(floorGnd, am[0] * 0.9), Math.max(floorGnd, am[1] * 0.9), Math.max(floorGnd, am[2] * 0.9));
-                skyCol.lerp(new THREE.Color(0.22, 0.26, 0.42), (1 - day) * 0.8);   // ночью — синий полумрак
+                skyCol.lerp(new THREE.Color(0.22, 0.26, 0.42), (1 - day) * 0.8);   // at night — blue half-darkness
                 gndCol.lerp(new THREE.Color(0.08, 0.09, 0.15), (1 - day) * 0.8);
                 sky.lerp(new THREE.Color(0x0a1030), 1 - day);
                 bright = Math.max(0.4, Math.min(1.6, ml.brightness / 2));
             }
-            // ColorCorrectionEffect карты — без пост-обработки (она дорогая на телефоне): тон и яркость
-            // запекаются в цвета света; контраст/насыщенность не воспроизводим.
+            // The map's ColorCorrectionEffect — no post-processing (it's expensive on a phone): tone and brightness
+            // are baked into the light colors; contrast/saturation are not reproduced.
             const cc = mapLighting && mapLighting.colorCorrection;
             if (cc) {
                 const k = Math.max(0.5, 1 + cc.brightness);
@@ -1972,9 +1974,9 @@
                 sunLight.position.copy(sunDir).multiplyScalar(100);
                 sunLight.intensity = qualitySettings.dirLight * bright * _dayFactor;
             }
-            // Небо/туман. Дальность тумана карты применяем только вне Play (в Play fog.far = дальность стриминга).
+            // Sky/fog. The map's fog distance is applied only outside Play (in Play fog.far = streaming distance).
             currentSkyColor = sky.getHex();
-            if (!_skyCube) {   // есть скайбокс карты — фон не трогаем
+            if (!_skyCube) {   // the map has a skybox — don't touch the background
                 if (scene.background && scene.background.isColor) scene.background.copy(sky);
                 else scene.background = new THREE.Color(sky);
             }
@@ -1989,8 +1991,8 @@
             rebuildMapGlow();
         }
 
-        // Лампы карты: свечение-спрайт на лампу. Лампы делятся на три корзины по Range (размер пятна),
-        // каждая корзина — ОДИН THREE.Points: итого не больше 3 draw call при любом числе ламп.
+        // Map lamps: one glow sprite per lamp. Lamps are split into three buckets by Range (spot size),
+        // each bucket is ONE THREE.Points: no more than 3 draw calls at any number of lamps.
         let glowObjs = [];
         function rebuildMapGlow() {
             for (const g of glowObjs) { scene.remove(g); g.geometry.dispose(); g.material.dispose(); }
@@ -2009,7 +2011,7 @@
                 g.fillRect(0, 0, 64, 64);
                 _glowTex = new THREE.CanvasTexture(c);
             }
-            const vis = 0.45 + 0.55 * (1 - _dayFactor);   // ночью свечение заметнее
+            const vis = 0.45 + 0.55 * (1 - _dayFactor);   // the glow is more noticeable at night
             const buckets = [{ size: 6, items: [] }, { size: 12, items: [] }, { size: 20, items: [] }];
             for (const l of L) buckets[l.range <= 10 ? 0 : (l.range <= 25 ? 1 : 2)].items.push(l);
             for (const bk of buckets) {
@@ -2033,9 +2035,9 @@
             }
         }
 
-        // Скайбокс карты (Sky): куб из шести граней, грузится один раз при открытии карты — на кадр
-        // не стоит ничего. Только medium/high. Порядок граней three: +X,-X,+Y,-Y,+Z,-Z = Rt,Lf,Up,Dn,Bk,Ft
-        // (в Roblox Front смотрит в -Z, Back — в +Z). Нет сети/не загрузилось — остаётся цвет неба.
+        // Map skybox (Sky): a cube of six faces, loaded once when the map opens — costs nothing per frame.
+        // Only medium/high. three face order: +X,-X,+Y,-Y,+Z,-Z = Rt,Lf,Up,Dn,Bk,Ft
+        // (in Roblox Front looks along -Z, Back along +Z). No network/failed to load — the sky color stays.
         let _skyCube = null, _skySig = '';
         function applyMapSky() {
             const sk = mapLighting && mapLighting.sky;
@@ -2046,7 +2048,7 @@
             if (!sig) { applyMapLighting(); return; }
             const urls = [sk.Rt, sk.Lf, sk.Up, sk.Dn, sk.Bk, sk.Ft].map(id => '/api/asset-proxy?id=' + id);
             new THREE.CubeTextureLoader().load(urls, (cube) => {
-                if (_skySig !== sig) { cube.dispose(); return; }  // за время загрузки карту сменили
+                if (_skySig !== sig) { cube.dispose(); return; }  // the map was changed while loading
                 cube.encoding = THREE.sRGBEncoding;
                 _skyCube = cube;
                 scene.background = cube;
@@ -2055,14 +2057,14 @@
 
         async function refreshMapLighting() {
             let r = null;
-            try { r = await api('GET', '/api/lighting'); } catch (e) { emuWarn('swallow:L1349', 'блок около script.js:1349: ' + _errText(e) + ' (без сети/сервера — свет по умолчанию)'); }
+            try { r = await api('GET', '/api/lighting'); } catch (e) { emuWarn('swallow:L1349', 'block near script.js:1349: ' + _errText(e) + ' (no network/server — default lighting)'); }
             mapLighting = (r && r.ok && r.found) ? r : null;
             applyMapLighting();
             applyMapSky();
         }
 
-        // Круглая «тень» под игроком (вид от 3-го лица) — вместо теневых карт: 1 draw call,
-        // 1 луч вниз раз в 2 кадра.
+        // A round «shadow» under the player (third-person view) — instead of shadow maps: 1 draw call,
+        // 1 downward ray every 2 frames.
         let blobShadow = null, _blobFrame = 0;
         function _makeBlobShadow() {
             const geo = new THREE.CircleGeometry(1, 24);
@@ -2091,7 +2093,7 @@
                 physicsWorld.raycastClosest(new CANNON.Vec3(x, y, z), new CANNON.Vec3(x, y - 60, z),
                     { collisionFilterMask: _charRayMask(), skipBackfaces: true }, res);
                 if (res.hasHit) {
-                    const k = Math.max(0.35, 1 - (y - res.hitPointWorld.y) / 25); // выше от земли — меньше и бледнее
+                    const k = Math.max(0.35, 1 - (y - res.hitPointWorld.y) / 25); // higher above the ground — smaller and paler
                     blobShadow.position.y = res.hitPointWorld.y + 0.06;
                     blobShadow.scale.setScalar(CHAR_RADIUS * 1.5 * k);
                     blobShadow.material.opacity = 0.38 * k;
@@ -2102,8 +2104,8 @@
             blobShadow.position.z = z;
         }
 
-        // Снимок текущего кадра вьюпорта для ИИ-ассистента (редактор и Play). Рендерим и читаем канвас в одной
-        // задаче — без preserveDrawingBuffer буфер иначе уже очищен. Уменьшаем до maxSide, отдаём JPEG data-URL.
+        // Snapshot of the current viewport frame for the AI assistant (editor and Play). Render and read the canvas in one
+        // task — without preserveDrawingBuffer the buffer would already be cleared. Downscale to maxSide, return a JPEG data URL.
         window.rswCaptureScene = function (maxSide, quality) {
             try {
                 if (!renderer || !scene || !camera) return null;
@@ -2129,26 +2131,26 @@
             renderer = new THREE.WebGLRenderer({
                 antialias: qualitySettings.antialias,
                 powerPreference: currentQuality === 'high' ? "high-performance" : "low-power",
-                // highp на всех пресетах: mediump (16 бит) на мобильных GPU даёт мерцание/«помехи»
-                // на моделях с анимацией и текстурами (аватар), а выигрыша по FPS почти нет.
-                // Если GPU highp в шейдерах не умеет, three сам откатится на mediump.
+                // highp on all presets: mediump (16-bit) on mobile GPUs causes flicker/«noise»
+                // on animated and textured models (the avatar), and there's almost no FPS gain.
+                // If the GPU can't do highp in shaders, three falls back to mediump on its own.
                 precision: "highp"
             });
-            // ФИКС ЧЁТКОСТИ НА ТЕЛЕФОНЕ:
+            // SHARPNESS FIX ON PHONES:
             applyPixelRatio();
             renderer.shadowMap.enabled = qualitySettings.shadows;
             vp.appendChild(renderer.domElement);
 
-            // ВРЕМЕННАЯ ДИАГНОСТИКА:
+            // TEMPORARY DIAGNOSTICS:
             try {
                 const dbgExt = renderer.getContext().getExtension('WEBGL_debug_renderer_info');
                 const gpuInfo = dbgExt
                     ? renderer.getContext().getParameter(dbgExt.UNMASKED_RENDERER_WEBGL)
-                    : 'н/д (расширение недоступно)';
+                    : 'n/a (extension unavailable)';
                 notify('GPU: ' + gpuInfo, 'warn');
                 console.log('WebGL renderer:', gpuInfo);
-                // То же одной строкой в Output (остаётся на экране, не пропадает как тост): по ней видно,
-                // с какой точностью/глубиной/версией WebView реально работает телефон.
+                // The same as one line in Output (stays on screen, doesn't vanish like a toast): it shows
+                // what precision/depth/WebView version the phone really runs with.
                 const gl = renderer.getContext();
                 const wv = (navigator.userAgent.match(/Chrome\/([\d.]+)/) || [])[1] || '?';
                 const gfxLine = 'GPU: ' + gpuInfo + ' | ' + (renderer.capabilities.isWebGL2 ? 'WebGL2' : 'WebGL1')
@@ -2156,26 +2158,26 @@
                     + ' | AA ' + (gl.getContextAttributes().antialias ? 'on' : 'off') + ' | DPR ' + window.devicePixelRatio
                     + ' | quality ' + currentQuality + ' | WebView ' + wv;
                 console.log(gfxLine);
-                setTimeout(() => { try { logLuaOutput('info', gfxLine); } catch (e) { /* Output не готов */ } }, 3000);
+                setTimeout(() => { try { logLuaOutput('info', gfxLine); } catch (e) { /* Output is not ready */ } }, 3000);
             } catch (e) {
-                console.log('Не удалось получить инфо о GPU:', e);
+                console.log('Failed to get GPU info:', e);
             }
 
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(currentSkyColor); // голубое небо вместо тёмно-синего/чёрного фона
-            // qualitySettings.fog отключён на High (fog:false) — это ок для
+            scene.background = new THREE.Color(currentSkyColor); // light blue sky instead of a dark blue/black background
+            // qualitySettings.fog is disabled on High (fog:false) — that's fine for
             scene.fog = new THREE.Fog(currentSkyColor, 50, qualitySettings.fog ? 400 : qualitySettings.renderDistance);
 
             camera = new THREE.PerspectiveCamera(60, 1, 0.5, 500);
 
-            // Инициализация raycaster с правильными настройками
+            // Initialize the raycaster with the right settings
             raycaster = new THREE.Raycaster();
             raycaster.params.Points.threshold = 0.1;
             raycaster.params.Line.threshold = 0.1;
 
             mouse = new THREE.Vector2();
 
-            // Освещение
+            // Lighting
             buildSceneLights();
 
             updateHelpers();
@@ -2183,29 +2185,29 @@
             resize();
             window.addEventListener('resize', resize);
 
-            // Мышь
+            // Mouse
             renderer.domElement.addEventListener('mousedown', onMD);
             renderer.domElement.addEventListener('mousemove', onMM);
             renderer.domElement.addEventListener('mouseup', onMU);
             renderer.domElement.addEventListener('wheel', onWh, { passive: false });
             renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 
-            // Тач
+            // Touch
             renderer.domElement.addEventListener('touchstart', onTS, { passive: false });
             renderer.domElement.addEventListener('touchmove', onTM, { passive: false });
             renderer.domElement.addEventListener('touchend', onTE);
 
             updateCamera();
             animate();
-            // Дерево — только если карта уже загружена (сервер запущен с файлом); иначе /api/tree отвечал 400 и это попадало в лог.
-            // Новую/открытую карту дерево подхватывает само (loadTree после открытия/создания).
+            // Tree — only if the map is already loaded (the server was started with a file); otherwise /api/tree answered 400 and that landed in the log.
+            // The tree picks up a new/opened map by itself (loadTree after open/create).
             api('GET', '/api/status').then(st => { if (st && st.loaded) loadTree(); }).catch(() => {});
 
-            // Фокус viewport для WASD
+            // Viewport focus for WASD
             vp.addEventListener('click', () => vp.focus());
             vp.focus();
 
-            // Мобильный геймпад: кнопки вверх/вниз
+            // Mobile gamepad: up/down buttons
             document.querySelectorAll('.pad-btn').forEach(btn => {
                 const key = btn.dataset.key;
                 btn.addEventListener('touchstart', e => {
@@ -2226,7 +2228,7 @@
                 );
             });
 
-            // Мобильный геймпад: аналоговый стик движения
+            // Mobile gamepad: analog movement stick
             initJoystick();
         }
 
@@ -2237,17 +2239,17 @@
             const pad = document.getElementById('mobile-pad');
             const vp = document.getElementById('viewport');
             if (!zone || !base || !thumb || !pad || !vp) return;
-            let maxR = 30;       // px, максимальный вылет ручки стика от центра base
-            let deadZone = 6;    // px — маленький дрожащий сдвиг пальца не должен давать ход
+            let maxR = 30;       // px, the maximum stick knob travel from the center of base
+            let deadZone = 6;    // px — a small trembling finger shift must not produce movement
             let touchId = null;
 
-            // Размер стика зависит от вьюпорта: на узком телефонном окне 112px круг + зона 240px закрывали
-            // полэкрана и кнопки игры под ними. Диапазон 56..112 px, всё остальное (ручка, вылет, кнопки E/Q) — пропорционально.
+            // The stick size depends on the viewport: in a narrow phone window a 112px circle + a 240px zone covered
+            // half the screen and the game buttons under them. Range 56..112 px, everything else (knob, travel, E/Q buttons) — proportionally.
             function layout() {
                 const r = vp.getBoundingClientRect();
                 const size = Math.max(72, Math.min(140, Math.round(Math.min(r.width, r.height) * 0.42)));
                 pad.style.setProperty('--joy', size + 'px');
-                // Ход ручки почти до края круга (раньше 0.27 — полное отклонение за ~20px, стик был «дёрганым»)
+                // Knob travel almost to the edge of the circle (it used to be 0.27 — full deflection in ~20px, the stick was «jerky»)
                 maxR = size * 0.45;
                 deadZone = size * 0.1;
             }
@@ -2259,7 +2261,7 @@
                 thumb.style.transform = 'translate(calc(-50% + ' + dx + 'px), calc(-50% + ' + dy + 'px))';
             }
 
-            // "Всплывающий" стик: на touchstart сам круг базы переезжает
+            // A «floating» stick: on touchstart the base circle itself moves
             function placeBase(clientX, clientY) {
                 const zr = zone.getBoundingClientRect();
                 const half = base.offsetWidth / 2;
@@ -2289,12 +2291,12 @@
                     dy = dy / dist * maxR;
                 }
                 setThumb(dx, dy);
-                // Отклонение 0..1 после мёртвой зоны + лёгкая кривая (m^1.5): у центра точная настройка направления/скорости,
-                // у края — полный ход. Направление берём от пальца, чтобы дрожь у центра не вертела персонажа.
+                // Deflection 0..1 after the dead zone + a light curve (m^1.5): precise direction/speed control near the center,
+                // full travel at the edge. Direction is taken from the finger so that jitter near the center doesn't spin the character.
                 const m = Math.min(1, (Math.min(dist, maxR) - deadZone) / (maxR - deadZone));
                 const k = Math.pow(m, 1.5) / Math.max(1e-6, Math.hypot(dx, dy));
                 joyVector.x = dx * k;
-                joyVector.y = -dy * k; // тянем вверх по экрану — едем вперёд
+                joyVector.y = -dy * k; // drag up the screen — move forward
             }
 
             function resetJoy() {
@@ -2303,28 +2305,28 @@
                 joyVector.x = 0;
                 joyVector.y = 0;
                 setThumb(0, 0);
-                // возвращаем базу в исходный угол зоны для следующего касания
+                // return the base to the zone's original corner for the next touch
                 base.style.left = '0px';
                 base.style.bottom = '0px';
             }
 
-            // Под пальцем кнопка/поле/список игры — это её касание, стик не перехватывает (раньше невидимая зона
-            // с pointer-events:all закрывала любую GUI-кнопку в левом нижнем углу). Зона сама pointer-events:none,
-            // поэтому нажатие и так дойдёт до кнопки; здесь только решаем, начинать ли стик.
-            // true — под пальцем НЕ стик: кнопка/поле/список игры, кнопки E/Q или что-то вне вьюпорта (диалог, Explorer).
-            // Плавающая панель Output (в портрете она лежит поверх зоны) для этого решения «прозрачна»: стик
-            // по-прежнему выигрывает у неё, как и раньше, когда зона была выше панели по z-index.
+            // A game button/field/list under the finger is its own touch, the stick doesn't intercept it (an invisible zone
+            // with pointer-events:all used to cover any GUI button in the bottom-left corner). The zone itself is pointer-events:none,
+            // so the press reaches the button anyway; here we only decide whether to start the stick.
+            // true — it is NOT a stick under the finger: a game button/field/list, E/Q buttons or something outside the viewport (a dialog, Explorer).
+            // The floating Output panel (in portrait it lies over the zone) is «transparent» for this decision: the stick
+            // still wins over it, as before when the zone was above the panel by z-index.
             function guiControlAt(x, y) {
                 for (const el of document.elementsFromPoint(x, y)) {
                     if (el.closest('#bottom-panel')) continue;
                     if (el.closest('.pad-btn')) return true;
                     if (!el.closest('#viewport')) return true;
-                    // Кнопки и поля самого редактора внутри вьюпорта (панель инструментов ✥ ⟳ ⤢, Play/Stop, качество, шаги привязки).
-                    // Раньше они подпадали под общее правило «внутри #viewport — не кнопка», и в ландшафте, где зона стика
-                    // (до 2×--joy по высоте) достаёт до панели инструментов, стик перехватывал касание раньше самой кнопки.
+                    // The editor's own buttons and fields inside the viewport (toolbar ✥ ⟳ ⤢, Play/Stop, quality, snap steps).
+                    // They used to fall under the general rule «inside #viewport — not a button», and in landscape, where the stick zone
+                    // (up to 2×--joy tall) reaches the toolbar, the stick intercepted the touch before the button itself.
                     if (el.closest('#tf-bar, #tf-steps, #quality-selector, #play-stop-fab, button, input, select, textarea, label, a[href], [role="button"]')) return true;
-                    // elementsFromPoint уже исключает pointer-events:none, т.е. всё, что осталось внутри #gui-overlay, —
-                    // кнопка, TextBox, ScrollingFrame, Active-Frame или Frame со скриптом на InputBegan и т.п.
+                    // elementsFromPoint already excludes pointer-events:none, i.e. everything left inside #gui-overlay is
+                    // a button, TextBox, ScrollingFrame, Active Frame or a Frame with a script on InputBegan, etc.
                     if (el.closest('#gui-overlay') && el.id !== 'gui-overlay') return true;
                     if (el.closest('#joy-zone, #mobile-pad, #gui-overlay, canvas, #viewport')) return false;
                 }
@@ -2339,7 +2341,7 @@
                 if (touchId !== null) return;
                 for (const t of e.changedTouches) {
                     if (!inZone(t.clientX, t.clientY) || guiControlAt(t.clientX, t.clientY)) continue;
-                    if (typeof gzHit === 'function' && gzHit(t.clientX, t.clientY)) continue;   // ручка гизмо важнее стика
+                    if (typeof gzHit === 'function' && gzHit(t.clientX, t.clientY)) continue;   // a gizmo handle is more important than the stick
                     e.preventDefault();
                     e.stopPropagation();
                     touchId = joyTouchId = t.identifier;
@@ -2350,9 +2352,9 @@
                 }
             }, { capture: true, passive: false });
 
-            // Браузер присылает ОДИН touchmove на все сдвинувшиеся пальцы на одном элементе. Раньше стик делал
-            // stopPropagation всегда, и камера (палец на канвасе) не получала событие, пока двигался и палец стика.
-            // Теперь глотаем событие только если в нём нет чужих пальцев; чужие палец стика пропускают через joyTouchId.
+            // The browser sends ONE touchmove for all fingers that moved on one element. The stick used to call
+            // stopPropagation always, and the camera (a finger on the canvas) didn't get the event while the stick finger moved too.
+            // Now we swallow the event only if it has no foreign fingers; foreign ones pass the stick finger through joyTouchId.
             document.addEventListener('touchmove', e => {
                 if (touchId === null) return;
                 for (const t of e.changedTouches) {
@@ -2370,7 +2372,7 @@
                 for (const t of e.changedTouches) {
                     if (t.identifier === touchId) {
                         if (e.changedTouches.length === 1) e.stopPropagation();
-                        // палец стика ещё числится «своим» до конца этого события (камера/тап в нём же его пропускают)
+                        // the stick finger is still counted as «its own» until the end of this event (the camera/tap inside it skip it)
                         joyEndingId = t.identifier;
                         setTimeout(() => { joyEndingId = null; }, 0);
                         resetJoy();
@@ -2403,7 +2405,7 @@
             notify(qualitySettings.helpers ? t('notify_helpers_on') : t('notify_helpers_off'));
         }
 
-        // Максимальный DPR, который реально используем.
+        // The maximum DPR we actually use.
         function applyPixelRatio() {
             if (!renderer) return;
             const cap = currentQuality === 'high' ? 3 : currentQuality === 'medium' ? 1.5 : 1;
@@ -2415,10 +2417,10 @@
             const vp = document.getElementById('viewport');
             const scale = qualitySettings.resolutionScale;
             const guiOverlayEl = document.getElementById('gui-overlay');
-            // В Play зажимаем вьюпорт к 16:9 (letterbox чёрными полосами
+            // In Play the viewport is clamped to 16:9 (letterboxed with black bars
             let cssW = vp.clientWidth, cssH = vp.clientHeight, offX = 0, offY = 0;
-            // На телефоне (m-ui) letterbox не нужен: Roblox на мобильном тоже занимает весь экран, а 16:9-полоса
-            // в портрете оставляла игре ~393×221 и сдвигала раскладку GUI (хотбар переносился на 2 строки).
+            // On a phone (m-ui) letterboxing isn't needed: Roblox on mobile also takes the whole screen, and a 16:9 strip
+            // in portrait left the game ~393×221 and shifted the GUI layout (the hotbar wrapped onto 2 rows).
             if (typeof isPlaying !== 'undefined' && isPlaying && !document.body.classList.contains('m-ui')) {
                 const targetAspect = 16 / 9;
                 const boxAspect = vp.clientWidth / Math.max(vp.clientHeight, 1);
@@ -2434,14 +2436,14 @@
             }
             const w = Math.floor(cssW * scale);
             const h = Math.floor(cssH * scale);
-            // ВАЖНО: setSize принимает CSS-размер (третий аргумент false —
+            // IMPORTANT: setSize takes a CSS size (the third argument false —
             renderer.setSize(w, h, false);
             renderer.domElement.style.position = 'absolute';
             renderer.domElement.style.left = offX + 'px';
             renderer.domElement.style.top = offY + 'px';
             renderer.domElement.style.width = cssW + 'px';
             renderer.domElement.style.height = cssH + 'px';
-            // #gui-overlay обязан покрывать РОВНО ту же область, что и
+            // #gui-overlay must cover EXACTLY the same area as
             if (guiOverlayEl) {
                 guiOverlayEl.style.left = offX + 'px';
                 guiOverlayEl.style.top = offY + 'px';
@@ -2456,10 +2458,10 @@
             }
         }
 
-        // ============ АНИМАЦИЯ ============
+        // ============ ANIMATION ============
 
-        // ============ Профайлер кадра (строка под счётчиком FPS) ============
-        // Показывает, куда уходят мс кадра: шаг cannon, Lua-планировщик, синхронизация мешей и т.д.
+        // ============ Frame profiler (the line under the FPS counter) ============
+        // Shows where the frame's ms go: the cannon step, the Lua scheduler, mesh sync, etc.
         const _PROF = { acc: {}, frames: 0, wrapped: false, el: null };
         function _profWrap(name, fn) {
             return function () {
@@ -2474,7 +2476,7 @@
             const names = ['applyCharacterControl', 'updateHollowUnionGhosts', 'updateSurfaceGuis', 'luaStepWelds', 'updateTouchTriggers',
                 'updateContactTouches', 'followCharacterCamera', 'updateProximityPrompts', 'maybeStreamGeometry', 'streamCloneBodies',
                 'updateLuaScheduler', 'updateParticles', 'updateBeams', 'updateHighlights', 'updateSmallCull', 'updateBillboardGuis'];
-            for (const n of names) { try { const f = eval(n); if (typeof f === 'function') eval(n + ' = _profWrap(n, f)'); } catch (e) { /* нет такой функции */ } }
+            for (const n of names) { try { const f = eval(n); if (typeof f === 'function') eval(n + ' = _profWrap(n, f)'); } catch (e) { /* no such function */ } }
             const r = renderer.render.bind(renderer);
             renderer.render = function (a, b) { const t = performance.now(); r(a, b); _PROF.acc.render = (_PROF.acc.render || 0) + performance.now() - t; };
         }
@@ -2495,7 +2497,7 @@
             const rc = c.getBoundingClientRect();
             _PROF.el.style.left = rc.left + 'px'; _PROF.el.style.top = (rc.bottom + 2) + 'px';
             const rows = Object.entries(_PROF.acc).map(([k, v]) => [k, v / Math.max(1, frames)]).filter(r => r[1] >= 0.3).sort((a, b) => b[1] - a[1]).slice(0, 7);
-            _PROF.el.textContent = 'ms/кадр: ' + rows.map(r => r[0] + ' ' + r[1].toFixed(1)).join(' | ') + ' || тел ' + (physicsWorld ? physicsWorld.bodies.length : 0) + ', шаг ' + _physStepEma.toFixed(1) + ' мс';
+            _PROF.el.textContent = 'ms/frame: ' + rows.map(r => r[0] + ' ' + r[1].toFixed(1)).join(' | ') + ' || bodies ' + (physicsWorld ? physicsWorld.bodies.length : 0) + ', step ' + _physStepEma.toFixed(1) + ' ms';
             _PROF.acc = {};
         }
 
@@ -2507,11 +2509,11 @@
             const now = performance.now();
             if (now - fpsTime >= 1000) {
                 currentFPS = Math.round(fpsFrames / ((now - fpsTime) / 1000));
-                // ВРЕМЕННАЯ ДИАГНОСТИКА:
+                // TEMPORARY DIAGNOSTICS:
                 const _dbgPR = renderer ? renderer.getPixelRatio() : '?';
                 const _dbgSize = renderer ? renderer.getSize(new THREE.Vector2()) : { x: '?', y: '?' };
                 const _dbgAniso = renderer ? renderer.capabilities.getMaxAnisotropy() : '?';
-                // Раньше тут был Object.keys(sceneObjs).length — общий
+                // There used to be Object.keys(sceneObjs).length here — a total
                 let _visibleObjCount = 0;
                 for (const _m of Object.values(sceneObjs)) {
                     if (_m.visible) _visibleObjCount++;
@@ -2524,8 +2526,8 @@
                 fpsTime = now;
             }
 
-            // WASD + аналоговый стик — свободный полёт камеры (только в режиме
-            // редактирования; во время Play движением управляет 'тело' персонажа)
+            // WASD + analog stick — free camera flight (only in
+            // edit mode; during Play movement is driven by the character's 'body')
             if (!isPlaying) {
                 const forward = Math.max(-1, Math.min(1,
                     (keysPressed['w'] ? 1 : 0) - (keysPressed['s'] ? 1 : 0) + joyVector.y));
@@ -2544,7 +2546,7 @@
                     const right = new THREE.Vector3();
                     right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
                     speed = moveSpeed * (spherical.r / 30) * 0.25;
-                    //acseration надо в правильный переменовать;
+                    //acseration needs to be renamed correctly;
                     if (forward) {
                         acseration = acseration + 0.1;
                         if (acseration > 1) {
@@ -2567,19 +2569,19 @@
                 }
             }
 
-            // Раньше исключение внутри stepPhysics() (например, из-за плохих
-            // данных от Lua-скрипта карты) улетало из animate() необработанным.
-            // requestAnimationFrame(animate) уже был вызван строкой выше, так
-            // что следующий кадр планировался и цикл не останавливался — но
-            // если ошибка повторялась КАЖДЫЙ кадр (например, что-то на карте
-            // стабильно портит один и тот же объект), физика и рендер той же
-            // сцены молча не выполнялись НИ РАЗУ: экран замирал ("не идёт
-            // время в игре"), а сама ошибка была видна только в консоли
-            // браузера, до которой на телефоне не добраться. Теперь она
-            // попадает в Output — и не спамит: одно и то же сообщение
-            // печатается не чаще раза в 2 секунды, а рендер всё равно
-            // пытаемся сделать отдельно, чтобы падение именно физики не
-            // морозило картинку целиком.
+            // Previously an exception inside stepPhysics() (for example, because of bad
+            // data from the map's Lua script) escaped from animate() unhandled.
+            // requestAnimationFrame(animate) had already been called on the line above, so
+            // the next frame was still scheduled and the loop didn't stop — but
+            // if the error repeated EVERY frame (for example, something on the map
+            // steadily corrupts the same object), physics and rendering of that same
+            // scene silently never ran AT ALL: the screen froze ("game time
+            // isn't moving"), and the error itself was only visible in the
+            // browser console, which is unreachable on a phone. Now it
+            // lands in Output — and doesn't spam: the same message
+            // is printed at most once every 2 seconds, and we still try
+            // to render separately so that a physics failure alone doesn't
+            // freeze the whole picture.
             try {
                 stepPhysics();
             } catch (e) {
@@ -2623,23 +2625,23 @@
             logLuaOutput('error', msg, null, e && e.stack || null);
         }
 
-        let thirdPerson = false; // true — камера позади куба-персонажа, не в глазах
+        let thirdPerson = false; // true — the camera is behind the character cube, not in the eyes
         const THIRD_PERSON_DIST = 12;
-        // Дистанция камеры в Play — как у Roblox: от 0.5 до 128 студов (CameraMaxZoomDistance по умолчанию).
+        // Camera distance in Play — like Roblox: from 0.5 to 128 studs (CameraMaxZoomDistance by default).
         let playCamDist = THIRD_PERSON_DIST;
         const PLAY_CAM_MIN = 0.5, PLAY_CAM_MAX = 128;
-        // Щипок двумя пальцами: true — растягивать пальцы ПРИБЛИЖАЕТ камеру, сводить — отдаляет;
-        // false — наоборот. (Колёсико мыши не затрагивается: вниз — отдаляет.)
+        // Two-finger pinch: true — spreading the fingers brings the camera CLOSER, pinching zooms out;
+        // false — the opposite. (The mouse wheel is unaffected: down — zooms out.)
         const PINCH_SPREAD_ZOOMS_IN = true;
-        function applyPlayZoom(factor) {   // factor > 1 — отдаляем, < 1 — приближаем
+        function applyPlayZoom(factor) {   // factor > 1 — zoom out, < 1 — zoom in
             if (!isFinite(factor) || factor <= 0) return;
             if (!thirdPerson) {
-                if (factor <= 1) return;               // уже вплотную (первое лицо)
-                thirdPerson = true; playCamDist = 1.5; // отдаляем от первого лица — выходим в третье
+                if (factor <= 1) return;               // already at point-blank range (first person)
+                thirdPerson = true; playCamDist = 1.5; // zooming out from first person — switch to third
                 if (charMesh) charMesh.visible = true;
             }
             playCamDist = Math.max(PLAY_CAM_MIN, Math.min(PLAY_CAM_MAX, playCamDist * factor));
-            if (playCamDist <= 0.8 && factor < 1) {    // вплотную — снова первое лицо, как в Roblox
+            if (playCamDist <= 0.8 && factor < 1) {    // point-blank again — first person once more, like in Roblox
                 thirdPerson = false;
                 if (charMesh) charMesh.visible = false;
             }
@@ -2652,12 +2654,12 @@
             const dirY = Math.cos(phi);
             const dirZ = Math.sin(phi) * Math.cos(theta);
             if (isPlaying && thirdPerson) {
-                // dir — направление "назад" (см.
+                // dir — the "backward" direction (see
                 camera.position.set(target.x + dirX * playCamDist, target.y + dirY * playCamDist, target.z + dirZ * playCamDist);
                 camera.lookAt(target.x, target.y, target.z);
             } else {
-                // Камера от первого лица: позиция глаза = target,
-                // смотрим в направлении, заданном theta/phi (без отступа на радиус r)
+                // First-person camera: eye position = target,
+                // look in the direction given by theta/phi (without the radius r offset)
                 camera.position.set(target.x, target.y, target.z);
                 camera.lookAt(target.x - dirX, target.y - dirY, target.z - dirZ);
             }
@@ -2671,7 +2673,7 @@
             notify(thirdPerson ? t('cam_third') : t('cam_first'));
         }
 
-        // ============ ПРЕСЕТЫ КАМЕРЫ ============
+        // ============ CAMERA PRESETS ============
         function resetCamera() {
             spherical = { theta: Math.PI / 4, phi: Math.PI / 3, r: 30 };
             target = { x: 0, y: 2, z: 0 };
@@ -2697,7 +2699,7 @@
             notify(t('notify_rightview'));
         }
 
-        // Телепорт камеры редактора к выбранному в Explorer объекту —
+        // Teleport the editor camera to the object selected in Explorer —
         function teleportCameraToSelected() {
             if (selectedRef === null || !sceneObjs[selectedRef]) {
                 notify(t('notify_teleport_no_selection'), 'warn');
@@ -2710,7 +2712,7 @@
             notify(t('notify_teleported'));
         }
 
-        // ============ МЫШЬ ============
+        // ============ MOUSE ============
         function onMD(e) {
             isDragging = false;
             prevMouse = { x: e.clientX, y: e.clientY };
@@ -2718,8 +2720,8 @@
 
         function onMM(e) {
             if (!e.buttons) return;
-            if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — камера тоже не должна крутиться
-            if (isPlaying && cameraIsScriptable) return; // как в Roblox: Scriptable-камеру игрок не крутит — ею управляет скрипт
+            if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — the camera must not rotate either
+            if (isPlaying && cameraIsScriptable) return; // as in Roblox: the player doesn't rotate a Scriptable camera — the script controls it
 
             const dx = e.clientX - prevMouse.x;
             const dy = e.clientY - prevMouse.y;
@@ -2750,13 +2752,13 @@
             updateCamera();
         }
 
-        // После тапа браузер ещё присылает «синтетические» mousedown/mouseup/click — без этой
-        // защиты тот же тап обрабатывался дважды (ClickDetector срабатывал и сразу же выделялся объект).
+        // After a tap the browser still sends «synthetic» mousedown/mouseup/click — without this
+        // guard the same tap was handled twice (ClickDetector fired and the object was selected right away).
         let _lastTouchEndT = -1e9;
         function onMU(e) {
             if (performance.now() - _lastTouchEndT < 700) return;
             if (!isDragging && (e.button === 0 || e.button === 2) && isPlaying && luaClickDetectorAt(e.clientX, e.clientY, e.button === 2, false)) return;
-            // В Play объекты мышью не выбираются (как в настоящей игре): иначе клик по экрану/инвентарю выделял деталь за ним
+            // In Play objects are not selected with the mouse (as in the real game): otherwise a click on the screen/inventory selected the part behind it
             if (!isDragging && e.button === 0 && !isPlaying) {
                 pick(e.clientX, e.clientY, { additive: e.ctrlKey || e.metaKey || multiSelectMode, exact: e.altKey });
             }
@@ -2781,26 +2783,26 @@
                 applyPlayZoom(Math.pow(1.1, (PINCH_SPREAD_ZOOMS_IN ? 1 : 1) * e.deltaY / 100));
                 return;
             }
-            // r больше не двигает камеру (вид от 1-го лица), но всё ещё
-            // задаёт дальность подгрузки сцены и скорость панорамирования
+            // r no longer moves the camera (first-person view), but still
+            // sets the scene streaming distance and the panning speed
             spherical.r = Math.max(1, Math.min(500, spherical.r + e.deltaY * .05));
         }
 
-        // ============ ТАЧ ============
+        // ============ TOUCH ============
         let _tch = [];
         let _td = 0;
         let _ts = null;
-        // id пальца, который сейчас держит джойстик (initJoystick). Зона стика не владеет касанием (pointer-events:none),
-        // поэтому этот палец тоже числится в targetTouches канваса — камера должна его пропускать, иначе стик
-        // и поворот камеры одновременно не работают (камера видит «два пальца» и считает это щипком).
+        // id of the finger currently holding the joystick (initJoystick). The stick zone doesn't own the touch (pointer-events:none),
+        // so this finger is also listed in the canvas's targetTouches — the camera must skip it, otherwise the stick
+        // and camera rotation don't work simultaneously (the camera sees «two fingers» and treats it as a pinch).
         let joyTouchId = null;
-        let joyEndingId = null;   // палец стика, который закончился в текущем touchend (joyTouchId к этому моменту уже сброшен)
+        let joyEndingId = null;   // the stick finger that ended in the current touchend (joyTouchId has already been reset by then)
         const isJoyTouch = t => t.identifier === joyTouchId || t.identifier === joyEndingId;
         function camTouches(e) { return Array.from(e.targetTouches).filter(t => !isJoyTouch(t)); }
 
         function onTS(e) {
             e.preventDefault();
-            // targetTouches — только касания НА ЭТОМ элементе (вьюпорт), без пальца джойстика.
+            // targetTouches — only touches ON THIS element (the viewport), without the joystick finger.
             const ct = camTouches(e);
             _tch = ct;
             _ts = _tch[0] ? { x: _tch[0].clientX, y: _tch[0].clientY } : null;
@@ -2813,8 +2815,8 @@
 
         function onTM(e) {
             e.preventDefault();
-            if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — та же блокировка, что и для мыши (onMM)
-            if (isPlaying && cameraIsScriptable) return; // то же для касаний (Scriptable-камеру не крутим)
+            if (isPlaying && luaControlsDisabled) return; // PlayerModule:GetControls():Disable() — the same lock as for the mouse (onMM)
+            if (isPlaying && cameraIsScriptable) return; // the same for touches (we don't rotate a Scriptable camera)
             const ct = camTouches(e);
             if (ct.length === 1) {
                 const t = ct[0];
@@ -2854,42 +2856,42 @@
             }
         }
 
-        // ============ ВЫБОР ВО ВЬЮПОРТЕ: ВЕРХНИЙ РОДИТЕЛЬ ============
-        // Как в Roblox Studio: клик по детали внутри Model выделяет самую верхнюю Model под Workspace, а не саму деталь.
-        // Повторный клик по детали внутри уже выделенной Model опускается на уровень глубже; Alt+клик выделяет сразу деталь.
-        // Folder/Workspace «группами» не считаются (иначе клик по детали выделял бы всю папку с сотнями деталей).
-        // false — вернуть старое поведение (выделяется ровно та деталь, по которой кликнули).
+        // ============ SELECTION IN THE VIEWPORT: TOP PARENT ============
+        // As in Roblox Studio: clicking a part inside a Model selects the topmost Model under Workspace, not the part itself.
+        // Clicking again on a part inside an already selected Model goes one level deeper; Alt+click selects the part right away.
+        // Folder/Workspace don't count as «groups» (otherwise clicking a part would select the whole folder with hundreds of parts).
+        // false — restore the old behavior (exactly the part that was clicked is selected).
         let viewportSelectTopModel = true;
         const _SELECT_GROUP_CLASSES = new Set(['Model', 'Actor', 'Tool', 'Accessory', 'Hat', 'WorldModel']);
         function viewportSelectTarget(hitRef, opts) {
             if (!viewportSelectTopModel || (opts && opts.exact)) return hitRef;
-            if (!treeByRef[hitRef] || parentByRef[hitRef] === undefined) return hitRef;   // нет в дереве (аватар и т.п.)
-            if (selectedRefs.has(hitRef)) return hitRef;                                    // эта деталь уже выделена явно (Explorer / спуск)
-            // chain: [деталь, родитель, ..., корень-сервис]
+            if (!treeByRef[hitRef] || parentByRef[hitRef] === undefined) return hitRef;   // not in the tree (the avatar etc.)
+            if (selectedRefs.has(hitRef)) return hitRef;                                    // this part is already selected explicitly (Explorer / drill-down)
+            // chain: [part, parent, ..., root service]
             const chain = [hitRef];
             let p = parentByRef[hitRef], guard = 0;
             while (p !== undefined && p !== null && p !== -1 && guard++ < 200) { chain.push(p); p = parentByRef[p]; }
             const isGroup = (r) => r === hitRef || (treeByRef[r] && _SELECT_GROUP_CLASSES.has(treeByRef[r].cls));
-            // повторный клик внутри выделенной Model — на уровень глубже (без Ctrl/мультивыбора: там выбираем верх)
+            // clicking again inside a selected Model — one level deeper (without Ctrl/multi-select: there we pick the top)
             if (!(opts && opts.additive) && selectedRef !== null) {
                 const i = chain.indexOf(selectedRef);
                 if (i > 0) {
                     for (let j = i - 1; j >= 0; j--) if (isGroup(chain[j])) return chain[j];
                 }
             }
-            // самая верхняя группа под сервисом (последний элемент chain — сам сервис, Workspace и т.п., его не берём)
+            // the topmost group under the service (the last element of chain is the service itself, Workspace etc., we don't take it)
             for (let j = chain.length - 2; j >= 0; j--) if (isGroup(chain[j])) return chain[j];
             return hitRef;
         }
 
-        // ============ ИСПРАВЛЕННЫЙ PICK ============
+        // ============ FIXED PICK ============
         function pick(cx, cy, opts) {
             const vp = document.getElementById('viewport');
             const rect = vp.getBoundingClientRect();
             mouse.x = ((cx - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
 
-            // Пересоздаем raycaster если нужно
+            // Recreate the raycaster if needed
             if (!raycaster) {
                 raycaster = new THREE.Raycaster();
                 raycaster.params.Points.threshold = 0.1;
@@ -2898,7 +2900,7 @@
 
             raycaster.setFromCamera(mouse, camera);
 
-            // Обновляем кеш объектов для raycasting
+            // Update the object cache for raycasting
             const now = performance.now();
             let objectsToCheck;
 
@@ -2908,7 +2910,7 @@
             }
             objectsToCheck = raycasterCache.objects;
 
-            // Для low/medium с большим количеством объектов - оптимизация
+            // For low/medium with many objects — an optimization
             if (currentQuality !== 'high' && objectsToCheck.length > 2000) {
                 objectsToCheck = objectsToCheck
                     .map(obj => ({
@@ -2920,11 +2922,11 @@
                     .map(item => item.obj);
             }
 
-            // recursive: true — обычным Mesh'ам без детей это ничего не
+            // recursive: true — for plain Meshes without children this does nothing
             const hits = raycaster.intersectObjects(objectsToCheck, true);
 
             if (hits.length) {
-                // У аватара userData.ref есть только на корневой Group —
+                // The avatar has userData.ref only on the root Group —
                 let obj = hits[0].object;
                 while (obj && !(obj.userData && obj.userData.ref)) {
                     obj = obj.parent;
@@ -2935,25 +2937,25 @@
                 }
             }
 
-            // Мимо объекта с зажатым Ctrl / в режиме мультивыбора выделение не сбрасываем.
+            // Missing the object with Ctrl held / in multi-select mode we don't clear the selection.
             if (!(opts && opts.additive)) deselect();
         }
 
-        // Геометрия WedgePart (клин/скат). Конвенция Roblox: BackSurface — это +Z
-        // (полная прямоугольная грань), FrontSurface — -Z (высота сходится в ребро).
+        // WedgePart geometry (wedge/ramp). Roblox convention: BackSurface is +Z
+        // (the full rectangular face), FrontSurface is -Z (the height converges to an edge).
         function makeWedgeGeometry(sx, sy, sz) {
             const hx = sx / 2, hy = sy / 2, hz = sz / 2;
             const BBL = [-hx, -hy, hz], BBR = [hx, -hy, hz];
             const BTL = [-hx, hy, hz], BTR = [hx, hy, hz];
             const FBL = [-hx, -hy, -hz], FBR = [hx, -hy, -hz];
             const tris = [
-                BBL, BTR, BTL,   // задняя грань (полная, +Z)
+                BBL, BTR, BTL,   // back face (full, +Z)
                 BBL, BBR, BTR,
-                BBL, FBL, FBR,   // низ
+                BBL, FBL, FBR,   // bottom
                 BBL, FBR, BBR,
-                BBL, BTL, FBL,   // левая треугольная грань
-                BBR, FBR, BTR,   // правая треугольная грань
-                BTL, FBR, FBL,   // скат
+                BBL, BTL, FBL,   // left triangular face
+                BBR, FBR, BTR,   // right triangular face
+                BTL, FBR, FBL,   // slope
                 BTL, BTR, FBR,
             ];
             const positions = new Float32Array(tris.length * 3);
@@ -2964,25 +2966,25 @@
             return geo;
         }
 
-        // SpecialMesh MeshType.Head — скруглённый цилиндр (голова R6), ось Y.
+        // SpecialMesh MeshType.Head — a rounded cylinder (the R6 head), Y axis.
         function makeHeadGeometry(sx, sy, sz, seg) {
-            const R = 0.5, rc = 0.22; // радиус скругления кромок (в долях размера)
+            const R = 0.5, rc = 0.22; // edge rounding radius (as a fraction of the size)
             const pts = [new THREE.Vector2(0, -0.5), new THREE.Vector2(R - rc, -0.5)];
             const arcN = 5;
-            for (let i = 1; i <= arcN; i++) { // нижнее скругление
+            for (let i = 1; i <= arcN; i++) { // bottom rounding
                 const a = -Math.PI / 2 + (i / arcN) * (Math.PI / 2);
                 pts.push(new THREE.Vector2(R - rc + Math.cos(a) * rc, -0.5 + rc + Math.sin(a) * rc));
             }
-            for (let i = 0; i <= arcN; i++) { // верхнее скругление
+            for (let i = 0; i <= arcN; i++) { // top rounding
                 const a = (i / arcN) * (Math.PI / 2);
                 pts.push(new THREE.Vector2(R - rc + Math.cos(a) * rc, 0.5 - rc + Math.sin(a) * rc));
             }
             pts.push(new THREE.Vector2(0, 0.5));
             const geo = new THREE.LatheGeometry(pts, Math.max(8, seg));
-            geo.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz)); // applyMatrix4 сам поправит нормали
+            geo.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz)); // applyMatrix4 fixes the normals itself
             return geo;
         }
-        // Part.Shape = Cylinder: ось цилиндра вдоль X (а не Y, как у MeshType.Cylinder).
+        // Part.Shape = Cylinder: the cylinder axis runs along X (not Y, as with MeshType.Cylinder).
         function makeCylinderXGeometry(sx, sy, sz, seg) {
             const geo = new THREE.CylinderGeometry(0.5, 0.5, 1, Math.max(8, seg));
             geo.rotateZ(Math.PI / 2);
@@ -2990,18 +2992,18 @@
             return geo;
         }
 
-        // ============ ЗАГРУЗКА РЕАЛЬНОЙ ГЕОМЕТРИИ MeshPart/SpecialMesh(FileMesh) ============
+        // ============ LOADING REAL MeshPart/SpecialMesh(FileMesh) GEOMETRY ============
         const _meshGeometryCache = {}; // meshId -> Promise<{geometry, size}|null>
 
         function _parseRobloxMeshV1(text) {
-            // БАГ, из-за которого валился как минимум 514528468 (старый
+            // BUG that broke at least 514528468 (old
             const body = text.replace(/^\s*version[^\n]*\n?/i, '');
             const nums = body.match(/-?[\d.]+(?:[eE][-+]?\d+)?/g);
             if (!nums || nums.length < 2) return null;
             const numFaces = parseInt(nums[0], 10);
             if (!numFaces) return null;
             const coords = nums.slice(1).map(Number);
-            const need = numFaces * 3 * 9; // 3 вершины/грань × (pos3+norm3+uv3)
+            const need = numFaces * 3 * 9; // 3 vertices/face × (pos3+norm3+uv3)
             if (coords.length < need) return null;
             const positions = new Float32Array(numFaces * 9);
             const normals = new Float32Array(numFaces * 9);
@@ -3011,13 +3013,13 @@
                 for (let v = 0; v < 3; v++) {
                     positions[pi++] = coords[ci++]; positions[pi++] = coords[ci++]; positions[pi++] = coords[ci++];
                     normals[ni++] = coords[ci++]; normals[ni++] = coords[ci++]; normals[ni++] = coords[ci++];
-                    uvs[ui++] = coords[ci++]; uvs[ui++] = coords[ci++]; ci++; // третье число UV-тройки не используется. V больше НЕ переворачиваем — переворот никогда не был подтверждён на реальном Roblox-файле (проверялся только на моих же синтетических данных), а на реальном меше развёртка легла неверно именно с ним
+                    uvs[ui++] = coords[ci++]; uvs[ui++] = coords[ci++]; ci++; // the third number of the UV triple is unused. V is NO LONGER flipped — the flip was never confirmed on a real Roblox file (it was only checked against my own synthetic data), and on a real mesh the UV layout came out wrong precisely with it
                 }
             }
             return { positions, normals, uvs, indices: null };
         }
 
-        // Точная структура v2.00 (получена из реверс-инжиниринга
+        // Exact v2.00 structure (obtained by reverse engineering
         function _tryParseV2At(dv, buf, stub, vertSizeArg, vertOffArg) {
             const numVerts = dv.getUint32(stub, true);
             const numFaces = dv.getUint32(stub + 4, true);
@@ -3039,7 +3041,7 @@
                 normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
                 uvs[i * 2] = dv.getFloat32(base + 24, true);
                 uvs[i * 2 + 1] = dv.getFloat32(base + 28, true);
-                // base+32..35 — третье число UV-тройки (W), не используется.
+                // base+32..35 — the third number of the UV triple (W), unused.
             }
             const faceOff = vertOff + numVerts * vertSize;
             const indices = new Uint32Array(numFaces * 3);
@@ -3086,16 +3088,16 @@
         }
         function _parseRobloxMeshBinary(buf) {
             const dv = new DataView(buf);
-            // 5 байт — подтверждённый реальной документацией размер
+            // 5 bytes — the size confirmed by real documentation
             const dbg = 'bufLen=' + buf.byteLength;
-            if (buf.byteLength < 13) { _lastMeshParseFailReason = 'буфер короче минимального заголовка v2.00 (' + dbg + ')'; return null; }
-            // Заголовок v2.00: u16 sizeof_Header (=12), u8 sizeof_Vertex (36, либо 40 — с цветом вершины),
-            // u8 sizeof_Face (=12), u32 numVerts, u32 numFaces; данные вершин начинаются с sizeof_Header.
+            if (buf.byteLength < 13) { _lastMeshParseFailReason = 'buffer shorter than the minimum v2.00 header (' + dbg + ')'; return null; }
+            // v2.00 header: u16 sizeof_Header (=12), u8 sizeof_Vertex (36, or 40 — with a vertex color),
+            // u8 sizeof_Face (=12), u32 numVerts, u32 numFaces; vertex data starts at sizeof_Header.
             if (buf.byteLength >= 16) {
-                // Заголовок v3.00 (16 байт): u16 sizeof_Header, u8 sizeof_Vertex (40), u8 sizeof_Face (12),
-                // u16 sizeof_LodOffset (4), u16 numLodOffsets, u32 numVerts, u32 numFaces. Счётчики лежат со смещения 8,
-                // а не 4, как в v2 — раньше v3 шёл через v2-разбор и падал «ни один вариант заглушки не подошёл».
-                // После граней идут numLodOffsets смещений LOD (индексы граней): рисуем только LOD0 = [lod[0], lod[1]).
+                // v3.00 header (16 bytes): u16 sizeof_Header, u8 sizeof_Vertex (40), u8 sizeof_Face (12),
+                // u16 sizeof_LodOffset (4), u16 numLodOffsets, u32 numVerts, u32 numFaces. The counters sit at offset 8,
+                // not 4 as in v2 — previously v3 went through v2 parsing and failed with «none of the stub variants fit».
+                // After the faces come numLodOffsets LOD offsets (face indices): we draw only LOD0 = [lod[0], lod[1]).
                 const hs = dv.getUint16(0, true), vs = dv.getUint8(2), fs = dv.getUint8(3);
                 const lodSz = dv.getUint16(4, true), nLod = dv.getUint16(6, true);
                 if (hs === 16 && vs >= 32 && vs <= 64 && fs === 12 && lodSz === 4) {
@@ -3115,17 +3117,17 @@
                 const result = _tryParseV2At(dv, buf, stub);
                 if (result) return result;
             }
-            _lastMeshParseFailReason = 'ни один вариант заглушки (5/0/4/6 байт) не подошёл (' + dbg + ')';
+            _lastMeshParseFailReason = 'none of the stub variants (5/0/4/6 bytes) fit (' + dbg + ')';
             return null;
         }
 
-        // Форматы 4.00/4.01 (и, по той же структуре, 5.00/6.00) — с этой
+        // Formats 4.00/4.01 (and, by the same structure, 5.00/6.00) — with this
         let _lastMeshParseFailReason = '';
-        const failedMeshIds = new Set();   // меши, которые не удалось разобрать (для кнопки в Account)
+        const failedMeshIds = new Set();   // meshes that failed to parse (for the button in Account)
         function _tryParseV4Layout(dv, buf, vertOff, vertSize, numVerts, numFaces, dbg) {
             const faceOff = vertOff + numVerts * vertSize;
             const needBytes = faceOff + numFaces * 12;
-            if (needBytes > buf.byteLength) return null; // не влезает — точно не тот вариант
+            if (needBytes > buf.byteLength) return null; // doesn't fit — definitely not that variant
             const positions = new Float32Array(numVerts * 3);
             const normals = new Float32Array(numVerts * 3);
             const uvs = new Float32Array(numVerts * 2);
@@ -3138,7 +3140,7 @@
                 normals[i * 3 + 1] = dv.getFloat32(base + 16, true);
                 normals[i * 3 + 2] = dv.getFloat32(base + 20, true);
                 uvs[i * 2] = dv.getFloat32(base + 24, true);
-                // ТОЛЬКО для v4.00+ переворот V возвращён обратно:
+                // ONLY for v4.00+ the V flip is restored:
                 uvs[i * 2 + 1] = 1 - dv.getFloat32(base + 28, true);
             }
             const indices = new Uint32Array(numFaces * 3);
@@ -3148,11 +3150,11 @@
                 indices[i * 3 + 1] = dv.getUint32(base + 4, true);
                 indices[i * 3 + 2] = dv.getUint32(base + 8, true);
             }
-            // Проверка непротиворечивости:
+            // Consistency check:
             for (let i = 0; i < indices.length; i++) {
                 if (indices[i] >= numVerts) return null;
             }
-            // Этой проверки одной оказалось МАЛО:
+            // This check alone turned out NOT to be enough:
             let normalOk = 0, uvOk = 0;
             for (let i = 0; i < numVerts; i++) {
                 const nx = normals[i * 3], ny = normals[i * 3 + 1], nz = normals[i * 3 + 2];
@@ -3164,14 +3166,14 @@
             if (normalOk / numVerts < 0.7 || uvOk / numVerts < 0.7) return null;
             return { positions, normals, uvs, indices };
         }
-        // Точная раскладка v4.00/v4.01 (проверена на реальных файлах):
-        //   header(24) | vertices numVerts*40 | [envelope numVerts*8, если есть кости] |
-        //   faces numFaces*12 | LOD-офсеты numLODs*u32 | ...
-        // Вершина = 40 байт: pos(12) norm(12) uv(8) tangent(4) color(4).
-        // ВАЖНО: numFaces — это грани ВСЕХ уровней детализации подряд, а
-        // lods[i]..lods[i+1] — диапазон граней i-го LOD. Раньше рисовались
-        // все LOD сразу (грубые копии поверх LOD0) — отсюда «рваные»
-        // головы/шапки с полосами и наслоением текстуры.
+        // Exact v4.00/v4.01 layout (verified on real files):
+        //   header(24) | vertices numVerts*40 | [envelope numVerts*8, if there are bones] |
+        //   faces numFaces*12 | LOD offsets numLODs*u32 | ...
+        // Vertex = 40 bytes: pos(12) norm(12) uv(8) tangent(4) color(4).
+        // IMPORTANT: numFaces covers the faces of ALL levels of detail one after another, and
+        // lods[i]..lods[i+1] is the face range of the i-th LOD. Previously all
+        // LODs were drawn at once (coarse copies over LOD0) — hence the «ragged»
+        // heads/hats with stripes and texture layering.
         function _tryParseV4Exact(dv, buf, sizeofHeader, numVerts, numFaces, numLODs, numBones) {
             const vertSize = 40;
             const vertOff = sizeofHeader;
@@ -3209,7 +3211,7 @@
             return { positions, normals, uvs, indices };
         }
         function _parseRobloxMeshV4(buf) {
-            if (buf.byteLength < 24) { _lastMeshParseFailReason = 'буфер короче 24 байт (' + buf.byteLength + ')'; return null; }
+            if (buf.byteLength < 24) { _lastMeshParseFailReason = 'buffer shorter than 24 bytes (' + buf.byteLength + ')'; return null; }
             const dv = new DataView(buf);
             const sizeofHeader = dv.getUint16(0, true);
             const lodType = dv.getUint16(2, true);
@@ -3219,12 +3221,12 @@
             const numBones = dv.getUint16(14, true);
             const dbg = 'sizeofHeader=' + sizeofHeader + ' lodType=' + lodType + ' numVerts=' + numVerts +
                 ' numFaces=' + numFaces + ' numLODs=' + numLODs + ' numBones=' + numBones + ' bufLen=' + buf.byteLength;
-            if (sizeofHeader < 24 || sizeofHeader > 64) { _lastMeshParseFailReason = 'sizeofHeader вне диапазона 24-64 (' + dbg + ')'; return null; }
-            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces нулевые или огромные (' + dbg + ')'; return null; }
+            if (sizeofHeader < 24 || sizeofHeader > 64) { _lastMeshParseFailReason = 'sizeofHeader out of range 24-64 (' + dbg + ')'; return null; }
+            if (!numVerts || !numFaces || numVerts > 2_000_000 || numFaces > 2_000_000) { _lastMeshParseFailReason = 'numVerts/numFaces are zero or huge (' + dbg + ')'; return null; }
             const exact = _tryParseV4Exact(dv, buf, sizeofHeader, numVerts, numFaces, numLODs, numBones);
             if (exact) return exact;
-            // Точная раскладка не подошла — старый перебор вариантов как запасной путь.
-            // Реальные диагностические данные с телефона (см.
+            // The exact layout didn't fit — the old variant brute force as a fallback.
+            // Real diagnostic data from a phone (see
             const vertOffCandidates = numLODs > 0
                 ? [sizeofHeader + numLODs * 4, sizeofHeader + numLODs * 8, sizeofHeader]
                 : [sizeofHeader];
@@ -3235,20 +3237,20 @@
                     if (result) return result;
                 }
             }
-            _lastMeshParseFailReason = 'ни один из вариантов офсета/размера вершины не сошёлся (' + dbg +
-                ' испробованы vertOff=[' + vertOffCandidates.join(',') + '] vertSize=[' + vertSizeCandidates.join(',') + '])';
+            _lastMeshParseFailReason = 'none of the offset/vertex size variants matched (' + dbg +
+                ' tried vertOff=[' + vertOffCandidates.join(',') + '] vertSize=[' + vertSizeCandidates.join(',') + '])';
             return null;
         }
 
-        // Нулевые/NaN-нормали: normalize(0) в GLSL не определён. Десктопные GPU обычно дают 0
-        // (деталь просто чуть темнее), а Mali — NaN: чёрные треугольники и «помехи» только на телефоне.
-        // Если у меша есть хоть одна негодная нормаль — пересчитываем их все.
+        // Zero/NaN normals: normalize(0) is undefined in GLSL. Desktop GPUs usually give 0
+        // (the part is just slightly darker), while Mali gives NaN: black triangles and «noise» only on the phone.
+        // If a mesh has even one bad normal — recompute them all.
         function _sanitizeNormals(geo) {
             const a = geo.attributes.normal;
             if (!a) { geo.computeVertexNormals(); return; }
             const n = a.array;
             for (let i = 0; i + 2 < n.length; i += 3) {
-                if (!(n[i] * n[i] + n[i + 1] * n[i + 1] + n[i + 2] * n[i + 2] > 1e-6)) {   // ловит и 0, и NaN
+                if (!(n[i] * n[i] + n[i + 1] * n[i + 1] + n[i + 2] * n[i + 2] > 1e-6)) {   // catches both 0 and NaN
                     geo.computeVertexNormals();
                     return;
                 }
@@ -3269,12 +3271,12 @@
                 y: Math.max(0.001, bb.max.y - bb.min.y),
                 z: Math.max(0.001, bb.max.z - bb.min.z),
             };
-            // Помечаем как разделяемую между несколькими частями с одним
+            // Mark as shared between several parts with one
             geo.userData.sharedMesh = true;
             return { geometry: geo, size };
         }
 
-        // ============ v7.00 — Draco-компрессия ============
+        // ============ v7.00 — Draco compression ============
         let _dracoModulePromise = null;
         function _loadDracoModule() {
             if (!_dracoModulePromise) {
@@ -3282,10 +3284,10 @@
                     const script = document.createElement('script');
                     script.src = 'https://www.gstatic.com/draco/versioned/decoders/1.5.6/draco_decoder.js';
                     script.onload = () => {
-                        if (typeof DracoDecoderModule !== 'function') { reject(new Error('DracoDecoderModule не появился после загрузки скрипта')); return; }
+                        if (typeof DracoDecoderModule !== 'function') { reject(new Error('DracoDecoderModule did not appear after the script loaded')); return; }
                         DracoDecoderModule().then(resolve).catch(reject);
                     };
-                    script.onerror = () => reject(new Error('не удалось загрузить draco_decoder.js с CDN'));
+                    script.onerror = () => reject(new Error('failed to load draco_decoder.js from the CDN'));
                     document.head.appendChild(script);
                 });
             }
@@ -3295,11 +3297,11 @@
             const decoder = new decoderModule.Decoder();
             const dracoBuffer = new decoderModule.DecoderBuffer();
             try {
-                // length — точная длина Draco-потока из заголовка COREMESH
-                // (см. _parseRobloxMeshDraco), если известна: раньше сюда
-                // всегда уходил "остаток буфера", то есть Draco читал и
-                // байты следующего чанка (LODS) как будто они ещё часть
-                // потока — теперь передаём ровно столько, сколько указано.
+                // length — the exact length of the Draco stream from the COREMESH header
+                // (see _parseRobloxMeshDraco), if known: previously the "rest of the buffer"
+                // was always passed here, so Draco also read
+                // the bytes of the next chunk (LODS) as if they were still part of the
+                // stream — now we pass exactly as much as specified.
                 const end = length != null ? offset + length : bytes.length;
                 dracoBuffer.Init(bytes.subarray(offset, end), end - offset);
                 const geomType = decoder.GetEncodedGeometryType(dracoBuffer);
@@ -3329,9 +3331,9 @@
                 if (!positions) { decoderModule.destroy(mesh); return null; }
                 const normals = normalsRaw || new Float32Array(numPoints * 3);
                 const uvs = uvsRaw || new Float32Array(numPoints * 2);
-                // Как и в v4.x: у Roblox начало V сверху, а у three.js (flipY=true
-                // у TextureLoader) — снизу. В v4 переворот был, в Draco (v7)
-                // его не было — отсюда неправильная развёртка на v7-мешах.
+                // As in v4.x: in Roblox the V origin is at the top, in three.js (flipY=true
+                // in TextureLoader) — at the bottom. v4 had the flip, Draco (v7)
+                // didn't — hence the wrong UV layout on v7 meshes.
                 if (uvsRaw) for (let i = 1; i < uvs.length; i += 2) uvs[i] = 1 - uvs[i];
                 const faceBuf = new decoderModule.DracoInt32Array();
                 const indices = new Uint32Array(numFaces * 3);
@@ -3349,19 +3351,19 @@
                 decoderModule.destroy(dracoBuffer);
             }
         }
-        // v7.00 — НЕ просто "заголовок + чистый Draco-поток", как я раньше
-        // угадывал: это чанковый формат (как и другие бинарные форматы
-        // Roblox), Draco-данные лежат внутри чанка COREMESH, а отдельный
-        // чанк LODS задаёт диапазон граней конкретного уровня детализации.
-        // Рёбра "рваной" геометрии на скриншотах скорее всего от того, что
-        // без учёта LODS декодируются и рисуются ВСЕ уровни детализации
-        // сразу, наложенные друг на друга — а не от порядка обхода вершин
-        // (DoubleSide в предыдущей правке маскировал часть симптома, не
-        // причину). Точная структура чанков не подтверждена — ищем
-        // настоящую сигнатуру "DRACO" и имена чанков по байтам вместо
-        // слепого перебора отступов, и логируем найденное в Output: этого
-        // достаточно, чтобы через одно сообщение получить точные цифры для
-        // следующего шага (разбор LODS), вместо гадания вслепую.
+        // v7.00 is NOT simply "a header + a pure Draco stream", as I used to
+        // guess: it is a chunked format (like Roblox's other binary formats),
+        // the Draco data lies inside the COREMESH chunk, and a separate
+        // LODS chunk sets the face range of a particular level of detail.
+        // The «ragged» geometry edges in the screenshots most likely come from
+        // ALL levels of detail being decoded and drawn at once, on top of
+        // each other, because LODS is ignored — not from the vertex traversal order
+        // (DoubleSide in the previous edit masked part of the symptom, not
+        // the cause). The exact chunk structure is not confirmed — we look for
+        // the real "DRACO" signature and chunk names by bytes instead of
+        // blind offset brute force, and log what was found to Output: that is
+        // enough to get exact numbers with one message for
+        // the next step (LODS parsing), instead of guessing blindly.
         function _findBytes(haystack, needle, from) {
             outer: for (let i = from || 0; i <= haystack.length - needle.length; i++) {
                 for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer;
@@ -3380,11 +3382,11 @@
             }
             return out;
         }
-        // Чанк LODS идёт сразу за COREMESH: 8 байт имя, u32 версия, u32 размер,
-        // дальше данные. Точный формат не подтверждён, поэтому ищем в данных
-        // возрастающую последовательность u32, начинающуюся с 0 и
-        // заканчивающуюся числом граней меша — это офсеты LOD. Возвращает
-        // число граней LOD0 или null (тогда рисуются все грани, как раньше).
+        // The LODS chunk comes right after COREMESH: 8 bytes name, u32 version, u32 size,
+        // then the data. The exact format is not confirmed, so we look in the data
+        // for an increasing u32 sequence that starts with 0 and
+        // ends with the mesh's face count — those are the LOD offsets. Returns
+        // the LOD0 face count or null (then all faces are drawn, as before).
         function _findLod0FaceCount(bytes, chunkStart, numFaces) {
             if (chunkStart < 0 || chunkStart + 16 > bytes.length) return null;
             const name = new TextDecoder('latin1').decode(bytes.subarray(chunkStart, chunkStart + 4));
@@ -3407,12 +3409,12 @@
             }
             return null;
         }
-        // v7.00, COREMESH версии 1 — НЕСЖАТЫЙ чанк (Draco — версия 2).
-        // Раскладка (подтверждена на реальном файле): "COREMESH"(8) +
-        // u32 версия + u32 размер + u32 numVerts, затем numVerts вершин по 40 байт
-        // (pos f32x3, normal f32x3, uv f32x2, tangent 4 байта, color 4 байта),
-        // затем u32 numFaces и numFaces*3 u32 индексов. Размер чанка =
-        // 4 + numVerts*40 + 4 + numFaces*12. Дальше идёт чанк LODS.
+        // v7.00, COREMESH version 1 — an UNCOMPRESSED chunk (Draco is version 2).
+        // Layout (confirmed on a real file): "COREMESH"(8) +
+        // u32 version + u32 size + u32 numVerts, then numVerts vertices of 40 bytes
+        // (pos f32x3, normal f32x3, uv f32x2, tangent 4 bytes, color 4 bytes),
+        // then u32 numFaces and numFaces*3 u32 indices. Chunk size =
+        // 4 + numVerts*40 + 4 + numFaces*12. The LODS chunk follows.
         function _parseRobloxMeshV7Raw(bodyBytes) {
             const dv = new DataView(bodyBytes.buffer, bodyBytes.byteOffset, bodyBytes.byteLength);
             const chunkSize = dv.getUint32(12, true);
@@ -3420,13 +3422,13 @@
             const vertStart = 20;
             const facesStart = vertStart + numVerts * 40;
             if (!numVerts || numVerts > 2_000_000 || facesStart + 4 > bodyBytes.length) {
-                _lastMeshParseFailReason = 'v7 raw: некорректный numVerts=' + numVerts + ' (bufLen=' + bodyBytes.length + ')';
+                _lastMeshParseFailReason = 'v7 raw: invalid numVerts=' + numVerts + ' (bufLen=' + bodyBytes.length + ')';
                 return null;
             }
             const numFaces = dv.getUint32(facesStart, true);
             const idxStart = facesStart + 4;
             if (!numFaces || numFaces > 2_000_000 || idxStart + numFaces * 12 > bodyBytes.length) {
-                _lastMeshParseFailReason = 'v7 raw: некорректный numFaces=' + numFaces + ' (bufLen=' + bodyBytes.length + ')';
+                _lastMeshParseFailReason = 'v7 raw: invalid numFaces=' + numFaces + ' (bufLen=' + bodyBytes.length + ')';
                 return null;
             }
             const positions = new Float32Array(numVerts * 3);
@@ -3441,13 +3443,13 @@
                 normals[i * 3 + 1] = dv.getFloat32(o + 16, true);
                 normals[i * 3 + 2] = dv.getFloat32(o + 20, true);
                 uvs[i * 2] = dv.getFloat32(o + 24, true);
-                // Как в v4/Draco: V у Roblox сверху, у three.js снизу.
+                // As in v4/Draco: V is at the top in Roblox, at the bottom in three.js.
                 uvs[i * 2 + 1] = 1 - dv.getFloat32(o + 28, true);
             }
             const indices = new Uint32Array(numFaces * 3);
             for (let i = 0; i < indices.length; i++) {
                 const v = dv.getUint32(idxStart + i * 4, true);
-                if (v >= numVerts) { _lastMeshParseFailReason = 'v7 raw: индекс ' + v + ' >= numVerts ' + numVerts; return null; }
+                if (v >= numVerts) { _lastMeshParseFailReason = 'v7 raw: index ' + v + ' >= numVerts ' + numVerts; return null; }
                 indices[i] = v;
             }
             const lod0 = _findLod0FaceCount(bodyBytes, 16 + chunkSize, numFaces);
@@ -3463,28 +3465,28 @@
             try {
                 decoderModule = await _loadDracoModule();
             } catch (e) {
-                _lastMeshParseFailReason = 'не удалось загрузить Draco-декодер (' + e.message + ')';
+                _lastMeshParseFailReason = 'failed to load the Draco decoder (' + e.message + ')';
                 return null;
             }
             const dv = new DataView(bodyBytes.buffer, bodyBytes.byteOffset, bodyBytes.byteLength);
-            // Заголовок чанка COREMESH — подтверждено вживую на двух
-            // реальных файлах (см. диагностику): 8 байт имя "COREMESH",
-            // затем 3×uint32 — [флаг/версия=2, длина_Draco+4, длина_Draco].
-            // Сам Draco-поток начинается СРАЗУ после этого 20-байтного
-            // заголовка и длится ровно третье поле байт — раньше этой
-            // точной длины не было, декодер получал "остаток буфера" и мог
-            // читать байты уже следующего чанка (LODS) как часть потока.
+            // COREMESH chunk header — confirmed live on two
+            // real files (see diagnostics): 8 bytes name "COREMESH",
+            // then 3×uint32 — [flag/version=2, Draco_length+4, Draco_length].
+            // The Draco stream itself starts RIGHT after this 20-byte
+            // header and lasts exactly the third field's number of bytes — previously there
+            // was no exact length, the decoder got the "rest of the buffer" and could
+            // read bytes of the next chunk (LODS) as part of the stream.
             const ascii = new TextDecoder('latin1').decode(bodyBytes.subarray(0, Math.min(64, bodyBytes.length)));
             let dracoOffset = 20, dracoLength = null;
             if (ascii.startsWith('COREMESH') && bodyBytes.length >= 20) {
                 dracoLength = dv.getUint32(16, true);
             } else {
-                // Структура не подтвердилась для этого конкретного файла —
-                // ищем сигнатуру "DRACO" по байтам как запасной вариант,
-                // без точной длины (декодер получит "остаток буфера").
+                // The structure wasn't confirmed for this particular file —
+                // look for the "DRACO" signature by bytes as a fallback,
+                // without an exact length (the decoder will get the "rest of the buffer").
                 const found = _findBytes(bodyBytes, [0x44, 0x52, 0x41, 0x43, 0x4F], 0);
                 if (found < 0) {
-                    _lastMeshParseFailReason = 'не нашёл ни заголовок COREMESH, ни сигнатуру DRACO';
+                    _lastMeshParseFailReason = 'found neither the COREMESH header nor the DRACO signature';
                     return null;
                 }
                 dracoOffset = found;
@@ -3492,7 +3494,7 @@
             try {
                 const result = _tryDecodeDracoAt(decoderModule, bodyBytes, dracoOffset, dracoLength);
                 if (result) {
-                    // Оставляем только грани LOD0 — иначе грубые LOD рисуются поверх.
+                    // Keep only the LOD0 faces — otherwise the coarse LODs are drawn on top.
                     if (dracoLength != null) {
                         const totalFaces = result.indices.length / 3;
                         const lod0 = _findLod0FaceCount(bodyBytes, dracoOffset + dracoLength, totalFaces);
@@ -3504,11 +3506,11 @@
                     return result;
                 }
             } catch (e) {
-                _lastMeshParseFailReason = 'Draco-декодер бросил исключение: ' + e.message;
+                _lastMeshParseFailReason = 'Draco decoder threw an exception: ' + e.message;
                 return null;
             }
-            // Заявленная длина/офсет не подошли (например, длина 4 у служебного чанка) — ищем сигнатуру
-            // "DRACO" в теле и пробуем декодировать от неё, без точной длины.
+            // The declared length/offset didn't fit (e.g. length 4 for a service chunk) — look for the
+            // "DRACO" signature in the body and try to decode from it, without an exact length.
             try {
                 let from = 0;
                 for (;;) {
@@ -3520,9 +3522,9 @@
                     }
                     from = found + 1;
                 }
-            } catch (e) { emuWarn('swallow:L2558', 'блок около script.js:2558: ' + _errText(e) + ' (падаем в сообщение ниже)'); }
-            _lastMeshParseFailReason = 'Draco-декодер не смог разобрать поток по офсету ' + dracoOffset +
-                (dracoLength != null ? (', длина ' + dracoLength) : '') + ' (поиск сигнатуры DRACO тоже не помог)';
+            } catch (e) { emuWarn('swallow:L2558', 'block near script.js:2558: ' + _errText(e) + ' (falling back to the message below)'); }
+            _lastMeshParseFailReason = 'Draco decoder could not parse the stream at offset ' + dracoOffset +
+                (dracoLength != null ? (', length ' + dracoLength) : '') + ' (the DRACO signature search didn\'t help either)';
             return null;
         }
 
@@ -3540,7 +3542,7 @@
                     if (version === '1.00') {
                         parsed = _parseRobloxMeshV1(new TextDecoder('utf-8').decode(buf));
                     } else if (version === '2.00' || version === '3.00' || version === '4.00' || version === '4.01' || version === '5.00' || version === '6.00') {
-                        // Текстовый заголовок "version X.XX\n" (или "\r\n")
+                        // Text header "version X.XX\n" (or "\r\n")
                         const bytes = new Uint8Array(buf);
                         let nl = bytes.indexOf(10);
                         let bodyStart = nl + 1;
@@ -3554,12 +3556,12 @@
                         parsed = await _parseRobloxMeshDraco(bytes.subarray(nl + 1));
                     } else {
                         failedMeshIds.add(String(meshId));
-                        logLuaOutput('warn', 'Mesh ' + meshId + ': формат "' + (version || '?') + '" пока не поддержан, использую приближение');
+                        logLuaOutput('warn', 'Mesh ' + meshId + ': format "' + (version || '?') + '" is not supported yet, using an approximation');
                         return null;
                     }
                     if (!parsed) {
                         failedMeshIds.add(String(meshId));
-                        logLuaOutput('warn', 'Mesh ' + meshId + ' (версия "' + version + '"): не удалось разобрать — ' + (_lastMeshParseFailReason || 'причина неизвестна') + ', использую приближение');
+                        logLuaOutput('warn', 'Mesh ' + meshId + ' (version "' + version + '"): could not parse — ' + (_lastMeshParseFailReason || 'unknown reason') + ', using an approximation');
                         return null;
                     }
                     return _buildGeometryFromParsed(parsed);
@@ -3572,12 +3574,12 @@
             return p;
         }
 
-        // Асинхронно подменяет box-приближение на реальную геометрию, когда
-        // Сколько реальных мешей/текстур сейчас грузится по сети — Play
-        // ждёт, пока счётчик не опустеет (см. waitForPendingModelLoads),
-        // чтобы модель игрока (и остальная сцена) появлялась сразу целиком,
-        // как при скачивании аватара, а не проявлялась кусками уже во время
-        // игры.
+        // Asynchronously replaces the box approximation with the real geometry when
+        // How many real meshes/textures are currently loading over the network — Play
+        // waits until the counter is empty (see waitForPendingModelLoads),
+        // so that the player model (and the rest of the scene) appears all at once,
+        // like when downloading an avatar, and not in pieces during
+        // the game.
         let _pendingModelLoads = 0;
         function _trackLoad(promiseLike) {
             _pendingModelLoads++;
@@ -3593,11 +3595,11 @@
                 })();
             });
         }
-        // ============ UnionOperation: реальная геометрия (деталь минус Negate) ============
-        // Сервер отдаёт готовый меш из SolidMeshHolder (см. /api/union_mesh);
-        // координаты локальные, в настоящем размере (Size уже "вшит"), поэтому
-        // масштабировать не нужно — просто подменяем geometry у box-приближения.
-        // Нет меша / формат не разобран (404) — остаётся box по Size.
+        // ============ UnionOperation: real geometry (the part minus Negate) ============
+        // The server returns a ready mesh from SolidMeshHolder (see /api/union_mesh);
+        // coordinates are local, at real size (Size is already "baked in"), so
+        // no scaling is needed — just replace the geometry of the box approximation.
+        // No mesh / format not parsed (404) — the box by Size remains.
         function applyUnionTrimesh(body, mesh) {
             const verts = mesh && mesh.userData && mesh.userData.unionTrimeshVerts;
             if (!verts || !body || body.__unionTrimesh || body.mass !== 0 || !body.shapes.length) return;
@@ -3609,9 +3611,9 @@
             body.aabbNeedsUpdate = true;
             body.__unionTrimesh = true;
         }
-        let _unionGeoCache = {}; // ref -> Promise<BufferGeometry|null>; сбрасывается в reloadScene
+        let _unionGeoCache = {}; // ref -> Promise<BufferGeometry|null>; reset in reloadScene
         function loadUnionGeometry(ref) {
-            // клон юниона (комната/холодильник из шаблона) — виртуальный ref, на сервере его нет: берём меш оригинала
+            // a union clone (room/fridge from a template) — a virtual ref, not on the server: take the original's mesh
             if (typeof luaCloneOrigin !== 'undefined' && luaCloneOrigin[ref] !== undefined) ref = luaCloneOrigin[ref];
             if (_unionGeoCache[ref]) return _unionGeoCache[ref];
             const p = (async () => {
@@ -3625,7 +3627,7 @@
                     _sanitizeNormals(geo);
                     geo.computeBoundingBox();
                     geo.computeBoundingSphere();
-                    geo.userData.sharedMesh = true; // не dispose при очистке сцены (общий кэш)
+                    geo.userData.sharedMesh = true; // not disposed when the scene is cleared (shared cache)
                     return geo;
                 } catch (e) {
                     return null;
@@ -3637,11 +3639,11 @@
         function scheduleUnionMeshSwap(o, mesh) {
             const p = loadUnionGeometry(o.ref).then((geo) => {
                 if (!geo) return;
-                if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
+                if (sceneObjs[o.ref] !== mesh) return; // the object has already been replaced/deleted
                 mesh.geometry = geo;
-                // Материал-массив (Decal на одной грани бокса) без групп у union-геометрии не нарисуется:
-                // треугольники, смотрящие в сторону грани декали, получают планарные UV и текстурный
-                // материал (группа 1), остальные — базовый (группа 0).
+                // A material array (a Decal on one box face) without groups won't render on union geometry:
+                // triangles facing the decal's face get planar UVs and the texture
+                // material (group 1), the rest get the base one (group 0).
                 if (Array.isArray(mesh.material) && mesh.material.length === 6) {
                     const mats = mesh.material;
                     const ti = mats.findIndex(m => m && m.map);
@@ -3669,7 +3671,7 @@
                                 P[di] = src[si]; P[di + 1] = src[si + 1]; P[di + 2] = src[si + 2];
                                 if (nsrc) { N[di] = nsrc[si]; N[di + 1] = nsrc[si + 1]; N[di + 2] = nsrc[si + 2]; }
                                 const x = P[di], y = P[di + 1], z = P[di + 2];
-                                let u, v;   // как у THREE.BoxGeometry для соответствующей грани
+                                let u, v;   // same as THREE.BoxGeometry for the corresponding face
                                 if (ti === 0) { u = -z / sz + 0.5; v = y / sy + 0.5; }
                                 else if (ti === 1) { u = z / sz + 0.5; v = y / sy + 0.5; }
                                 else if (ti === 2) { u = x / sx + 0.5; v = -z / sz + 0.5; }
@@ -3690,13 +3692,13 @@
                         mesh.material = [base, mats[ti]];
                     }
                 }
-                // Внутренняя поверхность выреза (та, что "смотрит" внутрь
-                // полости) видна ТОЛЬКО если материал рисует обе стороны —
-                // материал box-заглушки общий (matCache) и по умолчанию
-                // однобокий: снаружи выемка/дырка не читалась (сплошная
-                // деталь), хотя геометрия внутри уже правильная. Клонируем
-                // материал (общий кэш трогать нельзя) и включаем DoubleSide
-                // только для реальных union-мешей.
+                // The inner surface of the cut-out (the one that «looks» into
+                // the cavity) is visible ONLY if the material draws both sides —
+                // the box placeholder's material is shared (matCache) and by default
+                // single-sided: from outside the notch/hole didn't read (a solid
+                // part), although the geometry inside was already correct. Clone
+                // the material (the shared cache must not be touched) and enable DoubleSide
+                // only for real union meshes.
                 const applyDoubleSide = (m) => {
                     if (m.side === THREE.DoubleSide) return m;
                     const c = m.clone();
@@ -3706,9 +3708,9 @@
                 mesh.material = Array.isArray(mesh.material)
                     ? mesh.material.map(applyDoubleSide)
                     : applyDoubleSide(mesh.material);
-                // Полый ли юнион (холодильник, шкаф, комната): объём меша заметно меньше
-                // объёма габаритного бокса. Физика у юниона — сплошной бокс, и игрока,
-                // телепортированного внутрь, выталкивало наружу.
+                // Whether the union is hollow (fridge, wardrobe, room): the mesh volume is noticeably smaller than the
+                // volume of the bounding box. A union's physics is a solid box, and a player
+                // teleported inside was pushed outside.
                 try {
                     const pa = geo.attributes && geo.attributes.position;
                     if (pa && pa.count >= 12) {
@@ -3726,23 +3728,23 @@
                         const bb = geo.boundingBox;
                         const boxVol = (bb.max.x - bb.min.x) * (bb.max.y - bb.min.y) * (bb.max.z - bb.min.z);
                         const ratio = boxVol > 0 ? Math.abs(vol) / boxVol : 1;
-                        // Любой вырез (проём в стене, комната): сплошной бокс не даёт пройти в дырку —
-                        // коллайдером становится настоящая геометрия (см. applyUnionTrimesh).
-                        // Trimesh в cannon.js хранит индексы в Int16, отсюда лимит ~10 000 треугольников.
+                        // Any cut-out (a wall opening, a room): a solid box doesn't let you through the hole —
+                        // the real geometry becomes the collider (see applyUnionTrimesh).
+                        // Trimesh in cannon.js stores indices as Int16, hence the limit of ~10,000 triangles.
                         if (ratio < 0.98 && tri <= 10000 && !idx) {
                             mesh.userData.unionTrimeshVerts = Array.from(pa.array);
                             applyUnionTrimesh(physicsBodies[o.ref], mesh);
                         } else if (ratio < 0.75) luaHollowUnions.add(o.ref);
                     }
-                } catch (e) { emuWarn('swallow:L2769', 'блок около script.js:2769: ' + _errText(e) + ''); }
+                } catch (e) { emuWarn('swallow:L2769', 'block near script.js:2769: ' + _errText(e) + ''); }
             });
             _trackLoad(p);
         }
 
-        // MeshPart с проёмом (рамка двери, арка, кольцо): физика по умолчанию — сплошной бокс по Size, и в проём
-        // не пройти. Если у настоящей геометрии есть сквозное отверстие (луч через центр вдоль какой-то оси
-        // ничего не задевает), статичная деталь получает коллайдер-Trimesh по самому мешу — как у юнионов.
-        // Для динамических деталей (mass>0) остаётся бокс: в cannon.js 0.6 нет столкновения «бокс — trimesh».
+        // A MeshPart with an opening (door frame, arch, ring): physics by default is a solid box by Size, and you
+        // can't get through the opening. If the real geometry has a through hole (a ray through the center along some axis
+        // hits nothing), a static part gets a Trimesh collider from the mesh itself — as with unions.
+        // Dynamic parts (mass>0) keep the box: cannon.js 0.6 has no «box — trimesh» collision.
         function _meshPartHasHole(geo) {
             geo.computeBoundingBox();
             const bb = geo.boundingBox, size = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
@@ -3765,21 +3767,21 @@
                 if (!geo || !geo.attributes || !geo.attributes.position || mesh.userData.anchoredFlag === false) return;
                 const pa = geo.attributes.position, idx = geo.index;
                 const tri = idx ? idx.count / 3 : pa.count / 3;
-                if (tri < 4 || tri > 10000) return;      // индексы Trimesh в cannon — Int16
-                if (geo.userData.hasHole === undefined) geo.userData.hasHole = _meshPartHasHole(geo);   // общая геометрия у многих деталей — считаем один раз
+                if (tri < 4 || tri > 10000) return;      // Trimesh indices in cannon — Int16
+                if (geo.userData.hasHole === undefined) geo.userData.hasHole = _meshPartHasHole(geo);   // geometry shared by many parts — compute once
                 if (!geo.userData.hasHole) return;
                 const verts = new Array(tri * 9);
                 for (let t = 0; t < tri * 3; t++) {
                     const i = idx ? idx.getX(t) : t;
                     verts[t * 3] = pa.getX(i) * scale.x; verts[t * 3 + 1] = pa.getY(i) * scale.y; verts[t * 3 + 2] = pa.getZ(i) * scale.z;
                 }
-                mesh.userData.unionTrimeshVerts = verts;        // подхватит и addPhysicsBodyForObj, если тела ещё нет
+                mesh.userData.unionTrimeshVerts = verts;        // addPhysicsBodyForObj will pick it up too if there is no body yet
                 applyUnionTrimesh(physicsBodies[o.ref], mesh);
             } catch (e) { emuWarn('swallow:meshpart-trimesh', 'MeshPart trimesh: ' + _errText(e)); }
         }
 
-        // ref полых юнионов + «призрак»: пока центр игрока внутри габаритов юниона,
-        // его тело не сталкивается с персонажем (иначе сфера игрока вылетает из полости).
+        // refs of hollow unions + a «ghost»: while the player's center is inside the union's bounds,
+        // its body doesn't collide with the character (otherwise the player's sphere is thrown out of the cavity).
         const luaHollowUnions = new Set();
         const luaGhostedUnions = new Set();
         function updateHollowUnionGhosts() {
@@ -3807,53 +3809,53 @@
         function scheduleRealMeshSwap(o, mesh) {
             const p = loadRealMeshGeometry(o.meshId).then((result) => {
                 if (!result) return;
-                if (sceneObjs[o.ref] !== mesh) return; // объект уже заменён/удалён
+                if (sceneObjs[o.ref] !== mesh) return; // the object has already been replaced/deleted
                 mesh.geometry = result.geometry;
-                // DoubleSide — реальная геометрия (особенно из Draco, v7.00)
-                // могла прийти с порядком обхода вершин граней (winding),
-                // обратным тому, что ожидает three.js по умолчанию;
-                // FrontSide-материал в этом случае отбрасывает примерно
-                // половину треугольников (backface culling) — именно так
-                // выглядел рваный/дырявый силуэт на скриншотах. DoubleSide
-                // рисует обе стороны независимо от направления обхода —
-                // чуть дороже по рендеру, но гарантированно не "дырявое".
+                // DoubleSide — real geometry (especially from Draco, v7.00)
+                // may have come with a vertex winding order of faces
+                // opposite to what three.js expects by default;
+                // a FrontSide material then discards roughly
+                // half of the triangles (backface culling) — that is exactly how
+                // the ragged/holey silhouette looked in the screenshots. DoubleSide
+                // draws both sides regardless of winding —
+                // slightly more expensive to render, but guaranteed not "holey".
                 if (mesh.material) mesh.material.side = THREE.DoubleSide;
                 const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scale = new THREE.Vector3();
                 mesh.matrix.decompose(pos, quat, scale);
                 if (o.meshScale) {
-                    // SpecialMesh(FileMesh): размер = родной размер меша * Scale,
-                    // Size самой детали не участвует (как в Roblox).
+                    // SpecialMesh(FileMesh): size = the mesh's native size * Scale,
+                    // the part's own Size doesn't take part (as in Roblox).
                     scale.set(o.meshScale[0], o.meshScale[1], o.meshScale[2]);
                 } else {
-                    // MeshPart: меш вписывается в Size детали.
+                    // MeshPart: the mesh is fitted into the part's Size.
                     const cur = loadedObjSize[o.ref] || { x: o.sx || 1, y: o.sy || 1, z: o.sz || 1 };
                     scale.set(cur.x / result.size.x, cur.y / result.size.y, cur.z / result.size.z);
-                    // исходный масштаб (по размеру из файла) — к нему возвращаемся после Stop
+                    // original scale (by the size from the file) — we return to it after Stop
                     mesh.userData.partScale0 = new THREE.Vector3((o.sx || 1) / result.size.x, (o.sy || 1) / result.size.y, (o.sz || 1) / result.size.z);
                 }
                 mesh.matrix.compose(pos, quat, scale);
-                // Масштаб меша (вписывание в Size у MeshPart / Scale у SpecialMesh) запоминаем: цикл синхронизации
-                // с физикой пересобирает матрицу каждый кадр и раньше сбрасывал его в (1,1,1), из-за чего меши
-                // с родным размером != Size (торс, шляпы и прочие аксессуары) рисовались «очень большими».
+                // We remember the mesh scale (fitting into Size for MeshPart / Scale for SpecialMesh): the physics sync loop
+                // rebuilds the matrix every frame and used to reset it to (1,1,1), because of which meshes
+                // with native size != Size (torso, hats and other accessories) were drawn «very large».
                 mesh.userData.partScale = scale.clone();
                 if (!o.meshScale) maybeMeshPartTrimesh(o, mesh, result.geometry, scale);
-                // matrixAutoUpdate=false → three.js сам НЕ пересчитает
-                // matrixWorld после первого кадра; без этого флага новый
-                // масштаб (и вообще любая правка mesh.matrix) не применялась.
+                // matrixAutoUpdate=false → three.js will NOT recompute
+                // matrixWorld on its own after the first frame; without this flag the new
+                // scale (and in general any edit of mesh.matrix) wasn't applied.
                 mesh.matrixWorldNeedsUpdate = true;
             });
             _trackLoad(p);
         }
 
-        // ============ ТЕКСТУРЫ ОБЫЧНЫХ ЧАСТЕЙ (Decal/MeshPart/SpecialMesh) ============
-        // Decal лежит НА поверхности детали — часто вплотную к стене/другой детали. polygonOffset сдвигает его
-        // к камере в буфере глубины, чтобы он не мерцал и не пропадал под углом (z-fighting); visible=true
-        // перекрывает visible:false у «невидимой» детали, на которой висит постер.
+        // ============ TEXTURES OF ORDINARY PARTS (Decal/MeshPart/SpecialMesh) ============
+        // A Decal lies ON the part's surface — often flush against a wall/another part. polygonOffset shifts it
+        // toward the camera in the depth buffer so it doesn't flicker or vanish at an angle (z-fighting); visible=true
+        // overrides visible:false of the «invisible» part the poster hangs on.
         const DECAL_FACE_OPTS = { visible: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 };
-        // polygonOffset при near=0.5/far=500 даёт сдвиг в доли тысячных стада — стена, стоящая вплотную спереди
-        // (постер «утоплен» в стену на 0.02–0.1), всё равно закрывает Decal. Поэтому дополнительно сдвигаем
-        // вершины грани с Decal К КАМЕРЕ на фиксированные DECAL_BIAS студов (в view-space, от дистанции не зависит):
-        // как в Roblox, Decal рисуется поверх соседней геометрии, лежащей почти в той же плоскости.
+        // polygonOffset at near=0.5/far=500 gives a shift of a fraction of a thousandth of a stud — a wall standing flush in front
+        // (the poster is «sunk» into the wall by 0.02–0.1) still covers the Decal. So we additionally shift
+        // the vertices of the Decal's face TOWARD THE CAMERA by a fixed DECAL_BIAS studs (in view space, independent of distance):
+        // as in Roblox, a Decal is drawn over neighboring geometry lying in almost the same plane.
         const DECAL_BIAS = 0.12;
         function _applyDecalBias(mat) {
             mat.customProgramCacheKey = () => 'decal-bias';
@@ -3864,10 +3866,10 @@
             return mat;
         }
         const _partTexCache = {};
-        // Раньше THREE.TextureLoader создавался здесь же, на верхнем уровне
+        // THREE.TextureLoader used to be created right here, at the top level
         let _partTexLoader = null;
-        // Почему ассет не загрузился: TextureLoader/Image не говорят причину, поэтому
-        // повторно спрашиваем прокси и показываем его ответ (401/403, XML вместо картинки...).
+        // Why the asset failed to load: TextureLoader/Image don't give a reason, so
+        // we ask the proxy again and show its response (401/403, XML instead of an image...).
         const _assetReported = new Set();
         function reportAssetFailure(id) {
             if (_assetReported.has(id)) return;
@@ -3882,8 +3884,8 @@
                 }
             }).catch(e => logLuaOutput('warn', t('asset_fail_reason', { id, reason: e.message })));
         }
-        // Overlay-режим SurfaceAppearance: итог = mix(Color детали, ColorMap.rgb, ColorMap.a). Правим один фрагмент
-        // стандартного шейдера (map_fragment), отдельная программа — по customProgramCacheKey.
+        // SurfaceAppearance Overlay mode: result = mix(part Color, ColorMap.rgb, ColorMap.a). We patch one fragment
+        // of the standard shader (map_fragment), a separate program — via customProgramCacheKey.
         function _applyOverlayAlpha(mat) {
             mat.customProgramCacheKey = () => 'overlay-alpha';
             mat.onBeforeCompile = (shader) => {
@@ -3901,14 +3903,14 @@
             let resolveLoad;
             _trackLoad(new Promise((res) => { resolveLoad = res; }));
             const tex = _partTexLoader.load('/api/asset-proxy?id=' + assetId, (loaded) => {
-                // Тот же r128-фикс насыщенности, что и у аватаров (см.
-                // importAvatarIntoScene) — иначе текстура выглядит блёкло.
+                // The same r128 saturation fix as for avatars (see
+                // importAvatarIntoScene) — otherwise the texture looks washed out.
                 loaded.encoding = THREE.sRGBEncoding;
                 loaded.anisotropy = renderer.capabilities.getMaxAnisotropy();
                 loaded.needsUpdate = true;
                 resolveLoad();
             }, undefined, () => {
-                // 3-й колбэк TextureLoader.load — onError, раньше не
+                // The 3rd TextureLoader.load callback is onError, previously not
                 logLuaOutput('warn', t('warn_texture_failed', { id: assetId }));
                 reportAssetFailure(assetId);
                 resolveLoad();
@@ -3917,9 +3919,9 @@
             return tex;
         }
 
-        // ============ МАТЕРИАЛЫ (Enum.Material + MaterialVariant) ============
-        // Phong вместо Lambert даёт блик без карты окружения (для three r128
-        // без RoomEnvironment metalness выглядел бы чёрным).
+        // ============ MATERIALS (Enum.Material + MaterialVariant) ============
+        // Phong instead of Lambert gives a specular highlight without an environment map (for three r128
+        // without RoomEnvironment, metalness would look black).
         const MATERIAL_STYLE = {
             272: { shininess: 40, specular: 0x444444 },   // SmoothPlastic
             288: { neon: true },                          // Neon
@@ -3956,8 +3958,8 @@
             };
             if (st.neon) { base.emissive = new THREE.Color(o.color || '#ffffff'); }
             if (mv && qualitySettings.textures) {
-                // Плитка MaterialVariant задаётся в студах (StudsPerTile), а у меша
-                // UV на всю деталь — берём приближённо по среднему размеру.
+                // A MaterialVariant tile is specified in studs (StudsPerTile), while the mesh
+                // has UVs over the whole part — take it approximately by the average size.
                 const tiles = Math.max(1, ((o.sx || 1) + (o.sz || 1)) / 2 / (mv.studsPerTile || 10));
                 if (mv.colorMap) base.map = getTiledTexture(mv.colorMap, tiles, tiles, true);
                 if (mv.normalMap) base.normalMap = getTiledTexture(mv.normalMap, tiles, tiles, false);
@@ -3966,12 +3968,12 @@
             return new THREE.MeshPhongMaterial(base);
         }
 
-        // ============ ОДЕЖДА R6 (Shirt/Pants) ============
-        // Классический шаблон 585x559: прямоугольники [x, y, w, h] граней.
-        // Порядок граней BoxGeometry: +x, -x, +y, -y, +z, -z
-        // (Roblox: Right, Left, Top, Bottom, Back, Front). Координаты
-        // торса известны точно; для рук/ног боковые грани — по симметричной
-        // раскладке шаблона (лицевая грань и верх/низ — точные).
+        // ============ R6 CLOTHING (Shirt/Pants) ============
+        // The classic 585x559 template: rectangles [x, y, w, h] of the faces.
+        // BoxGeometry face order: +x, -x, +y, -y, +z, -z
+        // (Roblox: Right, Left, Top, Bottom, Back, Front). The torso
+        // coordinates are known exactly; for arms/legs the side faces follow the symmetric
+        // template layout (the front face and top/bottom are exact).
         const CLOTH_W = 585, CLOTH_H = 559;
         const CLOTH_FACES = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
         const CLOTH_REGIONS = {
@@ -3985,7 +3987,7 @@
         function makeClothGeometry(o, baseGeo) {
             const reg = CLOTH_REGIONS[o.cloth.limb];
             if (!reg) return baseGeo;
-            const g = baseGeo.clone(); // UV свои у каждой части, общий кэш геометрий трогать нельзя
+            const g = baseGeo.clone(); // each part has its own UVs, the shared geometry cache must not be touched
             const uv = g.attributes.uv;
             CLOTH_FACES.forEach((f, gi) => {
                 const [x, y, w, h] = reg[f];
@@ -4011,7 +4013,7 @@
             const tex = new THREE.CanvasTexture(c);
             tex.encoding = THREE.sRGBEncoding;
             tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-            // штаны под рубашкой; порядок отрисовки не зависит от порядка загрузки
+            // pants under the shirt; the draw order doesn't depend on the load order
             const layers = [pantsId, shirtId].filter(Boolean);
             const p = Promise.all(layers.map(id => new Promise(res => {
                 const im = new Image();
@@ -4028,14 +4030,14 @@
             return tex;
         }
 
-        // ============ ИСПРАВЛЕННАЯ СЦЕНА ============
-        // TrussPart в Roblox — не текстура, а настоящая решётчатая геометрия: полый столб из 4 угловых стоек,
-        // на каждой ячейке (≈2 стада высотой) — горизонтальное кольцо и диагонали на гранях.
-        // Style (enum Style): 0 = AlternatingSupports (по диагонали на грань, направление чередуется от ячейки к ячейке),
-        // 1 = BridgeStyleSupports (X — обе диагонали), 2 = NoSupports (только стойки и кольца).
-        // Рисуется одним объединённым мешем; коллайдер остаётся боксом (см. buildCannonShape), лазание от формы не зависит.
+        // ============ FIXED SCENE ============
+        // A TrussPart in Roblox is not a texture but real lattice geometry: a hollow post of 4 corner struts,
+        // with a horizontal ring and diagonals on the faces at every cell (≈2 studs tall).
+        // Style (enum Style): 0 = AlternatingSupports (a diagonal per face, direction alternating from cell to cell),
+        // 1 = BridgeStyleSupports (X — both diagonals), 2 = NoSupports (only struts and rings).
+        // Drawn as one merged mesh; the collider stays a box (see buildCannonShape), climbing doesn't depend on the shape.
         function makeTrussGeometry(sx, sy, sz, style) {
-            const T = Math.max(0.05, Math.min(0.35, Math.min(sx, sz) * 0.14));   // толщина балки (~14% ширины, как на референсе из Roblox)
+            const T = Math.max(0.05, Math.min(0.35, Math.min(sx, sz) * 0.14));   // beam thickness (~14% of the width, as in the Roblox reference)
             const cells = Math.max(1, Math.round(sy / 2));
             const ch = sy / cells;
             const hx = sx / 2, hy = sy / 2, hz = sz / 2;
@@ -4052,9 +4054,9 @@
                 for (let i = 0; i < ix.length; i++) idx.push(base + ix[i]);
                 g.dispose();
             }
-            // стойки по углам
+            // corner struts
             for (const ix of [-1, 1]) for (const iz of [-1, 1]) beam(ix * (hx - T / 2), 0, iz * (hz - T / 2), T, sy, T);
-            // кольца на границах ячеек (низ и верх — внутри габарита)
+            // rings at cell boundaries (bottom and top — inside the bounds)
             for (let k = 0; k <= cells; k++) {
                 const y = -hy + k * ch + (k === 0 ? T / 2 : k === cells ? -T / 2 : 0);
                 beam(0, y, hz - T / 2, sx - 2 * T, T, T);
@@ -4068,13 +4070,13 @@
                     const x0 = -hx + T, x1 = hx - T, z0 = -hz + T, z1 = hz - T;
                     const flip = (style === 0) && (k % 2 === 1);
                     for (const sg of [-1, 1]) {
-                        // грани ±Z (плоскость XY)
+                        // ±Z faces (XY plane)
                         const dz = (a, b, c, d) => {
                             const L = Math.hypot(c - a, d - b), ang = Math.atan2(d - b, c - a);
                             const q = Math.sin(ang / 2), w = Math.cos(ang / 2);
                             beam((a + c) / 2, (b + d) / 2, sg * (hz - T / 2), L, T, T, 0, 0, q, w);
                         };
-                        // грани ±X (плоскость ZY): поворот вокруг Y на 90° переводит длину из X в Z, затем наклон вокруг неё
+                        // ±X faces (ZY plane): a 90° rotation around Y moves the length from X to Z, then tilt around it
                         const dx = (a, b, c, d) => {
                             const L = Math.hypot(c - a, d - b), ang = Math.atan2(d - b, c - a);
                             const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), ang);
@@ -4103,7 +4105,7 @@
 
         function buildMeshFromObj(o, geoCache, matCache) {
             const isTruss = o.class === 'TrussPart' && !o.meshId;
-            const trussStyle = (typeof o.trussStyle === 'number') ? o.trussStyle : 0;   // нет свойства — AlternatingSupports
+            const trussStyle = (typeof o.trussStyle === 'number') ? o.trussStyle : 0;   // no property — AlternatingSupports
             const geoKey = (isTruss ? 'truss' + trussStyle : o.shape) + '_' + (o.sx || 1).toFixed(2) + '_' + (o.sy || 1).toFixed(2) + '_' + (o.sz || 1).toFixed(2);
             if (!geoCache[geoKey]) {
                 if (isTruss) {
@@ -4130,22 +4132,22 @@
                 }
             }
             const geo = geoCache[geoKey];
-            // opacity=0 (Transparency=1) — валидное значение; раньше `o.opacity || 1`
-            // превращал его в 1, и невидимые детали рисовались непрозрачными.
+            // opacity=0 (Transparency=1) is a valid value; previously `o.opacity || 1`
+            // turned it into 1, and invisible parts were drawn opaque.
             const op = (o.opacity === undefined || o.opacity === null) ? 1 : o.opacity;
 
-            // Текстура — только на "high", как и остальные quality-флаги
+            // Texture — only on "high", like the other quality flags
             const texId = qualitySettings.textures ? o.texture : null;
 
-            // Decal накладывается РОВНО на одну грань (o.textureFace —
+            // A Decal is applied to EXACTLY one face (o.textureFace —
             const FACE_TO_BOX_GROUP = {
                 Right: 0, Left: 1, Top: 2, Bottom: 3, Back: 4, Front: 5,
             };
-            // meshId (реальная кастомная геометрия, см.
+            // meshId (real custom geometry, see
             const isBoxShape = !o.meshId && !isTruss && (!o.shape || o.shape === 'block' || o.shape === 'box');
-            // Все Decal детали (o.decals, по одному на грань) — только для боксов и только с текстурами
+            // All the part's Decals (o.decals, one per face) — only for boxes and only with textures
             const decalList = (qualitySettings.textures && isBoxShape && Array.isArray(o.decals) && o.decals.length) ? o.decals : null;
-            // Decal — своя явная грань (Face), уже вычислена корректно
+            // A Decal has its own explicit face (Face), already computed correctly
             let implicitFaceIdx = null;
             if (texId && (o.textureFace === null || o.textureFace === undefined || o.textureFace === '') && isBoxShape) {
                 const sx = o.sx || 1, sy = o.sy || 1, sz = o.sz || 1;
@@ -4153,8 +4155,8 @@
                 implicitFaceIdx = (areaX >= areaY && areaX >= areaZ) ? 0
                     : (areaY >= areaZ) ? 2 : 4;
             }
-            // Face у Decal в файле — число NormalId (Right=0, Top=1, Back=2, Left=3, Bottom=4, Front=5),
-            // а не имя: раньше число не находилось в таблице и ВСЕГДА превращалось в Front.
+            // A Decal's Face in the file is a NormalId number (Right=0, Top=1, Back=2, Left=3, Bottom=4, Front=5),
+            // not a name: previously the number wasn't found in the table and ALWAYS turned into Front.
             const _faceName = (typeof o.textureFace === 'number')
                 ? ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'][o.textureFace]
                 : o.textureFace;
@@ -4162,29 +4164,29 @@
                 ? (FACE_TO_BOX_GROUP[_faceName] ?? FACE_TO_BOX_GROUP.Front)
                 : implicitFaceIdx;
 
-            // SurfaceAppearance с AlphaMode=Overlay (o.alphaMode===0): цвет детали просвечивает там, где альфа текстуры
-            // мала. Раньше такие пиксели вырезались alphaTest'ом (остаются «только линии» на High) или были чёрными.
+            // SurfaceAppearance with AlphaMode=Overlay (o.alphaMode===0): the part's color shows through where the texture's alpha
+            // is low. Previously such pixels were cut out by alphaTest («only lines» remain on High) or were black.
             const overlayAlpha = !!(texId && o.meshId && faceIdx === null && o.alphaMode === 0);
             const baseColor = (texId && faceIdx === null && !overlayAlpha) ? '#ffffff' : (o.color || '#a0a0a0');
-            // Decal на грани: свой уровень непрозрачности (см. textureOpacity на сервере), а не
-            // прозрачность детали — иначе постер на невидимой детали (Transparency=1) пропадает.
+            // A Decal on a face: its own opacity level (see textureOpacity on the server), not the
+            // part's transparency — otherwise a poster on an invisible part (Transparency=1) disappears.
             const decalOp = (faceIdx !== null && o.textureFace !== null && o.textureFace !== undefined && typeof o.textureOpacity === 'number') ? o.textureOpacity : op;
             const matKey = (o.color || '#a0a0a0') + '_' + op.toFixed(1) + '_' + decalOp.toFixed(1) + '_' +
                 (faceIdx === null ? (texId || '') : (texId + '_face' + faceIdx)) + (overlayAlpha ? '_ovl' : '');
             if (!decalList && !matCache[matKey]) {
-                // Прозрачные материалы НЕ пишут глубину, а полностью невидимые (Transparency=1) не рисуются вовсе:
-                // иначе такая деталь (сортировка идёт по центру объекта, а не по поверхности) под одними
-                // углами закрывала Decal и всё остальное позади себя.
+                // Transparent materials do NOT write depth, and fully invisible ones (Transparency=1) aren't drawn at all:
+                // otherwise such a part (sorting goes by the object's center, not its surface) at some
+                // angles covered the Decal and everything else behind it.
                 const baseOpts = {
                     transparent: op < 1.0,
                     opacity: op,
                     depthWrite: op >= 1.0,
                     visible: op > 0.01,
-                    // flatShading тут не передаём: у MeshLambertMaterial в этой версии three такого свойства нет, параметр игнорировался,
-                    // а в консоль на каждый материал сыпалось «'flatShading' is not a property of this material»
+                    // we don't pass flatShading here: MeshLambertMaterial in this three version has no such property, the parameter was ignored,
+                    // and the console got «'flatShading' is not a property of this material» for every material
                 };
                 if (faceIdx !== null) {
-                    // Массив материалов по группам граней BoxGeometry:
+                    // Material array by BoxGeometry face groups:
                     const plain = new THREE.MeshLambertMaterial({ ...baseOpts, color: o.color || '#a0a0a0' });
                     const textured = _applyDecalBias(new THREE.MeshLambertMaterial({
                         ...baseOpts, ...DECAL_FACE_OPTS, transparent: true, opacity: decalOp, depthWrite: decalOp >= 0.99,
@@ -4196,18 +4198,18 @@
                 } else {
                     matCache[matKey] = new THREE.MeshLambertMaterial({
                         ...baseOpts,
-                        // Текстуру красим в тон o.color — она бы почти всегда
+                        // We tint the texture to the o.color tone — it would almost always
                         color: baseColor,
                         map: texId ? getOrLoadPartTexture(texId) : null,
-                        // alphaTest — реальные меши (o.meshId) часто используют
-                        // текстуру-атлас с прозрачными областями (PNG alpha);
-                        // без него прозрачные пиксели рисуются непрозрачным
-                        // чёрным (RGB под alpha=0 у большинства PNG — (0,0,0)),
-                        // а не прозрачными, поэтому там, где в развёртке
-                        // должна быть "дырка"/незанятая часть атласа, был
-                        // виден сплошной чёрный кусок. Не влияет на полностью
-                        // непрозрачные текстуры — alpha=1 везде проходит
-                        // проверку тривиально.
+                        // alphaTest — real meshes (o.meshId) often use
+                        // an atlas texture with transparent areas (PNG alpha);
+                        // without it transparent pixels are drawn as opaque
+                        // black (RGB under alpha=0 in most PNGs is (0,0,0)),
+                        // not transparent, so where the layout
+                        // should have a "hole"/an unused part of the atlas, a solid black
+                        // piece was visible. Doesn't affect fully
+                        // opaque textures — alpha=1 everywhere passes
+                        // the check trivially.
                         alphaTest: (texId && o.meshId && !overlayAlpha) ? 0.5 : 0,
                     });
                     if (overlayAlpha) _applyOverlayAlpha(matCache[matKey]);
@@ -4225,14 +4227,14 @@
                     for (const d of decalList) {
                         const g = FACE_TO_BOX_GROUP[typeof d.face === 'number' ? NAMES[d.face] : d.face];
                         if (g === undefined) continue;
-                        // свой opacity у Decal (Transparency Decal), а не прозрачность детали — постер на невидимой детали виден
+                        // the Decal's own opacity (Decal Transparency), not the part's transparency — a poster on an invisible part is visible
                         arrM[g] = _applyDecalBias(new THREE.MeshLambertMaterial({ ...dBase, ...DECAL_FACE_OPTS, transparent: true, opacity: d.op, depthWrite: d.op >= 0.99, color: '#ffffff', map: getOrLoadPartTexture(d.tex) }));
                     }
                     matCache[dk] = arrM;
                 }
                 mat = matCache[dk];
             }
-            // Особые материалы (металлы, Neon) и MaterialVariant — только для сплошных мешей
+            // Special materials (metals, Neon) and MaterialVariant — only for solid meshes
             if (!Array.isArray(mat) && !texId && (o.mvar || MATERIAL_STYLE[o.material])) {
                 const mk = 'mat_' + o.material + '_' + (o.mvar ? o.mvar.name : '') + '_' + (o.color || '') + '_' + op.toFixed(1)
                     + '_' + Math.round(((o.sx || 1) + (o.sz || 1)) * 4);
@@ -4253,7 +4255,7 @@
                 meshMat = matCache[ck];
             }
             const mesh = new THREE.Mesh(meshGeo, meshMat);
-            // SpecialMesh.Offset — сдвиг меша в ЛОКАЛЬНЫХ осях детали
+            // SpecialMesh.Offset — a mesh shift in the part's LOCAL axes
             let bpx = o.px || 0, bpy = o.py || 0, bpz = o.pz || 0;
             if (o.meshOffset) {
                 const [ox, oy, oz] = o.meshOffset;
@@ -4285,10 +4287,10 @@
             mesh.receiveShadow = qualitySettings.shadows;
             mesh.userData.ref = o.ref;
             mesh.userData.cls = o.class;
-            mesh.userData.seatDisabled = !!o.disabled;   // Seat/VehicleSeat.Disabled из файла (работает и без Lua)
+            mesh.userData.seatDisabled = !!o.disabled;   // Seat/VehicleSeat.Disabled from the file (works without Lua too)
             mesh.userData.shape = o.shape;
-            mesh.userData.pivotOffset = o.pivotOffset || null; // PivotOffset детали (GetPivot/PivotTo)
-            // Поза самой детали (без SpecialMesh.Offset) — от неё инструменты трансформации считают жесты
+            mesh.userData.pivotOffset = o.pivotOffset || null; // The part's PivotOffset (GetPivot/PivotTo)
+            // The pose of the part itself (without SpecialMesh.Offset) — the transform tools compute gestures from it
             mesh.userData.cfPos = [o.px || 0, o.py || 0, o.pz || 0];
             mesh.userData.cfRot = (o.rot && o.rot.length >= 9) ? o.rot.slice(0, 9) : [1, 0, 0, 0, 1, 0, 0, 0, 1];
             mesh.userData.sx = o.sx || 1;
@@ -4308,10 +4310,10 @@
             return mesh;
         }
 
-        // ============ Highlight (заливка + контур детали/модели) ============
-        // Adornee (или Parent, если Adornee пуст) -> на каждую деталь цели вешаем дочерние меши: заливка
-        // (та же геометрия, MeshBasicMaterial) и контур (EdgesGeometry). DepthMode: 0 AlwaysOnTop, 1 Occluded.
-        // Работает по Lua-дереву (luaByRef), поэтому видит и Highlight в клонах комнат. Раз в 400 мс сверяем состав.
+        // ============ Highlight (fill + outline of a part/model) ============
+        // Adornee (or Parent if Adornee is empty) -> for every part of the target we attach child meshes: a fill
+        // (the same geometry, MeshBasicMaterial) and an outline (EdgesGeometry). DepthMode: 0 AlwaysOnTop, 1 Occluded.
+        // Works on the Lua tree (luaByRef), so it also sees Highlights in room clones. We re-check the set every 400 ms.
         const _hlState = {};            // ref Highlight -> { objs: {partRef: {mesh, fill, line}}, sig }
         let _hlT = 0;
         const _hlEdgeCache = new WeakMap();
@@ -4391,10 +4393,10 @@
             for (const r of Object.keys(_hlState)) if (!seen.has(Number(r))) _hlDispose(r);
         }
 
-        // ============ Отсечение мелочи по экранному размеру ============
-        // Комната на сотни мелких деталей (лампы, болты, декор) давала сотни draw call'ов, хотя вдали каждая — пара пикселей.
-        // Прячем деталь, если её угловой размер < ~0.6% при дистанции > 40 студов. mesh.visible стримингом выставляется сам,
-        // поэтому свои скрытые меши помечаем (_sc) и возвращаем сами.
+        // ============ Culling small things by screen size ============
+        // A room of hundreds of small parts (lamps, bolts, decor) produced hundreds of draw calls although each is a couple of pixels far away.
+        // Hide a part if its angular size is < ~0.6% at a distance > 40 studs. mesh.visible is set by streaming itself,
+        // so we mark our own hidden meshes (_sc) and restore them ourselves.
         let _scT = 0;
         const _SC_RATIO = 0.006, _SC_MIN_DIST = 40, _SC_CLONE_DIST = 110;
         function updateSmallCull(nowMs) {
@@ -4407,7 +4409,7 @@
                 const e = m.matrix.elements;
                 const d = Math.hypot(e[12] - cp.x, e[13] - cp.y, e[14] - cp.z);
                 const r = 0.5 * Math.hypot(sz.x, sz.y, sz.z);
-                // клоны (комнаты из ROOMS 2-20 и т.п.) дальше _SC_CLONE_DIST не рисуем: пройденные комнаты остаются в сцене
+                // clones (rooms from ROOMS 2-20 etc.) farther than _SC_CLONE_DIST aren't drawn: passed rooms stay in the scene
                 const small = (d > _SC_MIN_DIST && r / d < _SC_RATIO) || (luaCloneOrigin[k] !== undefined && d - r > _SC_CLONE_DIST);
                 if (small) { if (m.visible) { m.visible = false; m.userData._sc = 1; } }
                 else if (m.userData._sc) { m.userData._sc = 0; m.visible = d - r <= cutoff; }
@@ -4417,10 +4419,10 @@
             for (const k in sceneObjs) { const m = sceneObjs[k]; if (m && m.userData._sc) { m.userData._sc = 0; m.visible = true; } }
         }
 
-        // ============ ЧАСТИЦЫ (ParticleEmitter) ============
-        // Сервер отдаёт эмиттеры (/api/particles), здесь они симулируются на CPU
-        // и рисуются одним THREE.Points на эмиттер (свой ShaderMaterial: размер в
-        // студах, поворот, цвет/прозрачность по времени жизни).
+        // ============ PARTICLES (ParticleEmitter) ============
+        // The server returns emitters (/api/particles), here they are simulated on the CPU
+        // and drawn as one THREE.Points per emitter (its own ShaderMaterial: size in
+        // studs, rotation, color/transparency over lifetime).
         const PS = { list: [], key: '', texCache: {}, soft: null, lastT: 0, timer: null, loading: false };
         const PS_MAX_PER = 1500;
         const PS_MAX_TOTAL = 8000;
@@ -4441,8 +4443,8 @@
             return PS.soft;
         }
 
-        // Текстура эмиттера: rbxassetid://N / ссылка с id= / число -> через asset-proxy,
-        // всё остальное (rbxasset://... встроенные .dds) -> мягкий круглый спрайт.
+        // Emitter texture: rbxassetid://N / a link with id= / a number -> via the asset-proxy,
+        // everything else (rbxasset://... built-in .dds) -> a soft round sprite.
         function _psLoadTexture(uniforms, url) {
             const m = /(?:id=|rbxassetid:\/\/|^)(\d{3,})/.exec(String(url || ''));
             if (!m) { uniforms.map.value = _psSoftTexture(); return; }
@@ -4461,15 +4463,15 @@
                 entry.waiters = [];
             }, undefined, () => {
                 entry.failed = true;
-                console.warn('Particle texture ' + id + ' не загрузилась — мягкий спрайт вместо неё');
+                console.warn('Particle texture ' + id + ' failed to load — a soft sprite instead');
             });
         }
 
         function _psSeqNum(seq, t, dflt) {
-            // В файле значение может быть обычным числом (константа) или вообще
-            // отсутствовать (тогда парсер подставляет число-дефолт) — это не «пустая»
-            // последовательность: раньше 0 принимался за «нет данных» и частицы были
-            // полностью прозрачными.
+            // In the file the value can be a plain number (a constant) or even
+            // missing (then the parser substitutes a default number) — this is not an «empty»
+            // sequence: previously 0 was taken for «no data» and particles were
+            // completely transparent.
             if (typeof seq === 'number') return [seq, 0];
             if (!seq || !seq.length) return [dflt === undefined ? 1 : dflt, 0];
             if (t <= seq[0].time) return [seq[0].value, seq[0].envelope || 0];
@@ -4578,21 +4580,21 @@
                 const r = await api('GET', '/api/particles');
                 if (!r || !r.ok) return;
                 const key = JSON.stringify(r.emitters);
-                if (key === PS.key) return;       // ничего не изменилось — не сбрасываем живые частицы
+                if (key === PS.key) return;       // nothing changed — don't reset live particles
                 PS.key = key;
                 _psDispose();
                 for (const d of r.emitters) {
                     try { PS.list.push(_psBuild(d)); } catch (e) { console.error('particle build:', e); }
                 }
-                const _msg = 'Particles: эмиттеров ' + PS.list.length +
+                const _msg = 'Particles: emitters ' + PS.list.length +
                     PS.list.map(e => '\n  • ' + e.d.name + ' @ ' + e.d.world.p.map(v => v.toFixed(1)).join(', ') +
                         ' | Enabled=' + (e.p.Enabled !== false) + ' Rate=' + e.p.Rate + ' tex=' + (e.p.Texture || '—')).join('');
                 console.log(_msg);
-                try { logLuaOutput('info', _msg); } catch (e) { /* Output ещё не готов */ }
+                try { logLuaOutput('info', _msg); } catch (e) { /* Output is not ready yet */ }
                 setTimeout(() => {
-                    const m2 = 'Particles alive: ' + PS.list.map(e => e.d.name + '=' + e.count + (e.points.visible ? '' : '(скрыт: далеко)')).join(', ');
+                    const m2 = 'Particles alive: ' + PS.list.map(e => e.d.name + '=' + e.count + (e.points.visible ? '' : '(hidden: far away)')).join(', ');
                     console.log(m2);
-                    try { logLuaOutput('info', m2); } catch (e) { /* Output ещё не готов */ }
+                    try { logLuaOutput('info', m2); } catch (e) { /* Output is not ready yet */ }
                 }, 1500);
             } catch (e) {
                 console.error('loadParticles:', e);
@@ -4610,7 +4612,7 @@
             if (e.count >= e.n) return;
             const p = e.p, i = e.count++;
             const o = e.d.onPart ? 1 : 0;
-            // точка появления: в Attachment — точка; в детали — внутри объёма (Box/Sphere)
+            // spawn point: in an Attachment — a point; in a part — inside the volume (Box/Sphere)
             let lx = 0, ly = 0, lz = 0;
             if (o) {
                 const sz = e.d.partSize || [1, 1, 1];
@@ -4622,7 +4624,7 @@
                     lx = (Math.random() - 0.5) * sz[0]; ly = (Math.random() - 0.5) * sz[1]; lz = (Math.random() - 0.5) * sz[2];
                 }
             }
-            // направление: ось эмиттера + случайное отклонение SpreadAngle (градусы)
+            // direction: the emitter axis + a random SpreadAngle deviation (degrees)
             const sa = p.SpreadAngle || { x: 0, y: 0 };
             const ax = Math.abs(sa.x || 0), ay = Math.abs(sa.y || 0);
             let dx, dy, dz;
@@ -4639,7 +4641,7 @@
                 const v2 = [A[1] * v1[2] - A[2] * v1[1], A[2] * v1[0] - A[0] * v1[2], A[0] * v1[1] - A[1] * v1[0]];
                 const t1 = (Math.random() * 2 - 1) * ax * Math.PI / 180, t2 = (Math.random() * 2 - 1) * ay * Math.PI / 180;
                 const s1 = Math.sin(t1), c1 = Math.cos(t1), s2 = Math.sin(t2), c2 = Math.cos(t2);
-                // сначала поворот вокруг v1 (в плоскости A-v2), затем вокруг v2
+                // first rotate around v1 (in the A-v2 plane), then around v2
                 const bx = A[0] * c1 + v2[0] * s1, by = A[1] * c1 + v2[1] * s1, bz = A[2] * c1 + v2[2] * s1;
                 dx = bx * c2 + v1[0] * s2; dy = by * c2 + v1[1] * s2; dz = bz * c2 + v1[2] * s2;
                 const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
@@ -4648,7 +4650,7 @@
             const k = i * 3;
             const m = mat.elements;       // column-major
             const locked = !!p.LockedToPart;
-            // локальные -> мировые координаты (если не LockedToPart); LockedToPart хранит локальные
+            // local -> world coordinates (if not LockedToPart); LockedToPart keeps local ones
             if (locked) {
                 e.pos[k] = lx; e.pos[k + 1] = ly; e.pos[k + 2] = lz;
                 e.vel[k] = dx * speed; e.vel[k + 1] = dy * speed; e.vel[k + 2] = dz * speed;
@@ -4687,13 +4689,13 @@
 
         const _psTmpC = [1, 1, 1];
 
-        // ============ BEAM: лента между двумя Attachment ============
-        // Лазер выстрела в Laser Tag (laserBeamEffect): клон LaserBeam с Beam + Tween позиции Attachment.
-        // Рисуем цветную аддитивную ленту к камере; текстура Beam не накладывается.
+        // ============ BEAM: a ribbon between two Attachments ============
+        // The shot laser in Laser Tag (laserBeamEffect): a LaserBeam clone with a Beam + a Tween of the Attachment position.
+        // We draw a colored additive ribbon toward the camera; the Beam texture isn't applied.
         const luaBeamRefs = new Set();
-        const luaBeamColor = {};      // ref -> [r,g,b] (первая точка ColorSequence)
+        const luaBeamColor = {};      // ref -> [r,g,b] (the first point of the ColorSequence)
         const _beamMeshes = {};       // ref -> THREE.Mesh
-        let _beamTmpA = null, _beamTmpB = null;   // THREE ещё не загружен при инициализации скрипта — создаём лениво
+        let _beamTmpA = null, _beamTmpB = null;   // THREE isn't loaded yet when the script initializes — create lazily
         let _beamWsRef = -1;
         function _beamUnderWorkspace(ref) {
             let r = ref, n = 0;
@@ -4707,7 +4709,7 @@
             const rp = luaRefProps[ref];
             let a = rp ? rp[key] : undefined;
             if (a === undefined || a === -1) return -1;
-            // Beam-клон ссылается на Attachment оригинала — берём одноимённого клона среди соседей
+            // A Beam clone refers to the original's Attachment — take the same-named clone among the siblings
             if (luaCloneSource[ref] !== undefined) {
                 const sibs = luaChildrenByRef[luaParentByRef[ref]] || [];
                 for (const x of sibs) if (luaCloneSource[x] === a) { a = x; rp[key] = x; break; }
@@ -4774,7 +4776,7 @@
             PS.lastT = nowMs;
             if (!(dt > 0)) return;
             dt = Math.min(dt, 0.05);
-            // перевод размера в студах -> пиксели точки
+            // conversion of size in studs -> point pixels
             let scale = 600;
             if (renderer && camera) {
                 const hpx = renderer.getDrawingBufferSize(new THREE.Vector2()).y;
@@ -4788,14 +4790,14 @@
                 const p = e.p;
                 const mat = _psWorldMat(e);
                 const me = mat.elements;
-                // дальние эмиттеры не считаем (и не рисуем)
+                // distant emitters aren't computed (or drawn)
                 const ddx = me[12] - camera.position.x, ddy = me[13] - camera.position.y, ddz = me[14] - camera.position.z;
                 if (ddx * ddx + ddy * ddy + ddz * ddz > maxDist * maxDist) { e.points.visible = false; e.count = 0; continue; }
                 e.points.visible = true;
                 e.mat.uniforms.uScale.value = scale;
                 const ts = (typeof p.TimeScale === 'number' ? p.TimeScale : 1);
                 const sdt = dt * ts;
-                // эмиссия
+                // emission
                 if (p.Enabled !== false && total < PS_MAX_TOTAL) {
                     e.acc += (typeof p.Rate === 'number' ? p.Rate : 20) * sdt * qf;
                     let n = Math.floor(e.acc);
@@ -4805,7 +4807,7 @@
                 } else {
                     e.acc = 0;
                 }
-                // симуляция
+                // simulation
                 const acc = p.Acceleration || { x: 0, y: 0, z: 0 };
                 const drag = Math.max(0, p.Drag || 0);
                 const dk = drag > 0 ? Math.exp(-drag * sdt) : 1;
@@ -4815,7 +4817,7 @@
                 while (i < e.count) {
                     e.age[i] += sdt;
                     if (e.age[i] >= e.life[i]) {
-                        // swap-remove: последний встаёт на место умершего
+                        // swap-remove: the last one takes the dead one's place
                         const last = --e.count;
                         if (i !== last) {
                             const a = i * 3, b = last * 3;
@@ -4833,7 +4835,7 @@
                     e.pos[k] += e.vel[k] * sdt; e.pos[k + 1] += e.vel[k + 1] * sdt; e.pos[k + 2] += e.vel[k + 2] * sdt;
                     i++;
                 }
-                // выгрузка в атрибуты
+                // dump into attributes
                 const P = e.geo.attributes.position.array;
                 for (let j = 0; j < e.count; j++) {
                     const t = e.age[j] / e.life[j];
@@ -4880,10 +4882,10 @@
             const r = await api('GET', '/api/scene?' + params.toString());
             if (!r.ok) return;
 
-            // Очистка старых объектов
+            // Clearing old objects
             for (const mesh of Object.values(sceneObjs)) {
                 scene.remove(mesh);
-                // sharedMesh (см. loadRealMeshGeometry/_buildGeometryFromParsed)
+                // sharedMesh (see loadRealMeshGeometry/_buildGeometryFromParsed)
                 if (mesh.geometry && !mesh.geometry.userData.sharedMesh) mesh.geometry.dispose();
                 if (mesh.material) {
                     if (Array.isArray(mesh.material)) {
@@ -4898,9 +4900,9 @@
                 }
             }
             sceneObjs = {};
-            _unionGeoCache = {}; // другой файл — те же ref, другая геометрия
+            _unionGeoCache = {}; // another file — the same refs, different geometry
 
-            // Сбрасываем кеш raycasting
+            // Reset the raycasting cache
             raycasterCache.objects = [];
             raycasterCache.lastUpdate = 0;
 
@@ -4909,14 +4911,14 @@
                 window._selBox = null;
             }
 
-            // Кеши геометрий и материалов
+            // Geometry and material caches
             const geoCache = {};
             const matCache = {};
 
             let objects = r.objects;
             let totalAvailable = r.total || objects.length;
 
-            // Применяем лимиты качества
+            // Apply quality limits
             if (qualitySettings.maxObjects && objects.length > qualitySettings.maxObjects) {
                 if (currentQuality === 'high') {
                     const maxHighObjects = Math.min(objects.length, 10000);
@@ -4927,11 +4929,11 @@
             }
 
             for (const o of objects) {
-                // Импортированные 3D-аватары — не обычные Part/MeshPart,
+                // Imported 3D avatars are not ordinary Part/MeshPart,
                 const cached = window._avatarMeshCache && window._avatarMeshCache[o.ref];
                 const mesh = cached ? cached.object : buildMeshFromObj(o, geoCache, matCache);
                 if (cached) {
-                    // Геометрия закэширована и не перестраивается, но
+                    // The geometry is cached and isn't rebuilt, but
                     mesh.position.set(o.px || 0, o.py || 0, o.pz || 0);
                     if (o.rot && o.rot.length >= 9) {
                         const rm = new THREE.Matrix4();
@@ -4949,8 +4951,8 @@
                 sceneObjs[o.ref] = mesh;
             }
 
-            // Чистим кэш от аватаров, чьи Instance удалили через обычный
-            // Explorer/Delete — сервер уже не пришлёт такой ref в objects.
+            // Clean the cache of avatars whose Instances were deleted via the regular
+            // Explorer/Delete — the server will no longer send such a ref in objects.
             if (window._avatarMeshCache) {
                 const liveRefs = new Set(objects.map(o => o.ref));
                 for (const ref of Object.keys(window._avatarMeshCache)) {
@@ -4972,7 +4974,7 @@
             notify(t('notify_scene_loaded', { n: shown }) + (totalAvailable > shown ? t('notify_scene_of', { total: totalAvailable }) : ''));
             updateInventoryCount();
 
-            // Обновляем выделение если было
+            // Update the selection if there was one
             if (selectedRefs.size || (selectedRef && sceneObjs[selectedRef])) {
                 highlightSelected(selectedRef);
             }
@@ -4983,7 +4985,7 @@
             const selSet = new Set(selectedRefs);
             if (ref) selSet.add(ref);
             for (const [r, mesh] of Object.entries(sceneObjs)) {
-                // ФИКС: импортированные 3D-аватары (importAvatarIntoScene)
+                // FIX: imported 3D avatars (importAvatarIntoScene)
                 const isSelected = selSet.has(parseInt(r));
                 const applyEmissive = (m) => {
                     if (!m || !m.material) return;
@@ -5004,7 +5006,7 @@
                 scene.remove(window._selBox);
                 window._selBox = null;
             }
-            // Рамки — только у первых 100 выбранных, иначе выделение целой карты тормозит.
+            // Frames — only for the first 100 selected, otherwise selecting a whole map is slow.
             const boxRefs = [...selSet].filter(r => sceneObjs[r]).slice(0, 100);
             if (boxRefs.length) {
                 const group = new THREE.Group();
@@ -5014,28 +5016,28 @@
             }
         }
 
-        // ============ PLAY-РЕЖИМ (ФИЗИКА + ПЕРСОНАЖ) ============
+        // ============ PLAY MODE (PHYSICS + CHARACTER) ============
         let isPlaying = false;
-        let prevFogFar = null; // scene.fog.far на момент старта Play — восстанавливается в stopPlay()
+        let prevFogFar = null; // scene.fog.far at the moment Play starts — restored in stopPlay()
         let physicsWorld = null;
         let physicsBodies = {};   // ref -> CANNON.Body
-        let playSnapshot = {};    // ref -> THREE.Matrix4 до запуска
-        let playOnlyRefs = new Set(); // ref-ы мешей, подгруженных только для Play
-        // Позиция каждого загруженного (в Play) объекта — независимо от
+        let playSnapshot = {};    // ref -> THREE.Matrix4 before launch
+        let playOnlyRefs = new Set(); // refs of meshes loaded only for Play
+        // The position of every object loaded (in Play) — independently of
         let loadedObjPos = {}; // ref -> {x,y,z}
-        // Раньше part.Size для ОБЫЧНОГО (не GUI) BasePart в Lua-скриптах
-        // не читался НИОТКУДА и всегда был nil — .Size вообще не был
-        // особым случаем в мосте (в отличие от Position/CFrame), а общий
-        // "мусорный ящик" свойств (luaGenericPropsByRef) заполняется только
-        // ЗАПИСЯМИ, никогда из данных файла. Любой скрипт вида
-        // "part.Size.Z" на детали, которую сам ни разу не трогал, падал
-        // с ошибкой (в MenuCamera.lua это останавливало enableSongCamera
-        // ДО строки camera.CFrame = ... — камера песни вообще никогда не
-        // переставлялась). См. __get_size ниже.
+        // Previously part.Size for an ORDINARY (non-GUI) BasePart in Lua scripts
+        // was read FROM NOWHERE and was always nil — .Size wasn't a
+        // special case in the bridge at all (unlike Position/CFrame), and the general
+        // "junk drawer" of properties (luaGenericPropsByRef) is filled only by
+        // WRITES, never from the file data. Any script like
+        // "part.Size.Z" on a part it never touched itself failed
+        // with an error (in MenuCamera.lua this stopped enableSongCamera
+        // BEFORE the camera.CFrame = ... line — the song camera was never
+        // moved at all). See __get_size below.
         let loadedObjSize = {}; // ref -> {x,y,z}
         let charPushX = 0, charPushZ = 0, charPushT = 0;
         let charBody = null;
-        let charMesh = null; // куб для вида от третьего лица, см. toggleThirdPerson
+        let charMesh = null; // cube for the third-person view, see toggleThirdPerson
 
         function updateCharMeshVisibility() {
             if (charMesh) charMesh.visible = isPlaying && thirdPerson;
@@ -5043,44 +5045,44 @@
         let jumpQueued = false;
         let canJump = false;
         let prevCameraState = null;
-        const GRAVITY_STUDS = -196.2; // workspace.Gravity в настоящем Roblox
-        // Размеры настоящего Roblox R15 — сняты с content/avatar/characterR15.rbxm:
-        // HumanoidRootPart 2x2x1, Humanoid.HipHeight 1.35 (ступни на 2.35 ниже центра HRP),
-        // макушка на 2.65 выше центра HRP => рост 5.0 стада, ширина торса 2.0.
-        // Глаза (центр головы) — на 4.5 над землёй.
+        const GRAVITY_STUDS = -196.2; // workspace.Gravity in real Roblox
+        // Real Roblox R15 dimensions — taken from content/avatar/characterR15.rbxm:
+        // HumanoidRootPart 2x2x1, Humanoid.HipHeight 1.35 (the feet are 2.35 below the HRP center),
+        // the top of the head is 2.65 above the HRP center => height 5.0 studs, torso width 2.0.
+        // Eyes (the center of the head) — at 4.5 above the ground.
         const R15_HEIGHT = 5.0;
         const R15_EYE_ABOVE_GROUND = 4.5;
-        const R15_HRP_ABOVE_GROUND = 2.35;   // HipHeight 1.35 + половина высоты HRP (1.0): центр HRP в настоящем Roblox
-        const CHAR_RADIUS = 1.0;      // половина ширины R15 (2 стада); коллайдер — сфера, центр на CHAR_RADIUS над землёй
-        // (было 2.2 — со стандартным Roblox-персонажем шириной ~2 стада
-        const CHAR_SPEED = 16;        // стадов/сек — дефолтный Humanoid.WalkSpeed
-        // Реальный WalkSpeed/JumpPower виртуального Humanoid (см.
-        // bootstrapClientPlayer) — карта может их менять (например,
-        // MenuCamera.lua ставит WalkSpeed=0 на время камеры песни); раньше
-        // Humanoid у игрока не существовал вообще, и такие вызовы были
-        // no-op'ами — игрок продолжал ходить, пока шла сценарная камера.
+        const R15_HRP_ABOVE_GROUND = 2.35;   // HipHeight 1.35 + half the HRP height (1.0): the HRP center in real Roblox
+        const CHAR_RADIUS = 1.0;      // half the R15 width (2 studs); the collider is a sphere, its center at CHAR_RADIUS above the ground
+        // (was 2.2 — with a standard Roblox character ~2 studs wide
+        const CHAR_SPEED = 16;        // studs/sec — the default Humanoid.WalkSpeed
+        // The real WalkSpeed/JumpPower of the virtual Humanoid (see
+        // bootstrapClientPlayer) — the map can change them (for example,
+        // MenuCamera.lua sets WalkSpeed=0 during the song camera); previously the
+        // player had no Humanoid at all, and such calls were
+        // no-ops — the player kept walking while the scripted camera ran.
         let charWalkSpeed = CHAR_SPEED;
-        const STEP_HEIGHT = 3.2;      // студов — низкий бордюр перешагиваем автоматически
-        const JUMP_VELOCITY = 50;     // Humanoid.JumpPower (как видят скрипты)
-        // В Roblox JumpPower 50 == JumpHeight 7.2; чистая v=50 при g=196.2 даёт лишь 6.37,
-        // поэтому реальную начальную скорость берём из высоты: v = sqrt(2*g*7.2) ≈ 53.15.
+        const STEP_HEIGHT = 3.2;      // studs — a low curb is stepped over automatically
+        const JUMP_VELOCITY = 50;     // Humanoid.JumpPower (as scripts see it)
+        // In Roblox JumpPower 50 == JumpHeight 7.2; a plain v=50 at g=196.2 gives only 6.37,
+        // so we take the real initial velocity from the height: v = sqrt(2*g*7.2) ≈ 53.15.
         const JUMP_POWER_TO_VELOCITY = Math.sqrt(2 * -GRAVITY_STUDS * 7.2) / 50;
         let charJumpPower = JUMP_VELOCITY;
-        const EYE_HEIGHT = R15_EYE_ABOVE_GROUND - CHAR_RADIUS; // от центра сферы-коллайдера до глаз
-        // Физику считаем не для всей загруженной сцены (при Quality=High это
+        const EYE_HEIGHT = R15_EYE_ABOVE_GROUND - CHAR_RADIUS; // from the collider sphere's center to the eyes
+        // We don't compute physics for the whole loaded scene (at Quality=High this
         function maxStreamedBodies() { return qualitySettings.playBodies; }
         function maxVisualBodies() { return qualitySettings.visualBodies || qualitySettings.playBodies; }
-        // Раньше геометрия для физики запрашивалась ОДИН раз при старте
+        // Previously the geometry for physics was requested ONCE at start
         let lastStreamPos = { x: null, y: null, z: null };
         let streamInFlight = false;
-        let fallingSinceMs = null; // когда персонаж начал падать без опоры под ногами
-        const STREAM_REFRESH_DIST = 20;   // студов сместились — пора подгрузить ещё
-        const STREAM_REFRESH_MS = 600;    // не чаще этого, даже если стоим на месте
-        const STREAM_PRUNE_DIST = 5000;    // общий "дальний" предел (fog/начальный вид) — НЕ радиус подгрузки, см. qualitySettings.loadRadius
-        const UNLOAD_MARGIN = 150;   // студов сверх loadRadius — гистерезис, чтобы объект
-        // на самой границе загрузки/выгрузки не мигал каждый refresh-цикл
-        // Радиус описанной сферы объекта: расстояния для стриминга/отсечения считаем до БЛИЖАЙШЕГО края,
-        // иначе длинные стены (центр далеко, один конец рядом) пропадают и теряют физику.
+        let fallingSinceMs = null; // when the character started falling with no support under its feet
+        const STREAM_REFRESH_DIST = 20;   // studs have shifted — time to load more
+        const STREAM_REFRESH_MS = 600;    // no more often than this, even when standing still
+        const STREAM_PRUNE_DIST = 5000;    // the general "far" limit (fog/initial view) — NOT the load radius, see qualitySettings.loadRadius
+        const UNLOAD_MARGIN = 150;   // studs beyond loadRadius — hysteresis so that an object
+        // right at the load/unload boundary doesn't blink every refresh cycle
+        // Radius of the object's bounding sphere: distances for streaming/culling are computed to the NEAREST edge,
+        // otherwise long walls (the center far away, one end nearby) disappear and lose physics.
         function objRadiusOfRef(ref) {
             const sz = loadedObjSize[ref];
             return sz ? 0.5 * Math.hypot(sz.x || 0, sz.y || 0, sz.z || 0) : 0;
@@ -5095,28 +5097,28 @@
             if (isPlaying) stopPlay(); else startPlay();
         }
 
-        // Системная кнопка «Назад» (Android: MainActivity.kt вызывает window.__handleBack()). Раньше она сразу закрывала
-        // приложение. Теперь закрывает самый верхний слой интерфейса и возвращает true; если закрывать нечего — false, и
-        // приложение само просит нажать «Назад» ещё раз для выхода.
+        // The system «Back» button (Android: MainActivity.kt calls window.__handleBack()). It used to close the
+        // app right away. Now it closes the topmost UI layer and returns true; if there's nothing to close — false, and
+        // the app itself asks to press «Back» once more to exit.
         window.__handleBack = function () {
             try {
                 const cl = document.body.classList;
                 const gate = document.getElementById('rbxm-gate');
-                if (gate) { gate.querySelector('[data-cancel]').click(); return true; }              // подтверждение скриптов
+                if (gate) { gate.querySelector('[data-cancel]').click(); return true; }              // script confirmation
                 const ov = document.getElementById('modal-overlay');
-                if (ov && ov.classList.contains('show')) { closeModal(); return true; }            // диалоги (Add, Toolbox, Experience…)
-                if (document.getElementById('file-menu')) { closeFileMenu(); return true; }        // меню «Файл»
+                if (ov && ov.classList.contains('show')) { closeModal(); return true; }            // dialogs (Add, Toolbox, Experience…)
+                if (document.getElementById('file-menu')) { closeFileMenu(); return true; }        // the «File» menu
                 if (_startVisible() && document.querySelector('#tree-scroll')?.children.length) { hideStartScreen(); return true; }
-                if (isPlaying) { stopPlay(); return true; }                                          // Play → редактор
-                if (cl.contains('m-menu-open')) { cl.remove('m-menu-open'); return true; }          // раскрытое ☰
-                if (cl.contains('m-out-open')) { cl.remove('m-out-open'); return true; }            // плавающий Output
-                if (MUI.on && MUI.mode === 'panels') { muiSetMode('scene'); return true; }          // «Панели» → «Сцена»
-                if (selectedRef !== null && selectedRef !== undefined) { deselect(); return true; }            // снять выделение
+                if (isPlaying) { stopPlay(); return true; }                                          // Play → editor
+                if (cl.contains('m-menu-open')) { cl.remove('m-menu-open'); return true; }          // the expanded ☰
+                if (cl.contains('m-out-open')) { cl.remove('m-out-open'); return true; }            // the floating Output
+                if (MUI.on && MUI.mode === 'panels') { muiSetMode('scene'); return true; }          // «Panels» → «Scene»
+                if (selectedRef !== null && selectedRef !== undefined) { deselect(); return true; }            // clear the selection
             } catch (e) { console.warn('back: ' + e); }
             return false;
         };
 
-        // Раньше спавн искался среди уже подгруженных в редакторе мешей —
+        // The spawn used to be looked up among meshes already loaded in the editor —
         async function findSpawnPoint() {
             const r = await api('GET', '/api/spawn?team=auto');
             if (r && r.ok) {
@@ -5126,12 +5128,12 @@
             return { x: target.x, y: target.y + 10, z: target.z };
         }
 
-        // Кэши геометрии/материалов для мешей, которые Play подгружает по
+        // Geometry/material caches for meshes that Play loads on
         let playGeoCache = {}, playMatCache = {};
 
-        // Последний CFrame, который СКРИПТ выставил детали (PivotTo/CFrame/Position/твин). Стриминг выгружает и
-        // заново строит детали из исходных данных карты — без этого сдвинутый босс «откатывался» на старое
-        // место, а дистанции отсечения считались от исходной точки, а не от текущей.
+        // The last CFrame that a SCRIPT set on a part (PivotTo/CFrame/Position/tween). Streaming unloads and
+        // rebuilds parts from the map's original data — without this a moved boss «rolled back» to its old
+        // place, and culling distances were computed from the original point and not the current one.
         let luaPartXform = {};   // ref -> {p:[x,y,z], q:[x,y,z,w]}
         function objPosFor(o) {
             const t = luaPartXform[o.ref];
@@ -5144,18 +5146,18 @@
             mesh.matrix.decompose(p0, q0, s0);
             mesh.matrix.compose(new THREE.Vector3(t.p[0], t.p[1], t.p[2]), new THREE.Quaternion(t.q[0], t.q[1], t.q[2], t.q[3]), s0);
         }
-        // Данные деталей карты (ответы /api/scene) по ref — нужны, чтобы Instance:Clone() детали из файла
-        // получал меш и физику (см. luaRealizeClonedParts): у виртуального клона своей геометрии нет.
+        // Map part data (/api/scene responses) by ref — needed so that Instance:Clone() of a part from the file
+        // gets a mesh and physics (see luaRealizeClonedParts): a virtual clone has no geometry of its own.
         let playObjData = {};
         function addPhysicsBodyForObj(o) {
             playObjData[o.ref] = o;
-            if (physicsBodies[o.ref]) return; // уже физически представлен
+            if (physicsBodies[o.ref]) return; // already physically represented
             let mesh = sceneObjs[o.ref];
             if (!mesh) {
-                // Этого объекта не было в текущем виде редактора —
-                // подгружаем именно для физики и добавляем в сцену.
+                // This object wasn't in the editor's current view —
+                // load it specifically for physics and add it to the scene.
                 mesh = buildMeshFromObj(o, playGeoCache, playMatCache);
-                if (!(o.ref in playSnapshot)) playSnapshot[o.ref] = mesh.matrix.clone();   // снимок — ИСХОДНОЕ положение
+                if (!(o.ref in playSnapshot)) playSnapshot[o.ref] = mesh.matrix.clone();   // snapshot — the ORIGINAL position
                 applyMovedXform(o.ref, mesh);
                 scene.add(mesh);
                 sceneObjs[o.ref] = mesh;
@@ -5176,7 +5178,7 @@
 
             const canCollide = mesh.userData.cancollideFlag !== false;
 
-            // По умолчанию вся загруженная геометрия статична (mass=0),
+            // By default all loaded geometry is static (mass=0),
             const body = new CANNON.Body({
                 mass: 0,
                 shape: shape,
@@ -5197,18 +5199,18 @@
             applyUnionTrimesh(body, mesh);
             physicsWorld.addBody(body);
             physicsBodies[o.ref] = body;
-            body.__ref = o.ref; // для Touched-события (см. beginContact ниже) — по-другому
-            // из cannon.js колбэка контакта не узнать, какому игровому
-            // объекту принадлежит столкнувшееся тело.
+            body.__ref = o.ref; // for the Touched event (see beginContact below) — otherwise
+            // from the cannon.js contact callback you can't tell which game
+            // object the colliding body belongs to.
         }
 
-        // Только меш, без CANNON.Body — для объектов, которые видно, но до
+        // Mesh only, without a CANNON.Body — for objects that are visible but until
         function addVisualMeshForObj(o) {
             playObjData[o.ref] = o;
             if (sceneObjs[o.ref]) {
                 loadedObjPos[o.ref] = objPosFor(o);
                 loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
-                return; // уже загружен (визуально или физически) — трогать не нужно
+                return; // already loaded (visually or physically) — no need to touch it
             }
             const mesh = buildMeshFromObj(o, playGeoCache, playMatCache);
             if (!(o.ref in playSnapshot)) {
@@ -5222,12 +5224,12 @@
             loadedObjSize[o.ref] = { x: o.sx, y: o.sy, z: o.sz };
         }
 
-        // Разжалование из физики в чисто визуальный меш:
+        // Demotion from physics to a purely visual mesh:
         function demoteToVisualOnly(ref) {
             const body = physicsBodies[ref];
-            // Тело игрока (оно же physicsBodies[HumanoidRootPart]) нельзя выгружать:
-            // раньше при подгрузке геометрии оно вылетало из физмира, и персонаж
-            // не мог двигаться (скорость есть, позиция стоит).
+            // The player's body (also physicsBodies[HumanoidRootPart]) must not be unloaded:
+            // previously, when loading geometry it flew out of the physics world, and the character
+            // couldn't move (there's speed, the position stands still).
             if (body && body === charBody) return;
             if (body) {
                 physicsWorld.removeBody(body);
@@ -5235,7 +5237,7 @@
             }
         }
 
-        // Убирает физическое тело (если было) и, если меш был подгружен
+        // Removes the physics body (if there was one) and, if the mesh was loaded
         function removePhysicsBodyForRef(ref) {
             const body = physicsBodies[ref];
             if (body && body === charBody) return;
@@ -5254,32 +5256,32 @@
                 delete playSnapshot[ref];
                 playOnlyRefs.delete(ref);
             } else {
-                // Объект был в сцене ещё до Play (подгружен редактором,
+                // The object was in the scene even before Play (loaded by the editor,
                 const mesh = sceneObjs[ref];
                 if (mesh) mesh.visible = false;
             }
         }
 
-        // Подгружает геометрию вокруг позиции персонажа, выгружает то, что
+        // Loads geometry around the character's position, unloads what
         async function refreshStreamedGeometry() {
             if (!isPlaying || !charBody || streamInFlight) return;
             const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
             streamInFlight = true;
             try {
-                const loadRadius = Math.min(qualitySettings.loadRadius || 350, PHYS_STATIC_RADIUS);     // физика — до этой дистанции (дальше статика персонажу не нужна)
-                const visualRadius = qualitySettings.visualRadius || 2000; // рендер — до этой (без физики)
-                const visualCap = maxVisualBodies(); // аварийный потолок на количество, см. пресеты
+                const loadRadius = Math.min(qualitySettings.loadRadius || 350, PHYS_STATIC_RADIUS);     // physics — up to this distance (beyond it static geometry isn't needed by the character)
+                const visualRadius = qualitySettings.visualRadius || 2000; // rendering — up to this (without physics)
+                const visualCap = maxVisualBodies(); // emergency ceiling on the count, see the presets
                 const sceneResp = await api('POST', '/api/scene', {
                     cx: Math.round(cx), cy: Math.round(cy), cz: Math.round(cz),
                     load_radius: visualRadius,
                     limit: visualCap, chunk: true
                 });
-                if (!isPlaying || !sceneResp || !sceneResp.ok) return; // Play могли остановить, пока шёл запрос
+                if (!isPlaying || !sceneResp || !sceneResp.ok) return; // Play could have been stopped while the request was in flight
 
-                // Сервер сортирует ответ с поправкой на размер объекта
+                // The server sorts the response adjusting for the object's size
                 const physicsCap = maxStreamedBodies();
                 for (const o of sceneResp.objects) { if (o.nw) playObjData[o.ref] = o; }
-                sceneResp.objects = sceneResp.objects.filter(o => !o.nw);   // шаблоны ServerStorage: данные сохранены, меша/физики нет
+                sceneResp.objects = sceneResp.objects.filter(o => !o.nw);   // ServerStorage templates: the data is saved, no mesh/physics
                 const withDist = sceneResp.objects.map(o => { const op = objPosFor(o); return [o, Math.max(0, Math.hypot(op.x - cx, op.y - cy, op.z - cz) - 0.5 * Math.hypot(o.sx || 0, o.sy || 0, o.sz || 0))]; });
                 withDist.sort((a, b) => a[1] - b[1]);
 
@@ -5292,18 +5294,18 @@
                         physicsAssigned++;
                         addPhysicsBodyForObj(o);
                     } else {
-                        // Видно, но физически ещё далеко (или бюджет
+                        // Visible, but physically still far away (or the budget
                         addVisualMeshForObj(o);
                     }
                 }
-                // Объект раньше был среди ближайших physicsCap, а теперь
+                // The object used to be among the nearest physicsCap, and now
                 for (const refStr of Object.keys(physicsBodies)) {
                     if (!nearRefs.has(parseInt(refStr)) && luaCloneOrigin[refStr] === undefined) {
                         demoteToVisualOnly(parseInt(refStr));
                     }
                 }
 
-                // Полная выгрузка (и физика, и меш) — с запасом
+                // Full unload (both physics and mesh) — with a margin
                 const unloadDist = visualRadius + UNLOAD_MARGIN;
                 for (const ref of Array.from(playOnlyRefs)) {
                     const p = loadedObjPos[ref];
@@ -5314,7 +5316,7 @@
                     }
                 }
 
-                // Тело физически держит пол/стены на месте и дальше этой
+                // The body physically holds the floor/walls in place and beyond this
                 const renderCutoff = playRenderCutoff();
                 for (const ref of Object.keys(loadedObjPos)) {
                     const mesh = sceneObjs[ref];
@@ -5328,25 +5330,25 @@
             }
         }
 
-        // Клоны (комнаты из ROOMS 2-20, враги, лифты…) серверный стриминг не трогает: данных для пересоздания тела у него нет
-        // (luaCloneOrigin). Поэтому их статичные тела раньше оставались в физическом мире НАВСЕГДА, мимо бюджета playBodies:
-        // после ~10 открытых дверей в мире 2–4 тыс. тел, шаг cannon (он обходит ВСЕ тела мира: clearForces, internalStep,
-        // sleepTick…) вырастал с 2.5 до ~50 мс, и FPS падал с 60 до ~9. Здесь к клонам применяется тот же бюджет и радиус, что к
-        // обычным деталям карты: в мире остаются playBodies ближайших статичных тел в пределах loadRadius, остальные из мира
-        // вынимаются. Объект тела остаётся в physicsBodies — Lua по-прежнему двигает его (PivotTo пишет в body.position),
-        // а при приближении тело возвращается в мир. Подвижные (DYNAMIC/KINEMATIC) тела не трогаем.
+        // Clones (rooms from ROOMS 2-20, enemies, elevators…) aren't touched by server streaming: it has no data to recreate the body
+        // (luaCloneOrigin). So their static bodies used to stay in the physics world FOREVER, outside the playBodies budget:
+        // after ~10 opened doors the world had 2–4 thousand bodies, the cannon step (it walks ALL the world's bodies: clearForces, internalStep,
+        // sleepTick…) grew from 2.5 to ~50 ms, and FPS dropped from 60 to ~9. Here clones get the same budget and radius as
+        // ordinary map parts: the world keeps playBodies of the nearest static bodies within loadRadius, the rest are
+        // taken out of the world. The body object stays in physicsBodies — Lua still moves it (PivotTo writes to body.position),
+        // and when it comes near the body returns to the world. Moving (DYNAMIC/KINEMATIC) bodies are not touched.
         const CLONE_PHYS_RADIUS = 100;
-        const PHYS_STATIC_RADIUS = 140;   // статичные тела карты в мире только в этом радиусе от персонажа: шаг cannon растёт с числом тел
+        const PHYS_STATIC_RADIUS = 140;   // static map bodies are in the world only within this radius of the character: the cannon step grows with the number of bodies
         let _cloneStreamT = 0, _cloneStreamForce = true, _cloneStreamPos = { x: NaN, y: 0, z: 0 };
         function streamCloneBodies() {
             if (!isPlaying || !charBody || !physicsWorld) return;
             const now = performance.now();
             const cx = charBody.position.x, cy = charBody.position.y, cz = charBody.position.z;
-            const moved = Math.hypot(cx - _cloneStreamPos.x, cy - _cloneStreamPos.y, cz - _cloneStreamPos.z);   // NaN в начале → не «меньше»
+            const moved = Math.hypot(cx - _cloneStreamPos.x, cy - _cloneStreamPos.y, cz - _cloneStreamPos.z);   // NaN at the start → not «less»
             if (!_cloneStreamForce && !(moved >= 12) && now - _cloneStreamT < 500) return;
             if (!_cloneStreamForce && now - _cloneStreamT < 150) return;
             _cloneStreamForce = false; _cloneStreamT = now; _cloneStreamPos = { x: cx, y: cy, z: cz };
-            const R = Math.min(qualitySettings.loadRadius || 350, CLONE_PHYS_RADIUS), cap = Math.max(1, maxStreamedBodies());   // клонам (комнаты) физика нужна только рядом
+            const R = Math.min(qualitySettings.loadRadius || 350, CLONE_PHYS_RADIUS), cap = Math.max(1, maxStreamedBodies());   // clones (rooms) need physics only nearby
             const STATIC = CANNON.Body.STATIC;
             const items = [];
             for (const k in luaCloneOrigin) {
@@ -5360,11 +5362,11 @@
             for (let i = 0; i < items.length; i++) {
                 const it = items[i], inWorld = it.b.world === physicsWorld;
                 if (!inWorld && i < cap && it.d <= R) { physicsWorld.addBody(it.b); it.b.aabbNeedsUpdate = true; added++; }
-                else if (inWorld && !(i < cap * 1.25 && it.d <= R + 40)) { physicsWorld.removeBody(it.b); removed++; }   // гистерезис: не дёргаем на границе
+                else if (inWorld && !(i < cap * 1.25 && it.d <= R + 40)) { physicsWorld.removeBody(it.b); removed++; }   // hysteresis: don't jerk at the boundary
             }
         }
         function maybeStreamGeometry() {
-            // ВАЖНО: streamInFlight проверяем ДО таймера, а не внутри
+            // IMPORTANT: we check streamInFlight BEFORE the timer, not inside
             if (!isPlaying || !charBody || streamInFlight) return;
             const now = performance.now();
             const moved = lastStreamPos.x === null ? Infinity :
@@ -5376,12 +5378,12 @@
             refreshStreamedGeometry();
         }
 
-        // Explorer/Properties занимают заметную часть ширины экрана (по
+        // Explorer/Properties take a noticeable part of the screen width (by
         let _savedExplorerWidth = null;
         let _savedRightpanelWidth = null;
         let _savedBottomPanelStyle = null;
         let _outputDragInited = false;
-        // Таскание Output за заголовок, когда он "плавающий" (Play, см.
+        // Dragging Output by its header when it is "floating" (Play, see
         function initOutputDrag() {
             if (_outputDragInited) return;
             _outputDragInited = true;
@@ -5391,7 +5393,7 @@
             let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
             function onDown(e) {
                 if (!panel.classList.contains('output-floating')) return;
-                // Не перетаскивать, если тап пришёлся на сами кнопки
+                // Don't drag if the tap landed on the buttons themselves
                 if (e.target.closest('button, select')) return;
                 dragging = true;
                 const p = e.touches ? e.touches[0] : e;
@@ -5406,7 +5408,7 @@
                 const dx = p.clientX - startX, dy = p.clientY - startY;
                 const w = panel.offsetWidth, h = panel.offsetHeight;
                 let nl = startLeft + dx, nt = startTop + dy;
-                // Не даём утащить целиком за пределы экрана — иначе
+                // Don't let it be dragged entirely off the screen — otherwise
                 nl = Math.max(-w + 40, Math.min(window.innerWidth - 40, nl));
                 nt = Math.max(0, Math.min(window.innerHeight - 40, nt));
                 panel.style.left = nl + 'px';
@@ -5432,7 +5434,7 @@
             const resizer2 = document.getElementById('resizer-2');
             const resizerH = document.getElementById('resizer-h');
             if (!explorerEl || !rightpanelEl) return;
-            // Раньше панели прятались ПОЛНОСТЬЮ (display:none) — вьюпорт
+            // Panels used to hide COMPLETELY (display:none) — the viewport
             const FLOAT_WIDTH = '360px';
             const FLOAT_HEIGHT = '200px';
             const COLLAPSED_WIDTH = '42px';
@@ -5462,7 +5464,7 @@
                     initOutputDrag();
                 }
                 if (resizerH) resizerH.style.display = 'none';
-                // Верхний тулбар (New/Open/Save/Add/Delete/...) в Play не
+                // The top toolbar (New/Open/Save/Add/Delete/...) in Play isn't
                 if (toolbarTopEl) toolbarTopEl.style.display = 'none';
                 if (playStopFab) playStopFab.classList.add('visible');
                 if (viewportEl) viewportEl.classList.add('play-active');
@@ -5482,32 +5484,32 @@
                 if (playStopFab) playStopFab.classList.remove('visible');
                 if (viewportEl) viewportEl.classList.remove('play-active');
             }
-            // renderer.setSize зависит от фактических размеров DOM
+            // renderer.setSize depends on the actual DOM sizes
             requestAnimationFrame(() => { if (typeof resize === 'function') resize(); });
         }
 
-        // ============ АВАТАР ИГРОКА В PLAY ============
-        // Нет куки Roblox — стандартный «нуб» (рисуется кодом, без сети).
-        // Есть кука — ник аккаунта (/api/roblox/me) и 3D-аватар
-        // (/api/roblox/play-avatar, кэш на диске) вместо куба.
-        // Если аватар смотрит спиной — поставьте PLAY_AVATAR_YAW_OFFSET = Math.PI;
-        // если стоит выше/ниже земли — подправьте PLAY_AVATAR_Y_OFFSET.
+        // ============ PLAYER AVATAR IN PLAY ============
+        // No Roblox cookie — the standard «noob» (drawn in code, no network).
+        // With a cookie — the account's nickname (/api/roblox/me) and a 3D avatar
+        // (/api/roblox/play-avatar, cached on disk) instead of a cube.
+        // If the avatar faces backward — set PLAY_AVATAR_YAW_OFFSET = Math.PI;
+        // if it stands above/below the ground — adjust PLAY_AVATAR_Y_OFFSET.
         const PLAY_AVATAR_YAW_OFFSET = 0;
-        const PLAY_AVATAR_Y_OFFSET = R15_HEIGHT / 2 - CHAR_RADIUS; // ступни на земле (центр сферы — на CHAR_RADIUS над ней)
-        let playerAccount = null; // {userId, name, displayName} или null (гость)
+        const PLAY_AVATAR_Y_OFFSET = R15_HEIGHT / 2 - CHAR_RADIUS; // feet on the ground (the sphere's center is at CHAR_RADIUS above it)
+        let playerAccount = null; // {userId, name, displayName} or null (guest)
         const _playAvatarTemplates = {};
 
         function _applyPlayerAccountToLua() {
             if (!playerAccount || luaPlayerRef === -1 || !luaByRef[luaPlayerRef]) return;
-            // Внутреннее имя инстанса ОСТАЁТСЯ 'LocalPlayer': по нему скрипты находят Players.LocalPlayer (раньше здесь
-            // стояло переименование в ник — и у всех вошедших в аккаунт LocalPlayer становился nil). Ник отдаёт __get_name.
+            // The instance's internal name STAYS 'LocalPlayer': scripts use it to find Players.LocalPlayer (previously here
+            // it was renamed to the nickname — and for everyone logged into an account LocalPlayer became nil). The nickname is returned by __get_name.
             const pr = virtualInstanceProps[luaPlayerRef] || (virtualInstanceProps[luaPlayerRef] = {});
             pr.UserId = playerAccount.userId;
             pr.DisplayName = playerAccount.displayName || playerAccount.name;
         }
 
         function _disposeObj(o) {
-            if (o.userData && o.userData.shared) return; // общий шаблон аватара — не трогаем
+            if (o.userData && o.userData.shared) return; // the shared avatar template — don't touch
             o.children.slice().forEach(_disposeObj);
             if (o.geometry) o.geometry.dispose();
             if (o.material) {
@@ -5532,29 +5534,29 @@
             group.add(body);
         }
 
-        // Классический R6-«нуб» в студах (5 высотой): жёлтые голова и руки,
-        // синий торс, зелёные ноги. Лицо — на -Z (туда же, куда идёт персонаж).
+        // The classic R6 «noob» in studs (5 tall): yellow head and arms,
+        // blue torso, green legs. The face is on -Z (the same way the character walks).
         function _buildNoobAvatar() {
             const g = new THREE.Group();
             const box = (w, h, d, color, x, y, z, basic, limb) => {
                 const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
                     basic ? new THREE.MeshBasicMaterial({ color }) : new THREE.MeshLambertMaterial({ color }));
                 m.position.set(x, y, z);
-                if (limb) { m.userData.limb = limb; m.userData.baseColor = color; } // для BodyColors костюма
+                if (limb) { m.userData.limb = limb; m.userData.baseColor = color; } // for the outfit's BodyColors
                 g.add(m);
             };
             const Y = 0xF5CD30, B = 0x0D69AC, G = 0xA4BD47;
-            box(1, 2, 1, G, -0.5, 1, 0, false, 'LeftLeg'); box(1, 2, 1, G, 0.5, 1, 0, false, 'RightLeg'); // ноги
-            box(2, 2, 1, B, 0, 3, 0, false, 'Torso');                                                    // торс
-            box(1, 2, 1, Y, -1.5, 3, 0, false, 'LeftArm'); box(1, 2, 1, Y, 1.5, 3, 0, false, 'RightArm'); // руки
-            box(2, 1, 1, Y, 0, 4.5, 0, false, 'Head');                                                   // голова
-            box(0.2, 0.3, 0.02, 0x000000, -0.4, 4.6, -0.51, true);         // глаза
+            box(1, 2, 1, G, -0.5, 1, 0, false, 'LeftLeg'); box(1, 2, 1, G, 0.5, 1, 0, false, 'RightLeg'); // legs
+            box(2, 2, 1, B, 0, 3, 0, false, 'Torso');                                                    // torso
+            box(1, 2, 1, Y, -1.5, 3, 0, false, 'LeftArm'); box(1, 2, 1, Y, 1.5, 3, 0, false, 'RightArm'); // arms
+            box(2, 1, 1, Y, 0, 4.5, 0, false, 'Head');                                                   // head
+            box(0.2, 0.3, 0.02, 0x000000, -0.4, 4.6, -0.51, true);         // eyes
             box(0.2, 0.3, 0.02, 0x000000, 0.4, 4.6, -0.51, true);
-            box(0.9, 0.1, 0.02, 0x000000, 0, 4.25, -0.51, true);           // рот
+            box(0.9, 0.1, 0.02, 0x000000, 0, 4.25, -0.51, true);           // mouth
             return _fitToCharHeight(g);
         }
 
-        // Центрирует объект и масштабирует до роста R15 (5 стадов).
+        // Centers the object and scales it to the R15 height (5 studs).
         function _fitToCharHeight(obj) {
             const box = new THREE.Box3().setFromObject(obj);
             const c = box.getCenter(new THREE.Vector3());
@@ -5582,44 +5584,44 @@
             g.fillText(text, 128, 32);
             const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
             sp.scale.set(4, 1, 1);
-            sp.position.y = R15_HEIGHT - CHAR_RADIUS + 0.9; // над макушкой
+            sp.position.y = R15_HEIGHT - CHAR_RADIUS + 0.9; // above the top of the head
             sp.renderOrder = 10;
             return sp;
         }
 
-        // РЕАЛЬНЫЙ РАЗМЕР аватара (как в Roblox). Раньше каждый аватар растягивался так, чтобы ВЕСЬ его bbox (вместе со шляпой,
-        // причёской, крыльями) стал 5 стадов, — поэтому у аватаров с высокими аксессуарами тело съёживалось, а у «голых» раздувалось,
-        // и размеры/«хитбоксы» у всех были разные. Теперь масштаб берётся ОДИН на единицы OBJ, а не по росту конкретного аватара:
-        // порядок величины определяется по высоте bbox (R15 с аксессуарами = ~4.2–9 стадов): стады, метры (1 стад = 0.28 м) или
-        // степени десяти от них. Ступни ставятся ровно на землю (низ bbox), по X/Z — центр bbox.
-        // Если единицы определить не удалось — прежняя нормировка по высоте (_fitToCharHeight).
-        const _AVATAR_UNIT_CANDIDATES = [1, 1 / 0.28, 10, 10 / 0.28, 100, 100 / 0.28, 0.1, 0.01]; // множитель «единицы OBJ → стады»
+        // REAL avatar SIZE (as in Roblox). Previously every avatar was stretched so that its WHOLE bbox (with the hat,
+        // hairstyle, wings) became 5 studs — so avatars with tall accessories had a shrunken body, and «bare» ones an inflated one,
+        // and sizes/«hitboxes» differed for everyone. Now ONE scale is taken per OBJ unit, not per a particular avatar's height:
+        // the order of magnitude is determined from the bbox height (R15 with accessories = ~4.2–9 studs): studs, meters (1 stud = 0.28 m) or
+        // powers of ten of those. Feet are placed exactly on the ground (bbox bottom), X/Z — the bbox center.
+        // If the units couldn't be determined — the old normalization by height (_fitToCharHeight).
+        const _AVATAR_UNIT_CANDIDATES = [1, 1 / 0.28, 10, 10 / 0.28, 100, 100 / 0.28, 0.1, 0.01]; // the «OBJ units → studs» multiplier
         function _fitAvatarRealSize(obj) {
             const box = new THREE.Box3().setFromObject(obj);
             const size = box.getSize(new THREE.Vector3());
             let scale = null;
             for (const k of _AVATAR_UNIT_CANDIDATES) {
                 const h = size.y * k;
-                if (h >= 4.2 && h <= 9) { scale = k; break; }   // диапазоны разных k не пересекаются
+                if (h >= 4.2 && h <= 9) { scale = k; break; }   // the ranges of different k don't overlap
             }
             if (scale === null) {
-                logLuaOutput('warn', 'Avatar: единицы OBJ не определены (высота bbox ' + size.y.toFixed(3) + ') — масштаб по росту, как раньше');
+                logLuaOutput('warn', 'Avatar: OBJ units not determined (bbox height ' + size.y.toFixed(3) + ') — scaling by height, as before');
                 return _fitToCharHeight(obj);
             }
             const c = box.getCenter(new THREE.Vector3());
-            obj.position.set(-c.x, -box.min.y, -c.z);            // ступни в y=0, по X/Z — по центру
+            obj.position.set(-c.x, -box.min.y, -c.z);            // feet at y=0, X/Z — at the center
             const inner = new THREE.Group();
             inner.add(obj);
             inner.scale.setScalar(scale);
             const outer = new THREE.Group();
             outer.add(inner);
             outer.rotation.y = PLAY_AVATAR_YAW_OFFSET;
-            outer.position.y = -CHAR_RADIUS;                      // центр сферы-коллайдера на CHAR_RADIUS над землёй
-            logLuaOutput('info', 'Avatar: bbox ' + size.y.toFixed(3) + ' ед. × ' + scale.toFixed(3) + ' = ' + (size.y * scale).toFixed(2) + ' стада (реальный размер)');
+            outer.position.y = -CHAR_RADIUS;                      // the collider sphere's center at CHAR_RADIUS above the ground
+            logLuaOutput('info', 'Avatar: bbox ' + size.y.toFixed(3) + ' units × ' + scale.toFixed(3) + ' = ' + (size.y * scale).toFixed(2) + ' studs (real size)');
             return outer;
         }
 
-        // OBJ+MTL → THREE-объект (те же фиксы Roblox-формата, что в importAvatarIntoScene)
+        // OBJ+MTL → THREE object (the same Roblox-format fixes as in importAvatarIntoScene)
         async function _buildPlayAvatarFromAssets(data) {
             await ensureObjMtlLoaders();
             const fixedObjText = data.obj_text.replace(
@@ -5656,15 +5658,15 @@
                     }
                 });
             });
-            if (!verts) throw new Error('пустая геометрия аватара');
+            if (!verts) throw new Error('empty avatar geometry');
             const fitted = _fitAvatarRealSize(object);
-            fitted.userData.shared = true; // шаблон общий для всех Play-сессий — не dispose'им
+            fitted.userData.shared = true; // the template is shared by all Play sessions — don't dispose it
             return fitted;
         }
 
-        // ФИКС ЗЕРНИСТОСТИ АВАТАРА: Roblox кладёт в `map_Bump` НОРМАЛЬ-карту (синеватая, среднее ~128,128,245),
-        // а MTLLoader (three r128) грузит её как bumpMap — карту высот. Производные от яркости
-        // нормаль-карты дают шумный «рельеф» с мерцающими бликами. Переносим её в normalMap.
+        // AVATAR GRAININESS FIX: Roblox puts a NORMAL map into `map_Bump` (bluish, mean ~128,128,245),
+        // while MTLLoader (three r128) loads it as bumpMap — a height map. Derivatives of the normal map's
+        // brightness give a noisy «relief» with flickering highlights. We move it to normalMap.
         function _fixAvatarNormalMap(m) {
             if (!m || !m.bumpMap) return;
             m.normalMap = m.bumpMap;
@@ -5684,21 +5686,21 @@
                 if (!r || !r.ok) throw new Error((r && (r.message || r.error)) || 'play-avatar');
                 if (!r.cached) try {
                     let bundleUrl = null;
-                    for (let i = 0; i < 45 && isPlaying; i++) { // Roblox генерирует модель асинхронно
+                    for (let i = 0; i < 45 && isPlaying; i++) { // Roblox generates the model asynchronously
                         const st = await api('GET', '/api/roblox/avatar3d/status?userId=' + userId);
                         if (!st || !st.ok) throw new Error((st && (st.message || st.error)) || 'status');
                         if (st.ready) { bundleUrl = st.bundleUrl; break; }
-                        if (st.state === 'Error') throw new Error('Roblox: ошибка генерации');
+                        if (st.state === 'Error') throw new Error('Roblox: generation error');
                         await new Promise(res => setTimeout(res, 1500));
                     }
-                    if (!bundleUrl) throw new Error('таймаут генерации');
+                    if (!bundleUrl) throw new Error('generation timeout');
                     r = await api('GET', '/api/roblox/play-avatar?userId=' + userId + '&bundleUrl=' + encodeURIComponent(bundleUrl));
                     if (!r || !r.ok) throw new Error((r && (r.message || r.error)) || 'play-avatar');
                 } catch (e) {
-                    // Обновить не вышло (нет сети, нет куки, Roblox не отвечает) — лучше старый скачанный аватар, чем «нуб»
+                    // Refresh failed (no network, no cookie, Roblox isn't responding) — an old downloaded avatar is better than a «noob»
                     const old = await api('GET', '/api/roblox/play-avatar?userId=' + userId + '&allowStale=1');
                     if (!old || !old.ok || !old.cached) throw e;
-                    emuWarn('avatar:stale', 'Avatar: не удалось обновить (' + _errText(e) + ') — используется сохранённая копия');
+                    emuWarn('avatar:stale', 'Avatar: failed to refresh (' + _errText(e) + ') — using the saved copy');
                     r = old;
                 }
                 return _buildPlayAvatarFromAssets(r);
@@ -5708,13 +5710,13 @@
             return p;
         }
 
-        // ============ КОСТЮМ ПЕРСОНАЖА (Accessory / BodyColors в Character) ============
-        // Скрипт карты (морф хазмата) клонирует Accessory и BodyColors в Character — раньше
-        // приложение это не рисовало, и надетый костюм был невидим. Теперь по ref ОРИГИНАЛА
-        // (luaCloneOrigin) берём данные с сервера (/api/outfit_item) и рисуем меш аксессуара
-        // на «якоре» тела (R6-раскладка: голова 4.5, торс 3.0 над землёй, спереди -Z; рост 5
-        // у нуба и у аватара одинаков, так что якоря подходят обоим). BodyColors красит
-        // только нуба (у OBJ-аватара цвет кожи — в текстуре). Shirt/Pants пока не рисуются.
+        // ============ CHARACTER OUTFIT (Accessory / BodyColors in Character) ============
+        // A map script (a hazmat morph) clones Accessory and BodyColors into Character — previously the
+        // app didn't draw this, and the worn outfit was invisible. Now, by the ORIGINAL's ref
+        // (luaCloneOrigin) we take data from the server (/api/outfit_item) and draw the accessory's mesh
+        // on the body «anchor» (R6 layout: head 4.5, torso 3.0 above the ground, front -Z; height 5
+        // is the same for the noob and the avatar, so the anchors fit both). BodyColors paints
+        // only the noob (for an OBJ avatar the skin color is in the texture). Shirt/Pants aren't drawn yet.
         const OUTFIT_ANCHORS = {
             'Head': [0, 4.5, 0], 'Torso': [0, 3, 0], 'UpperTorso': [0, 3.2, 0], 'LowerTorso': [0, 2.4, 0],
             'HumanoidRootPart': [0, 3, 0], 'Left Arm': [-1.5, 3, 0], 'Right Arm': [1.5, 3, 0],
@@ -5730,7 +5732,7 @@
         const _outfitInfoCache = {};
         let _outfitTimer = null;
 
-        function _cf12ToMatrix(a) { // [x,y,z, r00..r22 по строкам] -> Matrix4
+        function _cf12ToMatrix(a) { // [x,y,z, r00..r22 row by row] -> Matrix4
             const m = new THREE.Matrix4();
             m.set(a[3], a[4], a[5], a[0],
                   a[6], a[7], a[8], a[1],
@@ -5751,7 +5753,7 @@
         function _clearOutfit(group) {
             const root = group && group.userData.outfitRoot;
             if (!root) return;
-            // геометрия и текстуры общие (кэши мешей/текстур) — освобождаем только материалы
+            // geometry and textures are shared (mesh/texture caches) — free only the materials
             root.traverse(n => { if (n.material) n.material.dispose(); });
             group.remove(root);
             group.userData.outfitRoot = null;
@@ -5774,7 +5776,7 @@
             for (const k of (luaChildrenByRef[luaCharacterRef] || [])) {
                 const cls = luaByRef[k] && luaByRef[k].cls;
                 const origin = luaCloneOrigin[k] !== undefined ? luaCloneOrigin[k] : k;
-                if (origin < 0) continue;              // создано скриптом (не из файла) — данных на сервере нет
+                if (origin < 0) continue;              // created by a script (not from the file) — no data on the server
                 if (cls === 'Accessory') acc.push(origin);
                 else if (cls === 'BodyColors') bcs.push(origin);
             }
@@ -5784,12 +5786,12 @@
             const token = group.userData.outfitToken = (group.userData.outfitToken || 0) + 1;
             const [accInfos, bcInfos] = await Promise.all([
                 Promise.all(acc.map(_fetchOutfitInfo)), Promise.all(bcs.map(_fetchOutfitInfo))]);
-            if (charMesh !== group || group.userData.outfitToken !== token) return; // Play остановили / состав уже сменился
+            if (charMesh !== group || group.userData.outfitToken !== token) return; // Play was stopped / the set has already changed
             const bc = bcInfos.find(i => i && i.ok && i.cls === 'BodyColors');
             _applyBodyColors(group, bc ? bc.colors : null);
             _clearOutfit(group);
             const root = new THREE.Group();
-            root.position.y = -CHAR_RADIUS;            // земля: центр сферы-коллайдера на CHAR_RADIUS выше
+            root.position.y = -CHAR_RADIUS;            // ground: the collider sphere's center at CHAR_RADIUS higher
             root.rotation.y = PLAY_AVATAR_YAW_OFFSET;
             group.add(root);
             group.userData.outfitRoot = root;
@@ -5810,10 +5812,10 @@
             const off = new THREE.Matrix4();
             if (m.kind === 'special' || m.kind === 'meshpart') {
                 const res = await loadRealMeshGeometry(m.meshId);
-                if (!res) return null;                   // меш не разобрался — не рисуем кубик вместо шлема
+                if (!res) return null;                   // the mesh didn't parse — don't draw a cube instead of the helmet
                 geo = res.geometry;
                 if (m.kind === 'special') {
-                    scale.set(m.scale[0], m.scale[1], m.scale[2]);       // родной размер * Scale
+                    scale.set(m.scale[0], m.scale[1], m.scale[2]);       // native size * Scale
                     off.makeTranslation(m.offset[0], m.offset[1], m.offset[2]);
                 } else {
                     scale.set(info.size[0] / res.size.x, info.size[1] / res.size.y, info.size[2] / res.size.z);
@@ -5827,7 +5829,7 @@
                 geo = new THREE.BoxGeometry(info.size[0], info.size[1], info.size[2]);
                 mat = new THREE.MeshLambertMaterial({ color: info.color || '#a3a2a5' });
             }
-            // Handle = Part0(тело) * C0 * C1^-1 (как AccessoryWeld); нет сварки — по имени Attachment
+            // Handle = Part0(body) * C0 * C1^-1 (like AccessoryWeld); no weld — by the Attachment name
             let H;
             if (info.weld && info.weld.c0 && info.weld.c1) {
                 const a = OUTFIT_ANCHORS[info.weld.part0] || OUTFIT_ANCHORS.Torso;
@@ -5846,13 +5848,13 @@
             return mesh;
         }
 
-        // ============ TOOL В РУКЕ ============
-        // Tool, перешедший в Character (humanoid:EquipTool / хотбар), рисуем в правой руке: данные деталей — с сервера
-        // (/api/tool_item/<ref оригинала>), хват — как RightGrip в Roblox (R6: C0 = (0,-1,0) + поворот, C1 = Tool.Grip).
-        // Рука при этом поднимается вперёд, как в стандартной анимации toolhold. Координаты — как у костюма (спереди -Z).
+        // ============ TOOL IN HAND ============
+        // A Tool moved into Character (humanoid:EquipTool / hotbar) is drawn in the right hand: part data — from the server
+        // (/api/tool_item/<original's ref>), the grip — like RightGrip in Roblox (R6: C0 = (0,-1,0) + rotation, C1 = Tool.Grip).
+        // The arm is raised forward, as in the standard toolhold animation. Coordinates — as for the outfit (front -Z).
         const _toolInfoCache = {};
         let _toolHoldTimer = null;
-        const HOLD_ARM_ANGLE = Math.PI / 2;   // рука вперёд
+        const HOLD_ARM_ANGLE = Math.PI / 2;   // arm forward
         function _fetchToolInfo(originRef) {
             if (!_toolInfoCache[originRef]) _toolInfoCache[originRef] = api('GET', '/api/tool_item/' + originRef).catch(() => null);
             return _toolInfoCache[originRef];
@@ -5868,7 +5870,7 @@
                 if (!n.userData || n.userData.limb !== 'RightArm') return;
                 if (!n.userData.armBase) n.userData.armBase = { y: n.position.y, z: n.position.z };
                 const b = n.userData.armBase;
-                if (raised) {   // поворот вокруг плеча (y плеча = центр руки + 1)
+                if (raised) {   // rotation around the shoulder (shoulder y = arm center + 1)
                     n.rotation.x = HOLD_ARM_ANGLE;
                     n.position.y = b.y + 1 - Math.cos(HOLD_ARM_ANGLE);
                     n.position.z = b.z - Math.sin(HOLD_ARM_ANGLE);
@@ -5914,7 +5916,7 @@
                     side: THREE.DoubleSide, alphaTest: m.textureId ? 0.5 : 0,
                     transparent: opac < 1, opacity: opac,
                 });
-            } else {   // примитив — или меш не загрузился (нет сети/ассет недоступен): рисуем коробку по размеру детали
+            } else {   // a primitive — or the mesh didn't load (no network/asset unavailable): draw a box by the part's size
                 if (p.shape === 'sphere') { geo = new THREE.SphereGeometry(0.5, 16, 12); scale.set(p.size[0], p.size[1], p.size[2]); }
                 else if (p.shape === 'cylinder') { geo = makeCylinderXGeometry(p.size[0], p.size[1], p.size[2], 16); }
                 else geo = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
@@ -5924,7 +5926,7 @@
             mesh.matrixAutoUpdate = false;
             mesh.matrix.copy(_cf12ToMatrix(p.cf)).multiply(off).multiply(new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z));
             mesh.matrixWorldNeedsUpdate = true;
-            mesh.userData.shared = true;   // геометрия — из кэша мешей
+            mesh.userData.shared = true;   // geometry — from the mesh cache
             mesh.userData.ref = p.ref;
             mesh.userData.base = mesh.matrix.clone();
             return mesh;
@@ -5940,13 +5942,13 @@
             const token = group.userData.toolToken = (group.userData.toolToken || 0) + 1;
             if (tool === undefined) return;
             const origin = luaCloneOrigin[tool] !== undefined ? luaCloneOrigin[tool] : tool;
-            if (origin < 0) return;   // создан скриптом — данных в файле нет
+            if (origin < 0) return;   // created by a script — no data in the file
             const info = await _fetchToolInfo(origin);
             if (charMesh !== group || group.userData.toolToken !== token || !info || !info.ok) return;
             const root = new THREE.Group();
             root.position.y = -CHAR_RADIUS;
             root.rotation.y = PLAY_AVATAR_YAW_OFFSET;
-            // Handle = Arm * C0 * C1^-1; Arm — рука, поднятая вперёд вокруг плеча (1.5, 4, 0)
+            // Handle = Arm * C0 * C1^-1; Arm — the arm raised forward around the shoulder (1.5, 4, 0)
             const C0 = new THREE.Matrix4().set(1, 0, 0, 0,   0, 0, 1, -1,   0, -1, 0, 0,   0, 0, 0, 1);
             const grip = info.grip ? _cf12ToMatrix(info.grip) : new THREE.Matrix4();
             const arm = new THREE.Matrix4().makeTranslation(1.5, 4, 0)
@@ -5966,7 +5968,7 @@
             if (charMesh !== group || group.userData.toolToken !== token) return;
             held.userData.joints = {};
             for (const j of (info.joints || [])) held.userData.joints[j.ref] = j;
-            // размер модели — для «вида из глаз»: крупную деталь (клавиша 3×1.4) уменьшаем, чтобы она не закрывала экран
+            // model size — for the «first-person view»: a large part (a 3×1.4 key) is scaled down so it doesn't cover the screen
             held.matrix.identity();
             const _bb = new THREE.Box3().setFromObject(held), _bs = new THREE.Vector3();
             _bb.getSize(_bs);
@@ -5978,12 +5980,12 @@
             group.userData.toolHeld = held;
             group.userData.toolH = H.clone();
             _setRightArmRaised(group, true);
-            for (const jr of Object.keys(luaJointC)) _heldJointPose(Number(jr));   // позы Motor6D, выставленные до загрузки модели
+            for (const jr of Object.keys(luaJointC)) _heldJointPose(Number(jr));   // Motor6D poses set before the model loaded
             _updateHeldTool();
         }
 
-        // Предмет в руке: от третьего лица — на руке персонажа, от первого — «вьюмодель» перед камерой справа внизу
-        // (как в Roblox; раньше от первого лица в руке ничего не было видно). Там рисуем поверх мира, чтобы не врезался в стены.
+        // The item in hand: in third person — on the character's arm, in first person — a «viewmodel» in front of the camera at the bottom right
+        // (as in Roblox; previously nothing was visible in the hand in first person). Drawn over the world there so it doesn't clip into walls.
         function _heldDepth(held, normal) {
             held.traverse(o => { if (o.material) { o.material.depthTest = normal; } if (o.isMesh) o.renderOrder = normal ? 0 : 998; });
         }
@@ -5994,7 +5996,7 @@
             const want = fp ? camera : g.userData.toolRoot;
             if (!want || held.parent === want) return;
             if (fp) {
-                if (!camera.parent) scene.add(camera);   // дети камеры рисуются только если сама камера в сцене
+                if (!camera.parent) scene.add(camera);   // children of the camera are drawn only if the camera itself is in the scene
                 const k = Math.min(1, 0.55 / Math.max(0.01, held.userData.size || 1));
                 held.matrix.makeTranslation(0.55, -0.5, -1.25)
                     .multiply(new THREE.Matrix4().makeRotationY(-0.3))
@@ -6006,11 +6008,11 @@
             _heldDepth(held, !fp);
             want.add(held);
         }
-        // Motor6D.C0 меняют (скрипт «Кнопка Z»: нажатие клавиши) -> двигаем деталь Part1 внутри модели в руке
+        // Motor6D.C0 is changed (the «Z button» script: a key press) -> move the Part1 part inside the model in the hand
         function _heldJointPose(jointRef) {
             const g = charMesh, held = g && g.userData.toolHeld;
             if (!held || !held.userData.byRef) return;
-            // у клона Motor6D нет Part0/Part1 в luaRefProps — берём из данных файла (joints из /api/tool_item) по ref оригинала
+            // a Motor6D clone has no Part0/Part1 in luaRefProps — take them from the file data (joints from /api/tool_item) by the original's ref
             const jo = luaCloneOrigin[jointRef] !== undefined ? luaCloneOrigin[jointRef] : jointRef;
             const j = held.userData.joints && held.userData.joints[jo];
             if (!j) return;
@@ -6025,8 +6027,8 @@
             try {
                 const r = await api('GET', '/api/roblox/me');
                 if (r && r.ok && r.loggedIn) acc = r;
-            } catch (e) { emuWarn('swallow:setupPlayerAvatar:4457', 'setupPlayerAvatar: ' + _errText(e) + ' (без сети — гость)'); }
-            if (charMesh !== group) return; // Play уже остановили
+            } catch (e) { emuWarn('swallow:setupPlayerAvatar:4457', 'setupPlayerAvatar: ' + _errText(e) + ' (no network — guest)'); }
+            if (charMesh !== group) return; // Play has already been stopped
             if (!acc) { logLuaOutput('info', t('log_play_guest')); return; }
             playerAccount = { userId: acc.userId, name: acc.name, displayName: acc.displayName };
             _applyPlayerAccountToLua();
@@ -6048,14 +6050,14 @@
                 return;
             }
 
-            // Иначе Play запускал бы Lua-скрипты по последней СОХРАНЁННОЙ
+            // Otherwise Play would run Lua scripts by the last SAVED
             await saveCurrentScriptIfDirty();
 
             const spawn = await findSpawnPoint();
             playSpawnPos = { x: spawn.x, y: spawn.y, z: spawn.z };
-            loadProximityPrompts(); // не блокирует старт — подтянется чуть позже, если не успеет
+            loadProximityPrompts(); // doesn't block the start — it will be pulled in a bit later if it doesn't make it
 
-            // Геометрия для физики запрашивается заново, центрированная на
+            // The geometry for physics is requested again, centered on
             const params = new URLSearchParams({
                 cx: Math.round(spawn.x), cy: Math.round(spawn.y), cz: Math.round(spawn.z),
                 limit: maxStreamedBodies(), chunk: 1
@@ -6067,9 +6069,9 @@
             }
 
             physicsWorld = new CANNON.World();
-            // cannon.js 0.6.2: ArrayCollisionMatrix.reset() на КАЖДОМ шаге обнуляет N²/2 ячеек (N = все тела мира, а у нас в мир
-            // кладётся вся статичная геометрия). После спавна комнат (612 -> 1200+ объектов) шаг физики дорожал в разы
-            // и FPS проваливался. Разреженная матрица держит только реально соприкасающиеся пары: reset = clear().
+            // cannon.js 0.6.2: ArrayCollisionMatrix.reset() on EVERY step zeroes N²/2 cells (N = all bodies of the world, and we put
+            // all static geometry into the world). After rooms spawned (612 -> 1200+ objects) the physics step got several times more expensive
+            // and FPS collapsed. A sparse matrix holds only pairs actually touching: reset = clear().
             {
                 const mkSparse = () => {
                     const set = new Set();
@@ -6079,17 +6081,17 @@
                         get(a, b) { return set.has(key(a, b)) ? 1 : 0; },
                         set(a, b, v) { if (v) set.add(key(a, b)); else set.delete(key(a, b)); },
                         reset() { set.clear(); },
-                        setNumObjects() { /* размер не зависит от числа тел */ },
+                        setNumObjects() { /* the size doesn't depend on the number of bodies */ },
                     };
                 };
                 physicsWorld.collisionMatrix = mkSparse();
                 physicsWorld.collisionMatrixPrevious = mkSparse();
             }
             physicsWorld.gravity.set(0, GRAVITY_STUDS, 0);
-            // SAPBroadphase сортирует и прогоняет ВСЕ тела мира каждый шаг — а почти все они статичные (карта), друг с другом
-            // не сталкиваются. Шаг физики стоил 2.9 мс на 481 теле и 7–9 мс на 943 (после спавна комнат), а за кадр их до 20
-            // (PHYSICS_MAX_TICKS × PHYSICS_SUBSTEPS) — FPS падал с 60 до ~9. Здесь пары строятся только от подвижных тел
-            // (персонаж, динамические детали) к остальным: стоимость ~ (число подвижных) × (число тел), в 5–8 раз дешевле.
+            // SAPBroadphase sorts and walks ALL the world's bodies every step — and almost all of them are static (the map), they don't
+            // collide with each other. A physics step cost 2.9 ms on 481 bodies and 7–9 ms on 943 (after rooms spawned), and there are up to 20 per frame
+            // (PHYSICS_MAX_TICKS × PHYSICS_SUBSTEPS) — FPS dropped from 60 to ~9. Here pairs are built only from moving bodies
+            // (the character, dynamic parts) to the rest: the cost ~ (number of moving) × (number of bodies), 5–8 times cheaper.
             {
                 const STATIC = CANNON.Body.STATIC;
                 const DynStaticBroadphase = function (world) { CANNON.Broadphase.call(this); this.world = world; this.useBoundingBoxes = false; };
@@ -6103,7 +6105,7 @@
                         for (let j = 0; j < n; j++) {
                             const bj = bs[j];
                             if (bj === bi) continue;
-                            if (j < i && bj.type !== STATIC) continue;   // пара подвижных тел — один раз
+                            if (j < i && bj.type !== STATIC) continue;   // a pair of moving bodies — once
                             if (!this.needBroadphaseCollision(bi, bj)) continue;
                             this.intersectionTest(bi, bj, p1, p2);
                         }
@@ -6121,12 +6123,12 @@
             }
             physicsWorld.solver.iterations = 10;
             physicsWorld.allowSleep = true;
-            // friction = 0 обязательно:
+            // friction = 0 is required:
             physicsWorld.defaultContactMaterial.friction = 0;
             physicsWorld.defaultContactMaterial.restitution = 0.05;
 
-            // Touched — настоящее срабатывание по факту контакта в cannon.js
-            // (события beginContact в cannon.js 0.6 нет — см. updateContactTouches)
+            // Touched — a real trigger on actual contact in cannon.js
+            // (there is no beginContact event in cannon.js 0.6 — see updateContactTouches)
             touchContacts = new Map();
 
             physicsBodies = {};
@@ -6134,16 +6136,16 @@
             playOnlyRefs = new Set();
             playObjData = {};
 
-            // Меши, оставшиеся в сцене от редактора (загружены раньше,
+            // Meshes left in the scene by the editor (loaded earlier,
             for (const mesh of Object.values(sceneObjs)) {
                 mesh.visible = false;
             }
 
             for (const o of sceneResp.objects) {
-                if (o.nw) { playObjData[o.ref] = o; continue; }   // шаблон из ServerStorage: только данные для Clone()
+                if (o.nw) { playObjData[o.ref] = o; continue; }   // a template from ServerStorage: only data for Clone()
                 addPhysicsBodyForObj(o);
             }
-            // Данные ВСЕХ шаблонов (а не только тех, что попали в лимит по дистанции) — для Clone() комнат/врагов/лифтов
+            // Data of ALL templates (not only those within the distance limit) — for Clone() of rooms/enemies/elevators
             fetch('/api/scene?nw=1').then(r => r.json()).then(tr => {
                 if (!tr || !tr.ok || !isPlaying) return;
                 for (const o of tr.objects) if (!playObjData[o.ref]) playObjData[o.ref] = o;
@@ -6160,32 +6162,32 @@
                 }
             }
 
-            // Персонаж — сфера (без вращения, чтобы камера не крутило),
+            // The character is a sphere (without rotation so that the camera doesn't spin),
             charBody = new CANNON.Body({
                 mass: 5,
                 shape: new CANNON.Sphere(CHAR_RADIUS),
                 position: new CANNON.Vec3(spawn.x, spawn.y, spawn.z),
                 fixedRotation: true,
-                linearDamping: 0,      // в Roblox у персонажа нет «сопротивления воздуха»: прыжок/падение без торможения
+                linearDamping: 0,      // in Roblox the character has no «air resistance»: jumping/falling without slowing down
                 allowSleep: false,
             });
-            // Верх тела — колонна сфер того же радиуса, поставленных друг на друга (капсула «из сфер»),
-            // от центра первой сферы до макушки R15. Одна сфера закрывала только нижние ~2 стада от земли,
-            // и всё выше (стены, балки, юнионы на уровне груди/головы) игрок проходил насквозь.
-            // Именно сферы, а не бокс: в cannon.js 0.6 нет столкновения «бокс — trimesh», а юнионы здесь
-            // как раз trimesh (applyUnionTrimesh) — бокс сквозь них проходил бы; сфера сталкивается со всем.
+            // The upper body is a column of spheres of the same radius stacked on each other (a capsule «made of spheres»),
+            // from the center of the first sphere to the top of the R15 head. A single sphere covered only the lowest ~2 studs from the ground,
+            // and everything higher (walls, beams, unions at chest/head level) the player walked through.
+            // Spheres specifically, not a box: cannon.js 0.6 has no «box — trimesh» collision, and unions here
+            // are exactly trimesh (applyUnionTrimesh) — a box would pass through them; a sphere collides with everything.
             for (let y = CHAR_RADIUS; y + CHAR_RADIUS <= R15_HEIGHT - CHAR_RADIUS + 1e-6; y += CHAR_RADIUS) {
                 charBody.addShape(new CANNON.Sphere(CHAR_RADIUS), new CANNON.Vec3(0, y, 0));
             }
-            // Группу/маску тела НЕ меняем: у тел в cannon 0.6 mask по умолчанию = 1, и любая другая группа
-            // у персонажа отключила бы его столкновения со всем миром. Лучи персонажа стартуют изнутри
-            // его сфер, но с skipBackfaces=true выходные грани (нормаль по ходу луча) отбрасываются.
+            // We do NOT change the body's group/mask: in cannon 0.6 a body's default mask = 1, and any other group
+            // on the character would disable its collisions with the whole world. The character's rays start from inside
+            // its spheres, but with skipBackfaces=true the exit faces (normal along the ray) are discarded.
             physicsWorld.addBody(charBody);
 
-            // Куб-персонаж для вида от третьего лица — виден только когда
+            // The cube character for the third-person view — visible only when
             _disposeCharMesh();
             charMesh = new THREE.Group();
-            _setCharBody(charMesh, _buildNoobAvatar()); // сразу — стандартный «нуб»; аватар аккаунта подменит его, когда загрузится
+            _setCharBody(charMesh, _buildNoobAvatar()); // immediately — the standard «noob»; the account's avatar replaces it when it loads
             charMesh.visible = false;
             scene.add(charMesh);
             _disposeBlobShadow();
@@ -6197,7 +6199,7 @@
                 spherical: { ...spherical },
                 target: { ...target },
             };
-            spherical.phi = Math.PI / 2; // смотрим ровно вперёд, а не в пол/потолок
+            spherical.phi = Math.PI / 2; // look straight ahead, not at the floor/ceiling
             target = { x: spawn.x, y: spawn.y + EYE_HEIGHT, z: spawn.z };
             updateCamera();
 
@@ -6209,7 +6211,7 @@
             streamInFlight = false;
             playGeoCache = {};
             playMatCache = {};
-            // Реальная дальность отрисовки в Play — playRenderCutoff()
+            // The real draw distance in Play — playRenderCutoff()
             prevFogFar = scene.fog ? scene.fog.far : null;
             if (scene.fog) scene.fog.far = STREAM_PRUNE_DIST;
             document.getElementById('play-btn').textContent = t('notify_stop');
@@ -6218,30 +6220,30 @@
             const padE = document.getElementById('pad-e'), padQ = document.getElementById('pad-q');
             if (padE) { padE.textContent = '⤴'; padE.title = t('pad_jump_title'); }
             if (padQ) { padQ.style.visibility = 'hidden'; }
-            _updateTouchControlsVisibility(); // luaControlsDisabled сбрасывается в stopLuaScripts/startLuaScriptsInner — на старте контролы должны быть видны, если скрипт не решит иначе
-            // Модель игрока (голова/торс/руки/ноги/одежда — обычные MeshPart
-            // рядом со спавном) уже перечислена выше и начала грузить
-            // реальную геометрию и текстуры по сети
+            _updateTouchControlsVisibility(); // luaControlsDisabled is reset in stopLuaScripts/startLuaScriptsInner — at start the controls must be visible unless the script decides otherwise
+            // The player model (head/torso/arms/legs/clothes — ordinary MeshParts
+            // near the spawn) has already been listed above and has started loading
+            // the real geometry and textures over the network
             // (scheduleRealMeshSwap/getOrLoadPartTexture/getClothTexture —
-            // каждый асинхронный запрос сам регистрируется в
-            // _pendingModelLoads). Раньше рендер уже шёл (requestAnimationFrame
-            // не ждёт этот await), поэтому первые секунды игрок ВИДЕЛ, как
-            // персонаж доснашивает текстуры и меши прямо во время игры —
-            // "доскачивался" по кускам. Закрываем экран модалкой (как при
-            // скачивании аватара через "Импорт аватара") на время ожидания
-            // — тогда модель появляется сразу целиком; не дольше 2.5 сек,
-            // чтобы не превращать это в зависание на тяжёлой карте.
+            // each asynchronous request registers itself in
+            // _pendingModelLoads). Previously rendering was already running (requestAnimationFrame
+            // doesn't wait for this await), so for the first seconds the player SAW
+            // the character finish loading textures and meshes right during the game —
+            // "downloading" piece by piece. We cover the screen with a modal (as when
+            // downloading an avatar via "Import avatar") while waiting
+            // — then the model appears all at once; no longer than 2.5 s,
+            // so this doesn't turn into a hang on a heavy map.
             if (_pendingModelLoads > 0) {
                 showModal('<h3>' + t('notify_loading_model') + '</h3>');
                 await waitForPendingModelLoads(2500);
                 closeModal();
             }
-            if (!isPlaying) return; // Stop нажали, пока ждали загрузку
+            if (!isPlaying) return; // Stop was pressed while waiting for the load
             notify(t('notify_play_started', { n: Object.keys(physicsBodies).length }));
-            startLuaScripts(); // асинхронно — не блокирует появление игрока на спавне
+            startLuaScripts(); // asynchronous — doesn't block the player's appearance at the spawn
         }
 
-        // Реальный Roblox прячет тач-контролы (джойстик, кнопку прыжка)
+        // Real Roblox hides touch controls (the joystick, the jump button)
         function _updateTouchControlsVisibility() {
             const pad = document.getElementById('mobile-pad');
             if (!pad) return;
@@ -6249,10 +6251,10 @@
         }
 
         function stopPlay() {
-            try { resetBeams(); } catch (e) { /* сцена уже разобрана */ }
-            try { resetHighlights(); restoreSmallCull(); } catch (e) { /* сцена уже разобрана */ }
+            try { resetBeams(); } catch (e) { /* the scene has already been torn down */ }
+            try { resetHighlights(); restoreSmallCull(); } catch (e) { /* the scene has already been torn down */ }
             isPlaying = false;
-            _updateTouchControlsVisibility(); // возвращаем джойстик/кнопку — она могла остаться скрытой, если скрипт вызвал Disable() и не успел/не стал явно включать обратно
+            _updateTouchControlsVisibility(); // bring back the joystick/button — it could have stayed hidden if a script called Disable() and didn't or couldn't explicitly enable it again
             cameraIsScriptable = false;
             _scriptCam = null;
             setEditorPanelsCollapsedForPlay(false);
@@ -6260,7 +6262,7 @@
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
-            seatState = null; climbState = null; _seatCooldownUntil = 0; _climbCooldownUntil = 0; _scCache.t = -1e9; _scVirtN = -1; _scVirtT = -1e9;   // не тащим сиденье/лестницу в следующий Play
+            seatState = null; climbState = null; _seatCooldownUntil = 0; _climbCooldownUntil = 0; _scCache.t = -1e9; _scVirtN = -1; _scVirtT = -1e9;   // don't carry the seat/ladder into the next Play
             _camReturnToCharT = null;
             luaHumanoidRootPartRef = -1;
             luaHumanoidRef = -1;
@@ -6284,23 +6286,23 @@
             for (const [refStr, mesh] of Object.entries(sceneObjs)) {
                 const ref = parseInt(refStr);
                 if (!(ref in playSnapshot)) {
-                    // Не был подгружен стримингом за время Play вообще
+                    // Was not loaded by streaming at all during Play
                     mesh.visible = true;
                     continue;
                 }
                 if (playOnlyRefs.has(ref)) {
-                    // Загружен только ради Play — убираем совсем, иначе
+                    // Loaded only for Play — remove completely, otherwise
                     scene.remove(mesh);
                     if (mesh.geometry && !mesh.geometry.userData.sharedMesh) mesh.geometry.dispose();
                     delete sceneObjs[ref];
                 } else {
                     mesh.matrix.copy(playSnapshot[ref]);
-                    // Size, выставленный скриптом во время Play, после Stop откатывается (как в Studio)
+                    // A Size set by a script during Play is rolled back after Stop (as in Studio)
                     if (mesh.userData.partScale0 !== undefined) {
                         if (mesh.userData.partScale0) mesh.userData.partScale = mesh.userData.partScale0.clone();
                         else delete mesh.userData.partScale;
                     }
-                    if (mesh.userData.partScale) {   // геометрия уже настоящая (меш заменён) — масштаб не терять
+                    if (mesh.userData.partScale) {   // the geometry is already real (the mesh was replaced) — don't lose the scale
                         const rp = new THREE.Vector3(), rq = new THREE.Quaternion(), rs = new THREE.Vector3();
                         mesh.matrix.decompose(rp, rq, rs);
                         mesh.matrix.compose(rp, rq, mesh.userData.partScale);
@@ -6309,7 +6311,7 @@
                         mesh.matrix.decompose(rp, rq, rs);
                         mesh.matrix.compose(rp, rq, new THREE.Vector3(1, 1, 1));
                     }
-                    mesh.visible = true; // сняли дальнюю обрезку рендера, введённую во время Play
+                    mesh.visible = true; // removed the far render clipping introduced during Play
                 }
             }
             playSnapshot = {};
@@ -6333,15 +6335,15 @@
             notify(t('notify_stop'));
         }
 
-        // ============ LUA (Script/LocalScript в Play) ============
+        // ============ LUA (Script/LocalScript in Play) ============
         let fengariLoadPromise = null;
         function ensureFengariLoaded() {
             if (window.fengari) return Promise.resolve(true);
             if (fengariLoadPromise) return fengariLoadPromise;
             fengariLoadPromise = new Promise((resolve) => {
-                // Пробуем по очереди: локальная копия (с cache-bust, чтобы
-                // WebView не отдал закэшированный 404/сбой прошлой попытки),
-                // затем CDN-зеркала. Причина каждого сбоя пишется в Output.
+                // Try in turn: the local copy (with a cache-bust so that the
+                // WebView doesn't return a cached 404/failure from the previous attempt),
+                // then the CDN mirrors. The reason for each failure is written to Output.
                 const urls = [
                     'vendor/fengari-web.js?_=' + Date.now(),
                     'https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js',
@@ -6349,7 +6351,7 @@
                 ];
                 const tryNext = (i) => {
                     if (i >= urls.length) {
-                        console.error('[Lua] fengari не загрузился ни с одного адреса');
+                        console.error('[Lua] fengari failed to load from any address');
                         resolve(false);
                         return;
                     }
@@ -6357,11 +6359,11 @@
                     s.src = urls[i];
                     s.onload = () => {
                         if (window.fengari) { resolve(true); return; }
-                        logLuaOutput('warn', 'fengari: ' + urls[i] + ' загрузился, но window.fengari не появился');
+                        logLuaOutput('warn', 'fengari: ' + urls[i] + ' loaded, but window.fengari did not appear');
                         s.remove(); tryNext(i + 1);
                     };
                     s.onerror = () => {
-                        logLuaOutput('warn', 'fengari: не загрузился ' + urls[i]);
+                        logLuaOutput('warn', 'fengari: failed to load ' + urls[i]);
                         s.remove(); tryNext(i + 1);
                     };
                     document.head.appendChild(s);
@@ -6371,15 +6373,15 @@
             return fengariLoadPromise;
         }
 
-        // Два НЕЗАВИСИМЫХ lua_State — как сервер и клиент в настоящем
+        // Two INDEPENDENT lua_States — like the server and the client in real
         let luaServerL = null;
         let luaClientL = null;
-        let luaWaits = [];       // [{co, resumeAt}] — корутины, спящие в wait() (общий шедулер на обе VM)
-        let activeTweens = [];   // [{ref, propName, from, to, duration, startTime, composite, completedKey}] — см. TweenService ниже
-        let luaSignalWaits = []; // [{co, ref, evName}] — корутины, спящие в Event:Wait()/:wait(), см. __wait_signal
-        let luaModuleSourceByRef = {}; // ModuleScript ref -> Source (для require(), см. __compile_module)
-        let luaModuleNameByRef = {};   // ModuleScript ref -> имя (для сообщений об ошибках/имени чанка)
-        let luaOutputLines = []; // {level, text} — для панели #lua-output
+        let luaWaits = [];       // [{co, resumeAt}] — coroutines sleeping in wait() (a shared scheduler for both VMs)
+        let activeTweens = [];   // [{ref, propName, from, to, duration, startTime, composite, completedKey}] — see TweenService below
+        let luaSignalWaits = []; // [{co, ref, evName}] — coroutines sleeping in Event:Wait()/:wait(), see __wait_signal
+        let luaModuleSourceByRef = {}; // ModuleScript ref -> Source (for require(), see __compile_module)
+        let luaModuleNameByRef = {};   // ModuleScript ref -> name (for error messages/the chunk name)
+        let luaOutputLines = []; // {level, text} — for the #lua-output panel
 
         const LUA_PRELUDE = `
 Vector3 = {}
@@ -6390,15 +6392,15 @@ end
 Vector3.__add = function(a, b) return Vector3.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z) end
 Vector3.__sub = function(a, b) return Vector3.new(a.X - b.X, a.Y - b.Y, a.Z - b.Z) end
 Vector3.__mul = function(a, b)
-    if type(a) == "number" then return Vector3.new(a * b.X, a * b.Y, a * b.Z) end  -- 2 * v (раньше падало на a.X у числа)
+    if type(a) == "number" then return Vector3.new(a * b.X, a * b.Y, a * b.Z) end  -- 2 * v (used to fail on a.X of a number)
     if type(b) == "number" then return Vector3.new(a.X * b, a.Y * b, a.Z * b) end
     return Vector3.new(a.X * b.X, a.Y * b.Y, a.Z * b.Z)
 end
 Vector3.__unm = function(a) return Vector3.new(-a.X, -a.Y, -a.Z) end
 Vector3.__tostring = function(v) return v.X .. ", " .. v.Y .. ", " .. v.Z end
 function Vector3.new_magnitude(v) return math.sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z) end
--- Magnitude/Unit/Dot/Cross/Lerp и деление — раньше были только + - * и
--- new_magnitude, из-за чего v.Magnitude/v.Unit давали nil.
+-- Magnitude/Unit/Dot/Cross/Lerp and division — there used to be only + - * and
+-- new_magnitude, because of which v.Magnitude/v.Unit gave nil.
 function Vector3.Dot(a, b) return a.X*b.X + a.Y*b.Y + a.Z*b.Z end
 function Vector3.Cross(a, b)
     return Vector3.new(a.Y*b.Z - a.Z*b.Y, a.Z*b.X - a.X*b.Z, a.X*b.Y - a.Y*b.X)
@@ -6429,7 +6431,7 @@ Vector3.xAxis = Vector3.new(1, 0, 0)
 Vector3.yAxis = Vector3.new(0, 1, 0)
 Vector3.zAxis = Vector3.new(0, 0, 1)
 
--- BrickColor: палитра частых цветов Roblox (номер, имя, sRGB). Неизвестное имя/номер -> Medium stone grey (как в Roblox).
+-- BrickColor: a palette of common Roblox colors (number, name, sRGB). An unknown name/number -> Medium stone grey (as in Roblox).
 local __BC_PALETTE = {
     {1, "White", 242, 243, 243}, {5, "Brick yellow", 215, 197, 154}, {9, "Light reddish violet", 232, 186, 200},
     {21, "Bright red", 196, 40, 28}, {23, "Bright blue", 13, 105, 172}, {24, "Bright yellow", 245, 205, 48},
@@ -6465,7 +6467,7 @@ local function __bc_by_name(name)
     for i = 1, #__BC_PALETTE do local e = __BC_PALETTE[i]; if string.lower(e[2]) == want then return __bc_make(e) end end
     return __bc_make({194, "Medium stone grey", 163, 162, 165})
 end
-local function __bc_nearest(r, g, b)   -- r,g,b в 0..1
+local function __bc_nearest(r, g, b)   -- r,g,b in 0..1
     local best, bd = nil, math.huge
     for i = 1, #__BC_PALETTE do
         local e = __BC_PALETTE[i]
@@ -6486,7 +6488,7 @@ end
 function BrickColor.Random() return __bc_make(__BC_PALETTE[math.random(1, #__BC_PALETTE)]) end
 BrickColor.random = BrickColor.Random
 function BrickColor.palette(i) return __bc_make(__BC_PALETTE[((tonumber(i) or 0) % #__BC_PALETTE) + 1]) end
--- BrickColor.Red(), BrickColor.White() ... — по имени без пробелов
+-- BrickColor.Red(), BrickColor.White() ... — by name without spaces
 for i = 1, #__BC_PALETTE do
     local e = __BC_PALETTE[i]
     local key = string.gsub(e[2], "[^%w]", "")
@@ -6506,7 +6508,7 @@ Color3.__index = Color3
 function Color3.new(r, g, b) return setmetatable({R = r or 0, G = g or 0, B = b or 0}, Color3) end
 function Color3.fromRGB(r, g, b) return Color3.new((r or 0)/255, (g or 0)/255, (b or 0)/255) end
 function Color3.fromHSV(h, s, v)
-    -- Стандартная формула HSV->RGB (h,s,v в диапазоне 0..1, как и в Roblox).
+    -- The standard HSV->RGB formula (h,s,v in the range 0..1, as in Roblox).
     local i = math.floor(h * 6)
     local f = h * 6 - i
     local p = v * (1 - s)
@@ -6523,11 +6525,11 @@ end
 Color3.__tostring = function(c) return c.R .. ", " .. c.G .. ", " .. c.B end
 Color3.__eq = function(a, b) return a.R == b.R and a.G == b.G and a.B == b.B end
 
--- UDim/UDim2 — только конструкторы и арифметика (+/-), достаточно для
--- Position/Size любого GUI-скрипта. Само визуальное применение — через
--- __set_prop -> luaTableToJsPropValue на JS-стороне (см. installLuaBridge):
--- он узнаёт UDim2 по форме {X={Scale,Offset}, Y={Scale,Offset}}, поэтому
--- поля здесь называются РОВНО так (не scale/offset).
+-- UDim/UDim2 — only constructors and arithmetic (+/-), enough for
+-- the Position/Size of any GUI script. The visual application itself — via
+-- __set_prop -> luaTableToJsPropValue on the JS side (see installLuaBridge):
+-- it recognizes UDim2 by the shape {X={Scale,Offset}, Y={Scale,Offset}}, so
+-- the fields here are named EXACTLY that (not scale/offset).
 UDim = {}
 UDim.__index = UDim
 function UDim.new(scale, offset) return setmetatable({Scale = scale or 0, Offset = offset or 0}, UDim) end
@@ -6536,7 +6538,7 @@ UDim.__sub = function(a, b) return UDim.new(a.Scale - b.Scale, a.Offset - b.Offs
 UDim.__tostring = function(u) return u.Scale .. ", " .. u.Offset end
 
 UDim2 = {}
--- UDim2.Width/Height — синонимы X/Y (в Roblox это те же UDim); без них скрипты падали: attempt to index a nil value (field 'Width')
+-- UDim2.Width/Height — synonyms of X/Y (in Roblox these are the same UDim); without them scripts failed: attempt to index a nil value (field 'Width')
 UDim2.__index = function(t, k)
     if k == "Width" then return rawget(t, "X") elseif k == "Height" then return rawget(t, "Y") end
     return UDim2[k]
@@ -6550,9 +6552,9 @@ UDim2.__add = function(a, b) return UDim2.new(a.X.Scale + b.X.Scale, a.X.Offset 
 UDim2.__sub = function(a, b) return UDim2.new(a.X.Scale - b.X.Scale, a.X.Offset - b.X.Offset, a.Y.Scale - b.Y.Scale, a.Y.Offset - b.Y.Offset) end
 UDim2.__tostring = function(u) return "{" .. tostring(u.X) .. "}, {" .. tostring(u.Y) .. "}" end
 
--- typeof(v) — глобальная функция Roblox: Lua-тип для простых значений, а для Roblox-типов — их имя
--- ("Instance", "Vector3", "CFrame", "EnumItem"...). Раньше её не было вовсе: любой скрипт с typeof() падал
--- на attempt to call a nil value (global 'typeof').
+-- typeof(v) — a Roblox global function: the Lua type for simple values, and for Roblox types — their name
+-- ("Instance", "Vector3", "CFrame", "EnumItem"...). It didn't exist at all before: any script with typeof() failed
+-- with attempt to call a nil value (global 'typeof').
 function typeof(v)
     local t = type(v)
     if t ~= "table" then return t end
@@ -6572,27 +6574,27 @@ function typeof(v)
     if rawget(v, "EnumType") ~= nil then return "EnumItem" end
     return "table"
 end
--- RunService:BindToRenderStep хранит свои подключения здесь (по имени привязки)
+-- RunService:BindToRenderStep keeps its connections here (by binding name)
 __render_binds = {}
--- RaycastParams.new() — только контейнер полей (FilterDescendantsInstances/FilterType/...): workspace:Raycast в
--- приложении пока нет, но скрипты создают параметры до вызова — без глобала падали на RaycastParams.new
+-- RaycastParams.new() — only a field container (FilterDescendantsInstances/FilterType/...): workspace:Raycast isn't in
+-- the app yet, but scripts create the params before the call — without the global they failed on RaycastParams.new
 RaycastParams = {}
 function RaycastParams.new()
     return {FilterDescendantsInstances = {}, FilterType = "Exclude", IgnoreWater = false,
             RespectCanCollide = false, CollisionGroup = "Default", BruteForceAllSlow = false}
 end
--- OverlapParams.new() — контейнер полей для workspace:GetPartBoundsInBox/GetPartsInPart/GetPartBoundsInRadius
--- (без глобала скрипты падали: attempt to index a nil value (global 'OverlapParams')).
+-- OverlapParams.new() — a field container for workspace:GetPartBoundsInBox/GetPartsInPart/GetPartBoundsInRadius
+-- (without the global scripts failed: attempt to index a nil value (global 'OverlapParams')).
 OverlapParams = {}
 function OverlapParams.new()
     return {FilterDescendantsInstances = {}, FilterType = "Exclude", MaxParts = 0, CollisionGroup = "Default",
             RespectCanCollide = false, BruteForceAllSlow = false}
 end
--- Random — класс Luau: Random.new(seed) + NextNumber/NextInteger/NextUnitVector/Shuffle/Clone.
--- Свой генератор (xorshift32): один и тот же seed даёт одну и ту же последовательность, как в Roblox.
--- Целые в fengari 32-битные со знаком, поэтому никаких 64-битных множителей и масок 0xFFFFFFFF:
--- работаем в знаковом int32 (сдвиги влево сами «обрезаются»), результат берём без знакового бита.
--- Раньше глобала Random не было вовсе: attempt to index a nil value (global 'Random').
+-- Random — a Luau class: Random.new(seed) + NextNumber/NextInteger/NextUnitVector/Shuffle/Clone.
+-- Its own generator (xorshift32): the same seed gives the same sequence, as in Roblox.
+-- Integers in fengari are signed 32-bit, so no 64-bit multipliers and 0xFFFFFFFF masks:
+-- we work in signed int32 (left shifts truncate on their own), and take the result without the sign bit.
+-- The Random global didn't exist at all before: attempt to index a nil value (global 'Random').
 Random = {}
 Random.__index = Random
 local function __rnd_step(self)
@@ -6608,7 +6610,7 @@ function Random.new(seed)
     local st = seed % 2147483647
     if st == 0 then st = 1 end
     local self = setmetatable({_s = math.tointeger(st) or 1}, Random)
-    for _ = 1, 4 do __rnd_step(self) end   -- прогрев: близкие seed не должны давать близкие первые числа
+    for _ = 1, 4 do __rnd_step(self) end   -- warm-up: close seeds must not give close first numbers
     return self
 end
 function Random:NextNumber(min, max)
@@ -6633,12 +6635,12 @@ function Random:Shuffle(t)
 end
 function Random:Clone() return setmetatable({_s = self._s}, Random) end
 
--- Обобщённый for из Luau: "for k, v in tbl do" (без pairs/ipairs).
--- В Lua 5.3 такая запись пыталась ВЫЗВАТЬ таблицу как итератор —
--- "attempt to call a table value". Препроцессор (expandGenericFor)
--- оборачивает выражение после "in" в __geniter(...): таблица без
--- __call превращается в next-итерацию, всё остальное (pairs(t),
--- ipairs(t), функции-итераторы) проходит как есть.
+-- Luau generic for: "for k, v in tbl do" (without pairs/ipairs).
+-- In Lua 5.3 this form tried to CALL the table as an iterator —
+-- "attempt to call a table value". The preprocessor (expandGenericFor)
+-- wraps the expression after "in" into __geniter(...): a table without
+-- __call turns into a next-iteration, everything else (pairs(t),
+-- ipairs(t), iterator functions) passes through as is.
 function __geniter(f, s, c)
     if type(f) == "table" and s == nil and c == nil then
         local mt = getmetatable(f)
@@ -6656,12 +6658,12 @@ function __geniter(f, s, c)
     return f, s, c
 end
 
--- math.clamp/round/sign — расширения Luau, которых нет в обычной Lua 5.3
--- (см. math в fengari, стандартная библиотека). Были только в списке
--- подсветки синтаксиса, реально не существовали — "attempt to call a nil
--- value (field 'clamp')" на первой же строке любого обработчика слайдера/
--- промокода/чего угодно, что их использует (а их используют ОЧЕНЬ часто —
--- в этой карте минимум в SettingsMenuScript и Plugin.lua).
+-- math.clamp/round/sign — Luau extensions that plain Lua 5.3 lacks
+-- (see math in fengari, the standard library). They were only in the syntax
+-- highlighting list and didn't really exist — "attempt to call a nil
+-- value (field 'clamp')" on the very first line of any slider/
+-- promo code/whatever handler that uses them (and they are used VERY often —
+-- in this map at least in SettingsMenuScript and Plugin.lua).
 function math.clamp(x, min, max)
     if x < min then return min end
     if x > max then return max end
@@ -6672,9 +6674,9 @@ function math.sign(x)
     if x > 0 then return 1 elseif x < 0 then return -1 else return 0 end
 end
 
--- Расширения стандартной библиотеки Luau, которых нет в Lua 5.3 (fengari). В списке известных имён они
--- значились, но реализованы не были: table.find(...) падал с "attempt to call a nil value (field 'find')"
--- прямо в обработчике Touched лифта — поэтому лобби не открывалось и UI не показывался.
+-- Luau standard library extensions that Lua 5.3 (fengari) lacks. They were in the list of known names
+-- but weren't implemented: table.find(...) failed with "attempt to call a nil value (field 'find')"
+-- right in the elevator's Touched handler — so the lobby didn't open and the UI wasn't shown.
 function table.find(t, value, init)
     for i = init or 1, #t do
         if t[i] == value then return i end
@@ -6694,11 +6696,11 @@ function table.create(n, value)
     if value ~= nil then for i = 1, n do t[i] = value end end
     return t
 end
--- freeze только помечает таблицу (запрет записи не эмулируется — для этого пришлось бы подменять таблицу)
+-- freeze only marks the table (write protection isn't emulated — the table would have to be swapped for that)
 local __frozenTables = setmetatable({}, { __mode = "k" })
 function table.freeze(t) __frozenTables[t] = true return t end
 function table.isfrozen(t) return __frozenTables[t] == true end
--- string.split(s, sep): разделитель по умолчанию ",", как в Luau (разделитель — обычная строка, не паттерн)
+-- string.split(s, sep): the default separator is ",", as in Luau (the separator is a plain string, not a pattern)
 function string.split(s, sep)
     sep = sep or ","
     local out, pos = {}, 1
@@ -6714,8 +6716,8 @@ function string.split(s, sep)
     end
     return out
 end
--- bit32 (в Lua 5.3 есть операторы, но не библиотека). Целые в fengari 32-битные со знаком, а bit32 Roblox работает
--- с беззнаковыми 0..2^32-1: входы приводим к знаковым 32 бит (s32), результат — обратно к беззнаковому (u32).
+-- bit32 (Lua 5.3 has operators but not the library). Integers in fengari are signed 32-bit, while Roblox's bit32 works
+-- with unsigned 0..2^32-1: we convert inputs to signed 32-bit (s32) and the result back to unsigned (u32).
 local function __s32(x)
     x = x % 4294967296
     if x >= 2147483648 then x = x - 4294967296 end
@@ -6733,8 +6735,8 @@ bit32 = bit32 or {
         a = __s32(a)
         if n <= 0 then return __u32(a << -n) end
         if n >= 32 then return a < 0 and 4294967295 or 0 end
-        local r = a >> n                               -- логический сдвиг
-        if a < 0 then r = r | ~(-1 >> n) end           -- дописываем старшие единицы
+        local r = a >> n                               -- logical shift
+        if a < 0 then r = r | ~(-1 >> n) end           -- fill in the high ones
         return __u32(r)
     end,
     btest = function(a, b) return (__s32(a) & __s32(b)) ~= 0 end,
@@ -6746,20 +6748,20 @@ bit32 = bit32 or {
     end,
 }
 
--- CFrame.new(...) — только конструктор + позиция, БЕЗ полноценной алгебры
--- поворота (нет "*", нет CFrame.Angles с реальным эффектом) — как и у
--- чтения part.CFrame выше (см. __get_cframe_vecs), это осознанное
--- ограничение. camera.CFrame/part.CFrame = CFrame.new(pos) хотя бы
--- переносит позицию (см. __set_prop), CFrame.new(pos, lookAt) поворот не
--- считает вообще (для этого нужна честная матрица взгляда, которой тут
--- нет) — известное ограничение, не притворяемся, что его нет.
--- В Lua 5.3 (fengari) нет math.atan2 — а в Roblox/Luau он есть.
+-- CFrame.new(...) — only a constructor + position, WITHOUT full rotation
+-- algebra (no "*", no CFrame.Angles with a real effect) — as with
+-- reading part.CFrame above (see __get_cframe_vecs), this is a deliberate
+-- limitation. camera.CFrame/part.CFrame = CFrame.new(pos) at least
+-- transfers the position (see __set_prop), CFrame.new(pos, lookAt) doesn't
+-- compute rotation at all (that needs a proper look-at matrix, which isn't
+-- here) — a known limitation, we don't pretend it isn't there.
+-- Lua 5.3 (fengari) has no math.atan2 — but Roblox/Luau does.
 if not math.atan2 then math.atan2 = function(y, x) return math.atan(y, x) end end
 CFrame = {}
--- Полноценный CFrame: позиция + матрица поворота 3x3 (R00..R22, строки),
--- как в Roblox: RightVector = столбец 0, UpVector = столбец 1,
--- LookVector = -столбец 2. Поля X/Y/Z/Position/lookVector/... оставлены
--- «плоскими», потому что JS-мост (камера, твины) читает их напрямую.
+-- A full CFrame: position + a 3x3 rotation matrix (R00..R22, rows),
+-- as in Roblox: RightVector = column 0, UpVector = column 1,
+-- LookVector = -column 2. The fields X/Y/Z/Position/lookVector/... are left
+-- «flat» because the JS bridge (camera, tweens) reads them directly.
 local function _cfNew(x, y, z, a, b, c, d, e, f, g, h, i)
     local p = Vector3.new(x, y, z)
     local lv = Vector3.new(-c, -f, -i)
@@ -6809,7 +6811,7 @@ function CFrame.new(a, b, c, qx, qy, qz, qw, ...)
         return _cfNew(a.X, a.Y, a.Z, 1, 0, 0, 0, 1, 0, 0, 0, 1)
     end
     local rest = { ... }
-    if qx ~= nil and qy == nil then -- (на всякий случай) неполный набор
+    if qx ~= nil and qy == nil then -- (just in case) an incomplete set
         return _cfNew(a, b or 0, c or 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
     end
     if qw ~= nil and rest[1] == nil then -- x,y,z, qx,qy,qz,qw
@@ -6820,7 +6822,7 @@ function CFrame.new(a, b, c, qx, qy, qz, qw, ...)
             2*(qx*qy + qz*qw), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw),
             2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx*qx + qy*qy))
     end
-    if rest[1] ~= nil then -- 12 компонент: x,y,z,R00,R01,R02,R10,R11,R12,R20,R21,R22
+    if rest[1] ~= nil then -- 12 components: x,y,z,R00,R01,R02,R10,R11,R12,R20,R21,R22
         return _cfNew(a, b, c, qx, qy, qz, qw, rest[1], rest[2], rest[3], rest[4], rest[5])
     end
     return _cfNew(a, b or 0, c or 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
@@ -6955,7 +6957,7 @@ local function _toQuat(M)
     end
     return x, y, z, w
 end
--- cf:Lerp(goal, alpha) — позиция линейно, поворот сферически (slerp)
+-- cf:Lerp(goal, alpha) — position linearly, rotation spherically (slerp)
 function CFrame.Lerp(self, goal, alpha)
     local x = self.X + (goal.X - self.X) * alpha
     local y = self.Y + (goal.Y - self.Y) * alpha
@@ -6975,11 +6977,11 @@ function CFrame.Lerp(self, goal, alpha)
     return CFrame.new(x, y, z, k0*ax + k1*bx, k0*ay + k1*by, k0*az + k1*bz, k0*aw + k1*bw)
 end
 
--- NumberSequence/NumberSequenceKeypoint/ColorSequence(Keypoint) — просто
--- данные (чаще всего для UIGradient/ParticleEmitter). Визуального градиента
--- у UIGradient в этом движке нет — эти конструкторы нужны только чтобы
--- скрипт не падал НА СТРОКЕ ИХ СОЗДАНИЯ, а не чтобы градиент реально
--- был виден.
+-- NumberSequence/NumberSequenceKeypoint/ColorSequence(Keypoint) — just
+-- data (most often for UIGradient/ParticleEmitter). UIGradient has no visual gradient
+-- in this engine — these constructors are needed only so that
+-- a script doesn't fail ON THE LINE THAT CREATES THEM, not so that the gradient
+-- is really visible.
 function NumberSequenceKeypoint_new(time, value, envelope) return { Time = time, Value = value, Envelope = envelope or 0 } end
 NumberSequenceKeypoint = { new = NumberSequenceKeypoint_new }
 function NumberSequence_new(a, b)
@@ -6996,13 +6998,13 @@ function ColorSequence_new(a, b)
     return { Keypoints = { ColorSequenceKeypoint_new(0, a), ColorSequenceKeypoint_new(1, a) } }
 end
 ColorSequence = { new = ColorSequence_new }
--- NumberRange.new(min[, max]) — Min/Max (ParticleEmitter.Lifetime/Speed/..., без эффекта в эмуляторе)
+-- NumberRange.new(min[, max]) — Min/Max (ParticleEmitter.Lifetime/Speed/..., no effect in the emulator)
 function NumberRange_new(min, max) return { Min = min or 0, Max = max or min or 0 } end
 NumberRange = { new = NumberRange_new }
 
 Vector2 = {}
--- Magnitude/Unit — свойства (считаются на лету), остальное — методы из таблицы Vector2.
--- Раньше был только new/+/-: v:Lerp(...) в CameraRecoiler (Blaster) падал каждый кадр.
+-- Magnitude/Unit — properties (computed on the fly), the rest — methods from the Vector2 table.
+-- There used to be only new/+/-: v:Lerp(...) in CameraRecoiler (Blaster) failed every frame.
 Vector2.__index = function(t, k)
     if k == "Magnitude" or k == "magnitude" then return math.sqrt(t.X * t.X + t.Y * t.Y) end
     if k == "Unit" or k == "unit" then
@@ -7029,7 +7031,7 @@ Vector2.__unm = function(a) return Vector2.new(-a.X, -a.Y) end
 Vector2.__eq = function(a, b) return a.X == b.X and a.Y == b.Y end
 Vector2.__tostring = function(v) return v.X .. ", " .. v.Y end
 function Vector2.Dot(a, b) return a.X * b.X + a.Y * b.Y end
-function Vector2.Cross(a, b) return a.X * b.Y - a.Y * b.X end      -- как в Roblox: скаляр (z-компонента)
+function Vector2.Cross(a, b) return a.X * b.Y - a.Y * b.X end      -- as in Roblox: a scalar (the z component)
 function Vector2.Lerp(a, b, t) return Vector2.new(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t) end
 function Vector2.Max(a, b) return Vector2.new(math.max(a.X, b.X), math.max(a.Y, b.Y)) end
 function Vector2.Min(a, b) return Vector2.new(math.min(a.X, b.X), math.min(a.Y, b.Y)) end
@@ -7042,17 +7044,17 @@ Vector2.one = Vector2.new(1, 1)
 Vector2.xAxis = Vector2.new(1, 0)
 Vector2.yAxis = Vector2.new(0, 1)
 
--- Enum.* — ленивый и кэширующий: Enum.UserInputType.MouseButton1 создаётся
--- один раз при первом обращении и потом отдаётся ИЗ КЭША тем же объектом,
--- поэтому "input.UserInputType == Enum.UserInputType.MouseButton1" в
--- скриптах сравнивает две ссылки на одну и ту же таблицу (обычное Lua "==",
--- без __eq) — раньше Enum не существовал вовсе (только в списке подсветки
--- синтаксиса), и любое обращение к Enum.* падало "attempt to index a nil
+-- Enum.* — lazy and caching: Enum.UserInputType.MouseButton1 is created
+-- once on first access and then returned FROM THE CACHE as the same object,
+-- so "input.UserInputType == Enum.UserInputType.MouseButton1" in
+-- scripts compares two references to the same table (plain Lua "==",
+-- without __eq) — Enum didn't exist at all before (only in the syntax
+-- highlighting list), and any access to Enum.* failed with "attempt to index a nil
 -- value (global 'Enum')".
 local __enumCache = {}
--- EnumItem.Value: числа из настоящего Roblox для самых используемых перечислений (раньше .Value не было вовсе:
--- Enum.RenderPriority.Camera.Value + 2 в CameraRecoiler давало 'arithmetic on a nil value (field Value)').
--- Для остальных перечислений Value остаётся nil — выдумывать числа нельзя.
+-- EnumItem.Value: numbers from real Roblox for the most used enums (.Value didn't exist at all before:
+-- Enum.RenderPriority.Camera.Value + 2 in CameraRecoiler gave 'arithmetic on a nil value (field Value)').
+-- For the other enums Value stays nil — numbers must not be invented.
 local __ENUM_VALUES = {
     RenderPriority = { First = 0, Input = 100, Camera = 200, Character = 300, Last = 2000 },
     MouseBehavior = { Default = 0, LockCenter = 1, LockCurrentPosition = 2 },
@@ -7081,32 +7083,32 @@ Enum = setmetatable({}, { __index = function(t, enumType)
 end })
 
 local InstanceMT = {}
--- свойство -> тип Enum (значения хранятся на JS-стороне строкой)
+-- property -> Enum type (the values are stored on the JS side as a string)
 local __ENUM_PROPS = { CameraType = "CameraType", MouseBehavior = "MouseBehavior", Material = "Material" }
 
--- Event:Connect(fn) — функция-колбэк хранится ЦЕЛИКОМ на Lua-стороне (в
--- обычной Lua-таблице __conns), а не через luaL_ref в JS-реестр — так
--- проще проверить (тестируется напрямую в lua5.4, без fengari) и не
--- зависит от того, как именно fengari реализует работу с LUA_REGISTRYINDEX
--- изнутри JS-биндинга. JS-стороне (__register_conn/__unregister_conn)
--- нужен только id для маршрутизации: "по этому (ref, событие) вызови
--- Lua-функцию __invoke_conn(id, ...)" — саму функцию она никогда не видит.
--- connect/disconnect/wait — legacy lowercase-алиасы (Roblox 2008-2011
--- годов, до перехода на PascalCase) — без них скрипты того времени падали
--- уже на первом же :connect(), даже когда сам сигнал был честный.
+-- Event:Connect(fn) — the callback function is stored ENTIRELY on the Lua side (in
+-- an ordinary Lua table __conns), and not via luaL_ref into a JS registry — it is
+-- easier to test this way (tested directly in lua5.4, without fengari) and it doesn't
+-- depend on how exactly fengari implements working with LUA_REGISTRYINDEX
+-- from inside a JS binding. The JS side (__register_conn/__unregister_conn)
+-- only needs an id for routing: "for this (ref, event) call the
+-- Lua function __invoke_conn(id, ...)" — it never sees the function itself.
+-- connect/disconnect/wait — legacy lowercase aliases (Roblox of 2008-2011,
+-- before the switch to PascalCase) — without them scripts of that time failed
+-- already on the very first :connect(), even when the signal itself was real.
 local __conns = {}
--- id подписок должны быть уникальны МЕЖДУ серверной и клиентской Lua-VM: JS хранит их в одной
--- общей таблице luaSignalConns. Раньше обе VM считали с 1, клиентские подписки затирали серверные
--- с теми же номерами, и событие (например, ClickDetector.MouseClick) вызывало чужую функцию
--- в другой VM или не вызывало ничего.
+-- subscription ids must be unique BETWEEN the server and client Lua VMs: JS keeps them in one
+-- shared table luaSignalConns. Previously both VMs counted from 1, client subscriptions overwrote server ones
+-- with the same numbers, and an event (for example, ClickDetector.MouseClick) called someone else's function
+-- in the other VM or nothing at all.
 local __nextConnId = (__CONN_BASE or 0) + 1
-local __nextAnimTrackId = 0 -- см. Animator:LoadAnimation в InstanceMT.__index ниже
--- InputBegan/InputEnded/InputChanged — единственные события, где JS шлёт
--- НЕ готовые аргументы колбэка, а "сырые" (typeName, x, y) — само
--- превращение в InputObject (с Enum.UserInputType и Position) сделано
--- тут, в момент Connect, а не на JS-стороне: Enum это Lua-таблицы,
--- строить их из JS было бы либо копированием той же кэширующей логики
--- дважды, либо синтетическими объектами, не равными настоящим Enum.*.
+local __nextAnimTrackId = 0 -- see Animator:LoadAnimation in InstanceMT.__index below
+-- InputBegan/InputEnded/InputChanged — the only events where JS sends
+-- NOT ready callback arguments but "raw" ones (typeName, x, y) — the
+-- conversion into an InputObject (with Enum.UserInputType and Position) is done
+-- here, at Connect time, and not on the JS side: Enums are Lua tables,
+-- building them from JS would be either copying the same caching logic
+-- twice, or synthetic objects not equal to the real Enum.*.
 local __MOUSE = nil
 local __CAS = { actions = {}, hooked = false }
 local function __casHook()
@@ -7167,15 +7169,15 @@ local function makeEvent(ref, evName)
                 disconnect = function() __conns[id] = nil; __unregister_conn(id) end,
             } })
         end,
-        -- Настоящий блокирующий Wait — уступает корутину (__wait_signal
-        -- делает lua_yield) и просыпается ровно с теми аргументами, с
-        -- которыми в следующий раз выстрелит этот же (ref, evName), см.
-        -- luaSignalWaits/fireLuaSignal на JS-стороне. Раньше тут был
-        -- "return nil" сразу же, без реального ожидания — старые скрипты
-        -- вида "t, s = r.Stepped:wait()" получали t=nil и падали на
-        -- следующей же строке арифметикой на nil.
+        -- A real blocking Wait — yields the coroutine (__wait_signal
+        -- does lua_yield) and wakes up with exactly the arguments
+        -- with which this same (ref, evName) fires next, see
+        -- luaSignalWaits/fireLuaSignal on the JS side. There used to be
+        -- an immediate "return nil" here, without real waiting — old scripts
+        -- like "t, s = r.Stepped:wait()" got t=nil and failed on
+        -- the very next line with arithmetic on nil.
         Wait = function(self) return __wait_signal(ref, evName) end,
-        -- Once: сработать один раз и сам отключиться (sound.Ended:Once(fn) и т.п.)
+        -- Once: fire once and disconnect itself (sound.Ended:Once(fn) etc.)
         Once = function(self, fn)
             local conn
             conn = self:Connect(function(...)
@@ -7192,26 +7194,26 @@ local function makeEvent(ref, evName)
     return ev
 end
 
--- Вызывается из JS (fireLuaSignal) — по id находит СВОЮ Lua-функцию и
--- зовёт её обычным pcall, вместо того чтобы JS напрямую дёргал
--- lua_rawgeti/lua_pcall по значению, снятому через luaL_ref.
+-- Called from JS (fireLuaSignal) — finds ITS OWN Lua function by id and
+-- calls it with an ordinary pcall, instead of JS directly poking
+-- lua_rawgeti/lua_pcall on a value taken via luaL_ref.
 function __invoke_conn(id, ...)
     local fn = __conns[id]
     if fn then
         local ok, err = pcall(fn, ...)
-        if not ok then warn("ошибка в обработчике события: " .. tostring(err)) end
+        if not ok then warn("error in event handler: " .. tostring(err)) end
     end
 end
 
--- __mode="v" — слабые значения: если Lua-код нигде больше не держит ссылку
--- на обёртку, она может быть собрана сборщиком мусора, а не висеть вечно.
+-- __mode="v" — weak values: if Lua code holds no other reference
+-- to the wrapper, it can be garbage collected instead of hanging around forever.
 local instances = setmetatable({}, {__mode = "v"})
 
--- Цепочки наследования классов для IsA (класс -> список ПРЕДКОВ, от
--- ближайшего к дальнему). Не полное дерево Instance API, а только классы,
--- которые реально встречаются в парсере/сцене — этого достаточно, чтобы
--- ":IsA("BasePart")"/":IsA("GuiObject")"/":IsA("PVInstance")" и т.п.
--- работали как в настоящем Roblox, а не только по точному совпадению имени.
+-- Class inheritance chains for IsA (class -> list of ANCESTORS, from
+-- nearest to farthest). Not the full Instance API tree, only the classes
+-- that really occur in the parser/scene — this is enough for
+-- ":IsA("BasePart")"/":IsA("GuiObject")"/":IsA("PVInstance")" etc.
+-- to work as in real Roblox, and not only by an exact name match.
 INSTANCE_CLASS_ANCESTORS = {
     Part = {"BasePart", "PVInstance", "Instance"},
     MeshPart = {"BasePart", "PVInstance", "Instance"},
@@ -7251,10 +7253,10 @@ INSTANCE_CLASS_ANCESTORS = {
     Camera = {"Instance"},
 }
 
--- ВАЖНО: -1 (и только -1) — "нет инстанса" (так JS-мост сигналит "родитель
--- не найден"/"ребёнок не найден"). Виртуальные инстансы из Instance.new()
--- используют ДРУГИЕ отрицательные ref'ы (см. __instance_new) — это валидные
--- объекты, их заворачивать НУЖНО, поэтому проверяем именно "== -1", а не
+-- IMPORTANT: -1 (and only -1) is "no instance" (this is how the JS bridge signals "parent
+-- not found"/"child not found"). Virtual instances from Instance.new()
+-- use OTHER negative refs (see __instance_new) — these are valid
+-- objects, they MUST be wrapped, so we check exactly "== -1", not
 -- "< 0".
 local __emuWarned = {}
 function __emuWarnOnce(key, text)
@@ -7278,29 +7280,29 @@ InstanceMT.__index = function(t, k)
     if k == "Parent" then return wrap(__get_parent(ref)) end
     if k == "Name" then return __get_name(ref) end
     if k == "ClassName" or k == "className" then return __get_class(ref) end
-    -- player.Character — модельки настоящего Humanoid-персонажа тут нет,
-    -- но в Play есть тот самый ходящий "куб от первого/третьего лица"
-    -- (charBody/charMesh) — считаем его персонажем игрока: раньше
-    -- player.Character всегда был nil, и "if not player.Character then
-    -- player.CharacterAdded:Wait() end" в Main.lua висел бы вечно (ждал
-    -- события, которое никто никогда не шлёт) — теперь читаем настоящий
-    -- ref через __get_character_ref, so=Wait() до него просто не доходит.
+    -- player.Character — there is no real Humanoid character model here,
+    -- but in Play there is that very walking "first/third-person cube"
+    -- (charBody/charMesh) — we treat it as the player's character: previously
+    -- player.Character was always nil, and "if not player.Character then
+    -- player.CharacterAdded:Wait() end" in Main.lua would hang forever (waiting for an
+    -- event nobody ever sends) — now we read the real
+    -- ref through __get_character_ref, so Wait() is never reached.
     if k == "Character" and __get_class(ref) == "Player" then
         return wrap(__get_character_ref())
     end
-    -- workspace.CurrentCamera — раньше НЕ было особого случая вообще: этот
-    -- ключ проваливался в самый нижний fallback __index, который ищет
-    -- РЕБЁНКА с именем "CurrentCamera" (а не свойство-ссылку на Camera) —
-    -- такого ребёнка не бывает, поэтому workspace.CurrentCamera всегда был
-    -- nil. Любой скрипт вида "local camera = workspace.CurrentCamera;
-    -- camera.CameraType = ..." падал на первой же строке с камерой
-    -- ("attempt to index a nil value") — то есть ВООБЩЕ ничего из логики
-    -- сценарной камеры (MenuCamera.lua и подобные) не выполнялось, включая
-    -- сам телепорт игрока и переключение CameraType. Находим Camera-ребёнка
-    -- Workspace по классу — так же, как реальный Roblox всегда возвращает
-    -- единственную настоящую камеру независимо от того, как она названа.
-    -- workspace:Raycast(origin, direction, params) -> RaycastResult | nil (раньше метода не было вовсе:
-    -- attempt to call a nil value (method 'Raycast') — ломало ИИ врагов и спавнеры).
+    -- workspace.CurrentCamera — there was NO special case at all before: this
+    -- key fell into the very bottom __index fallback, which looks for a
+    -- CHILD named "CurrentCamera" (not a property reference to a Camera) —
+    -- there is no such child, so workspace.CurrentCamera was always
+    -- nil. Any script like "local camera = workspace.CurrentCamera;
+    -- camera.CameraType = ..." failed on the very first line with the camera
+    -- ("attempt to index a nil value") — i.e. NOTHING of the scripted camera
+    -- logic (MenuCamera.lua and the like) ran at all, including
+    -- the player teleport itself and the CameraType switch. We find the Workspace's Camera child
+    -- by class — the same way real Roblox always returns
+    -- the single real camera regardless of what it is named.
+    -- workspace:Raycast(origin, direction, params) -> RaycastResult | nil (the method didn't exist at all before:
+    -- attempt to call a nil value (method 'Raycast') — it broke enemy AI and spawners).
     if k == "Raycast" and __get_class(ref) == "Workspace" then
         return function(self, origin, direction, params)
             local mode, refs = 0, {}
@@ -7326,7 +7328,7 @@ InstanceMT.__index = function(t, k)
         end
     end
     -- workspace:GetPartBoundsInBox(cframe, size, params) / GetPartBoundsInRadius(pos, r, params) / GetPartsInPart(part, params):
-    -- пересечение по мировым AABB (повёрнутый бокс заменяется описанным AABB) — для дверей/триггеров/зон этого достаточно.
+    -- intersection by world AABBs (a rotated box is replaced by its bounding AABB) — enough for doors/triggers/zones.
     if (k == "GetPartBoundsInBox" or k == "GetPartBoundsInRadius" or k == "GetPartsInPart") and __get_class(ref) == "Workspace" then
         return function(self, a, b, c)
             local params, cx, cy, cz, hx, hy, hz, skipRef
@@ -7366,19 +7368,19 @@ InstanceMT.__index = function(t, k)
                     end
                 end
             end
-            -- весь перебор деталей — на стороне JS (один вызов), иначе по карте в тысячи объектов FPS падает до нуля
+            -- the whole part iteration is on the JS side (one call), otherwise on a map of thousands of objects FPS drops to zero
             local csv = __overlap(mode, maxParts, skipRef or -1, cx, cy, cz, hx, hy, hz, rx, ry, rz, ux, uy, uz, lx, ly, lz, table.unpack(refs))
             local out = {}
             for id in string.gmatch(csv, "%d+") do out[#out + 1] = wrap(tonumber(id)) end
             return out
         end
     end
-    -- Player:GetMouse() — заглушка Mouse (позиция/цель не отслеживаются, сигналы никогда не срабатывают);
-    -- без неё скрипты падали на attempt to call a nil value (method 'GetMouse').
+    -- Player:GetMouse() — a Mouse stub (position/target aren't tracked, signals never fire);
+    -- without it scripts failed with attempt to call a nil value (method 'GetMouse').
     if k == "GetMouse" and __get_class(ref) == "Player" then
         return function(self)
-            -- Живая мышь: X/Y (клиентские пиксели — те же, что у AbsolutePosition) и события из UserInputService
-            -- (мышь и тач). Раньше события не стреляли, и хотбар (Button1Up/Move/X/Y) не мог принять тап/перетаскивание слота.
+            -- A live mouse: X/Y (client pixels — the same as AbsolutePosition) and events from UserInputService
+            -- (mouse and touch). Events used not to fire, and the hotbar (Button1Up/Move/X/Y) couldn't accept a slot tap/drag.
             if __MOUSE then return __MOUSE end
             local function sig()
                 local s = { fns = {} }
@@ -7431,7 +7433,7 @@ InstanceMT.__index = function(t, k)
         if k == "CameraMaxZoomDistance" then return 128 end
         if k == "CameraMode" then return "Classic" end
     end
-    -- StarterGui:SetCoreGuiEnabled/SetCore/GetCore... — отключать встроенный CoreGui в эмуляторе нечего: no-op
+    -- StarterGui:SetCoreGuiEnabled/SetCore/GetCore... — there is no built-in CoreGui to disable in the emulator: no-op
     if __get_class(ref) == "StarterGui" then
         if k == "SetCoreGuiEnabled" then
             return function(self, ty, en) __core_gui(ty and ty.Name or tostring(ty), en and true or false) end
@@ -7448,8 +7450,8 @@ InstanceMT.__index = function(t, k)
         end
         return nil
     end
-    -- RunService:BindToRenderStep(name, priority, fn) — вызывать fn(dt) каждый кадр, как RenderStepped (приоритеты
-    -- не различаем); UnbindFromRenderStep(name) снимает привязку. Раньше методов не было: attempt to call a nil value.
+    -- RunService:BindToRenderStep(name, priority, fn) — call fn(dt) every frame, like RenderStepped (priorities
+    -- aren't distinguished); UnbindFromRenderStep(name) removes the binding. The methods didn't exist before: attempt to call a nil value.
     if __get_class(ref) == "RunService" then
         if k == "BindToRenderStep" then
             return function(self, name, priority, fn)
@@ -7462,9 +7464,9 @@ InstanceMT.__index = function(t, k)
                 local c = __render_binds[name]
                 if c then c:Disconnect(); __render_binds[name] = nil end
             end
-        -- Раньше этих методов не было вовсе (RunService:IsStudio() -> attempt to call a nil value, AdminPanelServer падал).
-        -- Приложение — это «Studio»: IsStudio = true; игра запущена кнопкой Play (не Run): IsRunning = true, IsRunMode = false.
-        -- Клиентская VM отличается от серверной базой id подписок (__CONN_BASE > 0).
+        -- These methods used not to exist at all (RunService:IsStudio() -> attempt to call a nil value, AdminPanelServer failed).
+        -- The app is «Studio»: IsStudio = true; the game is started with the Play button (not Run): IsRunning = true, IsRunMode = false.
+        -- The client VM differs from the server one by the subscription id base (__CONN_BASE > 0).
         elseif k == "IsStudio" then return function(self) return true end
         elseif k == "IsRunning" then return function(self) return true end
         elseif k == "IsRunMode" then return function(self) return false end
@@ -7473,8 +7475,8 @@ InstanceMT.__index = function(t, k)
         elseif k == "IsServer" then return function(self) return (__CONN_BASE or 0) == 0 end
         end
     end
-    -- Команды: Team.TeamColor/AutoAssignable, Player.Team/Neutral/TeamColor, Teams:GetTeams(). Раньше команд не было
-    -- вовсе: RoundGui падал на team.TeamColor, а TDM/Scoring/TeamCollisionFiltering считали игрока нейтральным.
+    -- Teams: Team.TeamColor/AutoAssignable, Player.Team/Neutral/TeamColor, Teams:GetTeams(). There were no teams at all
+    -- before: RoundGui failed on team.TeamColor, and TDM/Scoring/TeamCollisionFiltering treated the player as neutral.
     do
         local cls_ = __get_class(ref)
         if cls_ == "Team" then
@@ -7511,8 +7513,8 @@ InstanceMT.__index = function(t, k)
             end
         end
     end
-    -- PhysicsService: настоящие группы столкновений. Каждая группа — свой бит cannon-тела; part.CollisionGroup = имя
-    -- переносит тело в группу (так форсфилд команды пропускает своих и держит чужих).
+    -- PhysicsService: real collision groups. Each group is its own cannon body bit; part.CollisionGroup = name
+    -- moves the body into the group (this is how a team force field lets its own through and holds others back).
     if __get_class(ref) == "PhysicsService" then
         if k == "RegisterCollisionGroup" or k == "CreateCollisionGroup" then
             return function(self, name) __phys_register(name) end
@@ -7545,20 +7547,20 @@ InstanceMT.__index = function(t, k)
             local xs, xo, ys, yo = __get_gui_size(ref)
             return UDim2.new(xs, xo, ys, yo)
         end
-        -- BasePart.Size — раньше не было отдельного случая вообще, и
-        -- запрос падал в общий __get_prop-fallback, который для составных
-        -- Vector3-свойств не приспособлен (не запись в файле — значение
-        -- никогда не оказывалось в мусорном ящике свойств) и всегда отдавал
-        -- nil. part.Size.Z на любой нетронутой скриптом детали падало с
+        -- BasePart.Size — there was no separate case at all before, and
+        -- the request fell into the general __get_prop fallback, which isn't suited to composite
+        -- Vector3 properties (not a write in the file — the value
+        -- never ended up in the properties junk drawer) and always returned
+        -- nil. part.Size.Z on any part untouched by a script failed with
         -- "attempt to index a nil value".
         local x, y, z = __get_size(ref)
         return Vector3.new(x, y, z)
     end
-    -- Не полноценный CFrame (без умножения/CFrame.Angles) — только чтение
-    -- текущей ориентации как Position + три базисных вектора. Этого
-    -- достаточно старым скриптам вида "direction = part.CFrame.lookVector",
-    -- но НЕ достаточно для составления новых CFrame через "*" — такие
-    -- скрипты этот движок пока не поддерживает.
+    -- Not a full CFrame (without multiplication/CFrame.Angles) — only reading
+    -- the current orientation as Position + three basis vectors. That is
+    -- enough for old scripts like "direction = part.CFrame.lookVector",
+    -- but NOT enough for composing new CFrames via "*" — such
+    -- scripts aren't supported by this engine yet.
     if k == "CFrame" then
         return CFrame.new(__get_cframe(ref))
     end
@@ -7566,10 +7568,10 @@ InstanceMT.__index = function(t, k)
         return CFrame.new(__get_pivot(ref))
     end
     if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
-        -- Второй аргумент FindFirstChild(name, recursive) раньше игнорировался: ViewModelController искал
-        -- MuzzleAttachment глубоко внутри модели и «не находил» его, хотя в файле он есть.
+        -- The second argument of FindFirstChild(name, recursive) used to be ignored: ViewModelController looked for
+        -- MuzzleAttachment deep inside a model and "couldn't find" it, although it is in the file.
         return function(self, name, recursive)
-            local timeout = recursive   -- у WaitForChild 2-й аргумент — таймаут
+            local timeout = recursive   -- WaitForChild's 2nd argument is the timeout
             local c = __find_first_child(ref, name)
             if c ~= nil and c ~= -1 then return wrap(c) end
             if recursive == true and (k == "FindFirstChild" or k == "findFirstChild") then
@@ -7587,15 +7589,15 @@ InstanceMT.__index = function(t, k)
                 if found ~= nil then return wrap(found) end
             end
             if k == "WaitForChild" or k == "waitForChild" then
-                -- Как в Roblox: WaitForChild ЖДЁТ появления ребёнка (создаётся другим скриптом/клоном позже), а не возвращает nil
-                -- сразу. С таймаутом (2-й аргумент) — после него nil; без — ждёт, через 5 с пишет «Infinite yield possible».
-                -- Раньше сразу отдавался nil, и скрипты падали на «attempt to index a nil value (upvalue 'main')» там, где в
-                -- Roblox они просто ждут и ничего не ломают.
+                -- As in Roblox: WaitForChild WAITS for the child to appear (created later by another script/clone), rather than returning nil
+                -- immediately. With a timeout (2nd argument) — nil after it; without — it waits and after 5 s prints «Infinite yield possible».
+                -- It used to return nil right away, and scripts failed with «attempt to index a nil value (upvalue 'main')» where in
+                -- Roblox they simply wait and break nothing.
                 local limit = tonumber(timeout)
                 local waited, warned = 0, false
                 while true do
                     local cl = __get_class(ref)
-                    if cl == nil or cl == "" then return nil end   -- сам объект уничтожен — ждать некого
+                    if cl == nil or cl == "" then return nil end   -- the object itself is destroyed — nobody to wait for
                     task.wait(0.1)
                     waited = waited + 0.1
                     local f = __find_first_child(ref, name)
@@ -7610,17 +7612,17 @@ InstanceMT.__index = function(t, k)
             return wrap(c)
         end
     end
-    -- AbsolutePosition/AbsoluteSize — реальные пиксельные координаты/размер
-    -- GUI-элемента НА ЭКРАНЕ (посчитанные из его Position/Size — UDim2 —
-    -- и размеров родителей), раньше вообще не существовали ("attempt to
-    -- index a nil value"). Меряем настоящий отрисованный DOM-узел
-    -- (getBoundingClientRect через __get_gui_rect), а не пересчитываем
-    -- UDim2 вручную — так само собой учитывается вся цепочка родителей.
-    -- AbsoluteContentSize — то же самое, но полный (скроллируемый) размер
-    -- содержимого: единственный частый практический случай —
-    -- UIListLayout/UIGridLayout внутри ScrollingFrame (см. SongMenuScript),
-    -- и настоящей раскладки списка (переупорядочивание детей) в этом
-    -- движке нет — просто отдаём scrollWidth/scrollHeight родителя.
+    -- AbsolutePosition/AbsoluteSize — real pixel coordinates/size
+    -- of a GUI element ON THE SCREEN (computed from its Position/Size — UDim2 —
+    -- and the parents' sizes), they didn't exist at all before ("attempt to
+    -- index a nil value"). We measure the real rendered DOM node
+    -- (getBoundingClientRect via __get_gui_rect), instead of recomputing
+    -- UDim2 by hand — this automatically accounts for the whole parent chain.
+    -- AbsoluteContentSize — the same thing, but the full (scrollable) size
+    -- of the content: the only frequent practical case —
+    -- UIListLayout/UIGridLayout inside a ScrollingFrame (see SongMenuScript),
+    -- and there is no real list layout (child reordering) in this
+    -- engine — we just return the parent's scrollWidth/scrollHeight.
     if k == "AbsolutePosition" then
         local x, y, w, h = __get_gui_rect(ref)
         return Vector2.new(x, y)
@@ -7633,11 +7635,11 @@ InstanceMT.__index = function(t, k)
         local w, h = __get_gui_content_size(ref)
         return Vector2.new(w, h)
     end
-    -- FindFirstChildOfClass/FindFirstChildWhichIsA — раньше отсутствовали
-    -- (только в списке ключевых слов подсветки), поэтому такой вызов был
-    -- "attempt to call a nil value" — SongMenuScript ищет так свой
-    -- UIListLayout. Прямой перебор через __child_count/__child_at, класс
-    -- каждого — через уже существующий __get_class.
+    -- FindFirstChildOfClass/FindFirstChildWhichIsA — were missing before
+    -- (only in the syntax highlighting keyword list), so such a call was
+    -- "attempt to call a nil value" — SongMenuScript finds its
+    -- UIListLayout this way. A direct scan via __child_count/__child_at, the class
+    -- of each — via the already existing __get_class.
     if k == "FindFirstChildOfClass" or k == "findFirstChildOfClass" then
         return function(self, cls)
             local n = __child_count(ref)
@@ -7649,7 +7651,7 @@ InstanceMT.__index = function(t, k)
         end
     end
     if k == "FindFirstChildWhichIsA" or k == "findFirstChildWhichIsA" then
-        -- Через IsA, а не точное совпадение класса: FindFirstChildWhichIsA("BasePart") находит Part/MeshPart
+        -- Via IsA, not an exact class match: FindFirstChildWhichIsA("BasePart") finds Part/MeshPart
         return function(self, cls, recursive)
             local function search(r)
                 for i = 1, __child_count(r) do
@@ -7669,7 +7671,7 @@ InstanceMT.__index = function(t, k)
             return nil
         end
     end
-    -- FindFirstAncestor / FindFirstAncestorOfClass / FindFirstAncestorWhichIsA — вверх по Parent
+    -- FindFirstAncestor / FindFirstAncestorOfClass / FindFirstAncestorWhichIsA — up through Parent
     if k == "FindFirstAncestor" or k == "FindFirstAncestorOfClass" or k == "FindFirstAncestorWhichIsA" then
         return function(self, arg)
             local cur = __get_parent(ref)
@@ -7694,12 +7696,12 @@ InstanceMT.__index = function(t, k)
             return out
         end
     end
-    -- GetDescendants — раньше вообще не было в мосте (только в списке
-    -- ключевых слов подсветки синтаксиса, не в реальной реализации) —
-    -- "attempt to call a table value (method 'GetDescendants')" означало,
-    -- что __index в принципе не находил такой метод и отдавал пустую
-    -- таблицу вместо функции. Рекурсия чисто на Lua поверх тех же
-    -- __child_count/__child_at, что и GetChildren.
+    -- GetDescendants — wasn't in the bridge at all before (only in the syntax
+    -- highlighting keyword list, not in the real implementation) —
+    -- "attempt to call a table value (method 'GetDescendants')" meant
+    -- that __index didn't find such a method at all and returned an empty
+    -- table instead of a function. Recursion purely in Lua on top of the same
+    -- __child_count/__child_at as GetChildren.
     if k == "GetDescendants" or k == "getDescendants" then
         return function(self)
             local out = {}
@@ -7716,15 +7718,15 @@ InstanceMT.__index = function(t, k)
         end
     end
     if k == "IsA" or k == "isA" then
-        -- Раньше IsA сравнивала класс только буквально ("Part" ~= "BasePart"),
-        -- хотя в реальном Roblox IsA учитывает всю цепочку наследования.
-        -- Из-за этого весь код вида "if part:IsA(\"BasePart\") then ..."
-        -- (крайне частый паттерн) уходил в false-ветку для любого Part/
-        -- MeshPart/WedgePart и т.п. — например, в MenuCamera.lua это
-        -- заставляло брать targetSize = Vector3.new(4,4,4) (фиксированную
-        -- заглушку) вместо реального Size метки-камеры, и позицию через
-        -- GetPivot() у обычного Part вместо .Position — камера каждой
-        -- песни считала практически одну и ту же точку.
+        -- IsA used to compare the class only literally ("Part" ~= "BasePart"),
+        -- although in real Roblox IsA takes the whole inheritance chain into account.
+        -- Because of this all code like "if part:IsA(\"BasePart\") then ..."
+        -- (an extremely common pattern) went into the false branch for any Part/
+        -- MeshPart/WedgePart etc. — for example, in MenuCamera.lua this
+        -- made it take targetSize = Vector3.new(4,4,4) (a fixed
+        -- stub) instead of the camera marker's real Size, and the position via
+        -- GetPivot() of an ordinary Part instead of .Position — each song's
+        -- camera computed almost the same point.
         return function(self, cls)
             local c = __get_class(ref)
             if c == cls then return true end
@@ -7737,27 +7739,27 @@ InstanceMT.__index = function(t, k)
             return false
         end
     end
-    -- GetPropertyChangedSignal(name) — раньше был только заглушкой в списке
-    -- подсветки синтаксиса ("attempt to call a nil value"). Отдельный
-    -- сигнал на "__prop_<Имя>" (не пересекается с обычными именами событий
-    -- вроде Touched) — стреляет из __set_prop на JS-стороне ПОСЛЕ того,
-    -- как свойство реально применилось (см. installLuaBridge), так что
-    -- scroll.CanvasSize = ... внутри обработчика уже увидит новое значение.
+    -- GetPropertyChangedSignal(name) — used to be just a stub in the syntax
+    -- highlighting list ("attempt to call a nil value"). A separate
+    -- signal on "__prop_<Name>" (doesn't intersect with ordinary event names
+    -- like Touched) — fires from __set_prop on the JS side AFTER
+    -- the property has really been applied (see installLuaBridge), so
+    -- scroll.CanvasSize = ... inside a handler will already see the new value.
     if k == "GetPropertyChangedSignal" or k == "getPropertyChangedSignal" then
         return function(self, propName) return makeEvent(ref, "__prop_" .. tostring(propName)) end
     end
-    -- Animator:LoadAnimation(animation) — настоящего проигрывания анимаций
-    -- по AssetId тут быть не может (нет доступа к реальным ассетам с
-    -- серверов Roblox — это браузерная песочница), но раньше метод не
-    -- существовал ВООБЩЕ ("attempt to call a nil value (method
-    -- 'LoadAnimation')"), а вызывается он внутри самих интро-анимаций
-    -- (например, Michael_Jackson_-_Billie_Jean.lua) БЕЗ pcall вокруг —
-    -- падение обрывало всю функцию, включая task.delay(...) в конце,
-    -- который двигает игру дальше после интро. Возвращаем "пустой", но
-    -- живой AnimationTrack — .Play()/.Stop() ничего не анимируют, но и не
-    -- падают, KeyframeReached/Ended/Stopped существуют и подключаются, но
-    -- никогда не выстрелят по-настоящему.
-    -- Animator:GetPlayingAnimationTracks() — реально играющих треков нет (см. выше), значит список пуст
+    -- Animator:LoadAnimation(animation) — real animation playback
+    -- by AssetId can't exist here (no access to real assets on
+    -- Roblox servers — this is a browser sandbox), but the method used to
+    -- not exist AT ALL ("attempt to call a nil value (method
+    -- 'LoadAnimation')"), and it is called inside the intro animations themselves
+    -- (for example, Michael_Jackson_-_Billie_Jean.lua) WITHOUT a pcall around it —
+    -- the failure aborted the whole function, including the task.delay(...) at the end
+    -- that moves the game on after the intro. We return an "empty" but
+    -- live AnimationTrack — .Play()/.Stop() animate nothing but don't
+    -- fail either, KeyframeReached/Ended/Stopped exist and can be connected, but
+    -- will never really fire.
+    -- Animator:GetPlayingAnimationTracks() — there are no really playing tracks (see above), so the list is empty
     if k == "GetPlayingAnimationTracks" then
         return function(self) return {} end
     end
@@ -7779,18 +7781,18 @@ InstanceMT.__index = function(t, k)
     if k == "Destroy" or k == "remove" or k == "Remove" then
         return function(self) __destroy(ref) end
     end
-    -- Model:MakeJoints()/BreakJoints() — устаревшие, но существующие методы Roblox (RegenScript в Castle Warfare зовёт MakeJoints
-    -- на клоне танка). Системы соединений в эмуляторе нет (детали статичны), поэтому вызов не падает и ничего не делает.
+    -- Model:MakeJoints()/BreakJoints() — deprecated but existing Roblox methods (RegenScript in Castle Warfare calls MakeJoints
+    -- on a tank clone). There is no joint system in the emulator (parts are static), so the call doesn't fail and does nothing.
     if k == "MakeJoints" or k == "makeJoints" or k == "BreakJoints" or k == "breakJoints" then
         return function(self) end
     end
     if k == "Clone" or k == "clone" then
-        -- Настоящая копия — новый виртуальный инстанс (свой ref), с тем же
-        -- классом/именем/позицией, не запараентенный никуда (как и в
-        -- реальном Roblox — Clone() отвязан от дерева, пока сам скрипт не
-        -- выставит .Parent). Для virtual-инстансов (Instance.new()) вместе
-        -- с этим копируются и все произвольные свойства из
-        -- virtualInstanceProps — см. __clone на стороне JS.
+        -- A real copy — a new virtual instance (its own ref), with the same
+        -- class/name/position, not parented anywhere (as in
+        -- real Roblox — Clone() is detached from the tree until the script itself
+        -- sets .Parent). For virtual instances (Instance.new()) all the arbitrary properties from
+        -- virtualInstanceProps are copied along
+        -- with it — see __clone on the JS side.
         return function(self)
             local newRef = __clone(ref)
             return wrap(newRef)
@@ -7808,19 +7810,19 @@ InstanceMT.__index = function(t, k)
             end
         end
     end
-    -- Сигналы: RemoteEvent.OnServerEvent/OnClientEvent, TextButton.
-    -- MouseButton1Click, и общая физика/иерархия/жизненный цикл — у всех
-    -- один и тот же настоящий RBXScriptSignal (:Connect/:Disconnect,
-    -- см. makeEvent/__connect/fireLuaSignal), НЕ заглушка: ChildAdded/
-    -- ChildRemoved реально стреляют при репарентинге (см. luaSetParent),
-    -- Touched — при настоящем контакте в cannon.js (см. beginContact),
-    -- Stepped/Heartbeat/RenderStepped — каждый кадр игрового цикла.
+    -- Signals: RemoteEvent.OnServerEvent/OnClientEvent, TextButton.
+    -- MouseButton1Click, and the general physics/hierarchy/lifecycle — all have
+    -- the same real RBXScriptSignal (:Connect/:Disconnect,
+    -- see makeEvent/__connect/fireLuaSignal), NOT a stub: ChildAdded/
+    -- ChildRemoved really fire on re-parenting (see luaSetParent),
+    -- Touched — on a real contact in cannon.js (see beginContact),
+    -- Stepped/Heartbeat/RenderStepped — every frame of the game loop.
     -- Selected/Deselected/PlayerAdded/PlayerRemoving/Chatted/Died —
-    -- честные RBXScriptSignal (Connect не падает), но по-настоящему НЕ
-    -- срабатывают: нет системы выбора HopperBin/чата/смерти персонажа,
-    -- которая могла бы их вызвать. Это реальное ограничение движка, а не
-    -- сознательная заглушка "на будущее" — сигнал существует, событие в
-    -- игре просто ещё не происходит.
+    -- real RBXScriptSignals (Connect doesn't fail), but they do NOT really
+    -- fire: there is no HopperBin selection/chat/character death system
+    -- that could trigger them. This is a real limitation of the engine, not
+    -- a deliberate «for the future» stub — the signal exists, the event in
+    -- the game just doesn't happen yet.
     if k == "OnServerEvent" or k == "OnClientEvent" or k == "MouseClick" or k == "RightMouseClick"
         or k == "MouseHoverEnter" or k == "MouseHoverLeave" or k == "MouseButton1Click"
         or k == "MouseButton1Down" or k == "MouseButton1Up" or k == "MouseEnter" or k == "MouseLeave"
@@ -7840,14 +7842,14 @@ InstanceMT.__index = function(t, k)
         or k == "Event" or k == "Stepped" or k == "Heartbeat" or k == "RenderStepped" then
         return makeEvent(ref, k)
     end
-    -- Sound:Play()/:play() (и Pause/Resume/Stop, все регистры — старые
-    -- скрипты 2008-2011 годов зовут их с маленькой буквы). Раньше это
-    -- было no-op ВСЕГДА ("у движка нет реального аудио-плеера") — теперь
-    -- для настоящего Sound-инстанса реально играет через __sound_control
-    -- (JS поднимает под каждым Sound-рефом настоящий HTMLAudioElement,
-    -- см. getOrCreateSoundEl/luaSoundControl). Для прочих классов
-    -- (AnimationTrack и т.п., см. LoadAnimation чуть выше) по-прежнему
-    -- no-op — там реально нечему играть.
+    -- Sound:Play()/:play() (and Pause/Resume/Stop, all cases — old
+    -- scripts of 2008-2011 call them in lowercase). Previously this
+    -- was a no-op ALWAYS ("the engine has no real audio player") — now
+    -- for a real Sound instance it really plays through __sound_control
+    -- (JS creates a real HTMLAudioElement under every Sound ref,
+    -- see getOrCreateSoundEl/luaSoundControl). For other classes
+    -- (AnimationTrack etc., see LoadAnimation just above) it is still a
+    -- no-op — there is really nothing to play there.
     if k == "Play" or k == "play" or k == "Stop" or k == "stop"
         or k == "Pause" or k == "pause" or k == "Resume" or k == "resume" then
         if __get_class(ref) == "Sound" or __get_class(ref) == "AudioPlayer" then
@@ -7860,15 +7862,15 @@ InstanceMT.__index = function(t, k)
         return function(self, ...) end
     end
     if k == "Fire" then
-        -- BindableEvent:Fire(...) — генерирует .Event тут же, синхронно,
-        -- в пределах ОДНОЙ и той же VM (в отличие от FireServer/FireClient,
-        -- которые идут через межпроцессную очередь remoteQueue).
+        -- BindableEvent:Fire(...) — fires .Event right here, synchronously,
+        -- within ONE and the same VM (unlike FireServer/FireClient,
+        -- which go through the cross-process remoteQueue).
         return function(self, ...) __fire_bindable(ref, ...) end
     end
     if k == "FireServer" then
         return function(self, ...) __fire_remote(ref, "server", ...) end
     end
-    -- Camera: ViewportSize / FieldOfView (живое значение) / WorldToViewportPoint / ViewportPointToRay
+    -- Camera: ViewportSize / FieldOfView (a live value) / WorldToViewportPoint / ViewportPointToRay
     if k == "ViewportSize" or k == "FieldOfView" or k == "WorldToViewportPoint" or k == "WorldToScreenPoint"
         or k == "ViewportPointToRay" or k == "ScreenPointToRay" then
         if __get_class(ref) == "Camera" then
@@ -7893,29 +7895,29 @@ InstanceMT.__index = function(t, k)
         end
     end
     if k == "FireClient" then
-        -- первый аргумент — Player, у нас всегда ровно один
-        -- (LocalPlayer) — просто отбрасываем его.
+        -- the first argument is a Player, we always have exactly one
+        -- (LocalPlayer) — we simply discard it.
         return function(self, player, ...) __fire_remote(ref, "client", ...) end
     end
     local ok, v = pcall(__get_prop, ref, k)
     if not ok then
         __emuWarnOnce("getprop:" .. tostring(__get_class(ref)) .. "." .. tostring(k),
-            tostring(__get_class(ref)) .. "." .. tostring(k) .. " — ошибка чтения свойства: " .. tostring(v))
+            tostring(__get_class(ref)) .. "." .. tostring(k) .. " — property read error: " .. tostring(v))
     end
-    -- Свойства-перечисления JS хранит строкой ('Scriptable'), а скрипты сравнивают
-    -- их с Enum-значениями: camera.CameraType == Enum.CameraType.Scriptable.
-    -- Строка никогда не равна таблице-Enum, из-за чего такое условие всегда было
-    -- ложным (например, камера после выхода из шкафа навсегда оставалась Scriptable).
+    -- JS keeps enum properties as a string ('Scriptable'), while scripts compare
+    -- them with Enum values: camera.CameraType == Enum.CameraType.Scriptable.
+    -- A string is never equal to an Enum table, so such a condition was always
+    -- false (for example, the camera stayed Scriptable forever after leaving the wardrobe).
     local enumType = __ENUM_PROPS[k]
     if enumType then
         if ok and type(v) == "string" then return Enum[enumType][v] end
         if (not ok or v == nil) and k == "CameraType" and __get_class(ref) == "Camera" then
-            return Enum.CameraType.Custom -- значение по умолчанию у камеры в Roblox
+            return Enum.CameraType.Custom -- the default value of a camera in Roblox
         end
     end
-    -- Составные значения GUI-свойств (UIGridLayout.CellSize/CellPadding — UDim2, UIListLayout.Padding/UICorner.CornerRadius — UDim,
-    -- AnchorPoint — Vector2, StudsOffset — Vector3, цвета) JS отдаёт JSON-строкой. Раньше строка доходила до скрипта как есть:
-    -- hotbar.Grid.CellSize.X.Offset падал на «attempt to index a nil value (field 'X')» (инвентарь, перетаскивание).
+    -- Composite values of GUI properties (UIGridLayout.CellSize/CellPadding — UDim2, UIListLayout.Padding/UICorner.CornerRadius — UDim,
+    -- AnchorPoint — Vector2, StudsOffset — Vector3, colors) are given by JS as a JSON string. Previously the string reached the script as is:
+    -- hotbar.Grid.CellSize.X.Offset failed with «attempt to index a nil value (field 'X')» (inventory, dragging).
     if ok and type(v) == "string" and string.byte(v, 1) == 123 then
         local dok, t = pcall(__json_decode, v)
         if dok and type(t) == "table" then
@@ -7933,32 +7935,32 @@ InstanceMT.__index = function(t, k)
         end
     end
     if ok and v ~= nil then return v end
-    -- Roblox поддерживает доступ к дочернему объекту прямо через точку —
-    -- part.Engine эквивалентно part:FindFirstChild("Engine"), а не только
-    -- через явный вызов FindFirstChild. Раньше это падало в __get_prop
-    -- (тот про ДАННЫЕ properties, не про детей) и там же тихо давало nil,
-    -- хотя ребёнок с таким именем на самом деле есть — отсюда "field
-    -- 'Engine'"/"field 'Parts'"/"field 'Weapon'" на объектах, которые
-    -- реально существуют в файле карты.
+    -- Roblox supports accessing a child object directly through a dot —
+    -- part.Engine is equivalent to part:FindFirstChild("Engine"), not only
+    -- via an explicit FindFirstChild call. It used to fall into __get_prop
+    -- (which is about the properties DATA, not children) and quietly give nil there,
+    -- although a child with such a name actually exists — hence "field
+    -- 'Engine'"/"field 'Parts'"/"field 'Weapon'" on objects that
+    -- really exist in the map file.
     local child = __find_first_child(ref, k)
     if child ~= nil and child ~= -1 then return wrap(child) end
-    -- Ни свойства, ни потомка с таким именем: в Roblox это ошибка "X is not a valid member of Class". Эмулятор
-    -- отдавал молча nil — теперь говорим об этом (один раз на Класс.Имя), чтобы было видно, чего не хватает.
+    -- Neither a property nor a descendant with such a name: in Roblox this is the error "X is not a valid member of Class". The emulator
+    -- silently returned nil — now we say so (once per Class.Name) so it is visible what is missing.
     local cls = tostring(__get_class(ref))
     if cls == "ScreenGui" or cls == "SurfaceGui" or cls == "BillboardGui" then
-        -- значения по умолчанию корневых GUI: у созданного через Instance.new(\"ScreenGui\") Enabled читался как nil, и
-        -- переключатели вида gui.Enabled = not gui.Enabled (AdminPanelClient) всегда включали, а не переключали
+        -- default values of root GUIs: for one created via Instance.new(\"ScreenGui\") Enabled was read as nil, and
+        -- toggles like gui.Enabled = not gui.Enabled (AdminPanelClient) always turned it on instead of toggling
         local d = ({ Enabled = true, ResetOnSpawn = true, IgnoreGuiInset = false, DisplayOrder = 0, AlwaysOnTop = false })[k]
         if d ~= nil then return d end
     end
     if cls == "Tool" then
-        -- значения по умолчанию Tool (Enabled, TextureId, ToolTip, ...): раньше nil + предупреждение, а хотбар читает tool.Enabled
+        -- Tool default values (Enabled, TextureId, ToolTip, ...): previously nil + a warning, while the hotbar reads tool.Enabled
         local d = __TOOL_DEFAULTS[k]
         if d ~= nil then return d end
     end
     __emuWarnOnce("missing:" .. cls .. "." .. tostring(k),
-        tostring(k) .. " — не свойство и не потомок " .. tostring(__get_name(ref)) .. " (" .. cls ..
-        "); эмулятор вернул nil (в Roblox: 'is not a valid member', либо этого свойства нет в эмуляторе)")
+        tostring(k) .. " — is neither a property nor a descendant of " .. tostring(__get_name(ref)) .. " (" .. cls ..
+        "); the emulator returned nil (in Roblox: 'is not a valid member', or this property is missing in the emulator)")
     return nil
 end
 InstanceMT.__newindex = function(t, k, v)
@@ -7979,12 +7981,12 @@ InstanceMT.__newindex = function(t, k, v)
 end
 InstanceMT.__tostring = function(t) return __get_name(rawget(t, "__ref")) end
 
--- Instance.new(className [, parent]) — создаёт НОВЫЙ виртуальный инстанс
--- (свой отрицательный ref, ниже -1, не пересекается с реальными объектами
--- карты). У него нет меша/физики — это просто узел иерархии с именем,
--- классом и набором произвольных свойств (см. __instance_new/luaGetGenericProp
--- на стороне JS). Для классов без визуального смысла в этом движке (Message,
--- IntValue, Sound и т.п.) этого достаточно, чтобы скрипт не падал.
+-- Instance.new(className [, parent]) — creates a NEW virtual instance
+-- (its own negative ref, below -1, doesn't intersect with real map
+-- objects). It has no mesh/physics — it's just a hierarchy node with a name,
+-- a class and a set of arbitrary properties (see __instance_new/luaGetGenericProp
+-- on the JS side). For classes with no visual meaning in this engine (Message,
+-- IntValue, Sound etc.) this is enough for a script not to fail.
 Instance = {}
 function Instance.new(className, parent)
     local ref = __instance_new(className)
@@ -7994,22 +7996,22 @@ function Instance.new(className, parent)
 end
 
 workspace = wrap(__workspace_ref())
-Workspace = workspace -- в Roblox есть оба глобала
+Workspace = workspace -- Roblox has both globals
 
 -- game.Players / game.Lighting / game:GetService(...) / game:service(...)
--- (последнее — устаревший, но часто встречающийся в старых скриптах,
--- 2008-2011 годов, вызов) — сначала ищем РЕАЛЬНЫЙ сервис среди корневых
--- объектов карты, и только если такого нет — создаём виртуальный контейнер
--- (пустой, но не роняющий скрипт).
+-- (the latter is a deprecated but often seen call in old scripts,
+-- 2008-2011) — first look for a REAL service among the map's root
+-- objects, and only if there is none — create a virtual container
+-- (empty, but not crashing the script).
 local serviceCache = {}
--- DataStoreService — раньше не была особым случаем: game:GetService(...)
--- создавал ПУСТОЙ виртуальный инстанс без единого метода, отсюда "attempt
--- to call a nil value (method 'GetDataStore')". Настоящего сетевого
--- DataStore тут быть не может (это браузер, а не сервер Roblox) — вместо
--- этого простое ин-memory хранилище: живёт, пока идёт Play, обнуляется по
--- Stop/Play заново (см. luaResetSignals/serviceCache — этот файл вообще не
--- хранит состояние между запусками, так что это ограничение как минимум
--- честное, а не притворяется настоящей персистентностью).
+-- DataStoreService — wasn't a special case before: game:GetService(...)
+-- created an EMPTY virtual instance without a single method, hence "attempt
+-- to call a nil value (method 'GetDataStore')". A real network
+-- DataStore can't exist here (this is a browser, not a Roblox server) — instead
+-- a simple in-memory store: lives while Play runs, resets on
+-- Stop/Play again (see luaResetSignals/serviceCache — this file doesn't
+-- keep state between runs at all, so this limitation is at least
+-- honest, and doesn't pretend to be real persistence).
 local __dataStores = {}
 local DataStoreMT = { __index = {
     GetAsync = function(self, key) return self.__data[key] end,
@@ -8042,15 +8044,15 @@ local DataStoreServiceObj = setmetatable({}, { __index = {
     GetDataStore = function(self, name) return getDataStore(name) end,
     GetOrderedDataStore = function(self, name) return getDataStore(name) end,
 } })
--- ContentProvider:PreloadAsync — раньше отсутствовал вообще (виртуальный
--- пустой сервис без единого метода), из-за чего LoadingScreenScript падал
--- бы прямо внутри task.defer(...). Там ошибку ловит сам task.spawn (см.
--- реализацию task выше) и не роняет остальной скрипт — но и не продолжает
--- его: код ПОСЛЕ PreloadAsync (снятие текста "Готово!", fade-out,
--- loadingGui:Destroy()) просто никогда не выполнялся, и экран загрузки
--- оставался висеть навсегда, закрывая собой всё, что должно было
--- появиться под ним. Тут реальных ассетов не грузим (взять их неоткуда
--- в браузере) — сразу отвечаем Success по каждому.
+-- ContentProvider:PreloadAsync — didn't exist at all before (a virtual
+-- empty service without a single method), because of which LoadingScreenScript would
+-- fail right inside task.defer(...). There the error is caught by task.spawn itself (see
+-- the task implementation above) and doesn't crash the rest of the script — but doesn't continue
+-- it either: the code AFTER PreloadAsync (removing the "Done!" text, fade-out,
+-- loadingGui:Destroy()) simply never ran, and the loading screen
+-- stayed hanging forever, covering everything that was supposed to
+-- appear under it. Here we don't load real assets (there is nowhere to get them
+-- in a browser) — we immediately answer Success for each.
 local ContentProviderObj = setmetatable({}, { __index = {
     PreloadAsync = function(self, assets, callback)
         for _, assetId in ipairs(assets or {}) do
@@ -8059,29 +8061,29 @@ local ContentProviderObj = setmetatable({}, { __index = {
     end,
     GetAssetFetchStatus = function(self, assetId) return Enum.AssetFetchStatus.Success end,
 } })
--- HttpService:JSONEncode/JSONDecode — реально используются (SongMenuScript,
--- Main.lua) для разбора чартов песен, оба ЗАВЁРНУТЫ в pcall у авторов
--- скрипта — поэтому раньше, когда HttpService был пустым виртуальным
--- сервисом без единого метода, ошибка "attempt to call a nil value" НЕ
--- падала наружу, а тихо ловилась pcall'ом и просто пропускала песню
--- ("if not ok2 then continue end") — список песен оставался пустым без
--- единой видимой ошибки в Output. GetAsync/PostAsync честно рушатся —
--- настоящих сетевых запросов из браузерной песочницы наружу нет и не
--- будет, тут врать нечем.
+-- HttpService:JSONEncode/JSONDecode — really used (SongMenuScript,
+-- Main.lua) to parse song charts, both are WRAPPED in pcall by the script
+-- authors — so previously, when HttpService was an empty virtual
+-- service without a single method, the error "attempt to call a nil value" did NOT
+-- surface, it was quietly caught by pcall and just skipped the song
+-- ("if not ok2 then continue end") — the song list stayed empty with
+-- not a single visible error in Output. GetAsync/PostAsync honestly fail —
+-- there are no real network requests out of the browser sandbox and
+-- there won't be, nothing to lie about here.
 local HttpServiceObj = setmetatable({}, { __index = {
     JSONEncode = function(self, v) return __json_encode(v) end,
     JSONDecode = function(self, s) return __json_decode(s) end,
     UrlEncode = function(self, s) return tostring(s) end,
-    GetAsync = function(self, url) error("HttpService:GetAsync — реальных сетевых запросов из браузерной песочницы нет", 2) end,
-    PostAsync = function(self, url) error("HttpService:PostAsync — реальных сетевых запросов из браузерной песочницы нет", 2) end,
+    GetAsync = function(self, url) error("HttpService:GetAsync — there are no real network requests from the browser sandbox", 2) end,
+    PostAsync = function(self, url) error("HttpService:PostAsync — there are no real network requests from the browser sandbox", 2) end,
 } })
--- TweenService:Create(...):Play() — раньше TweenService был пустым
--- виртуальным сервисом без единого метода: "attempt to call a nil value
--- (method 'Create')" на любом месте, где он используется (а используется
--- он массово — очки в Main.lua, уведомления в SettingsMenuScript, блюр в
--- AgeWarningModule). Само число-в-число покадровое движение — на JS-
--- стороне (см. updateTweens/__tween_register), тут только конструкция
--- объекта Tween с Play/Cancel/Pause и событием Completed.
+-- TweenService:Create(...):Play() — TweenService used to be an empty
+-- virtual service without a single method: "attempt to call a nil value
+-- (method 'Create')" anywhere it is used (and it is used
+-- massively — points in Main.lua, notifications in SettingsMenuScript, blur in
+-- AgeWarningModule). The number-to-number per-frame movement itself is on the JS
+-- side (see updateTweens/__tween_register), here is only the construction of
+-- the Tween object with Play/Cancel/Pause and the Completed event.
 local __nextTweenId = 1
 local function __enumName(e) if type(e) == "table" then return tostring(e.Name or e) end return tostring(e or "") end
 local function __ease(a, style, dir)
@@ -8091,8 +8093,8 @@ local __jointTweenOwner = {}
 local TweenMT = { __index = {
     Play = function(self)
         local cls = __get_class(self.__ref)
-        -- CFrameValue/Vector3Value/Color3Value хранят Value в Lua (JS-твин их не двигает): интерполируем тут, шаг за шагом
-        -- присваивая Value — так срабатывают GetPropertyChangedSignal("Value")/Changed (DoorOpener: CFrameValue -> PivotTo).
+        -- CFrameValue/Vector3Value/Color3Value keep Value in Lua (a JS tween doesn't move them): we interpolate here, step by step
+        -- assigning Value — this triggers GetPropertyChangedSignal("Value")/Changed (DoorOpener: CFrameValue -> PivotTo).
         if (cls == "CFrameValue" or cls == "Vector3Value" or cls == "Color3Value") and self.__props.Value ~= nil then
             local token = {}
             self.__running = token
@@ -8115,13 +8117,13 @@ local TweenMT = { __index = {
             end)
             return
         end
-        -- Motor6D/Weld: C0/C1 — CFrame-свойства суставов (анимация нажатия клавиши, дверные петли на Motor6D…). JS-твин такие
-        -- свойства не двигает, поэтому интерполируем здесь (CFrame:Lerp) и присваиваем каждый шаг — запись попадает в __joint_set.
+        -- Motor6D/Weld: C0/C1 — CFrame properties of joints (a key press animation, door hinges on Motor6D…). A JS tween doesn't move such
+        -- properties, so we interpolate here (CFrame:Lerp) and assign every step — the write goes to __joint_set.
         if (cls == "Motor6D" or cls == "Weld" or cls == "ManualWeld" or cls == "Motor")
            and (self.__props.C0 ~= nil or self.__props.C1 ~= nil) then
             local token = {}
             self.__running = token
-            __jointTweenOwner[self.__ref] = token   -- новый твин сустава отменяет предыдущий (как в Roblox: release после press)
+            __jointTweenOwner[self.__ref] = token   -- a new joint tween cancels the previous one (as in Roblox: release after press)
             task.spawn(function()
                 local inst = __wrap(self.__ref)
                 local froms = {}
@@ -8151,18 +8153,18 @@ local TweenMT = { __index = {
                 __enumName(self.__style), __enumName(self.__dir), self.__delay or 0, self.__repeat or 0, self.__reverses and true or false)
         end
     end,
-    Pause = function(self) end, -- честной паузы нет — покадровый твин на JS-стороне идёт по времени, а не по кадрам
-    Cancel = function(self) self.__running = nil; __tween_cancel(self.__completedKey) end, -- Lua-твины (Value/Motor6D) останавливает токен, JS-твины — __tween_cancel
+    Pause = function(self) end, -- no honest pause — the per-frame tween on the JS side runs by time, not by frames
+    Cancel = function(self) self.__running = nil; __tween_cancel(self.__completedKey) end, -- Lua tweens (Value/Motor6D) are stopped by the token, JS tweens — by __tween_cancel
 } }
 local TweenServiceObj = setmetatable({}, { __index = {
     Create = function(self, instance, tweenInfo, props)
-        -- как в Roblox: nil вместо инстанса — ошибка ВЫЗЫВАЮЩЕГО скрипта (уровень 2 показывает его строку, а не прелюдию)
+        -- as in Roblox: nil instead of an instance is an error of the CALLING script (level 2 shows its line, not the prelude)
         if type(instance) ~= "table" or rawget(instance, "__ref") == nil then
-            error("TweenService:Create: первый аргумент должен быть Instance, получено " .. typeof(instance), 2)
+            error("TweenService:Create: the first argument must be an Instance, got " .. typeof(instance), 2)
         end
         local id = __nextTweenId
         __nextTweenId = __nextTweenId + 1
-        local completedKey = -500000 - id -- отдельный диапазон, не пересекается с обычными ref-ами (см. __tween_register)
+        local completedKey = -500000 - id -- a separate range, doesn't intersect with ordinary refs (see __tween_register)
         return setmetatable({
             __ref = rawget(instance, "__ref"), __props = props, __time = (tweenInfo and tweenInfo.Time) or 1,
             __completedKey = completedKey, Completed = makeEvent(completedKey, "Event"),
@@ -8178,9 +8180,9 @@ function TweenInfo.new(time, easingStyle, easingDirection, repeatCount, reverses
         RepeatCount = repeatCount or 0, Reverses = reverses or false, DelayTime = delayTime or 0,
     }
 end
--- ============ COMPAT: атрибуты, теги, сигналы, GetPivot и т.п. ============
--- Чисто-Lua простой сигнал (для событий, которых нет на JS-стороне):
--- Connect/Wait/Fire. Wait опрашивает флаг через wait().
+-- ============ COMPAT: attributes, tags, signals, GetPivot etc. ============
+-- A pure-Lua simple signal (for events that don't exist on the JS side):
+-- Connect/Wait/Fire. Wait polls the flag via wait().
 local function newSignal()
     local handlers, fired, lastArgs = {}, 0, nil
     local sig = {}
@@ -8210,16 +8212,16 @@ local function newSignal()
         for _, h in ipairs(handlers) do
             if not h.dead then
                 local ok, err = pcall(h.fn, ...)
-                if not ok then warn("ошибка в обработчике: " .. tostring(err)) end
+                if not ok then warn("error in handler: " .. tostring(err)) end
             end
         end
     end
     return sig
 end
 
--- Атрибуты и теги лежат на JS-стороне и ОБЩИЕ для серверной и клиентской
--- Lua-VM (раньше были локальными для каждой VM, и LocalScript не видел
--- SetAttribute из Script).
+-- Attributes and tags live on the JS side and are SHARED between the server and client
+-- Lua VMs (previously they were local to each VM, and a LocalScript didn't see
+-- SetAttribute from a Script).
 local __tagAdded, __tagRemoved = {}, {}
 
 local function refOf(inst) return type(inst) == "table" and rawget(inst, "__ref") or nil end
@@ -8255,10 +8257,10 @@ local CollectionServiceObj = setmetatable({}, { __index = {
     end,
 } })
 
--- TeleportService: телепорт в ДРУГОЙ плейс переключает редактор на него: игра останавливается, плейс скачивается
--- с Roblox (нужен вход в аккаунт / ключ, как при «Открыть из Roblox») и запускается заново. Если переключиться
--- нельзя (уже идёт переключение, ошибка скачивания) — как раньше: warn и сигнал TeleportInitFailed(player,
--- Enum.TeleportResult.Failure, сообщение, placeId, options), чтобы скрипты лобби не падали на nil.
+-- TeleportService: a teleport to ANOTHER place switches the editor to it: the game stops, the place is downloaded
+-- from Roblox (a sign-in / key is needed, as with «Open from Roblox») and started again. If switching
+-- is impossible (a switch is already in progress, a download error) — as before: warn and the TeleportInitFailed(player,
+-- Enum.TeleportResult.Failure, message, placeId, options) signal, so lobby scripts don't fail on nil.
 local TeleportServiceObj
 do
     local initFailed = newSignal()
@@ -8268,7 +8270,7 @@ do
         return ok and v or "Failure"
     end
     local function deny(placeId, players, options)
-        local msg = "Teleport недоступен в эмуляторе (placeId " .. tostring(placeId) .. ")"
+        local msg = "Teleport is unavailable in the emulator (placeId " .. tostring(placeId) .. ")"
         warn(msg)
         local list = players
         if type(list) ~= "table" or list.ClassName ~= nil then list = { list } end
@@ -8280,7 +8282,7 @@ do
     local function go(placeId, players, options)
         local pid = tonumber(placeId)
         if pid ~= nil and __teleport_place(pid) then
-            print("Teleport: переключаюсь на плейс " .. tostring(pid))
+            print("Teleport: switching to place " .. tostring(pid))
             return true
         end
         deny(placeId, players, options)
@@ -8320,9 +8322,9 @@ local function isDescendantOf(ref, ancestor)
 end
 
 local COMPAT = {
-    -- ParticleEmitter:Emit(n) — выпускает n частиц сразу (см. блок ЧАСТИЦЫ в script.js)
+    -- ParticleEmitter:Emit(n) — emits n particles at once (see the PARTICLES block in script.js)
     Emit = function(t, ref) return function(self, count) __particle_emit(ref, tonumber(count) or 1) end end,
-    -- Debris:AddItem(item, lifetime) — уничтожить item через lifetime секунд (по умолчанию 10)
+    -- Debris:AddItem(item, lifetime) — destroy item after lifetime seconds (10 by default)
     AddItem = function(t, ref) return function(self, item, lifetime)
         if item == nil then return end
         task.delay(tonumber(lifetime) or 10, function()
@@ -8354,10 +8356,10 @@ local COMPAT = {
     end end,
     PivotTo = function(t, ref) return function(self, cf)
         cf = __toCFrame(cf)
-        -- Если мост (JS) падает — в Output будет настоящая причина, а не голый стек.
+        -- If the bridge (JS) fails — Output will show the real cause, not a bare stack.
         local ok, err = pcall(__set_pivot, ref, cf:GetComponents())
         if not ok then
-            error("PivotTo не выполнен: " .. tostring(err) .. " [ref=" .. tostring(ref) .. ", класс=" .. tostring(__get_class(ref)) .. "]", 2)
+            error("PivotTo failed: " .. tostring(err) .. " [ref=" .. tostring(ref) .. ", class=" .. tostring(__get_class(ref)) .. "]", 2)
         end
     end end,
     MoveDirection = function(t, ref) return Vector3.new(__get_move_dir()) end,
@@ -8374,7 +8376,7 @@ local COMPAT = {
         end
         return out
     end end,
-    -- Players:GetPlayerFromCharacter(model) -> Player, чей Character == model (иначе nil)
+    -- Players:GetPlayerFromCharacter(model) -> the Player whose Character == model (otherwise nil)
     GetPlayerFromCharacter = function(t, ref) return function(self, char)
         if char == nil then return nil end
         for _, c in ipairs(t:GetChildren()) do
@@ -8382,7 +8384,7 @@ local COMPAT = {
         end
         return nil
     end end,
-    -- Сигналы Humanoid (Running/Jumping/... стреляют в реальном движке при смене состояния)
+    -- Humanoid signals (Running/Jumping/... fire in the real engine on state change)
     Running = function(t, ref) return makeEvent(ref, "Running") end,
     Jumping = function(t, ref) return makeEvent(ref, "Jumping") end,
     Climbing = function(t, ref) return makeEvent(ref, "Climbing") end,
@@ -8394,8 +8396,8 @@ local COMPAT = {
     Swimming = function(t, ref) return makeEvent(ref, "Swimming") end,
     StateChanged = function(t, ref) return makeEvent(ref, "StateChanged") end,
     HealthChanged = function(t, ref) return makeEvent(ref, "HealthChanged") end,
-    -- Model:GetBoundingBox() -> CFrame центра, Vector3 размер (оси мира, как у модели без PrimaryPart);
-    -- для детали — её CFrame и Size.
+    -- Model:GetBoundingBox() -> the center CFrame, the Vector3 size (world axes, as for a model without a PrimaryPart);
+    -- for a part — its CFrame and Size.
     GetBoundingBox = function(t, ref) return function(self)
         local cx, cy, cz, sx, sy, sz, r00, r01, r02, r10, r11, r12, r20, r21, r22 = __get_bbox(ref)
         return CFrame.new(cx, cy, cz, r00, r01, r02, r10, r11, r12, r20, r21, r22), Vector3.new(sx, sy, sz)
@@ -8408,14 +8410,14 @@ local COMPAT = {
         local ok, hp = pcall(__get_prop, ref, "Health")
         if ok and type(hp) == "number" then __set_prop(ref, "Health", hp - amount) end
     end end,
-    -- Сигналы ProximityPrompt и жизненного цикла: Triggered реально
-    -- стреляет с JS-стороны (см. updateProximityPrompts), остальные —
-    -- честные RBXScriptSignal без срабатывания.
+    -- ProximityPrompt and lifecycle signals: Triggered really
+    -- fires from the JS side (see updateProximityPrompts), the rest are
+    -- real RBXScriptSignals without firing.
     Triggered = function(t, ref) return makeEvent(ref, "Triggered") end,
     TriggerEnded = function(t, ref) return makeEvent(ref, "TriggerEnded") end,
     PromptTriggered = function(t, ref) return makeEvent(ref, "PromptTriggered") end,
     PromptTriggerEnded = function(t, ref) return makeEvent(ref, "PromptTriggerEnded") end,
-    -- prompt:InputHoldBegin()/InputHoldEnd() — программное «нажатие» (кастомный UI зовёт их сам)
+    -- prompt:InputHoldBegin()/InputHoldEnd() — a programmatic «press» (a custom UI calls them itself)
     InputHoldBegin = function(t, ref) return function(self) __prompt_input(ref, true) end end,
     InputHoldEnd = function(t, ref) return function(self) __prompt_input(ref, false) end end,
     PromptShown = function(t, ref) return makeEvent(ref, "PromptShown") end,
@@ -8425,11 +8427,11 @@ local COMPAT = {
     AncestryChanged = function(t, ref) return makeEvent(ref, "AncestryChanged") end,
     Destroying = function(t, ref) return makeEvent(ref, "Destroying") end,
 }
--- Принимает CFrame-объект ИЛИ «голую» таблицу с X/Y/Z (и R00..R22) —
--- например, Value у CFrameValue из .rbxm может прийти без метатаблицы.
+-- Accepts a CFrame object OR a «bare» table with X/Y/Z (and R00..R22) —
+-- for example, the Value of a CFrameValue from an .rbxm may come without a metatable.
 function __toCFrame(v)
     if type(v) ~= "table" then
-        error("PivotTo/CFrame ожидает CFrame, получено " .. type(v), 3)
+        error("PivotTo/CFrame expects a CFrame, got " .. type(v), 3)
     end
     if v.GetComponents ~= nil then return v end
     local p = rawget(v, "Position") or v
@@ -8439,8 +8441,8 @@ function __toCFrame(v)
     end
     return CFrame.new(x, y, z)
 end
-local __tblVals = {}   -- Value-свойства, хранящие таблицы (CFrameValue/Vector3Value/ObjectValue)
--- Начальные Value из файла (Vector3Value/CFrameValue/Color3Value/ObjectValue) — вызывается из JS после prelude
+local __tblVals = {}   -- Value properties that hold tables (CFrameValue/Vector3Value/ObjectValue)
+-- Initial Values from the file (Vector3Value/CFrameValue/Color3Value/ObjectValue) — called from JS after the prelude
 function __init_value(ref, kind, a, b, c, ...)
     if kind == "v3" then __tblVals[ref] = Vector3.new(a, b, c)
     elseif kind == "cf" then __tblVals[ref] = CFrame.new(a, b, c, ...)
@@ -8448,8 +8450,8 @@ function __init_value(ref, kind, a, b, c, ...)
     elseif kind == "ref" then __tblVals[ref] = __wrap(a)
     end
 end
--- Типизированные свойства объектов ИЗ ФАЙЛА (Color3/Vector3: Atmosphere.Color, ColorCorrection.TintColor, ...).
--- Глобальная таблица, а не local: у чанка prelude уже почти исчерпан лимит в 200 локальных переменных.
+-- Typed properties of objects FROM THE FILE (Color3/Vector3: Atmosphere.Color, ColorCorrection.TintColor, ...).
+-- A global table, not local: the prelude chunk has almost used up the limit of 200 local variables.
 __tblProps = {}
 function __init_prop(ref, name, kind, a, b, c)
     local t = __tblProps[ref]
@@ -8467,13 +8469,13 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
     local baseIndex = InstanceMT.__index
     InstanceMT.__index = function(t, k)
         local ref = rawget(t, "__ref")
-        -- ContextActionService: BindAction & co. Без него хотбар (SETTINGS:500) падал «attempt to call a nil value (method 'BindAction')».
-        -- Действия вызываются по клавишам из UserInputService.InputBegan/InputEnded (Begin/End); touch-кнопки не рисуем.
+        -- ContextActionService: BindAction & co. Without it the hotbar (SETTINGS:500) failed with «attempt to call a nil value (method 'BindAction')».
+        -- Actions are called by keys from UserInputService.InputBegan/InputEnded (Begin/End); touch buttons aren't drawn.
         if __get_class(ref) == "ContextActionService" then
             local f = __CAS_METHODS[k]
             if f then return f end
         end
-        -- PlayerGui:GetGuiObjectsAtPosition(x, y) — GuiObject-ы под точкой (сверху вниз), по реальному DOM
+        -- PlayerGui:GetGuiObjectsAtPosition(x, y) — GuiObjects under the point (top to bottom), by the real DOM
         if k == "GetGuiObjectsAtPosition" and __get_class(ref) == "PlayerGui" then
             return function(self, x, y)
                 local t = {}
@@ -8515,7 +8517,7 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 return out
             end
         end
-        -- UserInputService:GetStringForKeyCode(Enum.KeyCode.E) -> "E" (раскладка клиента не известна — отдаём имя клавиши)
+        -- UserInputService:GetStringForKeyCode(Enum.KeyCode.E) -> "E" (the client's layout is unknown — we return the key name)
         if k == "GetStringForKeyCode" and __get_class(ref) == "UserInputService" then
             return function(self, kc)
                 if kc == nil then return "" end
@@ -8524,10 +8526,10 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 return ({ Zero="0", One="1", Two="2", Three="3", Four="4", Five="5", Six="6", Seven="7", Eight="8", Nine="9" })[nm] or ""
             end
         end
-        -- ProximityPrompt.KeyboardKeyCode / GamepadKeyCode — EnumItem (Enum.KeyCode.E), а не голое число из файла
+        -- ProximityPrompt.KeyboardKeyCode / GamepadKeyCode — an EnumItem (Enum.KeyCode.E), not a bare number from the file
         if (k == "KeyboardKeyCode" or k == "GamepadKeyCode") and __get_class(ref) == "ProximityPrompt" then
             local ok, n = pcall(__get_prop, ref, k)
-            if not ok or n == nil then n = (k == "KeyboardKeyCode") and 101 or 1000 end   -- значения по умолчанию из Roblox: E / ButtonX
+            if not ok or n == nil then n = (k == "KeyboardKeyCode") and 101 or 1000 end   -- Roblox defaults: E / ButtonX
             if type(n) == "string" then return Enum.KeyCode[n] end
             if type(n) == "number" then
                 local nm
@@ -8537,14 +8539,14 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 return Enum.KeyCode[nm]
             end
         end
-        -- ProximityPrompt.Style — EnumItem (Enum.ProximityPromptStyle.Custom), а не число/строка из реестра подсказок
+        -- ProximityPrompt.Style — an EnumItem (Enum.ProximityPromptStyle.Custom), not a number/string from the prompt registry
         if k == "Style" and __get_class(ref) == "ProximityPrompt" then
             local ok, v = pcall(__get_prop, ref, k)
             if ok and type(v) == "number" then v = (v == 1) and "Custom" or "Default" end
             if not ok or type(v) ~= "string" or v == "" then v = "Default" end
             return Enum.ProximityPromptStyle[v] or Enum.ProximityPromptStyle.Default
         end
-        -- UserInputService:GetLastInputType() — InputCategorizer (Blaster) спрашивает тип последнего ввода при старте
+        -- UserInputService:GetLastInputType() — InputCategorizer (Blaster) asks for the last input type at start
         if k == "GetLastInputType" and __get_class(ref) == "UserInputService" then
             return function(self)
                 if __is_touch() then return Enum.UserInputType.Touch end
@@ -8556,7 +8558,7 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             local touch = __is_touch()
             if k == "TouchEnabled" then return touch end
             if k == "GamepadEnabled" then return false end
-            return not touch   -- Keyboard/Mouse: только когда нет сенсорного экрана
+            return not touch   -- Keyboard/Mouse: only when there is no touch screen
         end
         do
             local tpp = __tblProps[ref]
@@ -8586,7 +8588,7 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
            or k == "SourceInstance" or k == "TargetInstance" or k == "PositionInstance" then
             local rr = __refprop_get(ref, k)
             if rr ~= nil then
-                if rr == -1 then return nil end   -- -1 = nil; у клонов ref тоже отрицательные (виртуальные)
+                if rr == -1 then return nil end   -- -1 = nil; clones' refs are negative too (virtual)
                 return wrap(rr)
             end
         end
@@ -8620,9 +8622,9 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
             return h(t, ref)
         end
         local r = baseIndex(t, k)
-        -- Методы, возвращающие замыкание, зависящее ТОЛЬКО от ref, кешируем прямо в обёртке: иначе каждый
-        -- d:IsA(...) / part:FindFirstChild(...) заново идёт через сотни сравнений в __index (в циклах по
-        -- GetDescendants() это основная причина просадки FPS).
+        -- Methods that return a closure depending ONLY on ref are cached right in the wrapper: otherwise every
+        -- d:IsA(...) / part:FindFirstChild(...) goes through hundreds of comparisons in __index again (in loops over
+        -- GetDescendants() this is the main cause of FPS drops).
         if PURE_METHODS[k] and type(r) == "function" then rawset(t, k, r) end
         return r
     end
@@ -8670,7 +8672,7 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 return baseNew(t, "Color", v.Color)
             elseif k == "Value" then
                 __tblVals[ref] = v
-                -- GetPropertyChangedSignal("Value") / Changed: без этого CFrameValue+PivotTo (двери, лифты) не двигали модель
+                -- GetPropertyChangedSignal("Value") / Changed: without this CFrameValue+PivotTo (doors, elevators) didn't move the model
                 __fire_signal(ref, "__prop_Value")
                 __fire_signal(ref, "Changed")
                 return
@@ -8736,8 +8738,8 @@ game = setmetatable({}, {
         end
         if k == "Name" then return "game" end
         if k == "ClassName" or k == "className" then return "DataModel" end
-        -- Идентификаторы игры: раньше любое неизвестное имя уходило в getService(k), и game.PlaceId/CreatorId оказывались
-        -- «виртуальными сервисами» (печатались как строка 'PlaceId'), а сравнения game.CreatorId == player.UserId ломались.
+        -- Game identifiers: any unknown name used to go to getService(k), so game.PlaceId/CreatorId ended up as
+        -- "virtual services" (printed as the string 'PlaceId'), and comparisons like game.CreatorId == player.UserId broke.
         if k == "PlaceId" then return __PLACE_ID or 0 end
         if k == "GameId" then return __GAME_ID or 0 end
         if k == "CreatorId" then return __CREATOR_ID or 0 end
@@ -8747,13 +8749,13 @@ game = setmetatable({}, {
             local okE, e = pcall(function() return Enum.CreatorType.User end)
             return okE and e or "User"
         end
-        -- game сам по себе — как обычный Instance с детьми-сервисами
-        -- (Workspace/Players/...), только эти дети лежат не в
-        -- luaChildrenByRef (у него родитель -1, туда не попадает — см.
-        -- __root_count/__root_at), а собираются отдельно. Раньше ничего
-        -- этого не было: game:GetDescendants() уходило в общий "else"
-        -- (getService("GetDescendants")) и создавало виртуальный инстанс с
-        -- таким именем — тот факт, что он ТАБЛИЦА, а не функция, и давал
+        -- game itself — like an ordinary Instance with child services
+        -- (Workspace/Players/...), only these children don't lie in
+        -- luaChildrenByRef (its parent is -1, it doesn't get there — see
+        -- __root_count/__root_at), they are gathered separately. None of this
+        -- existed before: game:GetDescendants() went into the general "else"
+        -- (getService("GetDescendants")) and created a virtual instance with
+        -- such a name — the fact that it is a TABLE and not a function is what gave
         -- "attempt to call a table value".
         if k == "GetChildren" or k == "getChildren" then
             return function(self)
@@ -8784,7 +8786,7 @@ game = setmetatable({}, {
             end
         end
         if k == "FindFirstChild" or k == "findFirstChild" or k == "WaitForChild" or k == "waitForChild" then
-            return function(self, name) return getService(name) end -- у game "дети" верхнего уровня и есть сервисы
+            return function(self, name) return getService(name) end -- game's top-level "children" are the services
         end
         if k == "IsA" or k == "isA" then
             return function(self, cls) return cls == "DataModel" or cls == "Instance" end
@@ -8793,23 +8795,23 @@ game = setmetatable({}, {
     end
 })
 
--- require(moduleScriptInstance) — стандартный require() из библиотек Lua
--- (luaL_openlibs) ждёт СТРОКУ (имя модуля на диске) и падает "bad argument
--- #1 to 'require' (string expected, got table)" на настоящем Roblox-коде
--- вида require(ReplicatedStorage.Modules.Foo). Здесь он полностью
--- переопределён под Roblox-семантику: принимает инстанс ModuleScript,
--- компилирует и выполняет его Source РОВНО ОДИН РАЗ (см. __compile_module
--- на стороне JS), кэширует результат по ref и ловит циклический require —
--- всё как единый Lua-модуль, тем же принципом, что и __conns выше.
+-- require(moduleScriptInstance) — the standard require() from the Lua libraries
+-- (luaL_openlibs) expects a STRING (a module name on disk) and fails with "bad argument
+-- #1 to 'require' (string expected, got table)" on real Roblox code
+-- like require(ReplicatedStorage.Modules.Foo). Here it is completely
+-- redefined for Roblox semantics: it accepts a ModuleScript instance,
+-- compiles and runs its Source EXACTLY ONCE (see __compile_module
+-- on the JS side), caches the result by ref and catches a circular require —
+-- all as a single Lua module, on the same principle as __conns above.
 local __moduleCache = {}
 local __moduleHasRun = {}
 local __moduleLoading = {}
 function require(mod)
     local ref = (type(mod) == "table") and rawget(mod, "__ref") or mod
-    if ref == nil then error("require(): ожидается ModuleScript-инстанс", 2) end
+    if ref == nil then error("require(): a ModuleScript instance is expected", 2) end
     if __moduleHasRun[ref] then return __moduleCache[ref] end
     if __moduleLoading[ref] then
-        error("циклический require() — модуль #" .. tostring(ref) .. " уже выполняется", 2)
+        error("circular require() — module #" .. tostring(ref) .. " is already running", 2)
     end
     local ok, fnOrErr = __compile_module(ref)
     if not ok then error(fnOrErr, 0) end
@@ -8822,11 +8824,11 @@ function require(mod)
     return result
 end
 
--- task.* (Luau) — старые скрипты почти все на wait()/spawn(), но часть уже
--- написана под новый task-планировщик. Реализован поверх ТЕХ ЖЕ примитивов
--- (wait() и стандартной coroutine — обе честно работают, см. фикс
--- fireLuaSignal/__wait_signal выше), отдельного JS-шедулера не требуется.
--- wait(t) в Roblox возвращает (сколько реально прошло, время игры с запуска) — Animate: "local _, t = wait(0.1)"
+-- task.* (Luau) — old scripts are almost all on wait()/spawn(), but some are
+-- already written for the new task scheduler. Implemented on top of THE SAME primitives
+-- (wait() and the standard coroutine — both honestly work, see the
+-- fireLuaSignal/__wait_signal fix above), no separate JS scheduler is needed.
+-- wait(t) in Roblox returns (how much really passed, game time since launch) — Animate: "local _, t = wait(0.1)"
 local __gameStart = tick()
 do
     local __nativeWait = wait
@@ -8843,7 +8845,7 @@ task.wait = function(t) local e = wait(t) return e end
 function task.spawn(fn, ...)
     local co = coroutine.create(fn)
     local ok, err = coroutine.resume(co, ...)
-    if not ok then warn("ошибка в task.spawn: " .. tostring(err) .. "\\n" .. (debug and debug.traceback and debug.traceback(co) or "")) end
+    if not ok then warn("error in task.spawn: " .. tostring(err) .. "\\n" .. (debug and debug.traceback and debug.traceback(co) or "")) end
     return co
 end
 function task.delay(t, fn, ...)
@@ -8852,18 +8854,18 @@ function task.delay(t, fn, ...)
 end
 task.defer = task.spawn
 function task.cancel(co)
-    -- Честной отмены "спящей" в luaWaits корутины отсюда не достать (нет
-    -- ссылки на её запись в шедулере) — no-op, чтобы не падать хотя бы.
+    -- An honest cancel of a coroutine «sleeping» in luaWaits can't be reached from here (there is no
+    -- reference to its entry in the scheduler) — a no-op, at least so as not to fail.
 end
 `;
 
 
-        // co -> имя скрипта, которому принадлежит эта корутина — заполняется
+        // co -> the name of the script this coroutine belongs to — filled in
         const luaScriptNameByCo = new WeakMap();
-        // co -> 'server'/'client'/'shared', заполняется вместе с
+        // co -> 'server'/'client'/'shared', filled in together with
         const luaScriptSideByCo = new WeakMap();
 
-        // Разделение Script (сервер) / LocalScript (клиент) / ModuleScript
+        // Separation of Script (server) / LocalScript (client) / ModuleScript
         const SCRIPT_BADGES = {
             Script: { icon: '🖥️', label: 'Server', color: '#f87171' },
             LocalScript: { icon: '💻', label: 'Client', color: '#60a5fa' },
@@ -8894,24 +8896,24 @@ end
             return p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) + '.' + p3(d.getMilliseconds());
         }
 
-        // source — имя скрипта-источника (для print/warn/error) или null для
+        // source — the name of the source script (for print/warn/error) or null for
         let luaLogSessionId = null;
         let _luaOutputRenderTimer = null;
-        // «Проглоченные» ошибки и недостающие возможности эмулятора больше не молчат: любое такое событие один раз
-        // (на ключ) попадает в Output с пометкой «⚠ эмулятор». Набор ключей живёт в window, чтобы не зависеть от
-        // порядка инициализации (emuWarn вызывается и из кода, который выполняется до объявления Output).
+        // «Swallowed» errors and missing emulator features no longer stay silent: every such event is reported once
+        // (per key) in Output marked «⚠ emulator». The key set lives on window so as not to depend on
+        // the initialization order (emuWarn is also called from code that runs before Output is declared).
         function emuWarn(key, text) {
             const seen = (window._emuWarned = window._emuWarned || new Set());
             if (seen.has(key)) return;
             seen.add(key);
-            try { logLuaOutput('warn', '⚠ эмулятор: ' + text); } catch (e) { console.warn('⚠ эмулятор: ' + text); }
+            try { logLuaOutput('warn', '⚠ emulator: ' + text); } catch (e) { console.warn('⚠ emulator: ' + text); }
         }
         function _errText(e) { return (e && e.message) ? e.message : String(e); }
 
         function logLuaOutput(level, text, source, trace, sideCls) {
-            // Одинаковая ошибка/предупреждение подряд (обработчик события падает КАЖДЫЙ кадр) — не новая строка, а счётчик
-            // «×N»: иначе Output забивается сотнями строк, 200 из них пересобираются через innerHTML на каждый кадр
-            // (это съедало FPS), а на сервер уходил POST /api/log на каждое повторение.
+            // An identical error/warning in a row (an event handler fails EVERY frame) — not a new line but a «×N»
+            // counter: otherwise Output gets clogged with hundreds of lines, 200 of them are rebuilt via innerHTML every frame
+            // (this ate FPS), and a POST /api/log went to the server for every repeat.
             const prevLine = luaOutputLines[luaOutputLines.length - 1];
             if ((level === 'error' || level === 'warn') && prevLine && prevLine.level === level
                 && prevLine.text === text && prevLine.source === (source || null)) {
@@ -8936,7 +8938,7 @@ end
                         session: luaLogSessionId, time: luaTimestamp(), level,
                         source: source || sideCls || '', text: trace ? text + '\n' + trace : text,
                     }),
-                }).catch(() => { /* нет сети/сервера — молча пропускаем, панель Output и так работает */ });
+                }).catch(() => { /* no network/server — skip silently, the Output panel works anyway */ });
             }
         }
 
@@ -8975,9 +8977,9 @@ end
         }
 
 
-        // ---- Мост к объектам сцены: только числа/строки/булевы, см. коммент выше ----
-        // part.Size = Vector3.new(x,y,z): в Roblox меш/деталь растягивается на Size / (прежний размер).
-        // Раньше значение просто копилось в «мусорном ящике» свойств и ничего не менялось визуально, а z терялся.
+        // ---- Bridge to scene objects: only numbers/strings/booleans, see the comment above ----
+        // part.Size = Vector3.new(x,y,z): in Roblox the mesh/part is stretched by Size / (the previous size).
+        // Previously the value just accumulated in the properties «junk drawer» and nothing changed visually, and z was lost.
         function luaSetPartSize(ref, nx, ny, nz) {
             nx = Math.max(0.001, Number(nx) || 0); ny = Math.max(0.001, Number(ny) || 0); nz = Math.max(0.001, Number(nz) || 0);
             const old = luaSizeOfRef(ref);
@@ -9005,9 +9007,9 @@ end
         function luaSizeOfRef(ref) {
             const p = loadedObjSize[ref];
             if (p && (p.x || p.y || p.z)) return p;
-            // Заглушка не найдена (объект грузился не через
-            // addPhysicsBodyForObj/addVisualMeshForObj) — считаем реальный
-            // размер геометрии меша как запасной вариант.
+            // Placeholder not found (the object wasn't loaded via
+            // addPhysicsBodyForObj/addVisualMeshForObj) — compute the real
+            // mesh geometry size as a fallback.
             const mesh = sceneObjs[ref];
             if (mesh && mesh.geometry) {
                 if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
@@ -9050,17 +9052,17 @@ end
                 mesh.matrix.compose(new THREE.Vector3(x, y, z), q, sc);
             }
         }
-        // ============ ПОЛНОЦЕННЫЙ CFrame: поворот, GetPivot/PivotTo ============
-        // Мировая матрица детали БЕЗ масштаба (THREE.Matrix4, column-major).
-        let luaAttrs = {};  // ref -> {имя: значение}  (SetAttribute/GetAttribute)
+        // ============ FULL CFrame: rotation, GetPivot/PivotTo ============
+        // The part's world matrix WITHOUT scale (THREE.Matrix4, column-major).
+        let luaAttrs = {};  // ref -> {name: value}  (SetAttribute/GetAttribute)
         let luaTags = {};   // ref -> Set<tag>        (CollectionService)
-        // Данные объектов ИЗ ФАЙЛА (с /api/all_instances): атрибуты, теги, команды. luaAttrs/luaTags пересоздаются при
-        // каждом запуске Play (luaResetSignals) и засеваются отсюда — раньше GetAttribute по объектам карты давал nil.
+        // Object data FROM THE FILE (from /api/all_instances): attributes, tags, teams. luaAttrs/luaTags are recreated on every
+        // Play start (luaResetSignals) and seeded from here — previously GetAttribute on map objects returned nil.
         let luaFileAttrs = {}, luaFileTags = {}, luaTeamInfo = {}, luaPlayerTeam = -1;
-        let luaFilePivots = {};   // ref модели -> {p:[x,y,z], r:[9 по строкам]} — WorldPivotData из файла
-        // Группы столкновений (PhysicsService): имя -> {bit}; Default = бит 1; бит 2 занят «нет столкновений» (CanCollide=false).
-        // В cannon тела сталкиваются, если (A.group & B.mask) && (B.group & A.mask): у каждой группы свой бит, а маска —
-        // сумма битов групп, с которыми она сталкивается.
+        let luaFilePivots = {};   // model ref -> {p:[x,y,z], r:[9 row by row]} — WorldPivotData from the file
+        // Collision groups (PhysicsService): name -> {bit}; Default = bit 1; bit 2 is taken by «no collisions» (CanCollide=false).
+        // In cannon bodies collide if (A.group & B.mask) && (B.group & A.mask): each group has its own bit, and the mask is
+        // the sum of the bits of the groups it collides with.
         let luaCollGroups = {}, luaNextGroupBit = 4, luaGroupCollide = {}, luaPartGroup = {};
         function luaGroupBit(name) { if (!name || name === 'Default') return 1; const g = luaCollGroups[name]; return g ? g.bit : 1; }
         function luaGroupsCollide(a, b) {
@@ -9082,15 +9084,15 @@ end
             for (const b of Object.values(physicsBodies)) luaApplyGroup(b);
             if (charBody) luaApplyGroup(charBody);
         }
-        // Маска лучей персонажа (земля, ступеньки, авто-прыжок, тень): только то, с чем он сталкивается, —
-        // сквозь форсфилд своей команды луч «земли» не должен упираться.
+        // The character's ray mask (ground, steps, auto-jump, shadow): only what it collides with —
+        // the «ground» ray must not hit a force field of its own team.
         function _charRayMask() { return (charBody && charBody.collisionFilterMask) || 1; }
-        const _modelPivots = {}; // ref контейнера (Model/Folder) -> THREE.Matrix4 пивота
-        // Деталь стала динамической (скрипт сделал Anchored=false — например, полки
-        // холодильника). В Roblox всё, что лежало сверху и само не заякорено в файле
-        // (мясо: Anchored=false), начинает падать. Включать динамику для ВСЕХ незаякоренных
-        // деталей карты нельзя (в Castle Warfare их 2300+ — это тысячи тел и «рассыпающиеся»
-        // стены), поэтому будим только тех, кто касается/стоит на убранной опоре.
+        const _modelPivots = {}; // ref of a container (Model/Folder) -> the THREE.Matrix4 of the pivot
+        // The part became dynamic (a script set Anchored=false — for example, the fridge
+        // shelves). In Roblox everything lying on top that isn't itself anchored in the file
+        // (the meat: Anchored=false) starts to fall. Enabling dynamics for ALL unanchored
+        // parts of the map isn't possible (Castle Warfare has 2300+ — that's thousands of bodies and «crumbling»
+        // walls), so we wake only those touching/standing on the removed support.
         function luaPromoteResting(sbody) {
             if (typeof CANNON === 'undefined') return;
             sbody.computeAABB();
@@ -9102,15 +9104,15 @@ end
                 if (b === sbody || b === charBody || b.type !== CANNON.Body.STATIC) continue;
                 if (b.collisionFilterMask === 0) continue;                 // CanCollide=false
                 const mesh = sceneObjs[k];
-                if (!mesh || mesh.userData.anchoredFlag !== false) continue; // заякорена в файле — стоит на месте
+                if (!mesh || mesh.userData.anchoredFlag !== false) continue; // anchored in the file — stays in place
                 b.computeAABB();
                 const bl = b.aabb.lowerBound, bu = b.aabb.upperBound;
                 const touches = bl.x <= ub.x + M && bu.x >= lb.x - M &&
                                 bl.y <= ub.y + M && bu.y >= lb.y - M &&
                                 bl.z <= ub.z + M && bu.z >= lb.z - M;
                 if (!touches) continue;
-                if (b.position.y < sbody.position.y - 0.3) continue;       // лежит ниже опоры — не падает
-                // у падающего тела настоящие габариты (у статики толщина раздута до 1.0)
+                if (b.position.y < sbody.position.y - 0.3) continue;       // lies below the support — doesn't fall
+                // a falling body has real dimensions (for static ones the thickness is inflated to 1.0)
                 const sz = loadedObjSize[k];
                 if (sz && mesh.userData.shape !== 'sphere') {
                     const half = new CANNON.Vec3(Math.max(sz.x * 0.5, 0.05), Math.max(sz.y * 0.5, 0.05), Math.max(sz.z * 0.5, 0.05));
@@ -9127,14 +9129,14 @@ end
             }
         }
 
-        // Габаритный ящик (оси мира): по 8 углам каждой детали внутри Model/Folder.
-        // Model:GetBoundingBox(): бокс ориентирован по PIVOT модели (PrimaryPart или WorldPivot), а не по осям мира — как в Roblox.
-        // Раньше был мировой AABB: у повёрнутой двери size.X оказывался толщиной вместо ширины, и скрипт, который ставит петлю как
-        // bbox * CFrame.new(size.X/2, 0, 0) (DoorOpener), вращал створку вокруг центра, игнорируя pivot. У детали — её собственный CFrame.
+        // Bounding box (world axes): from the 8 corners of every part inside Model/Folder.
+        // Model:GetBoundingBox(): the box is oriented by the model's PIVOT (PrimaryPart or WorldPivot), not by the world axes — as in Roblox.
+        // It used to be a world AABB: for a rotated door size.X was the thickness instead of the width, and a script that places the hinge as
+        // bbox * CFrame.new(size.X/2, 0, 0) (DoorOpener) rotated the leaf around the center, ignoring the pivot. For a part — its own CFrame.
         function luaBoundingBox(ref) {
             const leaf = luaIsPartRef(ref) && !(luaChildrenByRef[ref] && luaChildrenByRef[ref].length);
             const refs = leaf ? [ref] : luaCollectParts(ref, []);
-            let R = new THREE.Matrix4();   // только вращение ориентации бокса
+            let R = new THREE.Matrix4();   // only the box's orientation rotation
             if (leaf) R.extractRotation(luaPartMatrix(ref));
             else if (!luaIsCharRef(ref) && !luaIsCameraRef(ref)) { try { R.extractRotation(luaGetPivotMatrix(ref)); } catch (e) { R = new THREE.Matrix4(); } }
             const Rinv = R.clone().invert();
@@ -9152,16 +9154,16 @@ end
             const e = R.elements;
             const rot = [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];   // R00 R01 R02 / R10 R11 R12 / R20 R21 R22
             if (!isFinite(mn.x)) { const p = luaPositionOfRef(ref) || { x: 0, y: 0, z: 0 }; return { cx: p.x, cy: p.y, cz: p.z, sx: 0, sy: 0, sz: 0, rot }; }
-            const lc = new THREE.Vector3((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2).applyMatrix4(R);   // центр обратно в мир
+            const lc = new THREE.Vector3((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2).applyMatrix4(R);   // center back into the world
             return { cx: lc.x, cy: lc.y, cz: lc.z, sx: mx.x - mn.x, sy: mx.y - mn.y, sz: mx.z - mn.z, rot };
         }
 
-        // ClickDetector: клик/тап по детали (или по детали внутри Model, у которой он есть)
-        // в Play -> MouseClick(player) / RightMouseClick(player) на ClickDetector, если игрок
-        // в пределах MaxActivationDistance (по умолчанию 32). Сигнал общий для серверной и
-        // клиентской Lua-VM (как и у ProximityPrompt).
+        // ClickDetector: a click/tap on a part (or on a part inside a Model that has one)
+        // in Play -> MouseClick(player) / RightMouseClick(player) on the ClickDetector if the player
+        // is within MaxActivationDistance (32 by default). The signal is shared by the server and
+        // client Lua VMs (as with ProximityPrompt).
         let _cdLogT = 0;
-        function _cdLog(msg) { /* отладочный лог ClickDetector отключён */ }
+        function _cdLog(msg) { /* the ClickDetector debug log is disabled */ }
         function luaClickDetectorAt(cx, cy, right, fat) {
             if (!isPlaying || (!luaServerL && !luaClientL) || luaControlsDisabled) return false;
             const vp = document.getElementById('viewport');
@@ -9170,8 +9172,8 @@ end
                 const pn = luaByRef[luaParentByRef[det]];
                 const evn = right ? 'RightMouseClick' : 'MouseClick';
                 const ids = luaSignalsByKey[det + '|' + evn] || [];
-                _cdLog(evn + ' → «' + (pn ? pn.name : '?') + '» (ClickDetector ref ' + det + ', подписчиков: ' + ids.length +
-                       ', игрок ref ' + luaPlayerRef + ')');
+                _cdLog(evn + ' → «' + (pn ? pn.name : '?') + '» (ClickDetector ref ' + det + ', subscribers: ' + ids.length +
+                       ', player ref ' + luaPlayerRef + ')');
                 fireLuaSignal(det, right ? 'RightMouseClick' : 'MouseClick', [{ __instanceRef: luaPlayerRef }]);
                 return true;
             };
@@ -9186,7 +9188,7 @@ end
                 for (const c of (luaChildrenByRef[partRef] || [])) if (luaByRef[c] && luaByRef[c].cls === 'ClickDetector') return c;
                 return null;
             };
-            // 1) точное попадание лучом: деталь с ClickDetector (или её родители-Model)
+            // 1) exact ray hit: a part with a ClickDetector (or its parent Models)
             const m = new THREE.Vector2(((cx - rect.left) / rect.width) * 2 - 1, -((cy - rect.top) / rect.height) * 2 + 1);
             const rc = new THREE.Raycaster();
             rc.setFromCamera(m, camera);
@@ -9196,7 +9198,7 @@ end
                 while (obj && !(obj.userData && obj.userData.ref)) obj = obj.parent;
                 if (obj) {
                     const hitRef = parseInt(obj.userData.ref);
-                    if (!fat) { /* мышь: диагностика ниже */ }
+                    if (!fat) { /* mouse: diagnostics below */ }
                     let node = hitRef, guard = 0;
                     while (node !== undefined && node !== -1 && guard++ < 200) {
                         for (const c of (luaChildrenByRef[node] || [])) {
@@ -9211,12 +9213,12 @@ end
                 const h0 = hits.length ? hits[0].object : null;
                 let o0 = h0; while (o0 && !(o0.userData && o0.userData.ref)) o0 = o0.parent;
                 const r0 = o0 ? parseInt(o0.userData.ref) : null;
-                _cdLog('клик попал в ' + (r0 !== null && luaByRef[r0] ? '«' + luaByRef[r0].name + '» (' + luaByRef[r0].cls + ')' : 'пустоту') + ' — ClickDetector нет или он далеко');
-                return false; // запас ниже — только для касаний (мышью целимся точно)
+                _cdLog('the click hit ' + (r0 !== null && luaByRef[r0] ? '«' + luaByRef[r0].name + '» (' + luaByRef[r0].cls + ')' : 'nothing') + ' — there is no ClickDetector or it is far away');
+                return false; // the margin below is for touches only (with the mouse we aim precisely)
             }
-            // 2) запас для пальца: кнопки бывают в десятые доли студа (у лифта 0.19), попасть лучом
-            // с телефона трудно. Берём ближайший к касанию ClickDetector в радиусе ~30 px
-            // (или в проекции размера детали, если она крупнее) — как «щедрый» клик в Roblox на сенсорных.
+            // 2) margin for a finger: buttons can be tenths of a stud (0.19 on the elevator), hitting with a ray
+            // from a phone is hard. Take the ClickDetector nearest to the touch within ~30 px
+            // (or within the projected size of the part if it is larger) — like the «generous» click in Roblox on touch devices.
             let best = null, bestD = Infinity;
             const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
             const v = new THREE.Vector3();
@@ -9242,8 +9244,8 @@ end
                 let o0 = h0; while (o0 && !(o0.userData && o0.userData.ref)) o0 = o0.parent;
                 const r0 = o0 ? parseInt(o0.userData.ref) : null;
                 let n = 0; for (const info of Object.values(luaByRef)) if (info.cls === 'ClickDetector') n++;
-                _cdLog('тап попал в ' + (r0 !== null && luaByRef[r0] ? '«' + luaByRef[r0].name + '» (' + luaByRef[r0].cls + ')' : 'пустоту') +
-                       '; ClickDetector рядом не найден (всего в карте: ' + n + ')');
+                _cdLog('the tap hit ' + (r0 !== null && luaByRef[r0] ? '«' + luaByRef[r0].name + '» (' + luaByRef[r0].cls + ')' : 'nothing') +
+                       '; no ClickDetector nearby (in the map overall: ' + n + ')');
             }
             return false;
         }
@@ -9251,9 +9253,9 @@ end
         function luaIsCharRef(ref) {
             return ref !== -1 && (ref === luaCharacterRef || ref === luaHumanoidRootPartRef || ref === luaHumanoidRef);
         }
-        // Клон детали из файла, которому ещё не построили меш (он не в Workspace): для скрипта это всё равно
-        // деталь — иначе PivotTo(клона-контейнера) до .Parent = workspace ничего не двигал (см. luaRealizeClonedParts).
-        // Данные детали без меша/тела: шаблон из ServerStorage (его не рисуем, см. o.nw) или клон, ещё не попавший в Workspace.
+        // A clone of a part from the file that has no mesh built yet (it isn't in Workspace): for a script it's still
+        // a part — otherwise PivotTo(of the clone container) before .Parent = workspace moved nothing (see luaRealizeClonedParts).
+        // Part data without a mesh/body: a ServerStorage template (not drawn, see o.nw) or a clone not yet in Workspace.
         function luaDormantData(ref) {
             if (sceneObjs[ref] || physicsBodies[ref]) return null;
             const d = playObjData[ref];
@@ -9266,7 +9268,7 @@ end
         function luaIsCameraRef(ref) {
             return !!(luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined');
         }
-        // Camera API для Lua: размер вьюпорта, живой FieldOfView, проекция точки и луч из пикселя
+        // Camera API for Lua: viewport size, live FieldOfView, point projection and a ray from a pixel
         function luaCamInfo() {
             const sz = renderer.getSize(new THREE.Vector2());
             return { w: sz.x, h: sz.y, fov: camera.fov };
@@ -9340,7 +9342,7 @@ end
                 return new THREE.Matrix4().compose(camera.position.clone(), camera.quaternion.clone(), new THREE.Vector3(1, 1, 1));
             }
             if (luaIsPartRef(ref)) return luaPartMatrix(ref).multiply(luaPivotOffsetMatrix(ref));
-            // Model с PrimaryPart: pivot модели = pivot этой детали (как в Roblox), а не WorldPivot/центр габаритов
+            // A Model with a PrimaryPart: the model's pivot = that part's pivot (as in Roblox), not WorldPivot/the bounds center
             const rpp = luaRefProps[ref];
             if (rpp && rpp.PrimaryPart !== undefined && rpp.PrimaryPart !== -1 && rpp.PrimaryPart !== ref && luaIsPartRef(rpp.PrimaryPart)) {
                 return luaPartMatrix(rpp.PrimaryPart).multiply(luaPivotOffsetMatrix(rpp.PrimaryPart));
@@ -9367,16 +9369,16 @@ end
             }
             return m;
         }
-        // ============ СВАРКА (WeldConstraint) ============
-        // Раньше Part0/Part1 только запоминались, и приваренная деталь (уран над головой игрока)
-        // просто падала. Теперь деталь, приваренная СКРИПТОМ, каждый кадр ставится в
-        // CFrame(Part0) * смещение, а смещение запоминается в момент сварки (как в Roblox).
-        // Тело Part1 на это время кинематическое (нет гравитации); снята сварка — снова динамическое.
-        // Сварки из самого файла не трогаем (они у закреплённых деталей и ничего не двигают).
+        // ============ WELDING (WeldConstraint) ============
+        // Previously Part0/Part1 were only remembered, and a part welded by a script (uranium above the player's head)
+        // just fell. Now a part welded by a SCRIPT is placed every frame at
+        // CFrame(Part0) * offset, and the offset is remembered at the moment of welding (as in Roblox).
+        // Part1's body is kinematic meanwhile (no gravity); when the weld is removed — dynamic again.
+        // Welds from the file itself aren't touched (they belong to anchored parts and move nothing).
         function _weldMat(ref, lifted) {
             const M = (luaIsPartRef(ref) && !luaIsCharRef(ref)) ? luaPartMatrix(ref) : luaGetPivotMatrix(ref);
-            // HumanoidRootPart в приложении — центр сферы-коллайдера (на CHAR_RADIUS над землёй), а в
-            // настоящем R15 он на 2.35 над землёй: приваренное «над головой» должно быть на высоте Roblox.
+            // The HumanoidRootPart in the app is the center of the collider sphere (CHAR_RADIUS above the ground), while in
+            // real R15 it is 2.35 above the ground: something welded «above the head» must be at the Roblox height.
             if (lifted && ref === luaHumanoidRootPartRef) M.elements[13] += R15_HRP_ABOVE_GROUND - CHAR_RADIUS;
             return M;
         }
@@ -9405,7 +9407,7 @@ end
             const old = luaWelds.findIndex(w => w.ref === weldRef);
             let prev = null;
             if (old >= 0) {
-                if (luaWelds[old].p1 === p1) prev = luaWelds[old].prev; // тело уже кинематическое — сохраняем исходное состояние
+                if (luaWelds[old].p1 === p1) prev = luaWelds[old].prev; // the body is already kinematic — keep the original state
                 else _releaseWeldBody(luaWelds[old]);
             }
             const body = physicsBodies[p1];
@@ -9461,7 +9463,7 @@ end
             fireLuaSignal(ref, '__prop_CFrame', []);
             fireLuaSignal(ref, '__prop_Position', []);
         }
-        // Сохранённый пивот контейнера (Model/Folder): явно заданный/закэшированный или WorldPivotData из файла; иначе null.
+        // The saved pivot of a container (Model/Folder): explicitly set/cached or WorldPivotData from the file; otherwise null.
         function _storedModelPivot(d) {
             if (_modelPivots[d]) return _modelPivots[d];
             const fp = luaFilePivots[d];
@@ -9471,9 +9473,9 @@ end
             fm.set(r[0], r[1], r[2], p[0], r[3], r[4], r[5], p[1], r[6], r[7], r[8], p[2], 0, 0, 0, 1);
             return fm;
         }
-        // PivotTo переносит жёстко ВСЮ иерархию, включая WorldPivot вложенных Model: раньше пивот вложенной
-        // модели (DoorSwing внутри повёрнутой комнаты-клона) оставался «старым», и GetBoundingBox/PivotTo
-        // двери считались в неверной ориентации — створка вращалась не вокруг петли.
+        // PivotTo moves the WHOLE hierarchy rigidly, including the WorldPivot of nested Models: previously a nested
+        // model's pivot (DoorSwing inside a rotated room clone) stayed «old», and the door's GetBoundingBox/PivotTo
+        // were computed in the wrong orientation — the leaf rotated not around the hinge.
         function luaShiftNestedPivots(root, delta) {
             const stack = (luaChildrenByRef[root] || []).slice();
             let g = 0;
@@ -9485,8 +9487,8 @@ end
                 if (st) _modelPivots[d] = delta.clone().multiply(st);
             }
         }
-        // PivotTo: деталь — с учётом PivotOffset; Model/Folder — жёстким
-        // переносом всех деталей внутри; персонаж — телепорт charBody.
+        // PivotTo: a part — taking PivotOffset into account; Model/Folder — by a rigid
+        // move of all parts inside; the character — a charBody teleport.
         function luaSetPivotMatrix(ref, M) {
             if (luaIsCharRef(ref)) {
                 const e = M.elements;
@@ -9506,14 +9508,14 @@ end
                 return;
             }
             if (luaIsPartRef(ref)) {
-                // PVInstance:PivotTo в Roblox переносит деталь ВМЕСТЕ со всеми потомками-деталями
-                // (у двери холодильника «стекло» и «ручка» — её дети). Раньше двигалась только сама
-                // деталь, и стекло с ручкой оставались на месте, пока дверь распахивалась.
+                // PVInstance:PivotTo in Roblox moves a part TOGETHER with all its descendant parts
+                // (on the fridge door the «glass» and the «handle» are its children). Previously only the part
+                // itself moved, and the glass and handle stayed in place while the door swung open.
                 const oldPart = luaPartMatrix(ref);
                 const newPart = M.clone().multiply(luaPivotOffsetMatrix(ref).invert());
                 const deltaP = newPart.clone().multiply(oldPart.clone().invert());
                 const kids = luaCollectParts(ref, []).filter(pr => pr !== ref);
-                const kidMats = kids.map(pr => luaPartMatrix(pr));   // до сдвига
+                const kidMats = kids.map(pr => luaPartMatrix(pr));   // before the shift
                 luaApplyPartMatrix(ref, newPart);
                 luaFirePoseSignals(ref);
                 kids.forEach((pr, i) => {
@@ -9532,7 +9534,7 @@ end
             luaShiftNestedPivots(ref, delta);
             _modelPivots[ref] = M.clone();
         }
-        // part.CFrame = cf — задаёт именно CFrame детали (без PivotOffset)
+        // part.CFrame = cf — sets exactly the part's CFrame (without PivotOffset)
         function luaSetCFrameMatrix(ref, M) {
             if (luaIsPartRef(ref) && !luaIsCharRef(ref)) {
                 luaApplyPartMatrix(ref, M);
@@ -9541,7 +9543,7 @@ end
                 luaSetPivotMatrix(ref, M);
             }
         }
-        // Camera — особый случай:
+        // Camera — a special case:
         function applyCFrameValue(ref, x, y, z, lx, ly, lz) {
             if (luaByRef[ref] && luaByRef[ref].cls === 'Camera' && typeof camera !== 'undefined') {
                 camera.position.set(x, y, z);
@@ -9551,7 +9553,7 @@ end
                 luaSetPositionOfRef(ref, x, y, z);
             }
         }
-        // rbxassetid://12345 (или голое число) -> локальный проксирующий
+        // rbxassetid://12345 (or a bare number) -> a local proxying
         function rbxAssetIdToProxyUrl(idStr) {
             const m = /\d+/.exec(String(idStr || ''));
             if (!m) return null;
@@ -9559,9 +9561,9 @@ end
         }
 
         let soundElByRef = {};
-        // PlaybackSpeed vs PitchShiftSoundEffect.Octave — это НЕ два
-        const _soundBaseSpeed = {};   // ref -> PlaybackSpeed (Pitch — алиас того же)
-        const _soundPitchOctave = {}; // ref -> Octave активного PitchShiftSoundEffect (реально применяется, см. RobloxSoundElement.pitchOctave/_pitchShiftAsync)
+        // PlaybackSpeed vs PitchShiftSoundEffect.Octave — these are NOT two
+        const _soundBaseSpeed = {};   // ref -> PlaybackSpeed (Pitch is an alias of the same)
+        const _soundPitchOctave = {}; // ref -> Octave of the active PitchShiftSoundEffect (actually applied, see RobloxSoundElement.pitchOctave/_pitchShiftAsync)
         function _applySoundRate(ref) {
             const speed = _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
             const octave = _soundPitchOctave[ref] != null ? _soundPitchOctave[ref] : 0;
@@ -9570,7 +9572,7 @@ end
             el.pitchOctave = octave;
         }
 
-        // ============ WEB AUDIO OLA TIME-STRETCH (сохранение тона) ============
+        // ============ WEB AUDIO OLA TIME-STRETCH (pitch preservation) ============
         let _sharedAudioCtx = null;
         function _getAudioCtx() {
             if (!_sharedAudioCtx) {
@@ -9579,40 +9581,40 @@ end
             }
             return _sharedAudioCtx;
         }
-        // Мобильные браузеры разрешают звуку играть только после реального
-        // тача/клика — а AudioContext для звуков с PlaybackSpeed/Octave
-        // (фазовый вокодер) раньше создавался и получал .resume() только
-        // ГЛУБОКО ВНУТРИ асинхронной цепочки (fetch → decodeAudioData →
-        // воркер → ...), когда браузер уже не считает это "прямым откликом"
-        // на жест пользователя. .resume() в такой ситуации может остаться
-        // подвешенным навсегда — контекст стоит на паузе, и звук просто НЕ
-        // ИГРАЕТ (тишина), хотя весь код вокруг отрабатывает без ошибок.
-        // Обычные <audio> (без PlaybackSpeed/Octave) эту проблему не
-        // получали — у них своя, более мягкая политика автовоспроизведения,
-        // отсюда и было "пропадает только у звуков с pitch-эффектами".
-        // Лечится стандартно: создать и разблокировать AudioContext сразу
-        // на первое же касание/клик по странице, заранее, до того как он
-        // реально понадобится какой-либо песне.
+        // Mobile browsers allow sound to play only after a real
+        // touch/click — and the AudioContext for sounds with PlaybackSpeed/Octave
+        // (a phase vocoder) used to be created and get .resume() only
+        // DEEP INSIDE an asynchronous chain (fetch → decodeAudioData →
+        // worker → ...), when the browser no longer considers it a "direct response"
+        // to a user gesture. .resume() in such a situation can stay
+        // hanging forever — the context stays paused and the sound simply DOES NOT
+        // PLAY (silence), although all the code around works without errors.
+        // Ordinary <audio> (without PlaybackSpeed/Octave) didn't have this problem —
+        // they have their own, softer autoplay policy,
+        // hence the "disappears only for sounds with pitch effects".
+        // Fixed the standard way: create and unlock the AudioContext right
+        // on the first touch/click on the page, in advance, before it
+        // is really needed by any song.
         let _audioUnlockDone = false;
         function _unlockAudioContext() {
             if (_audioUnlockDone) return;
             const ctx = _getAudioCtx();
             const finish = () => { if (ctx.state === 'running') _audioUnlockDone = true; };
             if (ctx.state === 'suspended') { ctx.resume().then(finish).catch(() => { }); } else { finish(); }
-            // Немой блип нулевой громкости — на iOS одного resume() иногда
-            // недостаточно, помогает реальный (пусть и беззвучный) source.start().
+            // A silent zero-volume blip — on iOS a single resume() is sometimes
+            // not enough, a real (even if silent) source.start() helps.
             try {
                 const buf = ctx.createBuffer(1, 1, ctx.sampleRate);
                 const src = ctx.createBufferSource();
                 src.buffer = buf; src.connect(ctx.destination); src.start(0);
-            } catch (e) { emuWarn('swallow:L7432', 'блок около script.js:7432: ' + _errText(e) + ' (не критично)'); }
+            } catch (e) { emuWarn('swallow:L7432', 'block near script.js:7432: ' + _errText(e) + ' (not critical)'); }
         }
         ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'keydown'].forEach((ev) => {
             document.addEventListener(ev, _unlockAudioContext, { passive: true });
         });
-        const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, чтобы не пересчитывать заново при повторном Play/пересборке сцены
+        const _stretchedBufferCache = {}; // "src|rate" -> AudioBuffer, so as not to recompute on a repeated Play/scene rebuild
 
-        // Фазовый вокодер — раньше здесь был WSOLA (время-доменный поиск
+        // Phase vocoder — there used to be WSOLA (a time-domain search
         const _STRETCH_WORKER_CODE = `
             function _fft(re, im, inverse) {
                 const n = re.length;
@@ -9702,7 +9704,7 @@ end
                 for (let i = 0; i < outLen; i++) if (normArr[i] > 1e-6) output[i] /= normArr[i];
                 return output;
             }
-            // Простой линейный ресемплинг — НЕ фазовый вокодер, наоборот:
+            // A simple linear resampling — NOT a phase vocoder, on the contrary:
             function _resampleChannel(input, factor) {
                 const outLen = Math.max(1, Math.floor(input.length / factor));
                 const output = new Float32Array(outLen);
@@ -9718,7 +9720,7 @@ end
             }
             self.onmessage = function (e) {
                 const { jobId, channels, speed, mode } = e.data;
-                const frameSize = 2048; // степень двойки — обязательное требование для _fft; ~46мс при 44.1кГц
+                const frameSize = 2048; // a power of two — a mandatory requirement for _fft; ~46 ms at 44.1 kHz
                 const outChannels = mode === 'resample'
                     ? channels.map((ch) => _resampleChannel(ch, speed))
                     : channels.map((ch) => _stretchChannel(ch, speed, frameSize));
@@ -9740,7 +9742,7 @@ end
             }
             return _stretchWorker;
         }
-        // Возвращает Promise<AudioBuffer> — сам расчёт идёт в воркере
+        // Returns a Promise<AudioBuffer> — the computation itself runs in a worker
         function _postStretchJob(buffer, speed, mode, audioCtx) {
             return new Promise((resolve) => {
                 if (Math.abs(speed - 1) < 0.001) { resolve(buffer); return; }
@@ -9749,7 +9751,7 @@ end
                 const channels = [];
                 const transferables = [];
                 for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-                    const data = buffer.getChannelData(ch).slice(); // копия — оригинал AudioBuffer нельзя "отдать" воркеру (detach испортил бы исходный буфер)
+                    const data = buffer.getChannelData(ch).slice(); // a copy — the original AudioBuffer can't be "handed over" to the worker (detaching would spoil the source buffer)
                     channels.push(data);
                     transferables.push(data.buffer);
                 }
@@ -9767,7 +9769,7 @@ end
         function _resampleAsync(buffer, factor, audioCtx) {
             return _postStretchJob(buffer, factor, 'resample', audioCtx);
         }
-        // PitchShiftSoundEffect.Octave — НАСТОЯЩИЙ pitch-only эффект
+        // PitchShiftSoundEffect.Octave — a REAL pitch-only effect
         async function _pitchShiftAsync(buffer, octave, audioCtx) {
             if (Math.abs(octave) < 0.001) return buffer;
             const p = Math.pow(2, octave);
@@ -9775,7 +9777,7 @@ end
             return _resampleAsync(lengthened, p, audioCtx);
         }
 
-        // ============ ПОСТОЯННЫЙ КЭШ РЕЗУЛЬТАТА (IndexedDB) ============
+        // ============ PERSISTENT RESULT CACHE (IndexedDB) ============
         let _stretchDbPromise = null;
         function _openStretchDb() {
             if (!_stretchDbPromise) {
@@ -9797,7 +9799,7 @@ end
                     req.onsuccess = () => resolve(req.result || null);
                     req.onerror = () => resolve(null);
                 });
-            } catch (e) { return null; } // кэш — best-effort, не должен ронять воспроизведение
+            } catch (e) { return null; } // the cache is best-effort, it must not break playback
         }
         async function _stretchDbPut(key, value) {
             try {
@@ -9807,19 +9809,19 @@ end
             } catch (e) { emuWarn('swallow:_stretchDbPut:7631', '_stretchDbPut: ' + _errText(e) + ' (best-effort)'); }
         }
 
-        // Настоящий звуковой движок поверх Sound-инстансов.
+        // A real sound engine on top of Sound instances.
         class RobloxSoundElement {
             constructor() {
                 this._native = new Audio();
                 this._native.preload = 'auto';
                 this._mode = 'native';
                 this._rate = 1;
-                this._pitchOctave = 0; // PitchShiftSoundEffect.Octave — независимый от _rate pitch-only сдвиг, см. _rebuildProcessedBuffer
+                this._pitchOctave = 0; // PitchShiftSoundEffect.Octave — a pitch-only shift independent of _rate, see _rebuildProcessedBuffer
                 this._src = '';
                 this._listeners = {};
                 this._volume = 0.5;
                 this._loop = false;
-                // Web Audio часть — создаётся лениво в _upgrade(), чтобы
+                // The Web Audio part — created lazily in _upgrade(), so that
                 this._ctx = null;
                 this._gain = null;
                 this._rawBuffer = null;
@@ -9884,14 +9886,14 @@ end
                 if (Math.abs(v - this._rate) < 0.001) return;
                 this._rate = v;
                 if (Math.abs(v - 1) < 0.001 && Math.abs(this._pitchOctave) < 0.001) {
-                    // Возврат к 1x БЕЗ активного pitch-эффекта — нативного
-                    // <audio> достаточно, апгрейд не нужен.
+                    // Return to 1x WITHOUT an active pitch effect — the native
+                    // <audio> is enough, no upgrade needed.
                     return;
                 }
                 this._upgrade();
             }
-            // PitchShiftSoundEffect.Octave — независимый от playbackRate
-            // pitch-only эффект (см. _rebuildProcessedBuffer/_pitchShiftAsync).
+            // PitchShiftSoundEffect.Octave — a pitch-only effect independent of
+            // playbackRate (see _rebuildProcessedBuffer/_pitchShiftAsync).
             get pitchOctave() { return this._pitchOctave; }
             set pitchOctave(v) {
                 v = Number(v) || 0;
@@ -9919,9 +9921,9 @@ end
                     if (!r.ok) throw new Error('HTTP ' + r.status);
                     return r.arrayBuffer();
                 }).then((buf) => this._ctx.decodeAudioData(buf)).then((decoded) => {
-                    if (token !== this._loadToken) return; // src/режим сменили, пока грузили — этот результат уже неактуален
+                    if (token !== this._loadToken) return; // src/mode changed while loading — this result is no longer relevant
                     this._rawBuffer = decoded;
-                    // Сам расчёт фазового вокодера (секунды на трек, см.
+                    // The phase vocoder computation itself (seconds per track, see
                     if (!this._loadedFired) { this._loadedFired = true; this._fire('canplaythrough'); }
                     if (resumePlaying) {
                         this._rebuildProcessedBuffer().then(() => {
@@ -9932,18 +9934,18 @@ end
             }
             async _rebuildProcessedBuffer() {
                 if (!this._rawBuffer) return;
-                // Версия в ключе кэша (в памяти И в IndexedDB — последний
-                // переживает перезагрузку страницы): если когда-либо раньше
-                // тут был посчитан и сохранён результат по старой/другой
-                // версии алгоритма растяжки, он бы молча продолжал
-                // отдаваться из кэша и звучать неправильно (писклявый голос)
-                // даже после починки кода — сам код никогда не перезапускался,
-                // просто читался готовый файл из IndexedDB. Бампаем версию,
-                // чтобы прошлые закэшированные результаты гарантированно не
-                // подхватились.
+                // The version in the cache key (in memory AND in IndexedDB — the latter
+                // survives a page reload): if at some earlier point
+                // a result was computed and saved under an old/different
+                // version of the stretching algorithm, it would silently keep
+                // being served from the cache and sound wrong (a squeaky voice)
+                // even after the code was fixed — the code itself was never rerun,
+                // a ready file was just read from IndexedDB. Bump the version
+                // so that previously cached results are guaranteed not
+                // to be picked up.
                 const key = 'v2|' + this._src + '|' + this._rate.toFixed(3) + '|' + this._pitchOctave.toFixed(3);
                 if (_stretchedBufferCache[key]) { this._processedBuffer = _stretchedBufferCache[key]; return; }
-                // Дисковый (IndexedDB) кэш — проверяем ДО похода в воркер:
+                // The disk (IndexedDB) cache — check BEFORE going to the worker:
                 const cached = await _stretchDbGet(key);
                 if (cached) {
                     const outBuf = this._ctx.createBuffer(cached.channels.length, cached.channels[0].length, cached.sampleRate);
@@ -9952,34 +9954,34 @@ end
                     _stretchedBufferCache[key] = outBuf;
                     return;
                 }
-                // ВАЖНО: в настоящем Roblox Sound.PlaybackSpeed — это НЕ
-                // сохраняющая тон растяжка времени, а обычный множитель
-                // скорости чтения (как audio.playbackRate у HTML5): меняет
-                // И темп, И питч одновременно (это задокументированное и
-                // хорошо известное поведение Roblox). Раньше PlaybackSpeed
-                // здесь шёл через фазовый вокодер (сохраняя тон) — то есть
-                // звучал ИНАЧЕ, чем в настоящем Roblox, а маперы подбирают
-                // Octave у PitchShiftSoundEffect ИМЕННО под естественный
-                // подъём/понижение тона от PlaybackSpeed (как в примерах
-                // этой карты: у превью песен разные PlaybackSpeed и разные
-                // компенсирующие Octave). Наша "сохраняющая тон" растяжка
-                // ломала этот баланс — отсюда писклявость даже там, где в
-                // настоящем Roblox всё звучит нормально.
-                // PitchShiftSoundEffect.Octave — НАСТОЯЩИЙ отдельный эффект:
-                // он честно меняет питч БЕЗ изменения длительности (в
-                // отличие от PlaybackSpeed) — это тоже задокументированное
-                // поведение, и его сохраняем как есть.
+                // IMPORTANT: in real Roblox Sound.PlaybackSpeed is NOT
+                // a pitch-preserving time stretch, but an ordinary
+                // read-speed multiplier (like audio.playbackRate in HTML5): it changes
+                // BOTH tempo AND pitch at once (this is documented and
+                // well-known Roblox behavior). Previously PlaybackSpeed
+                // went here through the phase vocoder (preserving pitch) — i.e. it
+                // sounded DIFFERENT from real Roblox, while map makers tune the
+                // Octave of PitchShiftSoundEffect PRECISELY to the natural
+                // pitch rise/fall from PlaybackSpeed (as in the examples
+                // of this map: song previews have different PlaybackSpeeds and different
+                // compensating Octaves). Our "pitch-preserving" stretch
+                // broke this balance — hence the squeakiness even where
+                // in real Roblox everything sounds fine.
+                // PitchShiftSoundEffect.Octave — a REAL separate effect:
+                // it honestly changes pitch WITHOUT changing duration (unlike
+                // PlaybackSpeed) — this is also documented
+                // behavior, and we keep it as is.
                 const t0 = performance.now();
-                logLuaOutput('info', 'Sound: обрабатываю ' + this._src + ' — PlaybackSpeed=' + this._rate.toFixed(3) + ', Octave=' + this._pitchOctave.toFixed(3) + ' (длительность ' + this._rawBuffer.duration.toFixed(2) + 'с, ' + this._rawBuffer.sampleRate + 'Гц)');
+                logLuaOutput('info', 'Sound: processing ' + this._src + ' — PlaybackSpeed=' + this._rate.toFixed(3) + ', Octave=' + this._pitchOctave.toFixed(3) + ' (duration ' + this._rawBuffer.duration.toFixed(2) + 's, ' + this._rawBuffer.sampleRate + 'Hz)');
                 const p = Math.pow(2, this._pitchOctave);
-                // PlaybackSpeed — наивный ресемпл (меняет питч, как в Roblox).
+                // PlaybackSpeed — naive resampling (changes pitch, as in Roblox).
                 const speedApplied = Math.abs(this._rate - 1) < 0.001
                     ? this._rawBuffer
                     : await _resampleAsync(this._rawBuffer, this._rate, this._ctx);
-                // PitchShiftSoundEffect — честный сдвиг тона без изменения темпа.
+                // PitchShiftSoundEffect — an honest pitch shift without changing tempo.
                 this._processedBuffer = Math.abs(p - 1) < 0.001 ? speedApplied : await _pitchShiftAsync(speedApplied, this._pitchOctave, this._ctx);
                 _stretchedBufferCache[key] = this._processedBuffer;
-                logLuaOutput('info', 'Sound: готово за ' + ((performance.now() - t0) / 1000).toFixed(1) + 'с — новая длительность ' + this._processedBuffer.duration.toFixed(2) + 'с, ' + this._processedBuffer.sampleRate + 'Гц (AudioContext=' + this._ctx.sampleRate + 'Гц)');
+                logLuaOutput('info', 'Sound: done in ' + ((performance.now() - t0) / 1000).toFixed(1) + 's — new duration ' + this._processedBuffer.duration.toFixed(2) + 's, ' + this._processedBuffer.sampleRate + 'Hz (AudioContext=' + this._ctx.sampleRate + 'Hz)');
                 const channels = [];
                 for (let ch = 0; ch < this._processedBuffer.numberOfChannels; ch++) {
                     channels.push(this._processedBuffer.getChannelData(ch));
@@ -9996,13 +9998,13 @@ end
             _startPlayback(offset) {
                 if (!this._processedBuffer) return;
                 if (this._ctx.state === 'suspended') {
-                    // На всякий случай (если по какой-то причине разблокировка
-                    // при первом тапе не сработала) — пробуем ещё раз при
-                    // самом запуске; логируем, чтобы было видно в Output,
-                    // если звук всё равно не слышен именно по этой причине.
+                    // Just in case (if for some reason the unlock
+                    // on the first tap didn't work) — try again at
+                    // the launch itself; log it so it is visible in Output
+                    // if the sound is still inaudible for exactly this reason.
                     this._ctx.resume().then(() => {
                         if (this._ctx.state !== 'running') {
-                            logLuaOutput('warn', 'AudioContext не разблокировался (state=' + this._ctx.state + ') — звук может быть не слышен');
+                            logLuaOutput('warn', 'AudioContext was not unlocked (state=' + this._ctx.state + ') — the sound may be inaudible');
                         }
                     }).catch(() => { });
                 }
@@ -10010,13 +10012,13 @@ end
                 node.buffer = this._processedBuffer;
                 node.connect(this._gain);
                 node.onended = () => {
-                    if (this._sourceNode !== node) return; // это был предыдущий source (заменили офсетом/темпом раньше) — игнор
+                    if (this._sourceNode !== node) return; // this was the previous source (replaced earlier by an offset/tempo change) — ignore
                     this._sourceNode = null;
                     this._playing = false;
                     if (this._loop) {
                         this._startOffset = 0;
                         this._startPlayback(0);
-                        this._fire('timeupdate'); // сигнал для DidLoop-детектора (см. регистрацию в getOrCreateSoundEl)
+                        this._fire('timeupdate'); // signal for the DidLoop detector (see the registration in getOrCreateSoundEl)
                     } else {
                         this._ended = true;
                         this._fire('ended');
@@ -10034,7 +10036,7 @@ end
                 return new Promise((resolve, reject) => {
                     const tryStart = () => {
                         if (this._rawBuffer && !this._processedBuffer && !this._stretchInFlight) {
-                            // Первый реальный Play для этого трека — именно
+                            // The first real Play for this track — precisely
                             this._stretchInFlight = true;
                             this._rebuildProcessedBuffer().finally(() => { this._stretchInFlight = false; });
                         }
@@ -10045,7 +10047,7 @@ end
                             }
                             resolve();
                         } else if (this._loadToken > 0) {
-                            setTimeout(tryStart, 50); // ещё грузится/декодируется/считается в воркере — подождём
+                            setTimeout(tryStart, 50); // still loading/decoding/being computed in the worker — wait
                         } else {
                             reject(new Error('no source'));
                         }
@@ -10064,29 +10066,29 @@ end
         function getOrCreateSoundEl(ref) {
             if (!soundElByRef[ref]) {
                 const a = new RobloxSoundElement();
-                // Sound.Ended — реальный сигнал Roblox, на который
+                // Sound.Ended — a real Roblox signal, on which
                 a.addEventListener('ended', () => fireLuaSignal(ref, 'Ended', []));
-                // Loaded — раньше нечем было понять, что звук вообще готов
+                // Loaded — previously there was no way to tell that a sound was ready at all
                 a.addEventListener('canplaythrough', () => fireLuaSignal(ref, 'Loaded', []));
-                // DidLoop — родное 'ended' у зацикленного <audio> (loop=true)
+                // DidLoop — the native 'ended' of a looped <audio> (loop=true)
                 let _lastT = 0;
                 a.addEventListener('timeupdate', () => {
                     if (a.loop && a.currentTime < _lastT - 0.5) fireLuaSignal(ref, 'DidLoop', []);
                     _lastT = a.currentTime;
                 });
-                // Раньше ошибка загрузки звука (плохой/просроченный
+                // Previously a sound load error (a bad/expired
                 a.addEventListener('error', () => {
                     const nm = (luaByRef[ref] && luaByRef[ref].name) || ref;
                     logLuaOutput('warn', t('warn_sound_failed', { name: nm, src: a.src || '?' }));
-                    // Сама ошибка <audio> не говорит, ПОЧЕМУ не загрузилось —
-                    // переспрашиваем /api/asset-proxy напрямую и показываем,
-                    // что ответил сервер (тот же приём, что и для текстур:
-                    // reportAssetFailure). Без этого "Failed to load sound"
-                    // ничего не говорит о причине (401 от Roblox, битый файл,
-                    // сеть) — и в этой карте таймер "Time: X.XX" в ChartPlayer
-                    // считается от sound.TimePosition, так что незагруженный
-                    // звук выглядит как "не идёт время в игре", хотя причина
-                    // на самом деле в загрузке трека.
+                    // The <audio> error itself doesn't say WHY loading failed —
+                    // we re-query /api/asset-proxy directly and show
+                    // what the server answered (the same trick as for textures:
+                    // reportAssetFailure). Without it "Failed to load sound"
+                    // says nothing about the cause (401 from Roblox, a broken file,
+                    // the network) — and in this map the "Time: X.XX" timer in ChartPlayer
+                    // is computed from sound.TimePosition, so an unloaded
+                    // sound looks like "game time isn't moving", although the cause
+                    // is actually the track loading.
                     const m = a.src && a.src.match(/[?&]id=(\d+)/);
                     if (m) reportAssetFailure(m[1]);
                 });
@@ -10096,10 +10098,10 @@ end
         }
         function luaSoundControl(ref, action) {
             const a = soundElByRef[ref];
-            if (!a) return; // SoundId ещё не задан — играть нечего
+            if (!a) return; // SoundId is not set yet — nothing to play
             if (action === 'play') {
-                // currentTime не сбрасываем — Roblox Sound:Play() на уже
-                a.play().catch(() => { }); // автоплей иногда блокируется браузером до первого жеста пользователя — не считаем это ошибкой скрипта
+                // we don't reset currentTime — Roblox Sound:Play() on an already
+                a.play().catch(() => { }); // autoplay is sometimes blocked by the browser until the first user gesture — we don't count this as a script error
             } else if (action === 'stop') {
                 a.pause();
                 a.currentTime = 0;
@@ -10110,24 +10112,24 @@ end
             }
         }
 
-        // Разумные Roblox-дефолты для свойств, которых у этого движка нет
+        // Reasonable Roblox defaults for properties this engine doesn't have
         const GENERIC_PROP_DEFAULTS = {
             Volume: 0.5, PlaybackSpeed: 1, Pitch: 1, TimePosition: 0, SoundId: '',
             Looped: false, Playing: false, PlayOnRemove: false,
         };
-        let playSpawnPos = null;   // где персонаж появляется при старте Play и после смерти
-        let luaCharDead = false;   // Humanoid.Health дошёл до 0, ждём респавн
+        let playSpawnPos = null;   // where the character appears at the start of Play and after death
+        let luaCharDead = false;   // Humanoid.Health reached 0, waiting for respawn
         let luaCharSavedMove = null;
-        let luaRefProps = {};   // ref -> {Part0|Part1|Attachment0|Attachment1: ref (-1 = nil)} у сварок и констрейнтов
-        let luaWelds = [];      // активные WeldConstraint, созданные СКРИПТОМ: {ref, p0, p1, off: Matrix4, prev}
-        let luaCloneOrigin = {}; // ref клона -> ref оригинала из файла (Clone() аксессуаров и т.п.)
-        let luaCloneSource = {}; // ref клона -> ref того, что клонировали (непосредственный источник)
-        let luaAttCF = {};   // ref вложения (Attachment) -> [x,y,z,R00..R22]: Position/CFrame, в т.ч. записанные скриптами
-        let luaInitProps = [];  // [{ref, name, kind, a, b, c}] — типизированные свойства из файла (Color3/Vector3), заливаются в Lua после prelude
-        let luaInitValues = []; // [{ref, value:{k,v}}] — табличные Value из файла, заливаются в Lua после prelude
-        let luaGenericPropsByRef = {}; // ref -> {propName: value} — общий "мусорный ящик" для свойств без спец-обработки, чтобы хотя бы запись-потом-чтение работала честно
+        let luaRefProps = {};   // ref -> {Part0|Part1|Attachment0|Attachment1: ref (-1 = nil)} for welds and constraints
+        let luaWelds = [];      // active WeldConstraints created by a SCRIPT: {ref, p0, p1, off: Matrix4, prev}
+        let luaCloneOrigin = {}; // clone ref -> original ref from the file (Clone() of accessories etc.)
+        let luaCloneSource = {}; // clone ref -> ref of what was cloned (the immediate source)
+        let luaAttCF = {};   // attachment ref -> [x,y,z,R00..R22]: Position/CFrame, including ones written by scripts
+        let luaInitProps = [];  // [{ref, name, kind, a, b, c}] — typed properties from the file (Color3/Vector3), poured into Lua after the prelude
+        let luaInitValues = []; // [{ref, value:{k,v}}] — table Values from the file, poured into Lua after the prelude
+        let luaGenericPropsByRef = {}; // ref -> {propName: value} — a general "junk drawer" for properties without special handling, so that at least write-then-read works honestly
 
-        // AudioPlayer (новый Audio API) играет через тот же <audio>, что и Sound; различаются только имена свойств
+        // AudioPlayer (the new Audio API) plays through the same <audio> as Sound; only the property names differ
         function luaSoundLikeCls(ref) { const c = luaByRef[ref] && luaByRef[ref].cls; return (c === 'Sound' || c === 'AudioPlayer') ? c : null; }
         function luaSoundPropAlias(ref, name) {
             if (luaByRef[ref] && luaByRef[ref].cls === 'AudioPlayer') {
@@ -10138,40 +10140,40 @@ end
         }
         function luaGetGenericProp(ref, name) {
             if (name === 'Name' && luaByRef[ref]) return luaByRef[ref].name;
-            // Sound — живое состояние реального <audio>, а не то, что
+            // Sound — the live state of the real <audio>, not what
             if (luaSoundLikeCls(ref) && soundElByRef[ref]) {
                 const a = soundElByRef[ref];
                 if (name === 'TimePosition') return a.currentTime || 0;
                 if (name === 'IsPlaying' || name === 'Playing') return !a.paused && !a.ended;
                 if (name === 'TimeLength' || name === 'Length') return a.duration || 0;
-                // Pitch — устаревшее (в реальном Roblox давно заменено
+                // Pitch — deprecated (long since replaced in real Roblox
                 if (name === 'PlaybackSpeed' || name === 'Pitch') return _soundBaseSpeed[ref] != null ? _soundBaseSpeed[ref] : 1;
             }
-            // Sound, чей ассет не загрузился (нет сети/куки) — всё равно «не играет», а не nil (скрипты читают IsPlaying/TimeLength)
+            // A Sound whose asset didn't load (no network/cookie) — still «not playing», not nil (scripts read IsPlaying/TimeLength)
             if (luaSoundLikeCls(ref) && !soundElByRef[ref]) {
                 if (name === 'IsPlaying' || name === 'Playing') return false;
                 if (name === 'TimePosition' || name === 'TimeLength' || name === 'Length') return 0;
             }
-            // GUI-объекты — ПЕРЕД virtualInstanceProps:
+            // GUI objects — BEFORE virtualInstanceProps:
             if (guiPropsByRef[ref] && name in guiPropsByRef[ref]) {
                 const v = guiPropsByRef[ref][name];
-                // Position/Size — составные UDim2-объекты, мост может
+                // Position/Size — composite UDim2 objects, the bridge may
                 return (v !== null && typeof v === 'object') ? JSON.stringify(v) : v;
             }
-            // Instance.new() — нет меша/тела вообще, все свойства просто
-            // лежат в обычном JS-объекте, заведённом при создании.
+            // Instance.new() — no mesh/body at all, all properties just
+            // live in a plain JS object created at creation.
             if (virtualInstanceProps[ref]) {
                 if (_promptRegistry[ref] && name in _promptRegistry[ref] && name !== 'parentRef' && _promptRegistry[ref][name] !== undefined) return _promptRegistry[ref][name];
                 const v = virtualInstanceProps[ref][name];
                 if (v !== undefined) return v;
-                // Player до загрузки аккаунта: UserId = -1 (как у локального тестового игрока в Studio), а не nil — иначе
-                // скрипты вида states[plr.UserId] падали (AdminPanelServer: table index is nil), пока /api/roblox/me ещё грузится
+                // Player before the account has loaded: UserId = -1 (like the local test player in Studio), not nil — otherwise
+                // scripts like states[plr.UserId] failed (AdminPanelServer: table index is nil) while /api/roblox/me is still loading
                 if (luaByRef[ref] && luaByRef[ref].cls === 'Player') {
                     if (name === 'UserId') return -1;
                     if (name === 'DisplayName') return 'LocalPlayer';
                     if (name === 'AccountAge') return 0;
                 }
-                // клон/Instance.new части без записанного свойства — значения по умолчанию Roblox, а не nil
+                // a clone/Instance.new part without a written property — Roblox default values, not nil
                 if (name === 'CanCollide' || name === 'CanTouch' || name === 'CanQuery') return true;
                 if (name === 'Anchored' || name === 'Massless') return false;
                 if (name === 'Material' && luaByRef[ref] && /Part|UnionOperation/.test(luaByRef[ref].cls)) return 'Plastic';
@@ -10181,16 +10183,16 @@ end
                     if (vcls && /Part$|^Part$|MeshPart|UnionOperation|WedgePart|TrussPart|SpawnLocation|Decal|Texture/.test(vcls)) return 0;
                 }
                 if (vcls === 'ProximityPrompt') {
-                    const rp = _promptRegistry[ref];   // живой реестр — источник истины (клон из файла, свойства из скрипта)
+                    const rp = _promptRegistry[ref];   // the live registry — the source of truth (a clone from the file, properties from a script)
                     if (rp && name in rp && rp[name] !== undefined && name !== 'parentRef') return rp[name];
                     const PD = { HoldDuration: 0, MaxActivationDistance: 10, ActionText: '', ObjectText: '', RequiresLineOfSight: true, Enabled: true, ClickablePrompt: true };
                     if (name in PD) return PD[name];
                 }
-                // свойства, скопированные Clone()-ом из файлового оригинала (Beam.Enabled, AudioPlayer.AssetId, ...)
+                // properties copied by Clone() from the file original (Beam.Enabled, AudioPlayer.AssetId, ...)
                 if (luaGenericPropsByRef[ref] && name in luaGenericPropsByRef[ref]) return luaGenericPropsByRef[ref][name];
                 return null;
             }
-            // ProximityPrompt из файла: свойства лежат в реестре подсказок (JS), а не в generic-пропсах
+            // A ProximityPrompt from the file: properties live in the prompt registry (JS), not in generic props
             if (_promptRegistry[ref]) {
                 const pr = _promptRegistry[ref];
                 if (name in pr && pr[name] !== undefined && name !== 'parentRef') return pr[name];
@@ -10211,13 +10213,13 @@ end
         }
         const VALUE_BASE_CLASSES = new Set(['StringValue', 'NumberValue', 'BoolValue',
             'IntValue', 'ObjectValue', 'Vector3Value', 'CFrameValue', 'Color3Value', 'BrickColorValue']);
-        // Смерть персонажа: Humanoid.Died, через Players.RespawnTime (5 c) — новый спавн на старом
-        // месте со здоровьем MaxHealth; Player.CharacterRemoving / CharacterAdded стреляют как в Roblox.
+        // Character death: Humanoid.Died, after Players.RespawnTime (5 s) — a new spawn at the old
+        // place with MaxHealth health; Player.CharacterRemoving / CharacterAdded fire as in Roblox.
         function luaKillCharacter() {
             luaCharDead = true;
             luaCharSavedMove = { walk: charWalkSpeed, jump: charJumpPower };
             charWalkSpeed = 0; charJumpPower = 0;
-            logLuaOutput('info', 'Humanoid: Health = 0 — персонаж погиб');
+            logLuaOutput('info', 'Humanoid: Health = 0 — the character died');
             fireLuaSignal(luaHumanoidRef, 'Died', []);
             const hum = luaHumanoidRef;
             setTimeout(() => {
@@ -10225,8 +10227,8 @@ end
                 luaRespawnCharacter();
             }, 5000);
         }
-        // Респавн: CharacterRemoving -> персонаж на точке появления своей команды со здоровьем и скоростью -> CharacterAdded.
-        // Его вызывает и таймер смерти, и Player:LoadCharacter() (раунды Blaster пересоздают персонажей именно так).
+        // Respawn: CharacterRemoving -> the character at its team's spawn point with health and speed -> CharacterAdded.
+        // Called by both the death timer and Player:LoadCharacter() (Blaster rounds recreate characters exactly this way).
         function luaRespawnCharacter() {
             if (!isPlaying || luaHumanoidRef === -1) return;
             const hum = luaHumanoidRef;
@@ -10243,26 +10245,26 @@ end
             fireLuaSignal(hum, 'HealthChanged', [hp.Health]);
             fireLuaSignal(luaPlayerRef, 'CharacterAdded', [{ __instanceRef: luaCharacterRef }]);
         }
-        // part.CollisionGroup = "Pink": тело получает бит группы (форсфилды команд: свои проходят, чужие нет).
-        // Вызывается ДО ветки virtualInstanceProps — иначе у виртуальных частей персонажа (HumanoidRootPart) значение
-        // просто оседало в словаре и тело игрока оставалось в группе Default.
+        // part.CollisionGroup = "Pink": the body gets the group's bit (team force fields: own pass, others don't).
+        // Called BEFORE the virtualInstanceProps branch — otherwise for the character's virtual parts (HumanoidRootPart) the value
+        // just settled in the dictionary and the player's body stayed in the Default group.
         function luaSetCollisionGroup(ref, value) {
             luaPartGroup[ref] = value;
             if (virtualInstanceProps[ref]) virtualInstanceProps[ref].CollisionGroup = value;
             else (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {}).CollisionGroup = value;
             const body = physicsBodies[ref];
             if (body) { body.__rbxGroup = value; luaApplyGroup(body); }
-            // часть персонажа -> группа тела игрока (в приложении весь персонаж — один charBody)
+            // a character part -> the player's body group (in the app the whole character is a single charBody)
             if (charBody && luaIsCharRef(ref)) { charBody.__rbxGroup = value; luaApplyGroup(charBody); }
         }
-        // Decal из Lua: decal.Texture = "rbxassetid://…" / Transparency / Face / ZIndex — меняет картинку на грани детали.
-        // Раньше свойства Decal в эмуляторе не существовали (decal.Texture == nil), и скрипты вроде «вирус на экране ТВ» падали.
+        // Decal from Lua: decal.Texture = "rbxassetid://…" / Transparency / Face / ZIndex — changes the picture on a part's face.
+        // Decal properties used not to exist in the emulator (decal.Texture == nil), and scripts like «virus on the TV screen» failed.
         const _DECAL_FACE_NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'];
         const _DECAL_BOX_GROUP = { Right: 0, Left: 1, Top: 2, Bottom: 3, Back: 4, Front: 5 };
         function luaDecalChanged(decalRef) {
             const partRef = luaParentByRef[decalRef];
             const mesh = partRef !== undefined ? sceneObjs[partRef] : null;
-            if (!mesh || !mesh.geometry || !mesh.geometry.groups || mesh.geometry.groups.length !== 6) return;   // декали рисуются только на боксах
+            if (!mesh || !mesh.geometry || !mesh.geometry.groups || mesh.geometry.groups.length !== 6) return;   // decals are drawn only on boxes
             const by = {};
             (luaChildrenByRef[partRef] || []).forEach((c, order) => {
                 if (!luaByRef[c] || luaByRef[c].cls !== 'Decal') return;
@@ -10293,7 +10295,7 @@ end
                 try { luaDecalChanged(ref); } catch (e) { console.error('decal:', e); }
                 return;
             }
-            if (ref === luaHumanoidRef && name === 'Sit' && ref !== -1) {   // humanoid.Sit = true/false из скрипта
+            if (ref === luaHumanoidRef && name === 'Sit' && ref !== -1) {   // humanoid.Sit = true/false from a script
                 if (value && !seatState) seatSit(-1); else if (!value && seatState) seatStand(false);
                 return;
             }
@@ -10301,28 +10303,28 @@ end
                 luaByRef[ref].name = String(value);
                 if (guiPropsByRef[ref]) {
                     guiPropsByRef[ref].Name = String(value);
-                    // SortOrder = Name: смена имени меняет порядок в UIListLayout/UIGridLayout родителя (слоты хотбара: frame.Name = position)
+                    // SortOrder = Name: a name change changes the order in the parent's UIListLayout/UIGridLayout (hotbar slots: frame.Name = position)
                     const gp = luaParentByRef[ref];
-                    if (gp !== undefined && gp !== -1) { try { applyUIListLayout(gp); } catch (e) { /* DOM ещё нет */ } }
+                    if (gp !== undefined && gp !== -1) { try { applyUIListLayout(gp); } catch (e) { /* no DOM yet */ } }
                 }
                 return;
             }
             if (name === 'CollisionGroup') { luaSetCollisionGroup(ref, value); return; }
-            // ValueBase.Value — раньше запись просто клалась в общий
-            // "мусорный ящик" свойств и на этом всё: сигнал .Changed
-            // никогда не стрелял. Это крайне частый паттерн в реальных
-            // играх (StringValue как канал связи между скриптами,
-            // например CurrentSong в этой карте) — "obj.Changed:Connect(...)"
-            // просто никогда не срабатывал, и весь код внутри (в этой карте
-            // — включение камеры песни, MenuCamera.lua) не выполнялся ВООБЩЕ,
-            // без единой ошибки — выглядело как "телепорт не работает",
-            // хотя сам расчёт камеры (уже проверенный) был ни при чём.
+            // ValueBase.Value — previously a write was just put into the general
+            // "junk drawer" of properties and that was it: the .Changed signal
+            // never fired. This is an extremely common pattern in real
+            // games (a StringValue as a communication channel between scripts,
+            // for example CurrentSong in this map) — "obj.Changed:Connect(...)"
+            // simply never fired, and all the code inside (in this map
+            // — enabling the song camera, MenuCamera.lua) didn't run AT ALL,
+            // without a single error — it looked like "teleport doesn't work",
+            // although the camera computation itself (already verified) had nothing to do with it.
             if (name === 'Value' && luaByRef[ref] && VALUE_BASE_CLASSES.has(luaByRef[ref].cls)) {
                 (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {}).Value = value;
                 fireLuaSignal(ref, 'Changed', [value]);
                 return;
             }
-            // Sound — до GUI/virtualInstanceProps веток:
+            // Sound — before the GUI/virtualInstanceProps branches:
             if (luaSoundLikeCls(ref)) {
                 const pn = luaSoundPropAlias(ref, name);
                 if (pn === 'SoundId') {
@@ -10334,15 +10336,15 @@ end
                 } else if (pn === 'Looped') {
                     getOrCreateSoundEl(ref).loop = !!value;
                 } else if (pn === 'PlaybackSpeed' || pn === 'Pitch') {
-                    // Оба свойства — один и тот же множитель (см.
+                    // Both properties are the same multiplier (see
                     _soundBaseSpeed[ref] = Number(value) || 1;
                     _applySoundRate(ref);
                 } else if (pn === 'TimePosition') {
                     getOrCreateSoundEl(ref).currentTime = Number(value) || 0;
                 }
-                // Падаем ДАЛЬШЕ (не return) — значение всё равно кладём в
+                // We fall THROUGH (not return) — the value is still stored in
             }
-            // PitchShiftSoundEffect.Octave/.Enabled — НАСТОЯЩИЙ Roblox-
+            // PitchShiftSoundEffect.Octave/.Enabled — a REAL Roblox
             if (luaByRef[ref] && luaByRef[ref].cls === 'PitchShiftSoundEffect' && (name === 'Octave' || name === 'Enabled')) {
                 const soundRef = luaParentByRef[ref];
                 if (soundRef !== undefined && luaByRef[soundRef] && luaByRef[soundRef].cls === 'Sound') {
@@ -10352,7 +10354,7 @@ end
                     _applySoundRate(soundRef);
                 }
             }
-            // GUI — ПЕРЕД virtualInstanceProps, той же причине, что и в
+            // GUI — BEFORE virtualInstanceProps, for the same reason as in
             if (guiPropsByRef[ref]) {
                 if (guiPatchProp(ref, name, value)) { surfaceGuiMarkDirty(ref); return; }
             }
@@ -10360,8 +10362,8 @@ end
                 _promptRegistry[ref][name] = value;
             }
             if (name === 'Anchored' && ref !== luaHumanoidRootPartRef) {
-                // Anchored=false — деталь становится динамической (падает, летит,
-                // получает AssemblyLinearVelocity); true — снова статична.
+                // Anchored=false — the part becomes dynamic (falls, flies,
+                // gets AssemblyLinearVelocity); true — static again.
                 const abody = physicsBodies[ref];
                 if (abody && typeof CANNON !== 'undefined') {
                     if (!value) {
@@ -10382,7 +10384,7 @@ end
                 }
             }
             if (ref === luaHumanoidRef && name === 'Health') {
-                // Health зажат в [0, MaxHealth]; дошёл до 0 — Died, затем респавн (как в Roblox)
+                // Health is clamped to [0, MaxHealth]; reaching 0 — Died, then respawn (as in Roblox)
                 const hp = virtualInstanceProps[ref];
                 let nv = Number(value);
                 if (!Number.isFinite(nv)) return;
@@ -10395,19 +10397,19 @@ end
             }
             if (ref === luaHumanoidRef && name === 'JumpHeight' && Number(value) <= 0) charJumpPower = 0;
             if (ref === luaHumanoidRef && (name === 'WalkSpeed' || name === 'JumpPower')) {
-                // Скрипт поменял скорость/прыжок — пишем в Output, кто и на что
-                // (раньше «персонаж не двигается» невозможно было отследить).
+                // A script changed speed/jump — write to Output who and to what
+                // (previously "the character doesn't move" was impossible to trace).
                 const nv = Number(value);
                 if (!Number.isFinite(nv)) {
-                    logLuaOutput('warn', 'Humanoid.' + name + ': значение не число (' + String(value) + ') — проигнорировано');
+                    logLuaOutput('warn', 'Humanoid.' + name + ': value is not a number (' + String(value) + ') — ignored');
                 } else if (name === 'WalkSpeed') charWalkSpeed = nv;
                 else charJumpPower = nv;
             }
             if (virtualInstanceProps[ref]) { virtualInstanceProps[ref][name] = value; return; }
             const mesh = sceneObjs[ref];
             if (name === 'Color' && mesh && mesh.material && value && typeof value === 'object' && 'r' in value) {
-                // Цвет детали: материалы общие (кеш по цвету), поэтому красим СВОЮ копию; текстурные грани
-                // (Decal) не трогаем — цвет детали на них не влияет.
+                // The part's color: materials are shared (cached by color), so we paint OUR OWN copy; textured faces
+                // (Decal) aren't touched — the part's color doesn't affect them.
                 const col = new THREE.Color(value.r, value.g, value.b);
                 const tint = (m) => {
                     if (m.map) return m;
@@ -10418,12 +10420,12 @@ end
                 return;
             }
             if (name === 'Transparency' && mesh && mesh.material) {
-                // Материалы деталей ОБЩИЕ (кеш по цвету/прозрачности): раньше opacity менялся прямо у общего
-                // материала, и когда скрипт босса делал setVisibility(0), пропадали ВСЕ детали того же цвета
-                // (серые стены и т.д.). Теперь у детали своя копия материала (создаётся один раз).
+                // Part materials are SHARED (cached by color/transparency): previously opacity was changed directly on the shared
+                // material, and when a boss script did setVisibility(0), ALL parts of the same color disappeared
+                // (gray walls etc.). Now a part has its own copy of the material (created once).
                 const tr = Math.max(0, Math.min(1, Number(value) || 0));
                 const own = (m) => {
-                    if (m.map) return m;                       // грань с текстурой (Decal) — не трогаем
+                    if (m.map) return m;                       // a face with a texture (Decal) — don't touch
                     if (m.userData && m.userData.ownMat) return m;
                     const c = m.clone(); c.userData = Object.assign({}, m.userData, { ownMat: true }); return c;
                 };
@@ -10445,25 +10447,24 @@ end
             }
             (luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {})[name] = value;
         }
-        // Отдельный, СЫРОЙ индекс иерархии для Lua-моста — специально НЕ
+        // A separate, RAW hierarchy index for the Lua bridge — deliberately does NOT
         let luaByRef = {};          // ref -> {cls, name}
-        let luaByRefVer = 0;        // растёт при любом добавлении/удалении записи (кэши списков деталей)
+        let luaByRefVer = 0;        // grow on every record addition/removal (part list caches)
         let luaParentByRef = {};    // ref -> parentRef
         let luaChildrenByRef = {};  // ref -> [childRef, ...]
-        // Instance.new() создаёт объекты без меша/физики — их произвольные
+        // Instance.new() creates objects without a mesh/physics — their arbitrary
         let virtualInstanceProps = {}; // ref -> {propName: value}
-        let luaNextVirtualRef = -1000; // счётчик вниз — не пересекается ни с
-        // реальными ref'ами карты (положительные), ни с сентинелом "нет
-        // инстанса" (-1, см. wrap() в LUA_PRELUDE).
+        let luaNextVirtualRef = -1000; // a counter going down — doesn't intersect with
+        // the real map refs (positive) or with the "no
+        // instance" sentinel (-1, see wrap() in LUA_PRELUDE).
 
-        // ============ Сигналы/RemoteEvent — общее для обеих VM состояние ============
+        // ============ Signals/RemoteEvent — state shared by both VMs ============
         let luaSignalConns = {};   // id -> {L, fnRef, ref, evName}
         let luaSignalsByKey = {};  // "ref|evName" -> [id, ...]
         let luaNextSignalId = 1;
-        let remoteQueue = [];      // [{ref, targetSide, args, dueAt}] — см. __fire_remote
+        let remoteQueue = [];      // [{ref, targetSide, args, dueAt}] — see __fire_remote
 
-        // Резолвит и дёргает все Connect-колбэки для (ref, evName) — общий
-        // Значение из RemoteEvent (null/число/строка/булево/массив/объект/Instance) -> Lua, вложенные таблицы рекурсивно
+        // A RemoteEvent value (null/number/string/boolean/array/object/Instance) -> Lua, nested tables recursively
         function pushRemoteValue(L, a) {
             const { lua } = window.fengari;
             if (a === null || a === undefined) lua.lua_pushnil(L);
@@ -10483,6 +10484,7 @@ end
             } else lua.lua_pushnil(L);
         }
 
+        // Resolves and invokes all Connect callbacks for (ref, evName) — shared
         function pushLuaSignalArgs(L, args) {
             const { lua } = window.fengari;
             let n = 0;
@@ -10494,8 +10496,8 @@ end
                     lua.lua_pushnumber(L, a.__instanceRef);
                     lua.lua_call(L, 1, 1);
                 } else if (a && typeof a === 'object' && a.__enum) {
-                    // Enum.<Type>.<Name> — тот же кэшированный объект, что видит скрипт
-                    // (сравнение inputType == Enum.ProximityPromptInputType.Touch — по ссылке)
+                    // Enum.<Type>.<Name> — the same cached object the script sees
+                    // (comparing inputType == Enum.ProximityPromptInputType.Touch — by reference)
                     lua.lua_getglobal(L, 'Enum');
                     lua.lua_getfield(L, -1, a.__enum[0]);
                     lua.lua_getfield(L, -1, a.__enum[1]);
@@ -10517,19 +10519,19 @@ end
                 const conn = luaSignalConns[id];
                 if (!conn) continue;
                 const L = conn.L;
-                // Раньше здесь напрямую доставали саму Lua-функцию через
+                // Previously the Lua function itself was fetched here directly through
                 const co = lua.lua_newthread(L);
                 lua.lua_getglobal(co, '__invoke_conn');
                 lua.lua_pushnumber(co, id);
                 const n = 1 + pushLuaSignalArgs(co, args);
                 const status = lua.lua_resume(co, null, n);
-                // lua_newthread положил co на стек L (побочный эффект) —
+                // lua_newthread put co on the L stack (a side effect) —
                 lua.lua_pop(L, 1);
                 if (status !== lua.LUA_OK && status !== lua.LUA_YIELD) {
                     logLuaOutput('error', luaErrToString(co), evName, null, L === luaServerL ? 'Script' : 'LocalScript');
                 }
             }
-            // Будим тех, кто спал в Event:Wait()/:wait() именно на этот
+            // Wake those sleeping in Event:Wait()/:wait() on exactly this
             if (luaSignalWaits.length) {
                 const ready = luaSignalWaits.filter(w => w.ref === ref && w.evName === evName);
                 if (ready.length) {
@@ -10542,7 +10544,7 @@ end
             }
         }
 
-        // Обрабатывает очередь __fire_remote — вызывается из того же тика
+        // Processes the __fire_remote queue — called from the same tick
         function processRemoteQueue() {
             if (!remoteQueue.length) return;
             const now = performance.now();
@@ -10551,7 +10553,7 @@ end
             remoteQueue = remoteQueue.filter(x => x.dueAt > now);
             for (const item of ready) {
                 const evName = item.targetSide === 'server' ? 'OnServerEvent' : 'OnClientEvent';
-                // RemoteEvent.OnServerEvent(player, ...) — player ПЕРВЫМ
+                // RemoteEvent.OnServerEvent(player, ...) — player FIRST
                 const args = evName === 'OnServerEvent'
                     ? [{ __instanceRef: luaPlayerRef }, ...item.args]
                     : item.args;
@@ -10567,9 +10569,9 @@ end
             luaSignalsByKey = {};
             luaNextSignalId = 1;
             remoteQueue = [];
-            lastRunServiceTick = null; // иначе первый Heartbeat/Stepped после
-            // следующего Play дал бы огромную dt — разницу с моментом,
-            // когда игра была остановлена в прошлый раз.
+            lastRunServiceTick = null; // otherwise the first Heartbeat/Stepped after
+            // the next Play would give a huge dt — the difference from the moment
+            // the game was stopped last time.
         }
 
         function luaWorkspaceRef() {
@@ -10578,8 +10580,8 @@ end
             }
             return -1;
         }
-        // Линейный перебор luaByRef (после клонирования комнат — десятки тысяч записей) звался из каждого game:GetService() и из
-        // обработчиков ввода. Найденный ref запоминаем и перед использованием проверяем, что он тот же сервис и всё ещё корневой.
+        // A linear scan of luaByRef (after cloning rooms — tens of thousands of entries) was called from every game:GetService() and from
+        // input handlers. We remember the found ref and check before use that it is the same service and still a root.
         const _svcRefCache = {};
         function luaFindServiceRef(name) {
             const c = _svcRefCache[name];
@@ -10589,7 +10591,7 @@ end
             }
             return -1;
         }
-        // Корневые сервисы (Workspace/Players/ReplicatedStorage/...) — их
+        // Root services (Workspace/Players/ReplicatedStorage/...) — their
         function luaRootRefs() {
             const out = [];
             for (const ref in luaParentByRef) {
@@ -10597,7 +10599,7 @@ end
             }
             return out;
         }
-        // Классы, у которых есть визуальное GUI-представление в DOM-оверлее
+        // Classes that have a visual GUI representation in the DOM overlay
         const GUI_CLASS_NAMES = new Set([
             'ScreenGui', 'BillboardGui', 'SurfaceGui', 'Frame', 'ScrollingFrame', 'CanvasGroup',
             'TextLabel', 'TextButton', 'TextBox', 'ImageLabel', 'ImageButton',
@@ -10610,32 +10612,32 @@ end
             luaParentByRef[ref] = -1;
             virtualInstanceProps[ref] = {};
             if (className === 'Beam') luaBeamRefs.add(ref);
-            // Instance.new("TextButton") и т.п.
+            // Instance.new("TextButton") etc.
             if (GUI_CLASS_NAMES.has(className)) {
                 guiPropsByRef[ref] = { ref, cls: className, Name: className, parent: -1 };
             }
-            // ProximityPrompt почти всегда создаётся СКРИПТОМ в рантайме
-            // (Instance.new("ProximityPrompt")), а не хранится в файле —
-            // например, в холодильнике из этого разговора подсказку
-            // "Спрятаться"/"Выкинуть полки" создаёт сам Script карты. Раньше
-            // список подсказок брался ТОЛЬКО из файла один раз при старте
-            // Play — такие подсказки никогда не появлялись вообще. Заводим
-            // запись в реестре сразу при создании; .Parent и свойства
-            // подтянутся через luaSetParent/luaSetGenericProp ниже.
+            // A ProximityPrompt is almost always created by a SCRIPT at runtime
+            // (Instance.new("ProximityPrompt")), and not stored in the file —
+            // for example, in the fridge from this conversation the
+            // "Hide"/"Throw out shelves" prompt is created by the map's Script itself. Previously the
+            // prompt list was taken ONLY from the file once at the start of
+            // Play — such prompts never appeared at all. We create
+            // a registry entry right at creation; .Parent and properties
+            // are filled in via luaSetParent/luaSetGenericProp below.
             if (className === 'ProximityPrompt') {
-                _promptRegistry[ref] = _defaultPromptEntry(); // parent проставится через luaSetParent
+                _promptRegistry[ref] = _defaultPromptEntry(); // parent is set via luaSetParent
             }
             return ref;
         }
-        // Script, склонированный через :Clone() ВО ВРЕМЯ игры (холодильники/двери/лифты, которые
-        // карта размножает из шаблона), раньше не запускался вообще: скрипты стартуют ОДИН раз из
-        // файла при нажатии Play, а у виртуального клона нет ни Source, ни запуска — у копии не было
-        // ни ProximityPrompt, ни двери. Как в Roblox: когда клон оказывается в Workspace /
-        // ServerScriptService — его Script-ы запускаются (script.Parent = склонированный контейнер).
-        let luaScriptsByRef = {};            // ref скрипта из файла -> {ref,name,cls,source,...} (из /api/scripts)
+        // A Script cloned via :Clone() DURING the game (fridges/doors/elevators that
+        // the map multiplies from a template) used to not run at all: scripts start ONCE from
+        // the file when Play is pressed, and a virtual clone has neither Source nor a launch — the copy had
+        // neither a ProximityPrompt nor a door. As in Roblox: when a clone ends up in Workspace /
+        // ServerScriptService — its Scripts are started (script.Parent = the cloned container).
+        let luaScriptsByRef = {};            // ref of a script from the file -> {ref,name,cls,source,...} (from /api/scripts)
         let luaStartedClonedScripts = new Set();
-        // Подписчики на AncestryChanged (ref -> есть соединение). Раньше AncestryChanged объявлялся, но не стрелял никогда, и
-        // кастомный инвентарь (tool.AncestryChanged) не узнавал, что Tool уничтожен/убран из Backpack — слот оставался в хотбаре.
+        // AncestryChanged subscribers (ref -> has a connection). Previously AncestryChanged was declared but never fired, and
+        // the custom inventory (tool.AncestryChanged) didn't learn that a Tool was destroyed/removed from the Backpack — the slot stayed in the hotbar.
         let luaAncestryRefs = new Set();
         let luaJointC = {};   // joint ref -> {C0, C1}: Matrix4 (Motor6D/Weld)
         function luaFireAncestryChanged(ref, newParentRef) {
@@ -10653,7 +10655,7 @@ end
                 const i = luaByRef[cur];
                 if (i && i.cls === 'Backpack') viaBackpack = true;
                 if (i && luaParentByRef[cur] === -1) {
-                    // Script внутри Tool в Backpack игрока (Players/<Игрок>/Backpack) в Roblox выполняется
+                    // A Script inside a Tool in the player's Backpack (Players/<Player>/Backpack) runs in Roblox
                     return i.cls === 'Workspace' || i.cls === 'ServerScriptService' || (i.cls === 'Players' && viaBackpack);
                 }
                 cur = luaParentByRef[cur];
@@ -10668,9 +10670,9 @@ end
             }
             return false;
         }
-        // Клон детали из файла (UnionOperation/MeshPart/Part холодильника) — пустой виртуальный инстанс: без меша и физики
-        // он стоял в (0,0,0) невидимкой. Когда клон попадает в Workspace — строим ему меш и тело по данным оригинала,
-        // в позиции, которую клону выставили Clone()/PivotTo (luaPartXform).
+        // A clone of a part from the file (UnionOperation/MeshPart/Part of the fridge) is an empty virtual instance: without a mesh and physics
+        // it stood at (0,0,0) as an invisible thing. When a clone gets into Workspace — we build a mesh and a body from the original's data,
+        // at the position that Clone()/PivotTo set for the clone (luaPartXform).
         function luaRealizeClonedParts(root) {
             if (!isPlaying || !luaIsUnderWorkspace(root)) return;
             const stack = [root];
@@ -10682,10 +10684,10 @@ end
                 const o = playObjData[origin];
                 if (!o) continue;
                 try { addPhysicsBodyForObj(Object.assign({}, o, { ref: r0 })); }
-                catch (e) { console.warn('Clone: меш/физика клона не построены:', e); }
+                catch (e) { console.warn('Clone: the clone\'s mesh/physics were not built:', e); }
             }
         }
-        // LocalScript выполняется на клиенте: в Backpack/Character игрока, PlayerGui, PlayerScripts
+        // A LocalScript runs on the client: in the player's Backpack/Character, PlayerGui, PlayerScripts
         function luaIsUnderClientContainer(ref) {
             let cur = ref, g = 0;
             while (cur !== undefined && cur !== -1 && g++ < 200) {
@@ -10696,10 +10698,10 @@ end
             }
             return false;
         }
-        // Script-ы клона запускаются в серверной VM, LocalScript-ы клона — в клиентской. Раньше LocalScript-ы клонов вообще
-        // не стартовали: ClientActivate/ClientLogic у Tool из StarterPack при старте Play запускались на ОРИГИНАЛЕ в
-        // StarterPack (script.Parent = он), tool.Activated/Equipped вешались на него — а у клона в Backpack/руке слушателей
-        // не было, и тап по экрану с предметом в руке ничего не делал.
+        // A clone's Scripts run in the server VM, a clone's LocalScripts — in the client VM. Previously a clone's LocalScripts didn't
+        // start at all: a Tool's ClientActivate/ClientLogic from StarterPack at the start of Play were run on the ORIGINAL in
+        // StarterPack (script.Parent = it), tool.Activated/Equipped were attached to it — and the clone in the Backpack/hand had no
+        // listeners, and a tap on the screen with an item in hand did nothing.
         function luaStartClonedScripts(root) {
             const server = !!luaServerL && luaIsUnderServerContainer(root);
             const client = !!luaClientL && luaIsUnderClientContainer(root);
@@ -10717,7 +10719,7 @@ end
                 if (!scr || scr.disabled) continue;
                 luaStartedClonedScripts.add(r0);
                 const runAs = Object.assign({}, scr, { ref: r0, cls: info.cls });
-                // отложенно: как в Roblox, скрипт клона стартует после того, как текущий код доработал до yield
+                // deferred: as in Roblox, the clone's script starts after the current code has run to a yield
                 setTimeout(() => {
                     const L = isLocal ? luaClientL : luaServerL;
                     if (!isPlaying || !L) return;
@@ -10727,7 +10729,7 @@ end
             }
         }
         function luaCloneRef(ref) {
-            // Instance:Clone() — новый виртуальный ref с тем же классом/именем
+            // Instance:Clone() — a new virtual ref with the same class/name
             const src = luaByRef[ref];
             const cls = src ? src.cls : 'Instance';
             const newRef = luaCreateVirtualInstance(cls);
@@ -10737,12 +10739,12 @@ end
             if (virtualInstanceProps[ref]) {
                 virtualInstanceProps[newRef] = Object.assign({}, virtualInstanceProps[ref]);
             }
-            // Clone() копирует и атрибуты, и теги (раньше у клона холодильника GetAttribute("HideOffset"/"Yaw") был nil)
+            // Clone() copies both attributes and tags (previously a fridge clone's GetAttribute("HideOffset"/"Yaw") was nil)
             if (luaAttrs[ref]) luaAttrs[newRef] = Object.assign({}, luaAttrs[ref]);
             if (luaTags[ref]) luaTags[newRef] = new Set(luaTags[ref]);
-            // Sound: у клона раньше не было аудио-элемента (SoundId лежал только у оригинала), поэтому
-            // sound:Clone():Play() молчал, а luaSoundControl тихо выходил с «SoundId ещё не задан».
-            // свойства «мусорного ящика» (Tool.TextureId/ToolTip из файла и т.п.) копируются у любого класса, не только у Sound
+            // Sound: a clone previously had no audio element (SoundId was only on the original), so
+            // sound:Clone():Play() was silent, and luaSoundControl quietly exited with «SoundId is not set yet».
+            // «junk drawer» properties (Tool.TextureId/ToolTip from the file etc.) are copied for any class, not only for Sound
             if (luaGenericPropsByRef[ref]) luaGenericPropsByRef[newRef] = Object.assign({}, luaGenericPropsByRef[ref]);
             if (cls === 'Beam') {
                 if (luaBeamColor[ref]) luaBeamColor[newRef] = luaBeamColor[ref];
@@ -10760,30 +10762,30 @@ end
                     _applySoundRate(newRef);
                 }
             }
-            // Клон ProximityPrompt (сундук/комната из шаблона) обязан унаследовать ВСЕ настройки: раньше он приходил с
-            // умолчаниями (текст пустой, дистанция 10, Style не Custom) и подсказка «странно работала». parentRef проставит luaSetParent.
+            // A ProximityPrompt clone (a chest/room from a template) must inherit ALL settings: previously it came with
+            // defaults (empty text, distance 10, Style not Custom) and the prompt «worked strangely». parentRef will be set by luaSetParent.
             if (cls === 'ProximityPrompt' && _promptRegistry[ref]) {
                 _promptRegistry[newRef] = Object.assign({}, _promptRegistry[ref], { parentRef: -1 });
             }
             const p = luaPositionOfRef(ref);
             if (p) luaSetPositionOfRef(newRef, p.x, p.y, p.z);
-            // Клон детали должен повторять и ПОВОРОТ оригинала (раньше копировалась только позиция —
-            // клоны повёрнутых лифтов/дверей вставали «прямо», а PivotTo считался от неверной матрицы).
+            // A part clone must repeat the original's ROTATION too (previously only the position was copied —
+            // clones of rotated elevators/doors stood «straight», and PivotTo was computed from the wrong matrix).
             if (luaIsPartRef(ref) && !luaIsCharRef(ref)) {
-                try { luaApplyPartMatrix(newRef, luaPartMatrix(ref)); } catch (e) { console.warn('Clone: поворот не скопирован:', e); }
+                try { luaApplyPartMatrix(newRef, luaPartMatrix(ref)); } catch (e) { console.warn('Clone: rotation was not copied:', e); }
             }
-            // GUI (Frame/TextButton/...) раньше тут вообще не копировался —
+            // GUI (Frame/TextButton/...) wasn't copied here at all before —
             if (guiPropsByRef[ref]) {
                 cloneGuiSubtreeInto(ref, newRef);
             } else {
-                // Instance:Clone() копирует и ВСЕХ потомков (Accessory -> Handle -> SpecialMesh/Weld ...):
-                // раньше клон приходил пустым, и FindFirstChild("Handle") у склонированного аксессуара был nil.
+                // Instance:Clone() copies ALL descendants too (Accessory -> Handle -> SpecialMesh/Weld ...):
+                // previously the clone came empty, and FindFirstChild("Handle") of a cloned accessory was nil.
                 for (const childRef of (luaChildrenByRef[ref] || [])) {
                     if (!luaByRef[childRef]) continue;
                     luaSetParent(luaCloneRef(childRef), newRef);
                 }
             }
-            // PrimaryPart клона Model — КОПИЯ той же детали внутри клона (если PrimaryPart лежал вне модели, у клона nil)
+            // A cloned Model's PrimaryPart is a COPY of the same part inside the clone (if PrimaryPart lay outside the model, the clone has nil)
             const rpp0 = luaRefProps[ref];
             if (rpp0 && rpp0.PrimaryPart !== undefined && rpp0.PrimaryPart !== -1) {
                 let found = -1;
@@ -10795,14 +10797,14 @@ end
                 }
                 (luaRefProps[newRef] = luaRefProps[newRef] || {}).PrimaryPart = found;
             }
-            // Пивот контейнера (Model/Folder): клон наследует пивот оригинала (WorldPivotData), иначе
-            // PivotTo(клона) считался бы от центра габаритов и клон вставал бы со смещением.
+            // A container's pivot (Model/Folder): the clone inherits the original's pivot (WorldPivotData), otherwise
+            // PivotTo(of the clone) would be computed from the bounds center and the clone would stand offset.
             if (!luaIsPartRef(ref) && !luaIsCharRef(ref) && !luaIsCameraRef(ref) && (_modelPivots[ref] || luaFilePivots[ref])) {
                 _modelPivots[newRef] = luaGetPivotMatrix(ref).clone();
             }
             return newRef;
         }
-        // Общая рекурсивная копия GUI-поддерева — используется и Clone()
+        // A shared recursive copy of a GUI subtree — used by Clone() too
         function cloneGuiSubtreeInto(origRef, newRef) {
             guiPropsByRef[newRef] = Object.assign({}, guiPropsByRef[origRef], { cls: luaByRef[newRef].cls, ref: newRef, parent: luaParentByRef[newRef] });
             for (const childRef of (luaChildrenByRef[origRef] || [])) {
@@ -10820,10 +10822,10 @@ end
                 if (guiPropsByRef[childRef]) cloneGuiSubtreeInto(childRef, newChildRef);
             }
         }
-        // DescendantAdded: в Roblox стреляет на КАЖДОМ предке при появлении потомка (и для всего поддерева вставленного
-        // объекта). Раньше стрелял только ChildAdded на прямом родителе, поэтому workspace.DescendantAdded не срабатывал
-        // никогда: Druns_PP вешал PromptShown только на промпты, существовавшие на старте (первая дверь), а промпты
-        // остальных дверей и клонов комнат оставались без кастомного UI. Обходим только если у предков есть подписчики.
+        // DescendantAdded: in Roblox fires on EVERY ancestor when a descendant appears (and for the whole subtree of the inserted
+        // object). Previously only ChildAdded fired on the direct parent, so workspace.DescendantAdded never
+        // fired: Druns_PP attached PromptShown only to prompts that existed at start (the first door), while the prompts
+        // of the other doors and room clones stayed without a custom UI. We walk only if the ancestors have subscribers.
         function luaFireDescendantAdded(ref, parentRef) {
             const listeners = [];
             for (let c = parentRef, g = 0; c !== undefined && c !== -1 && g++ < 200; c = luaParentByRef[c]) {
@@ -10836,7 +10838,7 @@ end
                 const r0 = stack.pop();
                 nodes.push(r0);
                 const ch = luaChildrenByRef[r0];
-                if (ch) for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);   // обратный порядок -> прямой обход дерева
+                if (ch) for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);   // reverse order -> forward tree traversal
             }
             for (const anc of listeners) {
                 for (const n of nodes) fireLuaSignal(anc, 'DescendantAdded', [{ __instanceRef: n }]);
@@ -10851,11 +10853,11 @@ end
             if (parentRef !== -1) {
                 (luaChildrenByRef[parentRef] = luaChildrenByRef[parentRef] || []).push(ref);
             }
-            // ProximityPrompt.Parent = somePart — дистанция меряется от
-            // родителя, так что перепривязку нужно отслеживать так же, как
-            // и создание (см. luaCreateVirtualInstance).
+            // ProximityPrompt.Parent = somePart — the distance is measured from
+            // the parent, so re-parenting must be tracked the same way as
+            // creation (see luaCreateVirtualInstance).
             if (_promptRegistry[ref]) _promptRegistry[ref].parentRef = parentRef;
-            // GUI-репарентинг (например, songCard.Parent = scroll после
+            // GUI re-parenting (for example, songCard.Parent = scroll after
             if (guiPropsByRef[ref]) {
                 if (oldParent !== undefined && guiChildrenByRef[oldParent]) {
                     guiChildrenByRef[oldParent] = guiChildrenByRef[oldParent].filter(c => c !== ref);
@@ -10872,15 +10874,15 @@ end
                 } else {
                     let el = guiDomByRef[ref];
                     if (el && parentEl) {
-                        parentEl.appendChild(el); // уже был в DOM (редкий, но валидный повторный репарентинг) — просто переносим узел
+                        parentEl.appendChild(el); // was already in the DOM (a rare but valid repeated re-parenting) — just move the node
                     } else if (!el && parentEl) {
-                        guiRenderNode(ref, parentEl); // первое появление в DOM — вместе со всем поддеревом (рекурсивно)
+                        guiRenderNode(ref, parentEl); // first appearance in the DOM — together with the whole subtree (recursively)
                     } else if (el && !parentEl) {
-                        el.remove(); // новый родитель ещё не отрисован (или это Parent=nil) — прячем, пока не понадобится
+                        el.remove(); // the new parent isn't rendered yet (or it's Parent=nil) — hide until needed
                         delete guiDomByRef[ref];
                     }
                 }
-                // Пере-раскладка списка (см.
+                // Re-layout of the list (see
                 if (oldParent !== undefined) applyUIListLayout(oldParent);
                 if (parentRef !== -1) applyUIListLayout(parentRef);
             }
@@ -10889,7 +10891,7 @@ end
                 const _oc = luaByRef[ref] && luaByRef[ref].cls;
                 if (_oc === 'Accessory' || _oc === 'BodyColors') scheduleCharacterOutfit();
             }
-            // Настоящее, а не заглушечное срабатывание — ChildAdded/ChildRemoved
+            // A real, not stub, firing — ChildAdded/ChildRemoved
             if (oldParent !== undefined && oldParent !== -1 && oldParent !== parentRef) {
                 fireLuaSignal(oldParent, 'ChildRemoved', [{ __instanceRef: ref }]);
             }
@@ -10898,11 +10900,11 @@ end
             }
             if (parentRef !== -1 && parentRef !== oldParent) luaFireDescendantAdded(ref, parentRef);
             if (parentRef !== oldParent) luaFireAncestryChanged(ref, parentRef);
-            // Tool перешёл в персонажа / вышел из него — Equipped / Unequipped (как в Roblox; на этом строится хотбар)
+            // A Tool moved into/out of the character — Equipped / Unequipped (as in Roblox; the hotbar is built on this)
             if (luaByRef[ref] && luaByRef[ref].cls === 'Tool' && luaCharacterRef !== -1) {
                 if (parentRef === luaCharacterRef && oldParent !== luaCharacterRef) fireLuaSignal(ref, 'Equipped', []);
                 else if (oldParent === luaCharacterRef && parentRef !== luaCharacterRef) fireLuaSignal(ref, 'Unequipped', []);
-                if (parentRef === luaCharacterRef || oldParent === luaCharacterRef) scheduleCharacterTool();   // предмет в руке
+                if (parentRef === luaCharacterRef || oldParent === luaCharacterRef) scheduleCharacterTool();   // the item in hand
             }
             if (parentRef !== -1) { luaRealizeClonedParts(ref); luaStartClonedScripts(ref); }
         }
@@ -10912,10 +10914,10 @@ end
                 luaFireAncestryChanged(ref, -1);
             }
             const _wasHeldTool = luaCharacterRef !== -1 && luaParentByRef[ref] === luaCharacterRef && luaByRef[ref] && luaByRef[ref].cls === 'Tool';
-            // Destroy в Roblox убирает и ВСЕХ потомков. Раньше чистился только сам ref: после g:Destroy() у модели «Кнопка Z»
-            // (подобранной у сундука) её деталь-меш оставалась в сцене, видимой и с физтелом — предмет «не пропадал».
+            // Destroy in Roblox removes ALL descendants too. Previously only the ref itself was cleaned: after g:Destroy() of the «Z button» model
+            // (picked up from a chest) its mesh part stayed in the scene, visible and with a physics body — the item «didn't disappear».
             for (const c of (luaChildrenByRef[ref] || []).slice()) luaDestroyRef(c, true);
-            if (_promptRegistry[ref]) {   // подсказка уничтожена — не оставляем в реестре (иначе утекает и ловит PromptShown/Hidden)
+            if (_promptRegistry[ref]) {   // the prompt is destroyed — don't leave it in the registry (otherwise it leaks and catches PromptShown/Hidden)
                 if (_promptHeldRef === String(ref) || _promptHeldRef === ref) _promptHoldEnd();
                 delete _promptRegistry[ref];
                 if (_activePromptRef === String(ref) || _activePromptRef === ref) { _activePromptRef = null; _activePrompt = null; }
@@ -10928,7 +10930,7 @@ end
                 const body = physicsBodies[ref];
                 if (body && body !== charBody && physicsWorld) { physicsWorld.removeBody(body); delete physicsBodies[ref]; }
             }
-            // GUI-узлы (ScreenGui/Frame/TextLabel/...) тут вообще не
+            // GUI nodes (ScreenGui/Frame/TextLabel/...) are not at all
             const guiEl = guiDomByRef[ref];
             if (guiEl) {
                 if (guiEl.parentNode) guiEl.parentNode.removeChild(guiEl);
@@ -10938,7 +10940,7 @@ end
             const guiParentRef = luaParentByRef[ref];
             if (guiParentRef !== undefined && guiChildrenByRef[guiParentRef]) {
                 guiChildrenByRef[guiParentRef] = guiChildrenByRef[guiParentRef].filter(c => c !== ref);
-                applyUIListLayout(guiParentRef); // осиротевшие места в списке (см. applyUIListLayout)
+                applyUIListLayout(guiParentRef); // orphaned places in the list (see applyUIListLayout)
             }
             delete guiChildrenByRef[ref];
             const parentRef = luaParentByRef[ref];
@@ -10949,7 +10951,7 @@ end
             delete luaParentByRef[ref];
             delete luaChildrenByRef[ref];
             delete virtualInstanceProps[ref];
-            if (_wasHeldTool) scheduleCharacterTool();   // tool:Destroy() в руке — убираем и модель в руке (смены родителя тут нет)
+            if (_wasHeldTool) scheduleCharacterTool();   // tool:Destroy() in hand — remove the model in hand too (there is no parent change here)
         }
 
         function installLuaBridge(L) {
@@ -10972,10 +10974,10 @@ end
             });
             def('tick', function (L2) { lua.lua_pushnumber(L2, performance.now() / 1000); return 1; });
             // __raycast(mode, ox,oy,oz, dx,dy,dz, ...filterRefs) -> ref, px,py,pz, nx,ny,nz, dist | nil
-            // mode 0 = Exclude (пропускаем потомков filterRefs), 1 = Include (только потомки filterRefs).
-            // Лучом бьём по всем мешам сцены (как Roblox: CanCollide/Transparency не важны), берём ближайшее попадание.
-            // __fire_signal(ref, evName): выстрелить событие инстанса из Lua (Tool.Equipped/Unequipped и т.п.)
-            // __gui_at_pos(x, y) -> "ref,ref,..." — GUI-узлы под точкой (клиентские координаты), верхний первым
+            // mode 0 = Exclude (skip descendants of filterRefs), 1 = Include (only descendants of filterRefs).
+            // The ray hits all scene meshes (as in Roblox: CanCollide/Transparency don't matter), take the nearest hit.
+            // __fire_signal(ref, evName): fire an instance event from Lua (Tool.Equipped/Unequipped etc.)
+            // __gui_at_pos(x, y) -> "ref,ref,..." — GUI nodes under the point (client coordinates), topmost first
             def('__gui_at_pos', function (L2) {
                 const ovr = _guiOverlayRect();
                 const x = ovr.left + lua.lua_tonumber(L2, 1) * guiScale, y = ovr.top + lua.lua_tonumber(L2, 2) * guiScale;
@@ -11042,7 +11044,7 @@ end
                 luaWaits.push({ co: L2, resumeAt: performance.now() + Math.max(0, secs) * 1000 });
                 return lua.lua_yield(L2, 0);
             });
-            // JSONEncode/JSONDecode — HttpService:JSONDecode(...) раньше не
+            // JSONEncode/JSONDecode — HttpService:JSONDecode(...) previously did not
             function pushJsAsLua(L2, v) {
                 if (v === null || v === undefined) { lua.lua_pushnil(L2); return; }
                 if (typeof v === 'number') { lua.lua_pushnumber(L2, v); return; }
@@ -11098,9 +11100,9 @@ end
                 }
                 return null;
             }
-            // RemoteEvent:FireServer/FireClient(...): таблицы (в т.ч. вложенные) и Instance передаём между VM. Раньше любой
-            // аргумент-таблица превращался в nil (else args.push(null)): AdminPanel получал init без данных -> attempt to index a nil
-            // value (local 'data'). Метатаблицы (Vector3/CFrame) теряются — приходят таблицей полей, как и у JSONEncode.
+            // RemoteEvent:FireServer/FireClient(...): tables (nested ones too) and Instances are passed between VMs. Previously any
+            // table argument turned into nil (else args.push(null)): AdminPanel received init without data -> attempt to index a nil
+            // value (local 'data'). Metatables (Vector3/CFrame) are lost — they arrive as a table of fields, like with JSONEncode.
             function luaToRemote(L2, idx, depth) {
                 idx = lua.lua_absindex(L2, idx);
                 const ty = lua.lua_type(L2, idx);
@@ -11138,34 +11140,34 @@ end
             }
             def('__json_encode', function (L2) {
                 let out = '{}';
-                try { out = JSON.stringify(luaToJs(L2, 1)); } catch (e) { emuWarn('swallow:out:8554', 'out: ' + _errText(e) + ' (циклическая ссылка и т.п. — отдаём безопасный fallback)'); }
+                try { out = JSON.stringify(luaToJs(L2, 1)); } catch (e) { emuWarn('swallow:out:8554', 'out: ' + _errText(e) + ' (circular reference etc. — return a safe fallback)'); }
                 lua.lua_pushstring(L2, out === undefined ? 'null' : out);
                 return 1;
             });
             def('__json_decode', function (L2) {
                 let val = null;
-                try { val = JSON.parse(lua.lua_tojsstring(L2, 1)); } catch (e) { emuWarn('swallow:val:8560', 'val: ' + _errText(e) + ' (невалидный JSON — nil, как и настоящий Roblox упал бы через error(), но тут безопаснее отдать nil)'); }
+                try { val = JSON.parse(lua.lua_tojsstring(L2, 1)); } catch (e) { emuWarn('swallow:val:8560', 'val: ' + _errText(e) + ' (invalid JSON — nil, as real Roblox would have failed via error(), but here it is safer to return nil)'); }
                 pushJsAsLua(L2, val);
                 return 1;
             });
-            // Signal:Wait()/:wait() — используется тем же принципом, что и
+            // Signal:Wait()/:wait() — used on the same principle as
             def('__wait_signal', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
                 const evName = lua.lua_tojsstring(L2, 2);
                 luaSignalWaits.push({ co: L2, ref, evName });
                 return lua.lua_yield(L2, 0);
             });
-            // require(moduleScriptInstance) — компилирует Source конкретного
+            // require(moduleScriptInstance) — compiles the Source of the specific
             def('__compile_module', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
-                // ModuleScript, склонированный в рантайме (копия StarterGui в PlayerGui, Clone() шаблона), — виртуальный ref
-                // с отрицательным номером: исходник лежит у оригинала из файла. Раньше require(клон) падал «не ModuleScript
-                // этой карты» (так ломался InventoryController: require(script.Parent.<Модуль>) в PlayerGui).
+                // A ModuleScript cloned at runtime (a copy of StarterGui in PlayerGui, a template's Clone()) — a virtual ref
+                // with a negative number: the source lives with the original from the file. Previously require(clone) failed with «not a ModuleScript
+                // of this map» (that is how InventoryController broke: require(script.Parent.<Module>) in PlayerGui).
                 const srcRef = luaModuleSourceByRef[ref] !== undefined ? ref : luaCloneOrigin[ref];
                 const src = srcRef !== undefined ? luaModuleSourceByRef[srcRef] : undefined;
                 if (src === undefined) {
                     lua.lua_pushboolean(L2, false);
-                    lua.lua_pushstring(L2, 'require(): ссылка #' + ref + ' — не ModuleScript этой карты');
+                    lua.lua_pushstring(L2, 'require(): reference #' + ref + ' — not a ModuleScript of this map');
                     return 2;
                 }
                 const chunkname = luaModuleNameByRef[ref] || luaModuleNameByRef[srcRef] || ('Module#' + ref);
@@ -11175,10 +11177,10 @@ end
                     const msg = luaErrToString(L2);
                     lua.lua_pop(L2, 1);
                     lua.lua_pushboolean(L2, false);
-                    lua.lua_pushstring(L2, 'ошибка компиляции модуля ' + chunkname + ': ' + msg);
+                    lua.lua_pushstring(L2, 'module compilation error ' + chunkname + ': ' + msg);
                     return 2;
                 }
-                status = lua.lua_pcall(L2, 0, 1, 0); // достаём саму function(script)...end как значение
+                status = lua.lua_pcall(L2, 0, 1, 0); // we fetch the function(script)...end itself as a value
                 if (status !== lua.LUA_OK) {
                     const msg = luaErrToString(L2);
                     lua.lua_pop(L2, 1);
@@ -11187,7 +11189,7 @@ end
                     return 2;
                 }
                 lua.lua_pushboolean(L2, true);
-                lua.lua_insert(L2, -2); // стек был [function, true] -> [true, function]
+                lua.lua_insert(L2, -2); // the stack was [function, true] -> [true, function]
                 return 2;
             });
             def('__emu_warn', function (L2) {
@@ -11226,7 +11228,7 @@ end
             def('__get_name', function (L2) {
                 const nref = lua.lua_tonumber(L2, 1);
                 const inst = luaByRef[nref];
-                // player.Name / tostring(player) у локального игрока — ник аккаунта Roblox (если вошли), как в настоящем Roblox
+                // player.Name / tostring(player) of the local player — the Roblox account nickname (if logged in), as in real Roblox
                 if (inst && nref === luaPlayerRef && playerAccount && playerAccount.name) {
                     lua.lua_pushstring(L2, playerAccount.name);
                     return 1;
@@ -11244,20 +11246,20 @@ end
                 lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
                 return 3;
             });
-            def('__refprop_get', function (L2) {   // -> ref | -1 (nil) | ничего (свойство не задано)
+            def('__refprop_get', function (L2) {   // -> ref | -1 (nil) | nothing (the property isn't set)
                 const rp = luaRefProps[lua.lua_tonumber(L2, 1)];
                 const key = lua.lua_tojsstring(L2, 2);
                 if (!rp || !(key in rp)) return 0;
                 lua.lua_pushnumber(L2, rp[key]);
                 return 1;
             });
-            def('__refprop_set', function (L2) {   // ref детали/вложения или -1
+            def('__refprop_set', function (L2) {   // ref of a part/attachment or -1
                 const ref = lua.lua_tonumber(L2, 1);
                 (luaRefProps[ref] = luaRefProps[ref] || {})[lua.lua_tojsstring(L2, 2)] = lua.lua_tonumber(L2, 3);
-                luaRegisterWeld(ref); // WeldConstraint с обоими Part0/Part1 — деталь начинает следовать за Part0
+                luaRegisterWeld(ref); // A WeldConstraint with both Part0/Part1 — the part starts following Part0
                 return 0;
             });
-            def('__att_get', function (L2) {      // Attachment.CFrame -> 12 чисел (или ничего)
+            def('__att_get', function (L2) {      // Attachment.CFrame -> 12 numbers (or nothing)
                 const a = luaAttCF[lua.lua_tonumber(L2, 1)];
                 if (!a) return 0;
                 for (let i = 0; i < 12; i++) lua.lua_pushnumber(L2, a[i]);
@@ -11269,7 +11271,7 @@ end
                 a[0] = lua.lua_tonumber(L2, 2); a[1] = lua.lua_tonumber(L2, 3); a[2] = lua.lua_tonumber(L2, 4);
                 return 0;
             });
-            def('__att_set_cf', function (L2) {   // Attachment.CFrame = CFrame (12 компонент)
+            def('__att_set_cf', function (L2) {   // Attachment.CFrame = CFrame (12 components)
                 const ref = lua.lua_tonumber(L2, 1);
                 const a = [];
                 for (let i = 0; i < 12; i++) a.push(lua.lua_tonumber(L2, 2 + i));
@@ -11285,7 +11287,7 @@ end
                 lua.lua_pushnumber(L2, p.x); lua.lua_pushnumber(L2, p.y); lua.lua_pushnumber(L2, p.z);
                 return 3;
             });
-            // GUI-объекты (ScreenGui/Frame/...) хранят Position/Size как
+            // GUI objects (ScreenGui/Frame/...) store Position/Size as
             def('__is_gui_ref', function (L2) {
                 lua.lua_pushboolean(L2, !!guiPropsByRef[lua.lua_tonumber(L2, 1)]);
                 return 1;
@@ -11304,7 +11306,7 @@ end
                 lua.lua_pushnumber(L2, y.scale || 0); lua.lua_pushnumber(L2, y.offset || 0);
                 return 4;
             });
-            // CFrame раньше не читался мостом вообще — .CFrame падал в
+            // CFrame wasn't read by the bridge at all before — .CFrame fell into
             def('__get_cframe_vecs', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
                 const mesh = sceneObjs[ref];
@@ -11321,7 +11323,7 @@ end
                 lua.lua_pushnumber(L2, up.x); lua.lua_pushnumber(L2, up.y); lua.lua_pushnumber(L2, up.z);
                 return 9;
             });
-            // ---- общие Атрибуты и Теги (для серверной и клиентской VM) ----
+            // ---- shared Attributes and Tags (for the server and client VMs) ----
             const _pushJsVal = (L2, v) => {
                 if (v === null || v === undefined) lua.lua_pushnil(L2);
                 else if (typeof v === 'number') lua.lua_pushnumber(L2, v);
@@ -11341,9 +11343,9 @@ end
                 if (old !== v && !(old === undefined && v === null)) fireLuaSignal(ref, '__attr_' + name, []);
                 return 0;
             });
-            // Команды и группы столкновений (Lua-стороны: Team.TeamColor, Player.Team, PhysicsService)
+            // Teams and collision groups (the Lua sides: Team.TeamColor, Player.Team, PhysicsService)
             def('__load_character', function (L2) {
-                // Player:LoadCharacter() — асинхронно, как в Roblox (скрипт зовёт его через task.spawn и продолжает работу)
+                // Player:LoadCharacter() — asynchronous, as in Roblox (a script calls it via task.spawn and keeps working)
                 setTimeout(() => luaRespawnCharacter(), 0);
                 return 0;
             });
@@ -11458,8 +11460,8 @@ end
                     n(9), n(10), n(11), n(2),
                     0, 0, 0, 1);
             };
-            // Motor6D/Weld: C0/C1. Раньше свойство не существовало — скрипт «Кнопка Z» (joint.C0 * CFrame.new(...)) падал с
-            // «attempt to index a nil value». По умолчанию CFrame.identity; запись двигает деталь Part1 в руке (см. _heldJointPose).
+            // Motor6D/Weld: C0/C1. The property didn't exist before — the «Z button» script (joint.C0 * CFrame.new(...)) failed with
+            // «attempt to index a nil value». CFrame.identity by default; a write moves the Part1 part in hand (see _heldJointPose).
             def('__joint_get', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1), key = lua.lua_tojsstring(L2, 2);
                 const rec = luaJointC[ref];
@@ -11484,14 +11486,14 @@ end
             });
             let _overlapPartCls = null, _overlapParts = null;
             def('__overlap', function (L2) {
-                // (mode 0=Exclude/1=Include, maxParts, skipRef, cx,cy,cz, hx,hy,hz, фильтр-ref...) -> "ref,ref,..."
+                // (mode 0=Exclude/1=Include, maxParts, skipRef, cx,cy,cz, hx,hy,hz, filter refs...) -> "ref,ref,..."
                 try {
                     const n = lua.lua_gettop(L2), num = (i) => lua.lua_tonumber(L2, i);
                     const mode = lua.lua_tointeger(L2, 1), maxParts = lua.lua_tointeger(L2, 2), skip = lua.lua_tointeger(L2, 3);
                     const cx = num(4), cy = num(5), cz = num(6), hx = num(7), hy = num(8), hz = num(9);
                     const roots = new Set();
                     const rx = num(10), ry = num(11), rz = num(12), ux = num(13), uy = num(14), uz = num(15), lx = num(16), ly = num(17), lz = num(18);
-                    // описанный мировой AABB повёрнутого бокса — для быстрого отсева
+                    // the bounding world AABB of the rotated box — for quick rejection
                     const wx = Math.abs(rx) * hx + Math.abs(ux) * hy + Math.abs(lx) * hz;
                     const wy = Math.abs(ry) * hx + Math.abs(uy) * hy + Math.abs(ly) * hz;
                     const wz = Math.abs(rz) * hx + Math.abs(uz) * hy + Math.abs(lz) * hz;
@@ -11504,7 +11506,7 @@ end
                     const out = [], c = new THREE.Vector3();
                     const PARTCLS = _overlapPartCls || (_overlapPartCls = new Set(['Part', 'MeshPart', 'WedgePart', 'CornerWedgePart', 'SpawnLocation',
                         'TrussPart', 'UnionOperation', 'NegateOperation', 'Seat', 'VehicleSeat', 'SpherePart', 'BallPart', 'CylinderPart']));
-                    // список ref-ов деталей кэшируем, пока не изменилось число объектов в luaByRef (клоны/удаления его меняют)
+                    // cache the list of part refs until the number of objects in luaByRef changes (clones/deletions change it)
                     if (!_overlapParts || _overlapParts.n !== luaByRefVer) {
                         _overlapParts = { n: luaByRefVer, refs: Object.keys(luaByRef).filter(k => luaByRef[k] && PARTCLS.has(luaByRef[k].cls)).map(k => parseInt(k, 10)) };
                     }
@@ -11512,7 +11514,7 @@ end
                         if (ref === skip) continue;
                         const pp = luaPositionOfRef(ref);
                         if (!pp) continue;
-                        // размер берём из кэша; тяжёлый luaSizeOfRef (геометрия меша) — только для деталей рядом с запросом
+                        // take the size from the cache; the heavy luaSizeOfRef (mesh geometry) — only for parts near the query
                         let sz = loadedObjSize[ref];
                         if (!sz) {
                             if (Math.abs(pp.x - cx) > wx + 100 || Math.abs(pp.y - cy) > wy + 100 || Math.abs(pp.z - cz) > wz + 100) continue;
@@ -11530,7 +11532,7 @@ end
                             if (c.z < mnz) mnz = c.z; if (c.z > mxz) mxz = c.z;
                         }
                         if (mxx < cx - wx || mnx > cx + wx || mxy < cy - wy || mny > cy + wy || mxz < cz - wz || mnz > cz + wz) continue;
-                        // ось-за-осью по базису самого бокса: углы детали переводим в его локальные координаты
+                        // axis by axis along the box's own basis: convert the part's corners into its local coordinates
                         let lmn = [Infinity, Infinity, Infinity], lmx = [-Infinity, -Infinity, -Infinity];
                         for (let i = 0; i < 8; i++) {
                             c.set((i & 1 ? 0.5 : -0.5) * sz.x, (i & 2 ? 0.5 : -0.5) * sz.y, (i & 4 ? 0.5 : -0.5) * sz.z).applyMatrix4(M);
@@ -11564,8 +11566,8 @@ end
                 lua.lua_pushnumber(L2, luaMoveDir.z);
                 return 3;
             });
-            // UserInputService.TouchEnabled и т.п.: экранный джойстик есть на
-            // сенсорных устройствах, WASD — на устройствах с клавиатурой.
+            // UserInputService.TouchEnabled etc.: the on-screen joystick exists on
+            // touch devices, WASD — on devices with a keyboard.
             def('__core_gui', function (L2) {
                 const nm = lua.lua_tojsstring(L2, 1), en = !!lua.lua_toboolean(L2, 2);
                 _coreGuiOff[nm] = !en; if (nm === 'All') _coreGuiOff.Backpack = !en;
@@ -11597,14 +11599,14 @@ end
             });
             def('__set_world_pivot', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
-                if (!luaIsPartRef(ref)) _modelPivots[ref] = _readMatrix(L2, 2);   // у Model — только пивот, детали остаются на месте
+                if (!luaIsPartRef(ref)) _modelPivots[ref] = _readMatrix(L2, 2);   // for a Model — only the pivot, parts stay in place
                 return 0;
             });
             def('__set_pivot', function (L2) {
                 luaSetPivotMatrix(lua.lua_tonumber(L2, 1), _readMatrix(L2, 2));
                 return 0;
             });
-            // __set_velocity(ref, kind[0=линейная,1=угловая], x, y, z)
+            // __set_velocity(ref, kind[0=linear,1=angular], x, y, z)
             def('__set_velocity', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1), kind = lua.lua_tonumber(L2, 2);
                 const x = lua.lua_tonumber(L2, 3), y = lua.lua_tonumber(L2, 4), z = lua.lua_tonumber(L2, 5);
@@ -11613,7 +11615,7 @@ end
                 if (ref === luaHumanoidRootPartRef) {
                     if (kind === 0) {
                         body.velocity.y = y;
-                        charPushX = x; charPushZ = z; charPushT = 0.4; // горизонтальный толчок затухает
+                        charPushX = x; charPushZ = z; charPushT = 0.4; // the horizontal push decays
                         body.wakeUp();
                     }
                     return 0;
@@ -11633,7 +11635,7 @@ end
                 luaSetPositionOfRef(lua.lua_tonumber(L2, 1), lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3), lua.lua_tonumber(L2, 4));
                 return 0;
             });
-            // AbsolutePosition/AbsoluteSize — меряем настоящий отрисованный
+            // AbsolutePosition/AbsoluteSize — we measure the real rendered
             def('__get_gui_rect', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
                 const el = guiDomByRef[ref];
@@ -11646,7 +11648,7 @@ end
                 lua.lua_pushnumber(L2, w); lua.lua_pushnumber(L2, h);
                 return 4;
             });
-            // AbsoluteContentSize — свойство UIListLayout/UIGridLayout, а не
+            // AbsoluteContentSize — a property of UIListLayout/UIGridLayout, not
             def('__get_gui_content_size', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1);
                 const parentRef = luaParentByRef[ref];
@@ -11655,10 +11657,10 @@ end
                 lua.lua_pushnumber(L2, el ? el.scrollHeight : 0);
                 return 2;
             });
-            // PlayerModule:GetControls():Disable()/:Enable() (см.
+            // PlayerModule:GetControls():Disable()/:Enable() (see
             def('__set_controls_enabled', function (L2) {
                 luaControlsDisabled = !lua.lua_toboolean(L2, 1);
-                // Раньше эта блокировка реально отключала ходьбу/поворот
+                // This lock used to really disable walking/turning
                 _updateTouchControlsVisibility();
                 return 0;
             });
@@ -11693,7 +11695,7 @@ end
                 luaSoundControl(lua.lua_tonumber(L2, 1), lua.lua_tojsstring(L2, 2));
                 return 0;
             });
-            def('__get_color', function (L2) {   // part.Color -> r, g, b (0..1) или ничего
+            def('__get_color', function (L2) {   // part.Color -> r, g, b (0..1) or nothing
                 const m = sceneObjs[lua.lua_tonumber(L2, 1)];
                 if (!m || !m.material) return 0;
                 const mat = Array.isArray(m.material) ? (m.material.find(x => x && !x.map) || m.material[0]) : m.material;
@@ -11709,13 +11711,13 @@ end
                 else lua.lua_pushstring(L2, String(v));
                 return 1;
             });
-            // Составные Roblox-типы (UDim2 у Position/Size, Color3 у
+            // Composite Roblox types (UDim2 for Position/Size, Color3 for
             function luaTableToJsPropValue(L2, idx) {
                 const field = (parentKey, childKey) => {
                     lua.lua_getfield(L2, idx, parentKey);
                     lua.lua_getfield(L2, -1, childKey);
                     const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0;
-                    lua.lua_pop(L2, 2); // childKey-значение + parentKey-таблица
+                    lua.lua_pop(L2, 2); // childKey value + parentKey table
                     return v;
                 };
                 lua.lua_getfield(L2, idx, 'X');
@@ -11736,7 +11738,7 @@ end
                     lua.lua_getfield(L2, idx, 'B'); const b = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
                     return { r, g, b };
                 }
-                // Vector2 (AnchorPoint и т.п.) — плоские числовые X/Y, без
+                // Vector2 (AnchorPoint etc.) — flat numeric X/Y, without
                 lua.lua_getfield(L2, idx, 'X');
                 const isVector2 = lua.lua_isnumber(L2, -1);
                 const vx = isVector2 ? lua.lua_tonumber(L2, -1) : 0;
@@ -11745,7 +11747,7 @@ end
                     lua.lua_getfield(L2, idx, 'Y'); const vy = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1);
                     return { x: vx, y: vy };
                 }
-                // UDim (плоская {Scale, Offset}, без вложенных X/Y) —
+                // UDim (flat {Scale, Offset}, without nested X/Y) —
                 lua.lua_getfield(L2, idx, 'Scale');
                 const isUDim = lua.lua_isnumber(L2, -1);
                 const uScale = isUDim ? lua.lua_tonumber(L2, -1) : 0;
@@ -11758,7 +11760,7 @@ end
             }
             def('__set_prop', function (L2) {
                 const ref = lua.lua_tonumber(L2, 1), name = lua.lua_tojsstring(L2, 2);
-                // part.CFrame = CFrame.new(...) — раньше вообще ничего не
+                // part.CFrame = CFrame.new(...) — previously nothing at all
                 if (name === 'CameraType') {
                     let enumName = null;
                     if (lua.lua_type(L2, 3) === lua.LUA_TTABLE) {
@@ -11772,13 +11774,13 @@ end
                         const wasScriptable = cameraIsScriptable;
                         cameraIsScriptable = (enumName === 'Scriptable');
                         logLuaOutput('info', 'Camera: CameraType -> ' + enumName + ' (ref ' + ref + ')');
-                        // Scriptable -> Custom (например MenuCamera.lua при
-                        // возврате в меню песен): раньше followCharacterCamera
-                        // в СЛЕДУЮЩИЙ же кадр мгновенно ставила target на
-                        // charBody.position — с точки зрения игрока камера,
-                        // всё это время стоявшая где-то у объекта 'camera'
-                        // песни, "телепортировалась" обратно к персонажу за
-                        // один кадр. Плавно подводим её вместо скачка.
+                        // Scriptable -> Custom (for example MenuCamera.lua when
+                        // returning to the song menu): previously followCharacterCamera
+                        // set target to charBody.position on the very NEXT frame —
+                        // from the player's point of view the camera,
+                        // which had been standing all that time somewhere at the song's 'camera'
+                        // object, "teleported" back to the character in
+                        // one frame. We ease it over smoothly instead of a jump.
                         if (wasScriptable && !cameraIsScriptable) _camReturnToCharT = 0;
                     }
                     luaSetGenericProp(ref, name, enumName);
@@ -11797,7 +11799,7 @@ end
                         const gx = (f) => { lua.lua_getfield(L2, -1, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
                         const x = gx('X'), y = gx('Y'), z = gx('Z');
                         lua.lua_pop(L2, 1);
-                        // Camera — особый случай:
+                        // Camera — a special case:
                         lua.lua_getfield(L2, 3, 'lookVector');
                         let lx = 0, ly = 0, lz = -1;
                         if (lua.lua_type(L2, -1) === lua.LUA_TTABLE) {
@@ -11817,9 +11819,9 @@ end
                 else if (ty === lua.LUA_TBOOLEAN) value = !!lua.lua_toboolean(L2, 3);
                 else if (ty === lua.LUA_TSTRING) value = lua.lua_tojsstring(L2, 3);
                 else if (ty === lua.LUA_TTABLE) {
-                    // EnumItem (prompt.Style = Enum.ProximityPromptStyle.Custom) -> имя; инстанс (gui.Adornee = part) -> ref.
-                    // Раньше оба превращались в null: Style игнорировался, Adornee у BillboardGui терялся.
-                    // rawget — чтобы не дёргать __index инстанса (он пишет «не свойство» в Output).
+                    // EnumItem (prompt.Style = Enum.ProximityPromptStyle.Custom) -> name; an instance (gui.Adornee = part) -> ref.
+                    // Previously both turned into null: Style was ignored, a BillboardGui's Adornee was lost.
+                    // rawget — so as not to trigger the instance's __index (it writes «not a property» to Output).
                     const raw = (key) => { lua.lua_pushstring(L2, key); lua.lua_rawget(L2, 3); };
                     raw('EnumType');
                     const isEnum = lua.lua_isstring(L2, -1);
@@ -11838,7 +11840,7 @@ end
                     }
                 }
                 luaSetGenericProp(ref, name, value);
-                // GetPropertyChangedSignal(name) — стреляем ПОСЛЕ применения
+                // GetPropertyChangedSignal(name) — fire AFTER applying
                 fireLuaSignal(ref, '__prop_' + name, []);
                 // NumberValue/IntValue/... .Changed(newValue)
                 if (name === 'Value') fireLuaSignal(ref, 'Changed', [value]);
@@ -11851,7 +11853,7 @@ end
                 const ref = lua.lua_tonumber(L2, 2);
                 const propName = lua.lua_tojsstring(L2, 3);
                 const duration = lua.lua_tonumber(L2, 5) || 0;
-                // TweenInfo: стиль/направление easing, DelayTime, RepeatCount (-1 = бесконечно), Reverses
+                // TweenInfo: easing style/direction, DelayTime, RepeatCount (-1 = infinite), Reverses
                 const tinfo = {
                     style: lua.lua_isstring(L2, 6) ? lua.lua_tojsstring(L2, 6) : '',
                     dir: lua.lua_isstring(L2, 7) ? lua.lua_tojsstring(L2, 7) : '',
@@ -11859,7 +11861,7 @@ end
                     repeat: lua.lua_isnumber(L2, 9) ? lua.lua_tonumber(L2, 9) : 0,
                     reverses: !!lua.lua_toboolean(L2, 10),
                 };
-                // CFrame — отдельный случай ДО общей ветки composite ниже:
+                // CFrame — a separate case BEFORE the general composite branch below:
                 if (propName === 'CFrame' && lua.lua_type(L2, 4) === lua.LUA_TTABLE) {
                     const gx = (f) => { lua.lua_getfield(L2, 4, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
                     const tx = gx('X'), ty = gx('Y'), tz = gx('Z');
@@ -11882,7 +11884,7 @@ end
                         const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
                         flx = dir.x; fly = dir.y; flz = dir.z;
                     }
-                    // Полный поворот цели (R00..R22 у нашего CFrame) — иначе деталь теряла крен/наклон
+                    // The target's full rotation (R00..R22 of our CFrame) — otherwise the part lost roll/tilt
                     let toQuat = null;
                     if (!(luaByRef[ref] && luaByRef[ref].cls === 'Camera')) {
                         const rr = [];
@@ -11905,8 +11907,8 @@ end
                     });
                     return 0;
                 }
-                // Position (Vector3) у детали — плавный сдвиг с сохранением поворота, как у твина CFrame
-                // (раньше шла общая ветка: без интерполяции и деталь вообще не двигалась).
+                // Position (Vector3) of a part — a smooth shift preserving rotation, like a CFrame tween
+                // (previously it went through the general branch: no interpolation and the part didn't move at all).
                 if (propName === 'Position' && lua.lua_type(L2, 4) === lua.LUA_TTABLE && luaIsPartRef(ref) && ref !== luaHumanoidRootPartRef) {
                     const gv = (f) => { lua.lua_getfield(L2, 4, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
                     const cur = new THREE.Vector3(), cq = new THREE.Quaternion(), cs = new THREE.Vector3();
@@ -11918,7 +11920,7 @@ end
                     });
                     return 0;
                 }
-                // Attachment.Position — плавно меняем локальный сдвиг (раньше composite-твин просто прыгал в конец)
+                // Attachment.Position — smoothly change the local offset (previously a composite tween just jumped to the end)
                 if (propName === 'Position' && lua.lua_type(L2, 4) === lua.LUA_TTABLE && luaByRef[ref] && luaByRef[ref].cls === 'Attachment') {
                     const gq = (f) => { lua.lua_getfield(L2, 4, f); const v = lua.lua_isnumber(L2, -1) ? lua.lua_tonumber(L2, -1) : 0; lua.lua_pop(L2, 1); return v; };
                     const a0 = luaAttCF[ref] || [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -11936,11 +11938,11 @@ end
                 let fromVal = null;
                 if (!composite) {
                     const cur = luaGetGenericProp(ref, propName);
-                // NumberValue/IntValue без записанного Value в Roblox равны 0 (раньше твин считал текущее значение нечитаемым и прыгал сразу к цели)
+                // NumberValue/IntValue without a written Value equal 0 in Roblox (previously the tween considered the current value unreadable and jumped straight to the target)
                 const numDefault = (luaByRef[ref] && /^(NumberValue|IntValue)$/.test(luaByRef[ref].cls)) ? 0 : toVal;
-                fromVal = (typeof cur === 'number') ? cur : numDefault; // не смогли прочитать текущее число — сразу к цели, без анимации
+                fromVal = (typeof cur === 'number') ? cur : numDefault; // couldn't read the current number — straight to the target, without animation
                 }
-                // Составное значение (UDim2/Color3/Vector2/UDim) GUI-объекта: берём текущее из guiPropsByRef и двигаем покадрово
+                // A composite value (UDim2/Color3/Vector2/UDim) of a GUI object: take the current one from guiPropsByRef and move it frame by frame
                 let fromComposite = null;
                 if (composite && toVal && typeof toVal === 'object' && guiPropsByRef[ref] && _tweenCompatible(guiPropsByRef[ref][propName], toVal)) {
                     fromComposite = JSON.parse(JSON.stringify(guiPropsByRef[ref][propName]));
@@ -11948,7 +11950,7 @@ end
                 activeTweens.push({ ref, propName, from: fromVal, to: toVal, duration, startTime: performance.now(), composite, fromComposite, completedRef: completedKey, ...tinfo });
                 return 0;
             });
-            // Tween:Cancel() для JS-твинов: убираем из активных, Completed стреляет с PlaybackState.Cancelled (как в Roblox)
+            // Tween:Cancel() for JS tweens: remove from the active ones, Completed fires with PlaybackState.Cancelled (as in Roblox)
             def('__tween_cancel', function (L2) {
                 const key = lua.lua_tonumber(L2, 1);
                 const mine = activeTweens.filter(t => t.completedRef === key);
@@ -11958,7 +11960,7 @@ end
                 }
                 return 0;
             });
-            // Easing для Lua-твинов (Value/Motor6D): тот же набор стилей, что и у JS-твинов
+            // Easing for Lua tweens (Value/Motor6D): the same set of styles as for JS tweens
             def('__ease_js', function (L2) {
                 lua.lua_pushnumber(L2, _tweenEase(lua.lua_tonumber(L2, 1), lua.lua_isstring(L2, 2) ? lua.lua_tojsstring(L2, 2) : '', lua.lua_isstring(L2, 3) ? lua.lua_tojsstring(L2, 3) : ''));
                 return 1;
@@ -11989,7 +11991,7 @@ end
                 lua.lua_pushnumber(L2, roots[i] !== undefined ? roots[i] : -1);
                 return 1;
             });
-            // ============ Сигналы (:Connect) и RemoteEvent ============
+            // ============ Signals (:Connect) and RemoteEvent ============
             def('__register_conn', function (L2) {
                 const id = lua.lua_tonumber(L2, 1);
                 const ref = lua.lua_tonumber(L2, 2);
@@ -12034,7 +12036,7 @@ end
                 return 0;
             });
             def('__fire_bindable', function (L2) {
-                // BindableEvent:Fire(...) — синхронно, в отличие от
+                // BindableEvent:Fire(...) — synchronous, unlike
                 const ref = lua.lua_tonumber(L2, 1);
                 const n = lua.lua_gettop(L2);
                 const args = [];
@@ -12057,9 +12059,9 @@ end
             });
         }
 
-        // ====================== Luau -> Lua препроцессор ======================
+        // ====================== Luau -> Lua preprocessor ======================
 
-        // [{type:'code'|'skip', text}] — 'skip' это строки ('...','"...",
+        // [{type:'code'|'skip', text}] — 'skip' are strings ('...','"...",
         function splitLuaSegments(src) {
             const segs = [];
             let i = 0, n = src.length, start = 0;
@@ -12096,8 +12098,8 @@ end
             flushCode(n);
             return segs;
         }
-        // [=*[ ... ]=*] — длинная строка/комментарий Lua. null, если в
-        // позиции i такой конструкции нет (одиночная '[' — просто скобка).
+        // [=*[ ... ]=*] — a Lua long string/comment. null if at
+        // position i there is no such construct (a lone '[' is just a bracket).
         function matchLuaLongBracket(src, i) {
             if (src[i] !== '[') return null;
             let j = i + 1, eq = 0;
@@ -12109,7 +12111,7 @@ end
             return { end: idx === -1 ? src.length : idx + close.length };
         }
 
-        // "x OP= y" -> "x = x OP (y)" — только внутри code-сегментов.
+        // "x OP= y" -> "x = x OP (y)" — only inside code segments.
         function expandCompoundAssign(code) {
             const opRe = /([+\-*/%^]|\.\.|\/\/)=(?!=)/g;
             const lvRe = /([A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*|\s*\[[^\[\]]*\])*)\s*$/;
@@ -12119,7 +12121,7 @@ end
                 let ls = opStart;
                 while (ls > 0 && /\s/.test(code[ls - 1])) ls--;
                 const lvMatch = lvRe.exec(code.slice(0, ls));
-                if (!lvMatch) continue; // не похоже на lvalue — не наш случай, оставляем как есть
+                if (!lvMatch) continue; // doesn't look like an lvalue — not our case, leave as is
                 const lvalue = lvMatch[1];
                 const lvStartIdx = lvMatch.index;
                 let re = opEnd, depth = 0;
@@ -12142,7 +12144,7 @@ end
         }
 
         // "for k, v in EXPR do" -> "for k, v in __geniter(EXPR) do"
-        // (обобщённый for Luau). Числовой for ("for i = 1, n do") не трогаем.
+        // (Luau generic for). A numeric for ("for i = 1, n do") is not touched.
         function expandGenericFor(segs) {
             const tokRe = /[A-Za-z_][A-Za-z0-9_]*|[()\[\]{}]/g;
             let stage = null, depth = 0;   // stage: null | 'names' | 'expr'
@@ -12159,7 +12161,7 @@ end
                             out += seg.text.slice(last, end) + ' __geniter(';
                             last = end; stage = 'expr'; depth = 0;
                         } else if (w === 'do') {
-                            stage = null; // числовой for
+                            stage = null; // numeric for
                         }
                     } else { // expr
                         if (w === '(' || w === '[' || w === '{') depth++;
@@ -12175,7 +12177,7 @@ end
             }
         }
 
-        // continue -> goto __continue_N + метка перед закрывающим end/until
+        // continue -> goto __continue_N + a label before the closing end/until
         function expandContinue(src) {
             const segs = splitLuaSegments(src);
             let loopId = 0;
@@ -12189,8 +12191,8 @@ end
                 let m;
                 while ((m = wordRe.exec(seg.text))) {
                     const w = m[0], idx = m.index;
-                    // `return` обязан быть последним оператором блока, а метка ::__continue_N:: перед `end` цикла
-                    // идёт после него -> "'end' expected near '::'". Внутри циклов оборачиваем return в do ... end.
+                    // `return` must be the last statement of a block, and the ::__continue_N:: label before the loop's `end`
+                    // comes after it -> "'end' expected near '::'". Inside loops we wrap return in do ... end.
                     if ((w === 'end' || w === 'else' || w === 'elseif' || w === 'until') &&
                         stack.length && stack[stack.length - 1].kind === 'ret') {
                         stack.pop();
@@ -12243,7 +12245,7 @@ end
                         out += seg.text.slice(last, idx);
                         let target = null;
                         for (let k = stack.length - 1; k >= 0; k--) {
-                            if (stack[k].kind === 'function') break; // continue не пересекает function
+                            if (stack[k].kind === 'function') break; // continue doesn't cross a function
                             if (stack[k].kind === 'loop' || stack[k].kind === 'repeat') { target = stack[k]; break; }
                         }
                         out += target ? (target.continueUsed = true, `goto __continue_${target.id}`) : w;
@@ -12256,9 +12258,9 @@ end
             return segs.map(s => s.text).join('');
         }
 
-        // ----- Luau: аннотации типов, "::"-касты, type-объявления, if-выражения -----
-        // Токенайзер сохраняет пробелы и комментарии, чтобы номера строк в
-        // сообщениях об ошибках остались такими же, как в исходнике скрипта.
+        // ----- Luau: type annotations, "::" casts, type declarations, if-expressions -----
+        // The tokenizer preserves whitespace and comments so that line numbers in
+        // error messages stay the same as in the script source.
         function luauTokenize(src) {
             const toks = [], n = src.length;
             const wsRe = /\s+/y, idRe = /[A-Za-z_][A-Za-z0-9_]*/y;
@@ -12308,12 +12310,12 @@ end
             const isP = (k, s) => k < N && toks[k].t === 'p' && toks[k].s === s;
             const isId = (k, s) => k < N && toks[k].t === 'id' && (s === undefined || toks[k].s === s);
             const copy = (a, b) => { for (let k = a; k < b; k++) out.push(toks[k].s); };
-            const dropTo = (a, b) => {   // выбросить [a,b), но сохранить переводы строк
+            const dropTo = (a, b) => {   // cut out [a,b) but keep newlines
                 let nl = 0;
                 for (let k = a; k < b; k++) for (const ch of toks[k].s) if (ch === '\n') nl++;
                 if (nl) out.push('\n'.repeat(nl));
             };
-            const skipBalanced = (p, open, close) => {   // toks[p] — открывающая скобка
+            const skipBalanced = (p, open, close) => {   // toks[p] — the opening bracket
                 let depth = 0;
                 for (; p < N; p++) {
                     if (isP(p, open)) depth++;
@@ -12321,7 +12323,7 @@ end
                 }
                 return N;
             };
-            // возвращает индекс сразу после типа, начинающегося с токена p
+            // returns the index right after the type starting at token p
             const skipType = (p) => {
                 for (;;) {
                     p = sig(p);
@@ -12406,7 +12408,7 @@ end
             return out.join('');
         }
 
-        // Luau: "if c then a elseif c2 then b else d" как ВЫРАЖЕНИЕ
+        // Luau: "if c then a elseif c2 then b else d" as an EXPRESSION
         //   -> (function() if c then return (a) elseif c2 then return (b) else return (d) end end)()
         function expandIfExpressions(src) {
             if (!/(?:[=(,{\[+\-*\/%^#<>]|\.\.|\b(?:return|and|or|not))\s*if\b/.test(src)) return src;
@@ -12415,7 +12417,7 @@ end
             const OPS = new Set(['=', '==', '~=', '<', '>', '<=', '>=', '(', ',', '{', '[', '..', '+', '-', '*', '/', '%', '^', '#', '//']);
             const OPWORDS = new Set(['return', 'and', 'or', 'not']);
             const prevSig = (k, lo) => { k--; while (k >= lo && isTrivia(k)) k--; return k >= lo ? k : -1; };
-            // 'if' в позиции k — выражение? lo — начало диапазона-выражения (там 'if' сразу в начале — тоже выражение)
+            // is the 'if' at position k an expression? lo — the start of the expression range (an 'if' right at the start is an expression too)
             const isExprIf = (k, lo, rangeIsExpr) => {
                 const p = prevSig(k, lo);
                 if (p < 0) return !!rangeIsExpr;
@@ -12423,7 +12425,7 @@ end
                 return (pt.t === 'p' && OPS.has(pt.s)) || (pt.t === 'id' && OPWORDS.has(pt.s));
             };
             const BLOCK_OPEN = new Set(['function', 'do', 'repeat']);
-            // индекс токена-терминатора выражения, начиная с p
+            // index of the expression's terminator token, starting from p
             const scanExpr = (p) => {
                 let depth = 0, block = 0, nest = 0, prevOperand = false, nl = false;
                 for (; p < N; p++) {
@@ -12454,7 +12456,7 @@ end
                     const w = t.s;
                     if (w === 'and' || w === 'or' || w === 'not') { prevOperand = false; nl = false; continue; }
                     if (w === 'if') {
-                        if (prevOperand) return p;          // начало следующего оператора
+                        if (prevOperand) return p;          // start of the next statement
                         nest++; prevOperand = false; nl = false; continue;
                     }
                     if (w === 'then' || w === 'elseif') { if (nest > 0) { prevOperand = false; nl = false; continue; } return p; }
@@ -12463,8 +12465,8 @@ end
                     if (w === 'end' || w === 'do' || w === 'until' || w === 'local' || w === 'return' ||
                         w === 'for' || w === 'while' || w === 'repeat' || w === 'break' || w === 'continue') return p;
                     if (w === 'nil' || w === 'true' || w === 'false') { if (prevOperand) return p; prevOperand = true; nl = false; continue; }
-                    // обычный идентификатор
-                    if (prevOperand) return p;               // два операнда подряд — граница выражения
+                    // an ordinary identifier
+                    if (prevOperand) return p;               // two operands in a row — an expression boundary
                     prevOperand = true; nl = false;
                 }
                 return N;
@@ -12508,11 +12510,11 @@ end
             return rewrite(0, N, false);
         }
 
-        // Luau-литералы, которых нет в Lua 5.3: интерполяция `текст {выражение}` -> ("текст" .. tostring(выражение)),
-        // числа с подчёркиваниями 1_000_000 и двоичные 0b1010. Строки/комментарии не трогаем; число строк сохраняется
-        // (переносы внутри `...` пишутся как \<перевод строки>), поэтому номера строк в ошибках остаются верными.
+        // Luau literals missing from Lua 5.3: interpolation `text {expression}` -> ("text" .. tostring(expression)),
+        // numbers with underscores 1_000_000 and binary 0b1010. Strings/comments are untouched; the line count is preserved
+        // (line breaks inside `...` are written as \<newline>), so line numbers in errors stay correct.
         function expandLuauLiterals(src) {
-            if (src.indexOf('`') < 0 && !/\d_|0[bB][01]/.test(src)) return src;   // быстрый путь
+            if (src.indexOf('`') < 0 && !/\d_|0[bB][01]/.test(src)) return src;   // fast path
             const n = src.length;
             const numRe = /0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?[\d_]+)?|\.\d[\d_]*(?:[eE][+-]?[\d_]+)?/y;
             const identRe = /[A-Za-z_][A-Za-z0-9_]*/y;
@@ -12534,7 +12536,7 @@ end
                 return Math.min(j + 1, n);
             };
             let skipBraces;
-            const skipBacktick = (k) => {            // индекс после закрывающей ` (учитывает вложенные {...})
+            const skipBacktick = (k) => {            // index after the closing ` (takes nested {...} into account)
                 let j = k + 1;
                 while (j < n) {
                     const c = src[j];
@@ -12544,7 +12546,7 @@ end
                 }
                 return n;
             };
-            skipBraces = (k) => {                     // k — на '{'; индекс после парной '}'
+            skipBraces = (k) => {                     // k — on '{'; the index after the matching '}'
                 let depth = 0, j = k;
                 while (j < n) {
                     const c = src[j];
@@ -12590,7 +12592,7 @@ end
             let out = '', i = 0;
             while (i < n) {
                 const c = src[i];
-                if (c === '-' && src[i + 1] === '-') {                   // комментарий
+                if (c === '-' && src[i + 1] === '-') {                   // comment
                     const lo = (src[i + 2] === '[') ? longOpen(i + 2) : 0;
                     let e;
                     if (lo) e = skipLong(i + 2, lo);
@@ -12633,7 +12635,7 @@ end
             return expandContinue(segs.map(s => s.text).join(''));
         }
 
-        // luaL_loadstring/luaL_loadbuffer работают с байтовыми буферами
+        // luaL_loadstring/luaL_loadbuffer work with byte buffers
         function loadLuaChunk(L, code, chunkname) {
             const { lauxlib, to_luastring } = window.fengari;
             const buf = to_luastring(preprocessLuau(code));
@@ -12647,23 +12649,23 @@ end
             return lua.lua_pcall(L, 0, 0, 0);
         }
 
-        // Безопасно достаёт текст ошибки с вершины Lua-стека.
+        // Safely fetches the error text from the top of the Lua stack.
         function luaErrToString(L) {
             const { lua, lauxlib } = window.fengari;
             try {
                 const s = lua.lua_tojsstring(L, -1);
                 if (s !== null && s !== undefined) return s;
-            } catch (e) { emuWarn('swallow:luaErrToString:9882', 'luaErrToString: ' + _errText(e) + ' (падаем на luaL_tolstring ниже)'); }
+            } catch (e) { emuWarn('swallow:luaErrToString:9882', 'luaErrToString: ' + _errText(e) + ' (falling back to luaL_tolstring below)'); }
             try {
                 lauxlib.luaL_tolstring(L, -1, null);
                 const s2 = lua.lua_tojsstring(L, -1);
                 lua.lua_pop(L, 1);
                 if (s2 !== null && s2 !== undefined) return s2;
-            } catch (e) { emuWarn('swallow:luaErrToString:9888', 'luaErrToString: ' + _errText(e) + ' (последний шанс — просто не строка)'); }
-            return '(ошибка не строкового типа)';
+            } catch (e) { emuWarn('swallow:luaErrToString:9888', 'luaErrToString: ' + _errText(e) + ' (last resort — just not a string)'); }
+            return '(error of a non-string type)';
         }
 
-        // luaL_traceback — тот же стек вызовов, что Roblox Studio показывает
+        // luaL_traceback — the same call stack that Roblox Studio shows
         function luaGetTraceback(co) {
             const { lua, lauxlib } = window.fengari;
             try {
@@ -12679,14 +12681,14 @@ end
         function resumeLuaCoroutine(co, name, nargs) {
             const { lua } = window.fengari;
             const status = lua.lua_resume(co, null, nargs);
-            if (status === lua.LUA_YIELD) return; // ушёл в wait(), уже в luaWaits
+            if (status === lua.LUA_YIELD) return; // went into wait(), already in luaWaits
             if (status !== lua.LUA_OK) {
                 const msg = luaErrToString(co);
                 logLuaOutput('error', msg, name, luaGetTraceback(co), luaScriptSideByCo.get(co));
             }
         }
 
-        // Полный путь до объекта (A.B.C.ScriptName) — на карте полно РАЗНЫХ
+        // The full path to the object (A.B.C.ScriptName) — the map is full of DIFFERENT
         function luaFullPathOf(ref) {
             const parts = [];
             let cur = ref, guard = 0;
@@ -12702,7 +12704,7 @@ end
         function runLuaScript(scr, L) {
             const { lua } = window.fengari;
             const path = luaFullPathOf(scr.ref);
-            // function(script) ... end — превращает `script` в upvalue КОНКРЕТНОЙ
+            // function(script) ... end — turns `script` into an upvalue of a SPECIFIC
             const wrapped = 'return function(script)\n' + scr.source + '\nend';
             let status = loadLuaChunk(L, wrapped, path);
             if (status !== lua.LUA_OK) {
@@ -12716,21 +12718,21 @@ end
                 lua.lua_pop(L, 1);
                 return;
             }
-            const co = lua.lua_newthread(L);     // пушится на стек L, возвращается co
-            lua.lua_pushvalue(L, -2);            // копия функции под свежесозданным потоком
-            lua.lua_xmove(L, co, 1);             // переносим функцию на стек co
+            const co = lua.lua_newthread(L);     // pushed onto the L stack, co is returned
+            lua.lua_pushvalue(L, -2);            // a copy of the function under the freshly created thread
+            lua.lua_xmove(L, co, 1);             // move the function onto the co stack
             lua.lua_getglobal(co, '__wrap');
             lua.lua_pushnumber(co, scr.ref);
-            lua.lua_call(co, 1, 1);              // co: [функция, script-инстанс]
-            lua.lua_pop(L, 2);                   // со стека L убираем саму функцию и поток
-            // (поток жив, пока жива JS-ссылка co — см. luaWaits/резюмирование;
-            // сборка Lua-мусора у fengari завязана на JS GC)
+            lua.lua_call(co, 1, 1);              // co: [function, script instance]
+            lua.lua_pop(L, 2);                   // remove the function and the thread itself from the L stack
+            // (the thread lives as long as the JS reference co lives — see luaWaits/resuming;
+            // Lua garbage collection in fengari is tied to the JS GC)
             luaScriptNameByCo.set(co, path);
             luaScriptSideByCo.set(co, scr.cls);
             resumeLuaCoroutine(co, path, 1);
         }
 
-        // Клонирует поддерево StarterGui в PlayerGui конкретного клиента —
+        // Clones the StarterGui subtree into a specific client's PlayerGui —
         function cloneStarterGuiIntoPlayerGui(playerGuiRef) {
             const starterGuiRef = luaFindServiceRef('StarterGui');
             const refMap = {};
@@ -12743,7 +12745,7 @@ end
                 luaByRef[newRef].name = origInfo.name;
                 luaSetParent(newRef, newParentRef);
                 refMap[origRef] = newRef;
-                // копия знает оригинал: по нему require(копия-ModuleScript) находит исходник (см. __compile_module)
+                // the copy knows its original: require(copy-ModuleScript) finds the source through it (see __compile_module)
                 luaCloneOrigin[newRef] = luaCloneOrigin[origRef] !== undefined ? luaCloneOrigin[origRef] : origRef; _cloneStreamForce = true;
                 luaCloneSource[newRef] = origRef;
                 if (guiPropsByRef[origRef]) {
@@ -12759,7 +12761,7 @@ end
             return refMap;
         }
 
-        // Синтетический PlayerModule — в настоящем Roblox это закрытый
+        // A synthetic PlayerModule — in real Roblox it is a closed
         const PLAYER_MODULE_SOURCE = [
             'local PlayerModule = {}',
             'local Controls = {}',
@@ -12770,11 +12772,11 @@ end
             'return PlayerModule',
         ].join('\n');
 
-        // Создаёт game.Players.LocalPlayer (виртуальный, как и всё Play-only
-        let luaCharacterRef = -1; // ref виртуального "Model", изображающего player.Character (см. __get_character_ref) — тот самый ходящий куб из Play, а не настоящий Humanoid
-        let luaPlayerRef = -1;    // ref единственного LocalPlayer (см. bootstrapClientPlayer) — нужен, чтобы подставлять его первым аргументом в OnServerEvent (см. processRemoteQueue)
-        let luaHumanoidRootPartRef = -1; // ref виртуального HumanoidRootPart — physicsBodies[этот ref] === charBody (см. bootstrapClientPlayer)
-        let luaHumanoidRef = -1;         // ref виртуального Humanoid — WalkSpeed/JumpPower реально применяются (см. luaSetGenericProp)
+        // Creates game.Players.LocalPlayer (virtual, like everything Play-only
+        let luaCharacterRef = -1; // ref of the virtual "Model" representing player.Character (see __get_character_ref) — the very walking cube from Play, not a real Humanoid
+        let luaPlayerRef = -1;    // ref of the single LocalPlayer (see bootstrapClientPlayer) — needed to pass it as the first argument of OnServerEvent (see processRemoteQueue)
+        let luaHumanoidRootPartRef = -1; // ref of the virtual HumanoidRootPart — physicsBodies[this ref] === charBody (see bootstrapClientPlayer)
+        let luaHumanoidRef = -1;         // ref of the virtual Humanoid — WalkSpeed/JumpPower are really applied (see luaSetGenericProp)
 
         function bootstrapClientPlayer() {
             let playersRef = luaFindServiceRef('Players');
@@ -12783,9 +12785,9 @@ end
             luaByRef[playerRef].name = 'LocalPlayer';
             if (playerAccount) { luaPlayerRef = playerRef; _applyPlayerAccountToLua(); }
             luaSetParent(playerRef, playersRef);
-            // Как в Roblox: игрок при входе попадает в AutoAssignable-команду с наименьшим числом игроков (игрок один —
-            // первая по порядку файла). Без этого player.Team == nil и скрипты (TDM, Scoring, TeamCollisionFiltering)
-            // считают игрока нейтральным.
+            // As in Roblox: on join the player is put into the AutoAssignable team with the fewest players (the player is alone —
+            // the first in file order). Without this player.Team == nil and scripts (TDM, Scoring, TeamCollisionFiltering)
+            // treat the player as neutral.
             const _autoTeams = Object.keys(luaTeamInfo).map(Number).filter(r => luaTeamInfo[r].auto);
             luaPlayerTeam = _autoTeams.length ? _autoTeams[0] : -1;
 
@@ -12796,11 +12798,11 @@ end
             luaHumanoidRootPartRef = luaCreateVirtualInstance('Part');
             luaByRef[luaHumanoidRootPartRef].name = 'HumanoidRootPart';
             luaSetParent(luaHumanoidRootPartRef, luaCharacterRef);
-            // Так Position/CFrame-геттеры и сеттеры (luaPositionOfRef/
-            // luaSetPositionOfRef/applyCFrameValue) начинают работать сами
-            // собой — они уже умеют physicsBodies[ref], отдельный код не
-            // нужен: чтение/запись CFrame этого рефа напрямую двигает
-            // charBody, то есть по-настоящему телепортирует игрока.
+            // This way the Position/CFrame getters and setters (luaPositionOfRef/
+            // luaSetPositionOfRef/applyCFrameValue) start working by
+            // themselves — they already know physicsBodies[ref], no separate code
+            // is needed: reading/writing this ref's CFrame directly moves
+            // charBody, i.e. it really teleports the player.
             if (charBody) { physicsBodies[luaHumanoidRootPartRef] = charBody; charBody.__ref = luaHumanoidRootPartRef; }
             touchingTriggers = new Set();
 
@@ -12818,10 +12820,10 @@ end
 
             const playerGuiRef = luaCreateVirtualInstance('PlayerGui');
             luaSetParent(playerGuiRef, playerRef);
-            const backpackRef = luaCreateVirtualInstance('Backpack'); // существует для полноты API; не рендерится
+            const backpackRef = luaCreateVirtualInstance('Backpack'); // exists for API completeness; not rendered
             luaSetParent(backpackRef, playerRef);
-            // Как в Roblox: при появлении игрока всё из StarterPack копируется в Backpack. Раньше Backpack оставался пустым, и
-            // самописный инвентарь/хотбар (InventoryController: слоты строятся по Backpack) не получал ни одного инструмента.
+            // As in Roblox: when the player appears everything from StarterPack is copied into the Backpack. Previously the Backpack stayed empty, and the
+            // custom inventory/hotbar (InventoryController: slots are built from the Backpack) didn't get a single tool.
             const starterPackRef = Object.keys(luaByRef).map(Number).find(r => luaByRef[r] && luaByRef[r].cls === 'StarterPack' && luaParentByRef[r] === -1);
             if (starterPackRef !== undefined) {
                 for (const childRef of (luaChildrenByRef[starterPackRef] || []).slice()) {
@@ -12860,16 +12862,16 @@ end
             if (!r.scripts || !r.scripts.length) { logLuaOutput('warn', t('lua_no_scripts')); return; }
 
             logLuaOutput('info', 'script.js build: ' + BUILD_LABEL);
-            checkBuildConsistency(); // запуск Play чистит Output — проверку версий файлов показываем и здесь
+            checkBuildConsistency(); // starting Play clears Output — we show the file version check here too
             if (!await ensureFengariLoaded()) {
                 logLuaOutput('error', t('lua_fengari_fail'));
                 notify(t('lua_vm_fail_notify'), 'err');
                 return;
             }
-            if (!isPlaying) return; // Play могли остановить, пока грузился fengari
+            if (!isPlaying) return; // Play could have been stopped while fengari was loading
 
-            // Сырой индекс иерархии для script.Parent/GetChildren — из
-            // /api/all_instances (весь файл, без фильтров Explorer-дерева).
+            // The raw hierarchy index for script.Parent/GetChildren — from
+            // /api/all_instances (the whole file, without the Explorer tree filters).
             const allR = await api('GET', '/api/all_instances');
             luaByRef = {}; luaByRefVer++;
             luaParentByRef = {};
@@ -12894,11 +12896,11 @@ end
                     if (inst.attrs) luaFileAttrs[inst.ref] = inst.attrs;
                     if (inst.tags) luaFileTags[inst.ref] = inst.tags;
                     if (inst.pivot) luaFilePivots[inst.ref] = inst.pivot;
-                    if (inst.gprops) luaGenericPropsByRef[inst.ref] = Object.assign({}, inst.gprops);   // Tool.TextureId/ToolTip/... из файла
+                    if (inst.gprops) luaGenericPropsByRef[inst.ref] = Object.assign({}, inst.gprops);   // Tool.TextureId/ToolTip/... from the file
                     if (inst.cls === 'Team') luaTeamInfo[inst.ref] = { color: inst.teamColor, auto: inst.autoAssignable !== false };
                     if (inst.att) luaAttCF[inst.ref] = inst.att;
                     if (inst.refs) luaRefProps[inst.ref] = inst.refs;
-                    // Свойства классов, которых раньше не было в Lua (Audio API, Beam, пост-эффекты, Atmosphere, констрейнты)
+                    // Properties of classes that Lua didn't have before (Audio API, Beam, post effects, Atmosphere, constraints)
                     if (inst.cls === 'Beam') { luaBeamRefs.add(inst.ref); if (inst.beamColor) luaBeamColor[inst.ref] = inst.beamColor; }
                     if (inst.tprops) {
                         for (const [pn, pv] of Object.entries(inst.tprops)) {
@@ -12906,7 +12908,7 @@ end
                             else luaInitProps.push({ ref: inst.ref, name: pn, kind: pv[0], a: pv[1], b: pv[2], c: pv[3] });
                         }
                     }
-                    // AudioPlayer, уже лежащий В ФАЙЛЕ: тот же <audio>, что и у Sound (Asset/Volume/Looping/PlaybackSpeed)
+                    // An AudioPlayer already lying IN THE FILE: the same <audio> as for Sound (Asset/Volume/Looping/PlaybackSpeed)
                     if (inst.cls === 'AudioPlayer' && inst.gprops && inst.gprops.AssetId) {
                         const a = getOrCreateSoundEl(inst.ref);
                         const url = rbxAssetIdToProxyUrl(inst.gprops.AssetId);
@@ -12918,12 +12920,12 @@ end
                             _applySoundRate(inst.ref);
                         }
                     }
-                    // ValueBase.Value, заданное в самом файле (IntValue = 10, CFrameValue, ...)
+                    // ValueBase.Value set in the file itself (IntValue = 10, CFrameValue, ...)
                     if (inst.value !== undefined && inst.value !== null) {
                         if (typeof inst.value === 'object') luaInitValues.push({ ref: inst.ref, value: inst.value });
                         else (luaGenericPropsByRef[inst.ref] = luaGenericPropsByRef[inst.ref] || {}).Value = inst.value;
                     }
-                    // Sound, уже лежащий В ФАЙЛЕ (не Instance.new(...) из
+                    // A Sound already lying IN THE FILE (not an Instance.new(...) from
                     if (inst.cls === 'Sound' && inst.soundId) {
                         const a = getOrCreateSoundEl(inst.ref);
                         const url = rbxAssetIdToProxyUrl(inst.soundId);
@@ -12931,7 +12933,7 @@ end
                         (luaGenericPropsByRef[inst.ref] = luaGenericPropsByRef[inst.ref] || {}).SoundId = inst.soundId;
                         if (typeof inst.volume === 'number') a.volume = Math.max(0, Math.min(1, inst.volume));
                         if (inst.looped) a.loop = true;
-                        // PlaybackSpeed, заданный ПРЯМО в файле (см.
+                        // PlaybackSpeed set DIRECTLY in the file (see
                         if (typeof inst.playbackSpeed === 'number') _soundBaseSpeed[inst.ref] = inst.playbackSpeed;
                         if (typeof inst.pitchOctave === 'number') _soundPitchOctave[inst.ref] = inst.pitchOctave;
                         _applySoundRate(inst.ref);
@@ -12945,9 +12947,9 @@ end
             } else {
                 logLuaOutput('warn', t('lua_instances_no_reply'));
             }
-            if (!isPlaying) return; // Play могли остановить, пока шёл запрос
+            if (!isPlaying) return; // Play could have been stopped while the request was in flight
 
-            // GUI-дерево (для клонирования StarterGui->PlayerGui и для
+            // The GUI tree (for cloning StarterGui->PlayerGui and for
             const guiR = await api('GET', '/api/gui_tree');
             guiPropsByRef = {};
             guiChildrenByRef = {};
@@ -12963,11 +12965,11 @@ end
             lualib.luaL_openlibs(luaClientL);
             installLuaBridge(luaClientL);
 
-            for (const [L, label] of [[luaServerL, 'сервера'], [luaClientL, 'клиента']]) {
-                // база для id подписок: у клиентской VM свой диапазон (см. __nextConnId в prelude)
+            for (const [L, label] of [[luaServerL, 'server'], [luaClientL, 'client']]) {
+                // base for subscription ids: the client VM has its own range (see __nextConnId in the prelude)
                 lua.lua_pushnumber(L, L === luaClientL ? 1000000 : 0);
                 lua.lua_setglobal(L, '__CONN_BASE');
-                // game.PlaceId/GameId/CreatorId: из открытого «Открыть из Roblox» плейса; у файла/неопубликованного — 0, как в Studio
+                // game.PlaceId/GameId/CreatorId: from the place opened via «Open from Roblox»; for a file/unpublished place — 0, as in Studio
                 const _o = window._rbxOrigin || {};
                 lua.lua_pushnumber(L, Number(_o.placeId) || 0); lua.lua_setglobal(L, '__PLACE_ID');
                 lua.lua_pushnumber(L, Number(_o.universeId) || 0); lua.lua_setglobal(L, '__GAME_ID');
@@ -12992,7 +12994,7 @@ end
                 }
             }
 
-            // ModuleScript-исходники по ref — require() ищет тут (см.
+            // ModuleScript sources by ref — require() looks here (see
             luaScriptsByRef = {};
             luaStartedClonedScripts = new Set(); luaAncestryRefs = new Set(); luaJointC = {};
             for (const scr of r.scripts) luaScriptsByRef[scr.ref] = scr;
@@ -13008,8 +13010,8 @@ end
             luaSignalWaits = [];
             luaResetSignals();
 
-            // Script с RunContext=Client (2) — клиентский: идёт вместе с LocalScript-ами (нужен Players.LocalPlayer).
-            // Скрипты из StarterCharacterScripts запускаются ПОСЛЕ создания персонажа, как его дети (script.Parent = Character).
+            // A Script with RunContext=Client (2) is a client one: it runs together with LocalScripts (it needs Players.LocalPlayer).
+            // Scripts from StarterCharacterScripts run AFTER the character is created, as its children (script.Parent = Character).
             const _isClientScript = (scr) => scr.cls === 'LocalScript' || (scr.cls === 'Script' && scr.runContext === 2);
             const _underCharacterScripts = (ref) => {
                 let cur = luaParentByRef[ref], g = 0;
@@ -13021,11 +13023,11 @@ end
                 return false;
             };
 
-            // Server-скрипты (Script) выполняются как есть — по одному
-            // разу, "на сервере", видят реальную (нефильтрованную) карту.
-            // В Roblox скрипты из ServerStorage не выполняются вообще (это склад шаблонов). Эмулятор запускал и их, из-за чего
-            // шаблон врага (EnemyTemplates/ЖИЛЕЦ) жил своей жизнью параллельно настоящему: двойной ИИ, лишние атаки и скримеры.
-            // Клоны шаблонов в Workspace по-прежнему запускаются (luaStartClonedScripts), так что спавнеры работают как раньше.
+            // Server scripts (Script) run as is — once each,
+            // "on the server", they see the real (unfiltered) map.
+            // In Roblox scripts in ServerStorage don't run at all (it is a storage of templates). The emulator ran those too, because of which
+            // an enemy template (EnemyTemplates/ЖИЛЕЦ) lived its own life in parallel with the real one: double AI, extra attacks and jump scares.
+            // Template clones in Workspace still run (luaStartClonedScripts), so spawners work as before.
             const _inServerStorage = (ref) => {
                 let cur = ref, g = 0;
                 while (cur !== undefined && cur !== -1 && g++ < 200) {
@@ -13041,19 +13043,19 @@ end
                 catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, scr.cls); }
             }
 
-            // Client: сначала bootstrapClientPlayer() клонирует StarterGui
+            // Client: first bootstrapClientPlayer() clones StarterGui
             let refMap = {};
             try {
                 const bootResult = bootstrapClientPlayer();
                 refMap = bootResult.refMap;
                 luaPlayerRef = bootResult.playerRef;
             } catch (e) {
-                // Раньше исключение тут (не пойманное) обрывало ВСЮ функцию —
-                logLuaOutput('error', 'bootstrapClientPlayer упал: ' + e.message + ' — LocalScript-и и GUI не запущены');
+                // Previously an exception here (uncaught) aborted the WHOLE function —
+                logLuaOutput('error', 'bootstrapClientPlayer crashed: ' + e.message + ' — LocalScripts and GUI are not started');
             }
-            // GUI должен существовать в DOM ДО запуска LocalScript-ов (в Roblox PlayerGui уже собран): иначе AbsoluteSize/
-            // AbsolutePosition на старте = 0 и хотбар (hotBar.Grid.CellSize = AbsoluteSize.Y) схлопывал ячейки в ноль.
-            // После запуска скриптов overlay перерисовывается начисто (renderGuiOverlayFromClient ниже) уже с их правками.
+            // The GUI must exist in the DOM BEFORE LocalScripts start (in Roblox PlayerGui is already assembled): otherwise AbsoluteSize/
+            // AbsolutePosition at start = 0 and the hotbar (hotBar.Grid.CellSize = AbsoluteSize.Y) collapsed the cells to zero.
+            // After the scripts start, the overlay is redrawn from scratch (renderGuiOverlayFromClient below) with their edits.
             try { renderGuiOverlayFromClient(); } catch (e) { console.warn('early GUI render:', e); }
             for (const scr of r.scripts) {
                 if (!_isClientScript(scr) || _underCharacterScripts(scr.ref) || _inServerStorage(scr.ref)) continue;
@@ -13063,9 +13065,9 @@ end
                 catch (e) { logLuaOutput('error', scr.name + ': ' + e.message, scr.name, null, 'LocalScript'); }
             }
 
-            // Игрок «вошёл»: серверные скрипты уже подписались на Players.PlayerAdded — сообщаем им (раньше событие не
-            // приходило вообще, и Gameplay-скрипты Blaster никогда не видели игрока). Затем, если скрипты не выключили
-            // Players.CharacterAutoLoads, спавнится первый персонаж (CharacterAdded); иначе его создаст LoadCharacter().
+            // The player «joined»: server scripts have already subscribed to Players.PlayerAdded — we notify them (previously the event
+            // never arrived, and Blaster's Gameplay scripts never saw the player). Then, if the scripts haven't turned off
+            // Players.CharacterAutoLoads, the first character is spawned (CharacterAdded); otherwise LoadCharacter() will create it.
             setTimeout(() => {
                 if (!isPlaying || luaPlayerRef === -1) return;
                 const playersRef = luaFindServiceRef('Players');
@@ -13076,8 +13078,8 @@ end
                 }, 0);
             }, 0);
 
-            // StarterCharacterScripts: копия скрипта становится ребёнком Character (в Roblox их клонируют в каждого
-            // персонажа), поэтому script.Parent.Humanoid и т.п. находятся.
+            // StarterCharacterScripts: a copy of the script becomes a child of the Character (in Roblox they are cloned into every
+            // character), so script.Parent.Humanoid etc. are found.
             if (luaCharacterRef !== -1) {
                 for (const scr of r.scripts) {
                     if ((scr.cls !== 'Script' && scr.cls !== 'LocalScript') || !_underCharacterScripts(scr.ref)) continue;
@@ -13096,11 +13098,11 @@ end
         }
 
         function stopLuaScripts() {
-            luaServerL = null; // JS-ссылки отпущены — обе VM и все их корутины
-            luaClientL = null; // станут доступны для сборки мусора JS-движком
+            luaServerL = null; // JS references released — both VMs and all their coroutines
+            luaClientL = null; // become available for garbage collection by the JS engine
             luaWaits = [];
             luaSignalWaits = [];
-            // luaOutputLines НЕ чистим: Output остаётся после остановки Play (очищается при следующем запуске или кнопкой 🗑)
+            // we do NOT clear luaOutputLines: Output stays after Play stops (cleared at the next launch or with the 🗑 button)
             luaByRef = {}; luaByRefVer++;
             luaParentByRef = {};
             luaChildrenByRef = {};
@@ -13117,13 +13119,13 @@ end
             luaResetSignals();
             renderLuaOutput();
             clearGuiOverlay();
-            // Раньше звук вообще не трогался при Stop — реальный
+            // Previously the sound wasn't touched at all on Stop — the real
             for (const a of Object.values(soundElByRef)) {
                 a.pause();
                 a.currentTime = 0;
             }
             soundElByRef = {};
-            // Иначе PlaybackSpeed/Octave, выставленные скриптом ДО Stop, тихо
+            // Otherwise PlaybackSpeed/Octave set by a script BEFORE Stop would silently
             for (const k in _soundBaseSpeed) delete _soundBaseSpeed[k];
             for (const k in _soundPitchOctave) delete _soundPitchOctave[k];
         }
@@ -13140,16 +13142,16 @@ end
             return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
         }
 
-        // UDim2 {x:{scale,offset}, y:{scale,offset}} -> CSS calc(), точно как
+        // UDim2 {x:{scale,offset}, y:{scale,offset}} -> CSS calc(), exactly like
         function udimToCssLength(u) {
             if (!u || typeof u !== 'object') return '0px';
             return 'calc(' + ((u.scale || 0) * 100) + '% + ' + (u.offset || 0) + 'px)';
         }
 
-        // UICorner: Scale считается от МЕНЬШЕЙ стороны элемента, а радиус не
-        // больше половины меньшей стороны (Roblox). CSS-проценты считаются
-        // отдельно по ширине и высоте — получался эллипс: ползунок-«линза»,
-        // овальные поля и кнопки. Пересчитываем в пиксели по реальному размеру.
+        // UICorner: Scale is computed from the SMALLER side of the element, and the radius is no
+        // more than half the smaller side (Roblox). CSS percentages are computed
+        // separately by width and height — which gave an ellipse: a «lens» slider,
+        // oval fields and buttons. We recompute into pixels by the real size.
         function applyCornerRadius(el, udims) {
             const conv = (u, m) => {
                 u = u || {};
@@ -13172,11 +13174,11 @@ end
             }
         }
 
-        // Применяет UICorner/UIStroke к DOM-элементу их РОДИТЕЛЯ.
+        // Applies UICorner/UIStroke to the DOM element of their PARENT.
         function applyGuiDecoration(parentEl, decoProps) {
             if (!parentEl || !decoProps) return;
             if (decoProps.cls === 'UICorner') {
-                // Часть файлов хранит один общий CornerRadius, часть (в
+                // Some files store one shared CornerRadius, some (in
                 if (decoProps.TopLeftRadius || decoProps.TopRightRadius ||
                     decoProps.BottomLeftRadius || decoProps.BottomRightRadius) {
                     applyCornerRadius(parentEl, [decoProps.TopLeftRadius, decoProps.TopRightRadius,
@@ -13196,7 +13198,7 @@ end
                 const isTextEl = parentEl.dataset.cls === 'TextLabel' || parentEl.dataset.cls === 'TextButton' || parentEl.dataset.cls === 'TextBox';
                 const mode = decoProps.ApplyStrokeMode;   // 0 Contextual, 1 Border
                 if (isTextEl && mode !== 1 && mode !== 'Border') {
-                    // Contextual на тексте — обводка БУКВ (а не рамка элемента): кольцо text-shadow вокруг глифов
+                    // Contextual on text — an outline of the LETTERS (not the element's border): a text-shadow ring around the glyphs
                     const sh = [];
                     for (const r of (thickness > 1.5 ? [thickness, thickness / 2] : [thickness])) {
                         for (let i = 0; i < 12; i++) {
@@ -13207,7 +13209,7 @@ end
                     parentEl.style.textShadow = sh.join(',');
                     parentEl.style.boxShadow = '';
                 } else {
-                    // BorderStrokePosition: 0 Outer (по умолчанию — обводка СНАРУЖИ, слот не сжимается), 1 Center, 2 Inner
+                    // BorderStrokePosition: 0 Outer (default — the stroke OUTSIDE, the slot doesn't shrink), 1 Center, 2 Inner
                     const pos = decoProps.BorderStrokePosition;
                     const inner = (pos === 2 || pos === 'Inner');
                     const center = (pos === 1 || pos === 'Center');
@@ -13236,21 +13238,21 @@ end
             };
         }
 
-        // В Roblox Frame/TextLabel/ImageLabel НЕ перехватывают ввод, пока Active=false
-        // (и не стоят под курсором с подключённым InputBegan/MouseEnter и т.п.); перехватывают
-        // только кнопки, TextBox и ScrollingFrame. Раньше любой Frame получал pointer-events:auto,
-        // и полноэкранный прозрачный Frame (затемнение) блокировал вращение камеры и клики по миру.
+        // In Roblox Frame/TextLabel/ImageLabel do NOT intercept input while Active=false
+        // (and aren't under the cursor with InputBegan/MouseEnter etc. connected); they intercept
+        // only buttons, TextBox and ScrollingFrame. Previously any Frame got pointer-events:auto,
+        // and a fullscreen transparent Frame (a dimmer) blocked camera rotation and clicks on the world.
         const guiClassSet = new Set(['ScreenGui','Frame','TextLabel','TextButton','TextBox','ImageLabel','ImageButton','ScrollingFrame','ViewportFrame','CanvasGroup','BillboardGui','SurfaceGui']);
-        const luaGuiInputRefs = new Set(); // ref GUI-объектов, у которых скрипт подписан на мышь/тач
+        const luaGuiInputRefs = new Set(); // refs of GUI objects whose script is subscribed to mouse/touch
         const _GUI_SINK_CLASSES = new Set(['TextButton', 'ImageButton', 'TextBox', 'ScrollingFrame']);
         function guiApplyPointer(el, props) {
             const ref = Number(el.dataset.ref);
             const interactive = _GUI_SINK_CLASSES.has(props.cls) || props.Active === true || luaGuiInputRefs.has(ref);
             el.style.pointerEvents = interactive ? 'auto' : 'none';
         }
-        // UIScale — дочерний модификатор: масштабирует ПАРОДИТЕЛЯ вместе со всем содержимым (в т.ч. пиксельные offset'ы).
-        // Раньше не поддерживался вовсе, поэтому скрипт GuiScale (Blaster) менял Scale впустую и интерфейс на маленьком
-        // экране оставался в полный размер.
+        // UIScale — a child modifier: scales the PARENT together with all its content (including pixel offsets).
+        // It wasn't supported at all before, so the GuiScale script (Blaster) changed Scale for nothing and the UI on a small
+        // screen stayed at full size.
         function guiUIScaleOf(ref) {
             for (const k of (guiChildrenByRef[ref] || [])) {
                 const cp = guiPropsByRef[k];
@@ -13269,32 +13271,32 @@ end
             el.style.top = pos.top;
             el.style.width = size.width;
             el.style.height = size.height;
-            // Файл Roblox хранит инстансы, сгруппированные ПО КЛАССАМ
+            // A Roblox file stores instances grouped BY CLASS
             const isInteractiveCls = props.cls === 'TextButton' || props.cls === 'ImageButton' || props.cls === 'TextBox';
             el.style.zIndex = String((props.ZIndex || 1) * 10 + (isInteractiveCls ? 5 : 0));
-            // AnchorPoint — раньше вообще не читался:
+            // AnchorPoint — wasn't read at all before:
             const ap = props.AnchorPoint;
             el.style.transform = ap ? `translate(${-(ap.x || 0) * 100}%, ${-(ap.y || 0) * 100}%)` : '';
             el.style.transformOrigin = '';
             const uiScale = guiUIScaleOf(Number(el.dataset.ref));
             if (uiScale !== 1) {
                 if (cls === 'ScreenGui' || cls === 'BillboardGui') {
-                    // Виртуальный экран становится в 1/s раз больше и масштабируется обратно: проценты (Scale) всё так же
-                    // покрывают весь экран, а пиксели (Offset) и размеры внутри — умножаются на s.
+                    // The virtual screen becomes 1/s times larger and is scaled back: percentages (Scale) still
+                    // cover the whole screen, while pixels (Offset) and sizes inside are multiplied by s.
                     el.style.width = 'calc(100% / ' + uiScale + ')';
                     el.style.height = 'calc(100% / ' + uiScale + ')';
                     el.style.transform = 'scale(' + uiScale + ')';
                     el.style.transformOrigin = '0 0';
                 } else {
-                    // Обычный GuiObject масштабируется вокруг своей точки привязки (AnchorPoint), как в Roblox
+                    // An ordinary GuiObject scales around its anchor point (AnchorPoint), as in Roblox
                     el.style.transform += ' scale(' + uiScale + ')';
                     el.style.transformOrigin = ((ap && ap.x || 0) * 100) + '% ' + ((ap && ap.y || 0) * 100) + '%';
                 }
             }
-            // ScreenGui/BillboardGui управляются свойством Enabled (не
+            // ScreenGui/BillboardGui are controlled by the Enabled property (not
             if (cls === 'BillboardGui') {
-                // Позицию и размер BillboardGui каждый кадр выставляет updateBillboardGuis (он же включает display). Если показать
-                // элемент здесь сразу, браузер успевает отрисовать «сырой» кадр с чужими координатами/размером.
+                // A BillboardGui's position and size are set every frame by updateBillboardGuis (it also enables display). If the
+                // element were shown right here, the browser would manage to render a «raw» frame with foreign coordinates/size.
                 el.style.display = (props.Enabled === false) ? 'none' : (el.style.display === 'flex' ? 'flex' : 'none');
             } else if (cls === 'ScreenGui') {
                 el.style.display = (props.Enabled === false) ? 'none' : 'flex';
@@ -13302,22 +13304,22 @@ end
                 el.style.display = (props.Visible === false) ? 'none' : 'flex';
             }
 
-            // ClipsDescendants есть у любого GuiObject (CanvasGroup клипует всегда); по умолчанию потомки НЕ обрезаются.
-            // Значение выставляется каждый раз, поэтому выключение флага из Lua тоже снимает обрезку.
+            // ClipsDescendants exists on any GuiObject (CanvasGroup always clips); by default descendants are NOT clipped.
+            // The value is set every time, so turning the flag off from Lua also removes clipping.
             el.style.overflow = (props.ClipsDescendants || cls === 'CanvasGroup') ? 'hidden' : 'visible';
-            // CanvasGroup.GroupTransparency — прозрачность ВСЕЙ группы целиком (CSS opacity как раз группирует содержимое)
+            // CanvasGroup.GroupTransparency — the transparency of the WHOLE group at once (CSS opacity groups the content just so)
             el.style.opacity = cls === 'CanvasGroup' ? String(1 - Math.max(0, Math.min(1, Number(props.GroupTransparency) || 0))) : '';
             if (cls === 'Frame' || cls === 'ScrollingFrame' || cls === 'CanvasGroup') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
-                // BorderSizePixel = 0 (частый случай: затемняющий Frame) раньше превращался
-                // в 1 из-за `|| 1` и рисовал рамку вокруг экрана — проверяем на null/undefined.
+                // BorderSizePixel = 0 (a common case: a dimming Frame) used to turn
+                // into 1 because of `|| 1` and drew a border around the screen — we check for null/undefined.
                 const bsp = (props.BorderSizePixel === undefined || props.BorderSizePixel === null) ? 1 : Number(props.BorderSizePixel);
                 el.style.border = bsp > 0
                     ? bsp + 'px solid ' + color3ToCss(props.BorderColor3)
                     : 'none';
                 if (props.BackgroundTransparency >= 1) el.style.background = 'transparent';
                 if (cls === 'ScrollingFrame') {
-                    // Раньше ScrollingFrame рендерился 1-в-1 как обычный
+                    // ScrollingFrame used to be rendered 1-to-1 like an ordinary
                     el.style.overflowY = 'auto';
                     el.style.overflowX = 'hidden';
                     el.style.webkitOverflowScrolling = 'touch';
@@ -13332,14 +13334,14 @@ end
                 if (cls === 'TextBox') {
                     el.contentEditable = 'true';
                     el.style.cursor = 'text';
-                    // ВАЖНО: applyGuiElementStyle вызывается не только при
-                    // изменении Text, а на КАЖДЫЙ проход UIListLayout (и на
-                    // любой другой patch того же контейнера). Если в этот
-                    // момент поле редактируется (сфокусировано), перезапись
-                    // el.textContent сбрасывает курсор на начало и стирает
-                    // непереданные в Lua символы — с точки зрения игрока
-                    // поле просто "не принимает ввод". Пока элемент в
-                    // фокусе, доверяем тому, что уже введено в DOM.
+                    // IMPORTANT: applyGuiElementStyle is called not only on
+                    // a Text change, but on EVERY UIListLayout pass (and on
+                    // any other patch of the same container). If at that
+                    // moment the field is being edited (focused), rewriting
+                    // el.textContent resets the cursor to the start and erases
+                    // characters not yet passed to Lua — from the player's point of view
+                    // the field just "doesn't accept input". While the element is
+                    // focused, we trust what has already been entered in the DOM.
                     if (document.activeElement !== el) {
                         _setElText(el, props.Text != null ? String(props.Text) : '');
                     }
@@ -13350,22 +13352,22 @@ end
             } else if (cls === 'ImageLabel' || cls === 'ImageButton') {
                 el.style.background = color3ToCss(props.BackgroundColor3, props.BackgroundTransparency);
                 if (cls === 'ImageButton') {
-                    // у <button> по умолчанию рамка 2px outset («фаска» на слотах хотбара) — рисуем только BorderSizePixel
+                    // a <button> has a 2px outset border by default (a «bevel» on hotbar slots) — we draw only BorderSizePixel
                     const bspB = (props.BorderSizePixel === undefined || props.BorderSizePixel === null) ? 1 : Number(props.BorderSizePixel);
                     el.style.border = bspB > 0 ? bspB + 'px solid ' + color3ToCss(props.BorderColor3) : 'none';
                 }
                 _setElText(el, '');
-                // Раньше Image просто складывался в title (всплывающая
-                // thumb=1: если без входа в Roblox assetdelivery отвечает 401/403 — сервер отдаст публичную миниатюру ассета
+                // Image used to just be put into title (the tooltip
+                // thumb=1: if without a Roblox login assetdelivery answers 401/403 — the server returns the asset's public thumbnail
                 const _pu = rbxAssetIdToProxyUrl(props.Image);
                 const proxyUrl = _pu ? _pu + '&thumb=1' : _pu;
                 if (proxyUrl) {
                     el.style.backgroundImage = 'url(' + proxyUrl + ')';
-                    // Fit — ближе всего к дефолтному ScaleType.Stretch
+                    // Fit — the closest to the default ScaleType.Stretch
                     el.style.backgroundSize = (props.ScaleType === 'Fit') ? 'contain' : 'cover';
                     el.style.backgroundPosition = 'center';
                     el.style.backgroundRepeat = 'no-repeat';
-                    // background-image сам по себе не даёт события ошибки
+                    // background-image on its own gives no error event
                     const probe = new Image();
                     probe.onerror = () => {
                         logLuaOutput('warn', t('warn_image_failed', { name: props.Name || cls, src: proxyUrl }));
@@ -13378,14 +13380,14 @@ end
             }
             guiApplyPointer(el, props);
         }
-        // ячейка UIGridLayout переприменяет размер/позицию после любой перекраски элемента (иначе Text/Color затирали раскладку)
+        // a UIGridLayout cell re-applies size/position after any repaint of the element (otherwise Text/Color wiped out the layout)
         {
             const _ages = applyGuiElementStyle;
             applyGuiElementStyle = function (el, props) { _ages(el, props); if (el && el._gridCell) _applyGridCell(el); };
         }
 
-        // Текст GUI-элемента без затирания вложенных GUI-элементов: el.textContent = ... удаляет ВСЕХ детей, а у ImageLabel/TextLabel
-        // в Roblox бывают дочерние элементы (Druns_PP: ButtonText внутри ImageLabel Button — иконка с «E»/«TAP» пропадала после первой перекраски).
+        // A GUI element's text without wiping nested GUI elements: el.textContent = ... removes ALL children, while ImageLabel/TextLabel
+        // in Roblox can have child elements (Druns_PP: ButtonText inside the ImageLabel Button — the «E»/«TAP» icon disappeared after the first repaint).
         function _setElText(el, text) {
             let first = null;
             for (const n of Array.from(el.childNodes)) {
@@ -13402,11 +13404,11 @@ end
             if (e.button === 1) return 'MouseButton3';
             return 'MouseButton1';
         }
-        // Масштаб игрового GUI (оверлей получает CSS zoom): на телефоне окно Play маленькое, а GUI считается в «пикселях Roblox».
-        // Все координаты, которые видит Lua (мышь/тач, AbsolutePosition/AbsoluteSize, ViewportSize), — в единицах GUI,
-        // от левого верхнего угла оверлея (как в Roblox), а не в пикселях экрана.
+        // The game GUI scale (the overlay gets CSS zoom): on a phone the Play window is small, while the GUI is computed in «Roblox pixels».
+        // All coordinates Lua sees (mouse/touch, AbsolutePosition/AbsoluteSize, ViewportSize) are in GUI units,
+        // from the overlay's top-left corner (as in Roblox), not in screen pixels.
         let guiScale = 1;
-        try { const v = parseFloat(localStorage.getItem('rbxstudio-gui-scale')); if (v >= 1 && v <= 3) guiScale = v; } catch (e) { /* нет localStorage */ }
+        try { const v = parseFloat(localStorage.getItem('rbxstudio-gui-scale')); if (v >= 1 && v <= 3) guiScale = v; } catch (e) { /* no localStorage */ }
         function _guiOverlayRect() {
             const ov = document.getElementById('gui-overlay');
             return ov ? ov.getBoundingClientRect() : { left: 0, top: 0 };
@@ -13415,9 +13417,9 @@ end
             const r = _guiOverlayRect();
             return [(cx - r.left) / guiScale, (cy - r.top) / guiScale];
         }
-        // CSS zoom на оверлее: в Chromium >=128 бокс остаётся равным родителю, а в старых WebView (Android) он становился
-        // в guiScale раз больше и нижняя часть GUI (хотбар, anchor снизу) уезжала за экран. Применяем zoom и сверяем
-        // реальный размер с родителем: если оверлей вылез — ужимаем его на guiScale.
+        // CSS zoom on the overlay: in Chromium >=128 the box stays equal to the parent, while in old WebViews (Android) it became
+        // guiScale times larger and the bottom of the GUI (the hotbar, bottom anchor) went off-screen. We apply zoom and compare
+        // the real size with the parent: if the overlay stuck out — shrink it by guiScale.
         function _applyGuiZoom(ov) {
             if (!ov) return;
             ov.style.zoom = String(guiScale);
@@ -13434,16 +13436,16 @@ end
         window.addEventListener('resize', () => { const ov = document.getElementById('gui-overlay'); if (ov && ov.classList.contains('active')) _applyGuiZoom(ov); });
         function setGuiScale(sc) {
             guiScale = sc;
-            try { localStorage.setItem('rbxstudio-gui-scale', String(sc)); } catch (e) { /* ничего */ }
+            try { localStorage.setItem('rbxstudio-gui-scale', String(sc)); } catch (e) { /* nothing */ }
             _markGuiScaleButtons();
             const ov = document.getElementById('gui-overlay');
             _applyGuiZoom(ov);
             if (isPlaying) { try { renderGuiOverlayFromClient(); } catch (e) { console.warn('GUI scale re-render:', e); } }
             _notifyViewportChanged();
         }
-        // ViewportSize у камеры (в единицах GUI = экран / guiScale) изменился: скриптам нужно сообщить, иначе, например,
-        // хотбар (camera:GetPropertyChangedSignal("ViewportSize") -> Grid.CellSize) остаётся со старым размером ячеек
-        // и после смены масштаба UI уезжает за край экрана. Дважды — сразу и после перерисовки DOM (AbsoluteSize берётся из него).
+        // The camera's ViewportSize (in GUI units = screen / guiScale) changed: scripts must be told, otherwise, for example,
+        // the hotbar (camera:GetPropertyChangedSignal("ViewportSize") -> Grid.CellSize) keeps the old cell size
+        // and after a UI scale change goes off the screen edge. Twice — immediately and after the DOM repaint (AbsoluteSize is taken from it).
         function _notifyViewportChanged() {
             if (!luaServerL && !luaClientL) return;
             const fire = () => {
@@ -13462,8 +13464,8 @@ end
             });
         }
         document.addEventListener('DOMContentLoaded', () => _markGuiScaleButtons());
-        // TextScaled у DOM-текста: Roblox подбирает самый крупный шрифт (до 100), при котором текст влезает в элемент по ширине
-        // и высоте. Раньше шрифт всегда равнялся TextSize (16px), и подписи слотов хотбара налезали друг на друга.
+        // TextScaled for DOM text: Roblox picks the largest font (up to 100) at which the text fits the element in width
+        // and height. Previously the font was always equal to TextSize (16px), and the hotbar slot labels overlapped each other.
         let _fitCtx = null;
         function _fitScaledText(el, props) {
             if (!props || !props.TextScaled) {
@@ -13472,7 +13474,7 @@ end
             }
             const run = () => {
                 const w = el.clientWidth, h = el.clientHeight;
-                // UITextSizeConstraint (дочерний): ограничивает итоговый размер шрифта TextScaled-текста [Min, Max]
+                // UITextSizeConstraint (child): limits the final font size of TextScaled text to [Min, Max]
                 let tMin = 4, tMax = 100;
                 for (const k of (guiChildrenByRef[el.dataset.ref] || [])) {
                     const cp = guiPropsByRef[k];
@@ -13482,9 +13484,9 @@ end
                         break;
                     }
                 }
-                // Размера у элемента ещё нет (скрыт, высота 0 в начале твина появления) — шрифт минимальный. Раньше здесь был
-                // просто return, и текст жил с литеральным TextSize (у TextScaled-подписей это 100px): при появлении кастомного
-                // ProximityPrompt (Druns_PP: Group.Size.Y = 0 -> твин) на ~0.4 с вылезал огромный текст.
+                // The element has no size yet (hidden, height 0 at the start of the appear tween) — the font is minimal. Previously there was
+                // just a return here, and the text lived with the literal TextSize (for TextScaled labels it's 100px): when the custom
+                // ProximityPrompt appeared (Druns_PP: Group.Size.Y = 0 -> tween) huge text popped up for ~0.4 s.
                 if (!(w > 0 && h > 0)) { el.style.fontSize = tMin + 'px'; return; }
                 const lines = String(el.textContent || '').split('\n');
                 if (!_fitCtx) _fitCtx = document.createElement('canvas').getContext('2d');
@@ -13495,7 +13497,7 @@ end
                 el.style.fontSize = size + 'px';
                 el.style.whiteSpace = 'nowrap';
                 el.style.lineHeight = 'normal';
-                // Канвас меряет другим шрифтом, чем DOM (и по-разному в разных WebView) — добиваем по реальному переполнению
+                // The canvas measures with a different font than the DOM (and differently in different WebViews) — we finish by the real overflow
                 for (let i = 0; i < 12 && size > tMin && el.scrollWidth > w + 1; i++) {
                     size = Math.max(tMin, size * 0.9); el.style.fontSize = size + 'px';
                 }
@@ -13507,8 +13509,8 @@ end
             }
         }
         function domInputXY(e) {
-            // Для тач-событий берём палец, который это событие вызвал (changedTouches), а не touches[0]: при зажатом
-            // джойстике touches[0] — это он, и тап по слоту инвентаря получал координаты стика (mouse.X/Y → «слот не нажат»).
+            // For touch events we take the finger that caused the event (changedTouches), not touches[0]: with the joystick held
+            // touches[0] is it, and a tap on an inventory slot got the stick's coordinates (mouse.X/Y → «slot not pressed»).
             let t = null;
             if (e.changedTouches && e.changedTouches.length) {
                 t = Array.from(e.changedTouches).find(x => !isJoyTouch(x)) || e.changedTouches[0];
@@ -13526,39 +13528,39 @@ end
             applyGuiElementStyle(el, props);
             if (props.cls === 'TextButton' || props.cls === 'ImageButton') {
                 el.style.outline = 'none';
-                // Клик по кнопке — настоящий Lua-сигнал (fireLuaSignal),
+                // A button click is a real Lua signal (fireLuaSignal),
                 el.addEventListener('click', () => fireLuaSignal(ref, 'MouseButton1Click', []));
                 el.addEventListener('mousedown', () => fireLuaSignal(ref, 'MouseButton1Down', []));
                 el.addEventListener('mouseup', () => fireLuaSignal(ref, 'MouseButton1Up', []));
-                // touchend НЕ passive и с preventDefault — иначе следом за
+                // touchend is NOT passive and with preventDefault — otherwise right after
                 el.addEventListener('touchstart', () => fireLuaSignal(ref, 'MouseButton1Down', []), { passive: true });
                 el.addEventListener('touchend', (e) => { e.preventDefault(); fireLuaSignal(ref, 'MouseButton1Up', []); fireLuaSignal(ref, 'MouseButton1Click', []); }, { passive: false });
             }
-            // MouseEnter/MouseLeave — у ЛЮБОГО GuiObject в настоящем Roblox,
-            // не только у кнопок (Frame/TextLabel тоже их поддерживают).
+            // MouseEnter/MouseLeave — on ANY GuiObject in real Roblox,
+            // not only buttons (Frame/TextLabel support them too).
             el.addEventListener('mouseenter', () => fireLuaSignal(ref, 'MouseEnter', []));
             el.addEventListener('mouseleave', () => fireLuaSignal(ref, 'MouseLeave', []));
-            // InputBegan/InputEnded — тоже у ЛЮБОГО GuiObject (в отличие от
+            // InputBegan/InputEnded — also on ANY GuiObject (unlike
             el.addEventListener('mousedown', (e) => fireLuaSignal(ref, 'InputBegan', [domInputTypeName(e, false), ...domInputXY(e)]));
             el.addEventListener('mouseup', (e) => fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]));
-            // Тач-эквиваленты — см.
+            // Touch equivalents — see
             el.addEventListener('touchstart', (e) => fireLuaSignal(ref, 'InputBegan', [domInputTypeName(e, false), ...domInputXY(e)]), { passive: true });
             el.addEventListener('touchend', (e) => fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]), { passive: true });
-            // FocusLost/Focused — TextBox (contentEditable div, см.
+            // FocusLost/Focused — TextBox (a contentEditable div, see
             if (props.cls === 'TextBox') {
                 let enterPressed = false;
-                // На части мобильных браузеров голый tap по contentEditable
-                // div (без tabindex) фокусирует элемент, но НЕ поднимает
-                // экранную клавиатуру — нужен явный .focus() внутри самого
-                // обработчика тача. Без этого поле выглядит нерабочим: курсор
-                // как будто появляется, а печатать нельзя.
+                // On some mobile browsers a bare tap on a contentEditable
+                // div (without tabindex) focuses the element but does NOT bring up the
+                // on-screen keyboard — an explicit .focus() is needed inside the touch
+                // handler itself. Without it the field looks broken: the cursor
+                // seems to appear, but you can't type.
                 el.tabIndex = 0;
                 el.addEventListener('touchend', (e) => {
                     e.preventDefault();
                     el.focus();
                 }, { passive: false });
                 el.addEventListener('mousedown', () => el.focus());
-                // Живая правка contentEditable не попадает в guiPropsByRef
+                // Live editing of contentEditable doesn't make it into guiPropsByRef
                 el.addEventListener('input', () => { if (guiPropsByRef[ref]) guiPropsByRef[ref].Text = el.textContent; });
                 el.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') { enterPressed = true; el.blur(); }
@@ -13572,12 +13574,12 @@ end
             return el;
         }
 
-        // ============ BillboardGui: интерфейс в мире, всегда лицом к камере ============
-        // Раньше BillboardGui рисовался как обычный ScreenGui — на весь экран, а не над деталью/Attachment.
-        // Якорь: Adornee, иначе родитель (деталь, Attachment, модель). Size: Scale — в студах (px = Scale * px_на_стад
-        // на дистанции якоря), Offset — в пикселях. StudsOffsetWorldSpace — в мире, StudsOffset — в системе камеры (x,y).
-        // MaxDistance — скрыть дальше. AlwaysOnTop=false — скрываем, если между камерой и якорем есть геометрия
-        // (луч, не чаще раза в 5 кадров; части самой модели-владельца не заслоняют).
+        // ============ BillboardGui: UI in the world, always facing the camera ============
+        // A BillboardGui used to be drawn like an ordinary ScreenGui — over the whole screen, not above the part/Attachment.
+        // Anchor: Adornee, otherwise the parent (a part, Attachment, model). Size: Scale — in studs (px = Scale * px_per_stud
+        // at the anchor's distance), Offset — in pixels. StudsOffsetWorldSpace — in the world, StudsOffset — in camera space (x,y).
+        // MaxDistance — hide beyond it. AlwaysOnTop=false — hide if there is geometry between the camera and the anchor
+        // (a ray, no more often than once per 5 frames; parts of the owner model itself don't occlude).
         const _bbOcc = {};   // ref -> { frame, hidden }
         let _bbFrame = 0;
         function _bbAnchorWorld(ref, out) {
@@ -13600,14 +13602,14 @@ end
                 out.set(p.x, p.y, p.z);
                 return true;
             }
-            // Model/Folder и т.п.: первая деталь среди потомков
+            // Model/Folder etc.: the first part among the descendants
             const stack = [ref];
             while (stack.length) {
                 const r0 = stack.shift();
                 if (luaIsPartRef(r0)) { const p = luaPositionOfRef(r0); out.set(p.x, p.y, p.z); return true; }
                 for (const c of (luaChildrenByRef[r0] || [])) stack.push(c);
             }
-            // скриптовая деталь без меша (FloatRoot у «Кнопки Z»): позиция по соседним деталям модели
+            // a scripted part without a mesh (FloatRoot of the «Z button»): position by the model's neighboring parts
             const anc = (info.cls === 'Part' || info.cls === 'MeshPart') ? _anchorFromAncestors(ref) : null;
             if (anc) { out.copy(anc); return true; }
             return false;
@@ -13616,8 +13618,8 @@ end
             const st = _bbOcc[ref] || (_bbOcc[ref] = { frame: -99, hidden: false });
             if (_bbFrame - st.frame < 5) return st.hidden;
             st.frame = _bbFrame;
-            // части модели-владельца якоря не заслоняют (иначе Attachment внутри торса всегда «закрыт» своим торсом)
-            // владелец = САМАЯ ВЕРХНЯЯ Model цепочки (весь враг/персонаж целиком), а не ближайшая вложенная ('head')
+            // parts of the anchor's owner model don't occlude (otherwise an Attachment inside the torso would always be «covered» by its own torso)
+            // owner = the TOPMOST Model of the chain (the whole enemy/character), not the nearest nested one ('head')
             let owner = anchorRef, cur = anchorRef, g = 0;
             while (cur !== undefined && cur !== -1 && g++ < 50) {
                 const i = luaByRef[cur];
@@ -13641,7 +13643,7 @@ end
                 for (const h of rc.intersectObjects(targets, true)) {
                     let o = h.object, r;
                     while (o) { if (o.userData && o.userData.ref !== undefined) { r = o.userData.ref; break; } o = o.parent; }
-                    // шаблоны из ServerStorage нарисованы в сцене поверх реальных объектов, но в Roblox их нет в мире
+                    // ServerStorage templates are drawn in the scene over real objects, but in Roblox they aren't in the world
                     if (r === undefined || inOwner(r) || !luaIsUnderWorkspace(r)) continue;
                     hidden = true; break;
                 }
@@ -13667,7 +13669,7 @@ end
                 let anchor = (props.Adornee !== undefined && props.Adornee !== null && props.Adornee !== -1 && luaByRef[props.Adornee])
                     ? props.Adornee : luaParentByRef[ref];
                 const hide = () => { el.style.display = 'none'; };
-                // шаблоны в ServerStorage/ReplicatedStorage и т.п. в мире не рисуются — только то, что лежит в Workspace
+                // templates in ServerStorage/ReplicatedStorage etc. aren't drawn in the world — only what lies in Workspace
                 if (props.Enabled === false || anchor === undefined || anchor === -1 || !luaIsUnderWorkspace(anchor) ||
                     !_bbAnchorWorld(anchor, world)) { hide(); continue; }
                 const wo = props.StudsOffsetWorldSpace;
@@ -13710,11 +13712,11 @@ end
             parentEl.appendChild(el);
             for (const childRef of (guiChildrenByRef[ref] || [])) {
                 const childProps = guiPropsByRef[childRef];
-                if (childProps && childProps.cls === 'UIScale') continue; // применяется в applyGuiElementStyle родителя
-                if (childProps && (childProps.cls === 'UIListLayout' || childProps.cls === 'UIGridLayout')) continue; // раскладка: свойства есть, DOM-узла нет
+                if (childProps && childProps.cls === 'UIScale') continue; // applied in the parent's applyGuiElementStyle
+                if (childProps && (childProps.cls === 'UIListLayout' || childProps.cls === 'UIGridLayout')) continue; // layout: properties exist, no DOM node
                 if (childProps && (childProps.cls === 'UICorner' || childProps.cls === 'UIStroke')) {
-                    // Модификатор, не отдельный визуальный узел — красим
-                    // el (родителя), а не создаём для него DOM-элемент.
+                    // A modifier, not a separate visual node — we paint
+                    // el (the parent), and don't create a DOM element for it.
                     applyGuiDecoration(el, childProps);
                     continue;
                 }
@@ -13723,11 +13725,11 @@ end
             applyUIListLayout(ref);
         }
 
-        // UIGridLayout: ячейки CellSize с зазором CellPadding, строки/столбцы по FillDirection (0 Horizontal), выравнивание
-        // Horizontal/VerticalAlignment (HA: 0 Center, 1 Left, 2 Right; VA: 0 Center, 1 Top, 2 Bottom). Раньше раскладки не было:
-        // слоты хотбара растягивались во всю ширину строками друг под другом. Размер/позиция ячеек пишутся прямо в style
-        // (props не трогаем — Lua читает исходный Size), el._gridCell переприменяется в applyGuiElementStyle.
-        // SortOrder раскладки: 0 = Name (по имени), 1 = Custom (порядок потомков), 2 = LayoutOrder (по числу, затем порядок потомков)
+        // UIGridLayout: CellSize cells with a CellPadding gap, rows/columns by FillDirection (0 Horizontal), alignment by
+        // Horizontal/VerticalAlignment (HA: 0 Center, 1 Left, 2 Right; VA: 0 Center, 1 Top, 2 Bottom). There was no layout before:
+        // hotbar slots stretched to the full width in rows one under another. The cells' size/position are written straight into style
+        // (we don't touch props — Lua reads the original Size), el._gridCell is re-applied in applyGuiElementStyle.
+        // Layout SortOrder: 0 = Name (by name), 1 = Custom (descendant order), 2 = LayoutOrder (by number, then descendant order)
         function _sortLayoutKids(kids, lp) {
             const so = lp.SortOrder === undefined ? 2 : lp.SortOrder;
             const idx = new Map(kids.map((k, i) => [k, i]));
@@ -13790,14 +13792,14 @@ end
             el.style.right = 'auto'; el.style.bottom = 'auto'; el.style.transform = 'none';
         }
 
-        // UIListLayout — раньше был только числом-заглушкой в GUI_CLASS_NAMES.
-        // Высота/ширина элемента бралась ТОЛЬКО из пиксельной части Size
-        // (Size.Y.offset), а в реальных меню размер почти всегда задан в
-        // Scale ({0.08, 0} и т.п.) — offset получался 0 у ВСЕХ элементов,
-        // список не сдвигался, и все пункты рисовались друг на друге в
-        // одной точке (наложенный текст в меню песен). Меряем то, что
-        // РЕАЛЬНО отрисовано в DOM (offsetWidth/offsetHeight) — там уже
-        // учтены и scale, и offset, как в настоящем AbsoluteSize у Roblox.
+        // UIListLayout — was only a number stub in GUI_CLASS_NAMES before.
+        // An element's height/width was taken ONLY from the pixel part of Size
+        // (Size.Y.offset), while in real menus the size is almost always given in
+        // Scale ({0.08, 0} etc.) — the offset came out 0 for ALL elements,
+        // the list didn't shift, and all items were drawn on top of each other at
+        // one point (overlapping text in the song menu). We measure what is
+        // ACTUALLY rendered in the DOM (offsetWidth/offsetHeight) — scale and offset are already
+        // accounted for there, as in a real Roblox AbsoluteSize.
         function applyUIListLayout(containerRef) {
             const kids = (guiChildrenByRef[containerRef] || []).slice();
             let layoutRef = null;
@@ -13810,14 +13812,14 @@ end
             const sortedKids = _sortLayoutKids(kids, layoutProps);
             kids.length = 0; sortedKids.forEach(k => kids.push(k));
             const paddingPx = (layoutProps.Padding && layoutProps.Padding.offset) || 0;
-            // FillDirection в файле — число enum (0 = Horizontal, 1 = Vertical), в Lua-присваивании — строка
+            // FillDirection in the file is an enum number (0 = Horizontal, 1 = Vertical), in a Lua assignment — a string
             const horizontal = layoutProps.FillDirection === 'Horizontal' || layoutProps.FillDirection === 0;
             let offset = 0;
             for (const k of kids) {
                 const p = guiPropsByRef[k];
                 if (!p || k === layoutRef) continue;
-                if (p.cls && p.cls.indexOf('UI') === 0) continue; // UIPadding/UICorner/... — не элементы списка
-                // Visible === false — это как раз наш случай "скрытый
+                if (p.cls && p.cls.indexOf('UI') === 0) continue; // UIPadding/UICorner/... — not list elements
+                // Visible === false — this is exactly our case of a "hidden
                 if (p.Visible === false) continue;
                 const el = guiDomByRef[k];
                 if (!el) continue;
@@ -13835,10 +13837,10 @@ end
             }
         }
 
-        // Рендерит DOM-оверлей из уже готового guiPropsByRef (собранного
+        // Renders the DOM overlay from the already prepared guiPropsByRef (assembled
         function renderGuiOverlayFromClient() {
             const overlay = document.getElementById('gui-overlay');
-            if (!overlay) { logLuaOutput('error', 'renderGuiOverlayFromClient: #gui-overlay не найден в DOM'); return; }
+            if (!overlay) { logLuaOutput('error', 'renderGuiOverlayFromClient: #gui-overlay not found in the DOM'); return; }
             overlay.innerHTML = '';
             _applyGuiZoom(overlay);
             guiDomByRef = {};
@@ -13857,9 +13859,9 @@ end
                 const parentRef = luaParentByRef[ref];
                 const parentInfo = parentRef !== undefined ? luaByRef[parentRef] : null;
                 const isTemplateUnderStarterGui = parentInfo && parentInfo.cls === 'StarterGui';
-                if (isTemplateUnderStarterGui) continue; // шаблон — не рендерим, рендерим клон в PlayerGui
-                // ScreenGui рисуется в Roblox ТОЛЬКО внутри PlayerGui. Шаблоны, лежащие в ReplicatedStorage / под скриптом /
-                // в ServerStorage (RoundResultsGui и т.п. — скрипт клонирует их сам), раньше рисовались поверх игры сразу.
+                if (isTemplateUnderStarterGui) continue; // a template — don't render, render the clone in PlayerGui
+                // A ScreenGui is drawn in Roblox ONLY inside PlayerGui. Templates lying in ReplicatedStorage / under a script /
+                // in ServerStorage (RoundResultsGui etc. — the script clones them itself) used to be drawn over the game right away.
                 if (props.cls === 'ScreenGui') {
                     let cur = parentRef, inPG = false, g = 0;
                     while (cur !== undefined && cur !== -1 && g++ < 60) {
@@ -13869,14 +13871,14 @@ end
                     }
                     if (!inPG) continue;
                 }
-                if (props.Enabled === false) continue; // раньше было props.enabled (маленькая e) — никогда не совпадало, ScreenGui.Enabled=false из плейса игнорировался
+                if (props.Enabled === false) continue; // it used to be props.enabled (lowercase e) — never matched, ScreenGui.Enabled=false from the place was ignored
                 guiRenderNode(ref, overlay);
                 renderedCount++;
             }
             overlay.classList.add('active');
-            // Временный диагностический лог:
-            logLuaOutput('info', 'GUI overlay: отрисовано верхних экранов ' + renderedCount
-                + ' из ' + Object.keys(guiPropsByRef).length + ' известных GUI-объектов');
+            // Temporary diagnostic log:
+            logLuaOutput('info', 'GUI overlay: top-level screens drawn ' + renderedCount
+                + ' of ' + Object.keys(guiPropsByRef).length + ' known GUI objects');
         }
 
         function clearGuiOverlay() {
@@ -13888,18 +13890,18 @@ end
             guiDomByRef = {};
         }
 
-        // Патчит уже отрисованный DOM-узел после того, как Lua-скрипт
-        // ============ SurfaceGui: интерфейс на грани детали (3D) ============
-        // Рисуем потомков SurfaceGui на canvas -> CanvasTexture на плоскости, приклеенной
-        // к нужной грани детали. Свойства Lua (TextLabel.Text и т.д.) помечают canvas
-        // «грязным», перерисовка — не чаще раза в кадр. Поддержка: Frame/TextLabel/TextButton/
-        // TextBox (фон, рамка, текст с TextScaled и выравниванием) и ImageLabel (только фон).
+        // Patches an already rendered DOM node after a Lua script
+        // ============ SurfaceGui: UI on a part's face (3D) ============
+        // We draw SurfaceGui's descendants onto a canvas -> a CanvasTexture on a plane glued
+        // to the needed face of the part. Lua properties (TextLabel.Text etc.) mark the canvas
+        // «dirty», repainting no more than once per frame. Supported: Frame/TextLabel/TextButton/
+        // TextBox (background, border, text with TextScaled and alignment) and ImageLabel (background only).
         const surfaceGuis = {}; // ref SurfaceGui -> { partRef, mesh, canvas, ctx, tex, dw, dh, k, local, dirty }
         const _SG_FACES = {
-            // NormalId: Right=0 Top=1 Back=2 Left=3 Bottom=4 Front=5 (Front = -Z детали)
+            // NormalId: Right=0 Top=1 Back=2 Left=3 Bottom=4 Front=5 (Front = -Z of the part)
             0: { n: [1, 0, 0], ry: Math.PI / 2, rx: 0 },
-            // Top/Bottom: холст в Roblox идёт ШИРИНОЙ вдоль Z детали, «верх» — вдоль +X (проверено на A.rbxl: «Рулетка» на
-            // грани Bottom детали 4x1x9.5, стоящей торцом, читается горизонтально). basis = [право, верх, нормаль] плоскости.
+            // Top/Bottom: the canvas in Roblox runs with its WIDTH along the part's Z, the «top» along +X (verified on A.rbxl: the «Roulette» on
+            // the Bottom face of a 4x1x9.5 part standing on its end reads horizontally). basis = [right, up, normal] of the plane.
             1: { n: [0, 1, 0], basis: [[0, 0, 1], [1, 0, 0], [0, 1, 0]] },
             2: { n: [0, 0, 1], ry: 0, rx: 0 },
             3: { n: [-1, 0, 0], ry: -Math.PI / 2, rx: 0 },
@@ -13986,10 +13988,10 @@ end
             clearSurfaceGuis();
             ensureSurfaceGuis();
         }
-        // Достраивает недостающие SurfaceGui. Геометрию карты подгружают порциями (стриминг около
-        // игрока), поэтому деталь с табло/кнопкой часто загружается ПОЗЖЕ старта Play — раньше
-        // плоскость строилась один раз при старте, пропускала ещё не загруженные детали и больше
-        // не создавалась (кнопки лифта оставались без цифр).
+        // Builds the missing SurfaceGuis. Map geometry is loaded in portions (streaming around
+        // the player), so a part with a board/button often loads LATER than the start of Play — the
+        // plane used to be built once at start, skipped parts not yet loaded and was never
+        // created again (the elevator buttons stayed without digits).
         function ensureSurfaceGuis() {
             let made = 0;
             for (const [refStr, p] of Object.entries(guiPropsByRef)) {
@@ -14012,7 +14014,7 @@ end
                     const pps = Number(p.PixelsPerStud) || 50;
                     dw = Math.max(1, fw * pps); dh = Math.max(1, fh * pps);
                 }
-                // разрешение текстуры: длинная сторона 128..512 px
+                // texture resolution: the long side 128..512 px
                 const longest = Math.max(dw, dh);
                 const target = Math.min(512, Math.max(128, longest));
                 const k = target / longest;
@@ -14024,7 +14026,7 @@ end
                     depthTest: !p.AlwaysOnTop, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false });
                 const mesh = new THREE.Mesh(new THREE.PlaneGeometry(fw, fh), mat);
                 mesh.matrixAutoUpdate = false; mesh.matrixWorldAutoUpdate = false; mesh.frustumCulled = false;
-                // локальная матрица плоскости относительно детали: на 0.003 студа от грани наружу
+                // the plane's local matrix relative to the part: 0.003 studs outward from the face
                 const half = [psz.x / 2, psz.y / 2, psz.z / 2];
                 const off = new THREE.Vector3(face.n[0] * (half[0] + 0.003), face.n[1] * (half[1] + 0.003), face.n[2] * (half[2] + 0.003));
                 const q = face.basis
@@ -14050,19 +14052,19 @@ end
                 delete surfaceGuis[ref];
             }
         }
-        // каждый кадр: приклеить плоскость к детали (она может двигаться) и при необходимости перерисовать
+        // every frame: glue the plane to the part (it may move) and repaint if necessary
         function updateSurfaceGuis() {
             const nowT = performance.now();
             if (nowT - _sgEnsureT > 500) { _sgEnsureT = nowT; ensureSurfaceGuis(); }
-            // 108 табло в одной комнате = 108 прозрачных draw call'ов даже за стеной: отсекаем по дальности и пирамиде камеры
+            // 108 boards in one room = 108 transparent draw calls even behind a wall: cull by distance and the camera frustum
             if (!_sgFrustum) { _sgFrustum = new THREE.Frustum(); _sgMat = new THREE.Matrix4(); _sgSph = new THREE.Sphere(); }
             camera.updateMatrixWorld();
             _sgMat.multiplyMatrices(camera.projectionMatrix, _sgMat.copy(camera.matrixWorld).invert());
             _sgFrustum.setFromProjectionMatrix(_sgMat);
             for (const sg of Object.values(surfaceGuis)) {
                 if (!sceneObjs[sg.partRef]) { sg.mesh.visible = false; continue; }
-                // matrix (а не только matrixWorld): в этой версии three.js сцена каждый кадр делает
-                // matrixWorld = parent.matrixWorld * matrix, и плоскость с единичной matrix оказывалась в (0,0,0).
+                // matrix (not only matrixWorld): in this three.js version the scene sets every frame
+                // matrixWorld = parent.matrixWorld * matrix, and a plane with an identity matrix ended up at (0,0,0).
                 sg.mesh.matrix.copy(luaPartMatrix(sg.partRef)).multiply(sg.local);
                 sg.mesh.matrixWorld.copy(sg.mesh.matrix);
                 sg.mesh.matrixWorldNeedsUpdate = true;
@@ -14083,13 +14085,13 @@ end
             if (!props) return false;
             props[name] = value;
             if (props.cls === 'UIListLayout' || props.cls === 'UIGridLayout') {
-                // Grid.CellSize = ... / list.Padding = ... — пересчитать раскладку контейнера
+                // Grid.CellSize = ... / list.Padding = ... — recompute the container's layout
                 const parentRef = luaParentByRef[ref];
                 if (parentRef !== undefined && parentRef !== -1) applyUIListLayout(parentRef);
                 return true;
             }
             if (props.cls === 'UIScale') {
-                // у UIScale нет своего DOM-узла: пересчитываем стиль родителя (GuiScale меняет Scale на лету)
+                // UIScale has no DOM node of its own: we recompute the parent's style (GuiScale changes Scale on the fly)
                 const parentRef = luaParentByRef[ref];
                 const pel = guiDomByRef[parentRef], pprops = guiPropsByRef[parentRef];
                 if (pel && pprops) applyGuiElementStyle(pel, pprops);
@@ -14097,7 +14099,7 @@ end
             }
             let el = guiDomByRef[ref];
             if (!el) {
-                // Узла ещё нет — это нормально для ScreenGui/BillboardGui,
+                // No node yet — that's normal for ScreenGui/BillboardGui,
                 if (name === 'Enabled' && value === true && (props.cls === 'ScreenGui' || props.cls === 'BillboardGui')) {
                     const overlay = document.getElementById('gui-overlay');
                     if (overlay) {
@@ -14124,10 +14126,10 @@ end
             for (const w of ready) resumeLuaCoroutine(w.co, 'script', 0);
         }
 
-        // TweenService:Create(...):Play() — раньше TweenService не
-        // Easing как в Roblox (формулы Пеннера): Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic ×
-        // In/Out/InOut. Раньше JS-твины шли линейно, а Lua-сторона знала только Linear/Sine/Quad–Quint (остальное — Quad):
-        // Back/Bounce/Elastic и т.д. не работали. По умолчанию Roblox — Quad/Out.
+        // TweenService:Create(...):Play() — TweenService didn't previously
+        // Easing as in Roblox (Penner formulas): Linear, Sine, Quad, Cubic, Quart, Quint, Exponential, Circular, Back, Bounce, Elastic ×
+        // In/Out/InOut. Previously JS tweens were linear, and the Lua side knew only Linear/Sine/Quad–Quint (the rest — Quad):
+        // Back/Bounce/Elastic etc. didn't work. The Roblox default is Quad/Out.
         function _tweenEase(a, style, dir) {
             style = String(style || 'Quad').replace(/^Enum\.EasingStyle\./, '');
             dir = String(dir || 'Out').replace(/^Enum\.EasingDirection\./, '');
@@ -14157,7 +14159,7 @@ end
             if (dir === 'InOut') return a < 0.5 ? inF(a * 2) / 2 : 1 - inF((1 - a) * 2) / 2;
             return 1 - inF(1 - a);   // Out
         }
-        // Прогресс твина с учётом DelayTime/RepeatCount/Reverses -> { p (0..1 внутри цикла), done, waiting }
+        // Tween progress taking DelayTime/RepeatCount/Reverses into account -> { p (0..1 within a cycle), done, waiting }
         function _tweenProg(t, now) {
             const D = t.duration;
             const el = (now - t.startTime) / 1000 - (t.delay || 0);
@@ -14168,10 +14170,10 @@ end
             if (el >= per * cycles) return { p: t.reverses ? 0 : 1, done: true };
             const c = el % per;
             let p = c / D;
-            if (p > 1) p = 2 - p;    // обратный ход
+            if (p > 1) p = 2 - p;    // reverse run
             return { p, done: false };
         }
-        // Оба значения — вложенные объекты с одинаковыми числовыми полями (UDim2, Color3, Vector2, UDim) -> можно интерполировать
+        // Both values are nested objects with the same numeric fields (UDim2, Color3, Vector2, UDim) -> can be interpolated
         function _tweenCompatible(a, b) {
             if (typeof a === 'number' && typeof b === 'number') return true;
             if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
@@ -14184,7 +14186,7 @@ end
             for (const k in b) o[k] = _tweenLerp(a[k], b[k], e);
             return o;
         }
-        // Completed стреляет с PlaybackState (Completed/Cancelled), как в Roblox: скрипты проверяют state == Enum.PlaybackState.Completed
+        // Completed fires with a PlaybackState (Completed/Cancelled), as in Roblox: scripts check state == Enum.PlaybackState.Completed
         function _tweenFinish(t, state) { fireLuaSignal(t.completedRef, 'Event', [{ __enum: ['PlaybackState', state || 'Completed'] }]); }
         function updateTweens() {
             if (!activeTweens.length) return;
@@ -14192,7 +14194,7 @@ end
             const stillActive = [];
             for (const t of activeTweens) {
                 const pr = _tweenProg(t, now);
-                if (pr.waiting) { stillActive.push(t); continue; }           // DelayTime ещё не прошёл
+                if (pr.waiting) { stillActive.push(t); continue; }           // DelayTime hasn't passed yet
                 const pe = _tweenEase(pr.p, t.style, t.dir), done = pr.done;
                 if (t.cframe) {
                     const x = t.fromPos.x + (t.toPos.x - t.fromPos.x) * pe;
@@ -14231,8 +14233,8 @@ end
                 }
                 if (t.composite) {
                     if (t.fromComposite) {
-                        // UDim2/Color3/Vector2/UDim у GUI-объектов: плавно по кадрам (раньше значение просто прыгало в конце твина —
-                        // появление кастомного ProximityPrompt и любые твины Size/Position/цвета GUI были скачком)
+                        // UDim2/Color3/Vector2/UDim of GUI objects: smoothly frame by frame (previously the value just jumped at the end of the tween —
+                        // the appearance of a custom ProximityPrompt and any GUI Size/Position/color tweens were a jump)
                         luaSetGenericProp(t.ref, t.propName, _tweenLerp(t.fromComposite, t.to, pe));
                         if (done) { fireLuaSignal(t.ref, '__prop_' + t.propName, []); _tweenFinish(t); } else stillActive.push(t);
                     } else if (done) {
@@ -14252,12 +14254,12 @@ end
             activeTweens = stillActive;
         }
 
-        // ============ Виртуальная клавиатура для UserInputService ============
-        // Источники нажатия: 'dom' — настоящая клавиатура, 'virt' — экранный
-        // джойстик (W/A/S/D) и кнопка прыжка (Space). Клавиша «нажата», если
-        // активен любой источник; InputBegan/InputEnded стреляют на переходах,
-        // как в Roblox. Так клиентские скрипты на телефоне видят «WASD/пробел».
-        const luaKeySrc = {}; // имя KeyCode -> { dom: bool, virt: bool }
+        // ============ Virtual keyboard for UserInputService ============
+        // Press sources: 'dom' — the real keyboard, 'virt' — the on-screen
+        // joystick (W/A/S/D) and the jump button (Space). A key is «pressed» if
+        // any source is active; InputBegan/InputEnded fire on transitions,
+        // as in Roblox. This way client scripts on a phone see «WASD/space».
+        const luaKeySrc = {}; // KeyCode name -> { dom: bool, virt: bool }
         function luaKeyIsDown(name) { const k = luaKeySrc[name]; return !!(k && (k.dom || k.virt)); }
         function luaSetKeySrc(name, src, down) {
             if (!luaServerL && !luaClientL) return;
@@ -14276,14 +14278,14 @@ end
             ShiftLeft: 'LeftShift', ShiftRight: 'RightShift', ControlLeft: 'LeftControl', ControlRight: 'RightControl',
             AltLeft: 'LeftAlt', AltRight: 'RightAlt', Enter: 'Return', Escape: 'Escape', Tab: 'Tab', Backspace: 'Backspace',
         };
-        // e.code — физическая клавиша, поэтому W/A/S/D работают и на русской раскладке
+        // e.code is the physical key, so W/A/S/D work on a Russian layout too
         function luaKeyNameFromDom(e) {
             const c = e.code || '';
             if (/^Key[A-Z]$/.test(c)) return c[3];
             if (/^Digit[0-9]$/.test(c)) return _digitNames[+c[5]];
             return _codeNames[c] || null;
         }
-        // Экранный джойстик -> виртуальные W/A/S/D (порог 0.3); вызывается каждый кадр
+        // On-screen joystick -> virtual W/A/S/D (threshold 0.3); called every frame
         function luaUpdateVirtualKeys() {
             if (!luaServerL && !luaClientL) return;
             const T = 0.3;
@@ -14293,7 +14295,7 @@ end
             luaSetKeySrc('A', 'virt', joyVector.x < -T);
         }
 
-        // UserInputService.InputBegan/InputChanged/InputEnded — глобальные
+        // UserInputService.InputBegan/InputChanged/InputEnded — global
         document.addEventListener('mousedown', (e) => {
             if (!luaServerL && !luaClientL) return;
             const ref = luaFindServiceRef('UserInputService');
@@ -14309,7 +14311,7 @@ end
             const ref = luaFindServiceRef('UserInputService');
             if (ref !== -1) fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]);
         });
-        // Тач-эквиваленты — раньше их не было вовсе, только мышиные.
+        // Touch equivalents — there were none at all before, only mouse ones.
         document.addEventListener('touchstart', () => {
             if (document.body.style.userSelect === 'none' && !currentResizer &&
                 !document.querySelector('.resizer-h.active')) {
@@ -14333,7 +14335,7 @@ end
             if (ref !== -1) fireLuaSignal(ref, 'InputEnded', [domInputTypeName(e, false), ...domInputXY(e)]);
         }, { passive: true });
 
-        // RunService.Stepped/Heartbeat/RenderStepped — настоящий, не
+        // RunService.Stepped/Heartbeat/RenderStepped — real, not
         let lastRunServiceTick = null;
         function updateRunServiceSignals() {
             const ref = luaFindServiceRef('RunService');
@@ -14349,7 +14351,7 @@ end
         function buildCannonShape(mesh) {
             const shapeName = mesh.userData.shape;
             const sx = mesh.userData.sx || 1, sy = mesh.userData.sy || 1, sz = mesh.userData.sz || 1;
-            // Реальные тонкие плиты пола (трава, базплейты и т.п.) толщиной
+            // Real thin floor slabs (grass, baseplates etc.) with thickness
             const MIN_COLLIDER_THICKNESS = 1.0;
             switch (shapeName) {
                 case 'sphere': {
@@ -14358,8 +14360,8 @@ end
                 }
                 case 'cylinder':
                     return new CANNON.Cylinder(sx * 0.5, sz * 0.5, Math.max(sy, MIN_COLLIDER_THICKNESS), 8);
-                // Wedge/Cone у cannon.js нет готовой формы — приближаем боксом
-                // по габаритам. Для точных скатов нужен ConvexPolyhedron.
+                // Wedge/Cone have no ready shape in cannon.js — approximate with a box
+                // by the bounds. Exact ramps need a ConvexPolyhedron.
                 case 'wedge':
                 case 'cone':
                 case 'box':
@@ -14373,23 +14375,23 @@ end
         }
 
         const luaMoveDir = { x: 0, z: 0 };
-        let charVelX = 0, charVelZ = 0; // последняя заданная игроком горизонтальная скорость
-        // ============ Seat / VehicleSeat (сидение) и TrussPart (лестница) ============
-        // Seat: касание сверху сажает персонажа (если не Disabled и свободно): Humanoid.Sit=true, Humanoid.SeatPart / Seat.Occupant,
-        // событие Humanoid.Seated(true, seat); тело следует за сиденьем (в т.ч. за движущимся), ввод ходьбы отключён,
-        // прыжок — встать (после этого 1.2 с сиденье не подхватывает снова). VehicleSeat дополнительно выставляет
-        // Throttle/Steer из W/S и A/D (для скриптов машин).
-        // TrussPart: упёрся в неё и жмёшь вперёд — лезешь (W вверх, S вниз; скорость 0.7×WalkSpeed, как в Roblox), без гравитации;
-        // сверху — запрыгиваешь на край, прыжок — спрыгнуть от лестницы. Humanoid.Climbing(speed) стреляет при старте/конце.
-        let seatState = null;      // {ref, yaw, pos: Vector3, rotated}   ref=-1 — «сидит» без сиденья (Humanoid.Sit = true из скрипта)
+        let charVelX = 0, charVelZ = 0; // the last horizontal speed set by the player
+        // ============ Seat / VehicleSeat (seating) and TrussPart (ladder) ============
+        // Seat: a touch from above seats the character (if not Disabled and free): Humanoid.Sit=true, Humanoid.SeatPart / Seat.Occupant,
+        // the Humanoid.Seated(true, seat) event; the body follows the seat (including a moving one), walking input is disabled,
+        // a jump — stand up (after that the seat won't pick you up again for 1.2 s). VehicleSeat additionally sets
+        // Throttle/Steer from W/S and A/D (for car scripts).
+        // TrussPart: bump into it and press forward — you climb (W up, S down; speed 0.7×WalkSpeed, as in Roblox), without gravity;
+        // at the top — you hop onto the edge, a jump — jump off the ladder. Humanoid.Climbing(speed) fires at start/end.
+        let seatState = null;      // {ref, yaw, pos: Vector3, rotated}   ref=-1 — «sitting» without a seat (Humanoid.Sit = true from a script)
         let climbState = null;     // {ref, vy}
         let _seatCooldownUntil = 0, _climbCooldownUntil = 0;
-        const SIT_DROP = 1.2;      // насколько опускаем модель при посадке (бёдра на уровень сиденья)
+        const SIT_DROP = 1.2;      // how far we lower the model when seating (hips at seat level)
         let _scCache = { t: -1e9, ver: -1, seats: [], truss: [] };
-        // «Лестница из перекладин» (в картах вроде Castle Warfare — обычные Part, не TrussPart): ≥4 одинаковых горизонтальных бруска
-        // друг над другом (один центр по XZ и одно направление, между ними зазор), общая высота ≥6. Лезем по ней как по ферме:
-        // коллайдер-сфера на перекладину не встаёт, а в оригинале такие конструкции проходимы. Каждая найденная лестница —
-        // «виртуальный TrussPart» _scVirt[id] = {M, Minv, h}: коробка на всю высоту ряда по локальным осям перекладин.
+        // A «rung ladder» (in maps like Castle Warfare — ordinary Parts, not TrussPart): ≥4 identical horizontal bars
+        // one above another (one center in XZ and one direction, with a gap between them), total height ≥6. We climb it like a truss:
+        // the collider sphere doesn't stand on a rung, while in the original such constructions are passable. Each ladder found is a
+        // «virtual TrussPart» _scVirt[id] = {M, Minv, h}: a box for the whole height of the row along the rungs' local axes.
         let _scVirt = {}, _scVirtN = -1, _scVirtT = -1e9;
         function _scDetectRungLadders() {
             _scVirt = {};
@@ -14397,18 +14399,18 @@ end
             const col = (M, i) => new THREE.Vector3(M.elements[i * 4], M.elements[i * 4 + 1], M.elements[i * 4 + 2]);
             for (const k in sceneObjs) {
                 const ud = sceneObjs[k] && sceneObjs[k].userData;
-                if (!ud || ud.cls !== 'Part' || ud.cancollideFlag === false) continue;   // решётка без коллизии лестницей не считается
+                if (!ud || ud.cls !== 'Part' || ud.cancollideFlag === false) continue;   // a lattice without collision doesn't count as a ladder
                 const sz = luaSizeOfRef(+k);
                 if (!sz) continue;
                 const dims = [sz.x, sz.y, sz.z];
                 const li = dims[0] >= dims[1] && dims[0] >= dims[2] ? 0 : (dims[1] >= dims[2] ? 1 : 2);
                 const len = dims[li], o1 = dims[(li + 1) % 3], o2 = dims[(li + 2) % 3];
-                if (len < 2 || o1 > 1.6 || o2 > 1.6) continue;                 // тонкий брусок
+                if (len < 2 || o1 > 1.6 || o2 > 1.6) continue;                 // a thin bar
                 const M = luaPartMatrix(+k);
                 const axis = col(M, li).normalize();
-                if (Math.abs(axis.y) > 0.15) continue;                          // перекладина горизонтальна
+                if (Math.abs(axis.y) > 0.15) continue;                          // the rung is horizontal
                 const ja = (li + 1) % 3, ka = (li + 2) % 3;
-                const jv = Math.abs(col(M, ja).y) >= Math.abs(col(M, ka).y) ? ja : ka;   // какая из двух других осей вертикальна
+                const jv = Math.abs(col(M, ja).y) >= Math.abs(col(M, ka).y) ? ja : ka;   // which of the other two axes is vertical
                 const vDim = dims[jv], tDim = dims[jv === ja ? ka : ja];
                 if (axis.x < 0 || (Math.abs(axis.x) < 1e-6 && axis.z < 0)) axis.negate();
                 const q = (v, st) => Math.round(v / st) * st;
@@ -14432,12 +14434,12 @@ end
                 let run = [g.items[0]];
                 for (let i = 1; i < g.items.length; i++) {
                     const prev = run[run.length - 1], it = g.items[i], step = it.y - prev.y;
-                    if (step >= 0.6 && step <= 3.2 && step - Math.max(prev.vDim, it.vDim) >= 0.35) run.push(it);   // зазор между перекладинами
+                    if (step >= 0.6 && step <= 3.2 && step - Math.max(prev.vDim, it.vDim) >= 0.35) run.push(it);   // gap between rungs
                     else { flush(g, run); run = [it]; }
                 }
                 flush(g, run);
             }
-            if (n) console.info('[climb] лестниц из перекладин найдено:', n);
+            if (n) console.info('[climb] rung ladders found:', n);
         }
         function _scRefresh() {
             const now = performance.now();
@@ -14450,7 +14452,7 @@ end
                 if (c === 'Seat' || c === 'VehicleSeat') seats.push(+k);
                 else if (c === 'TrussPart') truss.push(+k);
             }
-            // На карте без Script/LocalScript Lua-рантайм не стартует и luaByRef пуст — сиденья и лестницы берём прямо из сцены
+            // On a map without Script/LocalScript the Lua runtime doesn't start and luaByRef is empty — take seats and ladders straight from the scene
             for (const k in sceneObjs) {
                 if (seen.has(+k)) continue;
                 const c = sceneObjs[k] && sceneObjs[k].userData && sceneObjs[k].userData.cls;
@@ -14458,18 +14460,18 @@ end
                 else if (c === 'TrussPart') truss.push(+k);
             }
             const nObjs = Object.keys(sceneObjs).length;
-            // Сцена изменилась (новые детали/клоны) — ищем заново, но не чаще раза в 10 с: проход по тысячам деталей на телефоне заметен,
-            // а снаряды и клоны меняют число объектов постоянно
+            // The scene changed (new parts/clones) — search again, but no more than once per 10 s: walking thousands of parts on a phone is noticeable,
+            // and projectiles and clones change the object count constantly
             if (nObjs !== _scVirtN && now - _scVirtT > 10000) { _scVirtN = nObjs; _scVirtT = now; _scDetectRungLadders(); }
             for (const id in _scVirt) truss.push(id);
             _scCache.seats = seats; _scCache.truss = truss;
         }
-        // Деталь лежит в мире? Без Lua-рантайма иерархии (luaParentByRef) нет, но в sceneObjs попадает только то, что в Workspace
+        // Is the part in the world? Without the Lua runtime there is no hierarchy (luaParentByRef), but sceneObjs only contains what is in Workspace
         function _scInWorld(ref) {
             if (luaParentByRef[ref] === undefined) return !!(sceneObjs[ref] || physicsBodies[ref]);
             return luaIsUnderWorkspace(ref);
         }
-        // fireLuaSignal без fengari (карта без скриптов) бросал TypeError — тут тихо ничего не делаем
+        // fireLuaSignal without fengari (a map without scripts) threw a TypeError — quietly do nothing here
         function _scFire(ref, evName, args) {
             if (!window.fengari) return;
             try { fireLuaSignal(ref, evName, args); } catch (e) { console.warn('[seat/climb] signal', evName, e); }
@@ -14483,7 +14485,7 @@ end
             return !!(m && m.userData && m.userData.seatDisabled);
         }
         function _scLocal(ref, wp) {
-            if (typeof ref === 'string') {               // виртуальная лестница из перекладин
+            if (typeof ref === 'string') {               // virtual rung ladder
                 const v = _scVirt[ref];
                 return v ? { M: v.M, p: wp.clone().applyMatrix4(v.Minv), h: v.h.clone() } : null;
             }
@@ -14492,7 +14494,7 @@ end
             const s = luaSizeOfRef(ref);
             return { M, p: wp.clone().applyMatrix4(M.clone().invert()), h: new THREE.Vector3(s.x / 2, s.y / 2, s.z / 2) };
         }
-        // Ближайшая к персонажу точка коробки (мировые XZ): у широкой лестницы центр далеко сбоку, а лезть надо «в грань»
+        // The box point nearest to the character (world XZ): for a wide ladder the center is far to the side, but you have to climb «into the face»
         function _scNearestXZ(l, c) {
             const q = l.p.clone();
             q.x = Math.max(-l.h.x, Math.min(l.h.x, q.x)); q.y = 0; q.z = Math.max(-l.h.z, Math.min(l.h.z, q.z));
@@ -14518,7 +14520,7 @@ end
             seatState = { ref, yaw: spherical.theta, pos: new THREE.Vector3() };
             charVelX = 0; charVelZ = 0;
             charBody.velocity.set(0, 0, 0);
-            charBody.collisionResponse = false;   // тело следует за сиденьем, а не толкается с ним
+            charBody.collisionResponse = false;   // the body follows the seat instead of pushing against it
             if (ref !== -1) {
                 (luaRefProps[ref] = luaRefProps[ref] || {}).Occupant = luaHumanoidRef;
                 _scFire(ref, '__prop_Occupant', []);
@@ -14546,19 +14548,19 @@ end
             _climbCooldownUntil = performance.now() + (leap ? 600 : 250);
             if (luaHumanoidRef !== -1) _scFire(luaHumanoidRef, 'Climbing', [0]);
         }
-        // Возвращает true, если персонаж сидит/лезет и обычное управление нужно пропустить.
+        // Returns true if the character is seated/climbing and normal controls must be skipped.
         function _seatClimbTick(forward, strafe, dirX, dirZ) {
             _scRefresh();
             const now = performance.now();
             const c = new THREE.Vector3(charBody.position.x, charBody.position.y, charBody.position.z);
-            // ---- сидим ----
+            // ---- sitting ----
             if (seatState) {
                 const ref = seatState.ref;
                 if (ref !== -1) {
                     const l = _scLocal(ref, c);
                     if (!l) { seatStand(false); return false; }
-                    const top = new THREE.Vector3(0, l.h.y + 0.4, 0).applyMatrix4(l.M);   // центр тела чуть выше поверхности
-                    // персонажа унесли (телепорт скриптом/респавн): вместо того, чтобы вернуть его к сиденью, встаём
+                    const top = new THREE.Vector3(0, l.h.y + 0.4, 0).applyMatrix4(l.M);   // the body center is slightly above the surface
+                    // the character was carried away (script teleport/respawn): instead of returning it to the seat, stand up
                     if (c.distanceTo(top) > 4) { seatStand(false); return false; }
                     charBody.position.set(top.x, top.y, top.z);
                     const q = new THREE.Quaternion(); l.M.decompose(new THREE.Vector3(), q, new THREE.Vector3());
@@ -14576,17 +14578,17 @@ end
                 if (jumpQueued) { jumpQueued = false; seatStand(true); return true; }
                 return true;
             }
-            // ---- лезем ----
+            // ---- climbing ----
             if (climbState) {
                 const l = _scLocal(climbState.ref, c);
                 const e = 0.25 + CHAR_RADIUS;
                 const near = l && Math.abs(l.p.x) < l.h.x + e && Math.abs(l.p.z) < l.h.z + e && l.p.y > -l.h.y - 0.3 && l.p.y < l.h.y + CHAR_RADIUS + 0.6;
                 if (!near) { climbStop(false); return false; }
-                // направление «от лестницы» (в мировых XZ) — для прыжка и выхода наверх
+                // the direction «away from the ladder» (in world XZ) — for the jump and exiting at the top
                 const nq = _scNearestXZ(l, c);
                 const out = new THREE.Vector3(c.x - nq.x, 0, c.z - nq.z);
                 if (out.lengthSq() < 1e-4) out.set(0, 0, 1); out.normalize();
-                if (jumpQueued) {          // спрыгнуть от лестницы
+                if (jumpQueued) {          // jump off the ladder
                     jumpQueued = false;
                     charBody.velocity.y = charJumpPower * JUMP_POWER_TO_VELOCITY * 0.6;
                     charPushX = out.x * 8; charPushZ = out.z * 8; charPushT = 0.4;
@@ -14595,13 +14597,13 @@ end
                 }
                 const feet = c.y - CHAR_RADIUS;
                 const topWorld = new THREE.Vector3(0, l.h.y, 0).applyMatrix4(l.M).y;
-                if (feet >= topWorld - 0.25 && forward >= 0) {   // долезли до верха: запрыгиваем на край
+                if (feet >= topWorld - 0.25 && forward >= 0) {   // reached the top: hop onto the edge
                     charBody.velocity.y = 9;
                     charPushX = -out.x * 6; charPushZ = -out.z * 6; charPushT = 0.45;
                     climbStop(true);
                     return false;
                 }
-                if (forward < 0 && canJump) { climbStop(false); return false; }   // спустились на землю
+                if (forward < 0 && canJump) { climbStop(false); return false; }   // came down to the ground
                 const spd = charWalkSpeed * 0.7 * forward;
                 climbState.vy = spd;
                 charVelX = 0; charVelZ = 0;
@@ -14609,7 +14611,7 @@ end
                 if (luaHumanoidRef !== -1 && Math.abs(spd - (climbState.lastSpd || 0)) > 0.5) { climbState.lastSpd = spd; _scFire(luaHumanoidRef, 'Climbing', [spd]); }
                 return true;
             }
-            // ---- кандидаты: посадка / начало лазания ----
+            // ---- candidates: seating / start of climbing ----
             if (!luaControlsDisabled && now > _seatCooldownUntil) {
                 for (const ref of _scCache.seats) {
                     const l = _scLocal(ref, c);
@@ -14617,7 +14619,7 @@ end
                     if (_scSeatDisabled(ref)) continue;
                     const rp = luaRefProps[ref];
                     if (rp && rp.Occupant !== undefined && rp.Occupant !== -1) continue;
-                    const up = new THREE.Vector3(0, 1, 0).transformDirection(l.M);   // сиденье не перевёрнуто
+                    const up = new THREE.Vector3(0, 1, 0).transformDirection(l.M);   // the seat is not upside down
                     if (up.y < 0.5) continue;
                     if (Math.abs(l.p.x) < l.h.x + 0.6 && Math.abs(l.p.z) < l.h.z + 0.6 && l.p.y > l.h.y - 0.3 && l.p.y < l.h.y + CHAR_RADIUS + 0.9) {
                         seatSit(ref);
@@ -14645,7 +14647,7 @@ end
             return false;
         }
 
-        // Устанавливается настоящим PlayerModule:GetControls():Disable()
+        // Set by the real PlayerModule:GetControls():Disable()
         let luaControlsDisabled = false;
 
         function applyCharacterControl() {
@@ -14658,7 +14660,7 @@ end
             const strafe = luaControlsDisabled ? 0 : Math.max(-1, Math.min(1,
                 (keysPressed['d'] ? 1 : 0) - (keysPressed['a'] ? 1 : 0) + joyVector.x));
 
-            // Движение по горизонтали относительно направления взгляда камеры
+            // Horizontal movement relative to the camera's view direction
             const theta = spherical.theta;
             const fwdX = -Math.sin(theta), fwdZ = -Math.cos(theta);
             const rightX = Math.cos(theta), rightZ = -Math.sin(theta);
@@ -14667,9 +14669,9 @@ end
             let vz = fwdZ * forward + rightZ * strafe;
             const len = Math.hypot(vx, vz);
             let dirX = 0, dirZ = 0;
-            // Humanoid.MoveDirection: желаемое направление ввода (джойстик/WASD),
-            // как в Roblox — не зависит от WalkSpeed (при WalkSpeed=0 оно всё равно
-            // ненулевое, по нему клиентские скрипты видят «игрок пытается идти»).
+            // Humanoid.MoveDirection: the desired input direction (joystick/WASD),
+            // as in Roblox — independent of WalkSpeed (with WalkSpeed=0 it is still
+            // nonzero, client scripts use it to see «the player is trying to walk»).
             {
                 const mx = len > 0.001 ? vx / len : 0, mz = len > 0.001 ? vz / len : 0;
                 if (mx !== luaMoveDir.x || mz !== luaMoveDir.z) {
@@ -14679,24 +14681,24 @@ end
             }
             if (len > 0.001) {
                 dirX = vx / len; dirZ = vz / len;
-                const mag = Math.min(1, len);   // аналоговый стик: половина отклонения — половина скорости (клавиши дают len>=1 → полная)
+                const mag = Math.min(1, len);   // analog stick: half deflection — half speed (keys give len>=1 → full)
                 vx = dirX * charWalkSpeed * mag;
                 vz = dirZ * charWalkSpeed * mag;
             } else {
                 vx = 0; vz = 0;
             }
 
-            // Ground-check лучом вниз — определяет, можно ли прыгнуть и
+            // Ground check with a downward ray — determines whether we can jump and
             const from = new CANNON.Vec3(charBody.position.x, charBody.position.y, charBody.position.z);
             const to = new CANNON.Vec3(charBody.position.x, charBody.position.y - CHAR_RADIUS - 0.6, charBody.position.z);
             const result = new CANNON.RaycastResult();
             physicsWorld.raycastClosest(from, to, { collisionFilterMask: _charRayMask(), skipBackfaces: true }, result);
             canJump = result.hasHit;
 
-            // Сидение / лестница: пока сидим или лезем — обычная ходьба и прыжок пропускаются
+            // Seat / ladder: while seated or climbing — normal walking and jumping are skipped
             if (_seatClimbTick(forward, strafe, dirX, dirZ)) return;
 
-            // Падаем и уже какое-то время не находим опору — скорее всего
+            // Falling and have not found support for some time — most likely
             if (!canJump && charBody.velocity.y < -5) {
                 const now = performance.now();
                 if (fallingSinceMs === null && !streamInFlight) {
@@ -14712,7 +14714,7 @@ end
 
             if (canJump && (dirX !== 0 || dirZ !== 0)) {
                 tryStepUp(dirX, dirZ);
-                // Авто-прыжок (Humanoid.AutoJumpEnabled): впереди препятствие выше ступеньки, но ниже прыжка
+                // Auto-jump (Humanoid.AutoJumpEnabled): an obstacle ahead is higher than a step but lower than a jump
                 if (!jumpQueued && charJumpPower > 0 && _autoJumpEnabled()) {
                     const nowAJ = performance.now();
                     if (nowAJ - _lastAutoJumpMs > 350 && needsAutoJump(dirX, dirZ)) {
@@ -14722,7 +14724,7 @@ end
                 }
             }
 
-            if (charPushT > 0) { // толчок от HumanoidRootPart.AssemblyLinearVelocity
+            if (charPushT > 0) { // push from HumanoidRootPart.AssemblyLinearVelocity
                 const k = Math.min(1, charPushT / 0.4);
                 vx += charPushX * k; vz += charPushZ * k;
                 charPushT -= 1 / 60;
@@ -14739,7 +14741,7 @@ end
             jumpQueued = jumpQueued && charJumpPower <= 0 ? false : jumpQueued;
             jumpQueued = false;
 
-            // Страховка: тело игрока обязано быть в физическом мире (раз в секунду).
+            // Safety net: the player's body must be in the physics world (once a second).
             const tNow = performance.now();
             if (tNow - _bodyCheckT > 1000) {
                 _bodyCheckT = tNow;
@@ -14748,15 +14750,15 @@ end
         }
         let _bodyCheckT = 0;
 
-        // Сфера плохо лезет по отдельным боксам-ступеням:
-        // Авто-прыжок как у Roblox на телефонах. tryStepUp сам берёт низкие бордюры (до STEP_HEIGHT);
-        // сюда доходит то, что выше: прыгаем, если препятствие впереди — СТЕНА (не пологий склон)
-        // и его верх ниже высоты прыжка (JumpHeight 7.2, с запасом на сферу — 6.4 от ступней).
+        // A sphere climbs individual box steps poorly:
+        // Auto-jump like Roblox on phones. tryStepUp itself takes low curbs (up to STEP_HEIGHT);
+        // what is higher comes here: jump if the obstacle ahead is a WALL (not a gentle slope)
+        // and its top is below the jump height (JumpHeight 7.2, with a margin for the sphere — 6.4 from the feet).
         const AUTO_JUMP_MAX_H = 6.4;
         let _lastAutoJumpMs = 0;
         function _autoJumpEnabled() {
             const hp = luaHumanoidRef !== -1 ? virtualInstanceProps[luaHumanoidRef] : null;
-            return !hp || hp.AutoJumpEnabled !== false; // по умолчанию включён; скрипт может выключить
+            return !hp || hp.AutoJumpEnabled !== false; // enabled by default; a script can turn it off
         }
         function needsAutoJump(dirX, dirZ) {
             const dist = CHAR_RADIUS + 1.2;
@@ -14766,12 +14768,12 @@ end
                 new CANNON.Vec3(charBody.position.x + dirX * dist, feetY + h, charBody.position.z + dirZ * dist),
                 { collisionFilterMask: _charRayMask(), skipBackfaces: true }, res);
             const low = new CANNON.RaycastResult();
-            ray(STEP_HEIGHT + 0.3, low);                 // выше того, что берёт tryStepUp
-            if (!low.hasHit) return false;               // препятствия выше ступеньки нет
-            if (low.hitNormalWorld && low.hitNormalWorld.y > 0.6) return false; // пологий склон — просто идём
+            ray(STEP_HEIGHT + 0.3, low);                 // higher than what tryStepUp takes
+            if (!low.hasHit) return false;               // no obstacle above a step
+            if (low.hitNormalWorld && low.hitNormalWorld.y > 0.6) return false; // a gentle slope — just walk
             const high = new CANNON.RaycastResult();
             ray(AUTO_JUMP_MAX_H, high);
-            return !high.hasHit;                         // сверху свободно — перепрыгнем
+            return !high.hasHit;                         // free above — we will jump over
         }
 
         function tryStepUp(dirX, dirZ) {
@@ -14783,29 +14785,29 @@ end
             const footTo = new CANNON.Vec3(charBody.position.x + dirX * checkDist, footY, charBody.position.z + dirZ * checkDist);
             const footResult = new CANNON.RaycastResult();
             physicsWorld.raycastClosest(footFrom, footTo, { collisionFilterMask: _charRayMask(), skipBackfaces: true }, footResult);
-            if (!footResult.hasHit) return; // впереди на уровне ног пусто — ступенька не нужна
+            if (!footResult.hasHit) return; // empty ahead at foot level — no step needed
 
             const kneeFrom = new CANNON.Vec3(charBody.position.x, kneeY, charBody.position.z);
             const kneeTo = new CANNON.Vec3(charBody.position.x + dirX * checkDist, kneeY, charBody.position.z + dirZ * checkDist);
             const kneeResult = new CANNON.RaycastResult();
             physicsWorld.raycastClosest(kneeFrom, kneeTo, { collisionFilterMask: _charRayMask(), skipBackfaces: true }, kneeResult);
-            if (kneeResult.hasHit) return; // и выше препятствие — это стена, а не ступенька
+            if (kneeResult.hasHit) return; // and the obstacle is higher still — it's a wall, not a step
 
-            // Низкий порог впереди, сверху свободно — плавно поднимаем,
-            // порциями по кадрам (а не телепортом), пока не окажемся над ним.
+            // A low threshold ahead, free above — lift smoothly,
+            // in per-frame portions (not a teleport), until we are above it.
             charBody.position.y += 0.4;
             if (charBody.velocity.y < 0) charBody.velocity.y = 0;
         }
 
-        // ============ ProximityPrompt — кнопка взаимодействия у детали ============
-        // Живой реестр: и подсказки из файла (сервер отдаёт их начальные
-        // значения один раз), и созданные скриптом в рантайме через
-        // Instance.new (см. luaCreateVirtualInstance/luaSetParent/
-        // luaSetGenericProp) — ключи те же, что имена свойств в Roblox.
+        // ============ ProximityPrompt — an interaction button at a part ============
+        // The live registry: both prompts from the file (the server returns their initial
+        // values once) and ones created by a script at runtime via
+        // Instance.new (see luaCreateVirtualInstance/luaSetParent/
+        // luaSetGenericProp) — the keys are the same as the property names in Roblox.
         let _promptRegistry = {};
-        let _activePrompt = null;        // ближайшая подсказка в радиусе прямо сейчас (или null)
-        let _promptHoldStart = null;     // performance.now() начала удержания, или null
-        const KEYCODE_LABELS = { 69: 'E', 70: 'F', 71: 'G', 32: 'Space' }; // самые частые; иначе просто "E"
+        let _activePrompt = null;        // the nearest prompt within the radius right now (or null)
+        let _promptHoldStart = null;     // performance.now() of the hold start, or null
+        const KEYCODE_LABELS = { 69: 'E', 70: 'F', 71: 'G', 32: 'Space' }; // the most frequent; otherwise just "E"
         function _defaultPromptEntry(parentRef) {
             return {
                 ActionText: 'Interact', ObjectText: '', KeyboardKeyCode: 69,
@@ -14829,14 +14831,14 @@ end
                         if (!luaByRef[p.ref]) { luaByRef[p.ref] = { cls: 'ProximityPrompt', name: 'ProximityPrompt' }; luaByRefVer++; }
                     }
                 }
-            } catch (e) { emuWarn('swallow:for:11240', 'for: ' + _errText(e) + ' (подсказок из файла не будет — рантаймовые всё равно подхватятся через хуки)'); }
+            } catch (e) { emuWarn('swallow:for:11240', 'for: ' + _errText(e) + ' (no prompts from the file — runtime ones will still be picked up through hooks)'); }
         }
         function _promptKeyLabel(p) {
             if (typeof p.KeyboardKeyCode === 'number') return KEYCODE_LABELS[p.KeyboardKeyCode] || 'E';
             if (typeof p.KeyboardKeyCode === 'string' && p.KeyboardKeyCode) return p.KeyboardKeyCode.replace(/^KeyCode\.?/, '').slice(0, 3) || 'E';
             return 'E';
         }
-        // Известная позиция детали (без дефолта 0,0,0): физтело, меш, позиция из файла/клона. null — позиции нет.
+        // A part's known position (without a 0,0,0 default): physics body, mesh, position from the file/clone. null — no position.
         function _promptKnownPos(ref) {
             const body = physicsBodies[ref];
             if (body) return new THREE.Vector3(body.position.x, body.position.y, body.position.z);
@@ -14848,8 +14850,8 @@ end
             if (dd) return new THREE.Vector3(dd.px, dd.py, dd.pz);
             return null;
         }
-        // Позиция для объекта без собственной (скриптовая невидимая деталь без меша/физтела): среднее по известным деталям
-        // ближайшего предка. Используется и подсказкой (ProximityPrompt), и BillboardGui с Adornee на такую деталь.
+        // Position for an object with none of its own (a scripted invisible part without a mesh/physics body): the average of the known parts of
+        // the nearest ancestor. Used by both the prompt (ProximityPrompt) and a BillboardGui with an Adornee on such a part.
         function _anchorFromAncestors(ref) {
             for (let a = luaParentByRef[ref], g = 0; a !== undefined && a !== -1 && g++ < 40; a = luaParentByRef[a]) {
                 const sum = new THREE.Vector3(); let n = 0;
@@ -14865,24 +14867,24 @@ end
             return null;
         }
         function _promptWorldPos(p) {
-            // Подсказка работает только внутри Workspace (шаблоны в ServerStorage и удалённые комнаты не показываются —
-            // раньше такие «призрачные» подсказки висели на старых местах).
+            // A prompt works only inside Workspace (ServerStorage templates and deleted rooms aren't shown —
+            // «ghost» prompts used to hang at old places).
             const pr = p.parentRef;
             if (pr === undefined || pr === -1 || !luaIsUnderWorkspace(pr)) return null;
-            // Позиция родителя: физика, если есть, иначе матрица меша.
+            // The parent's position: physics if present, otherwise the mesh matrix.
             const own = _promptKnownPos(pr);
             if (own) return own;
-            // У созданной скриптом невидимой детали (Instance.new("Part") с Transparency=1, как FloatRoot у «Кнопки Z» из
-            // сундука) ни физтела, ни меша нет — позиция раньше бралась как (0,0,0), дистанция до игрока была ~90 и подсказку
-            // подобрать было нельзя. Берём ближайшего предка (Model) с известными деталями: среднее по их позициям.
+            // A script-created invisible part (Instance.new("Part") with Transparency=1, like FloatRoot of the «Z button» from
+            // a chest) has neither a physics body nor a mesh — the position used to be taken as (0,0,0), the distance to the player was ~90 and the prompt
+            // couldn't be picked up. We take the nearest ancestor (Model) with known parts: the average of their positions.
             const anc = _anchorFromAncestors(pr);
             if (anc) return anc;
-            // Attachment/Model — через общий luaPositionOfRef.
-            try { const q = luaPositionOfRef(pr); if (q && isFinite(q.x)) return new THREE.Vector3(q.x, q.y, q.z); } catch (e) { /* нет позиции — подсказка недоступна */ }
+            // Attachment/Model — via the shared luaPositionOfRef.
+            try { const q = luaPositionOfRef(pr); if (q && isFinite(q.x)) return new THREE.Vector3(q.x, q.y, q.z); } catch (e) { /* no position — the prompt is unavailable */ }
             return null;
         }
 
-        // ===== Стандартный хотбар Roblox (CoreGui Backpack) + Tool.Activated =====
+        // ===== The standard Roblox hotbar (CoreGui Backpack) + Tool.Activated =====
         const _coreGuiOff = {};
         let _hotbarEl = null, _hotbarLast = 0, _hotbarSig = '';
         function _toolsOf(parentRef) {
@@ -14896,7 +14898,7 @@ end
             const bp = _backpackRef();
             if (bp === -1 || luaCharacterRef === -1) return;
             const equipped = luaParentByRef[ref] === luaCharacterRef;
-            for (const t of _toolsOf(luaCharacterRef)) luaSetParent(t, bp);   // одновременно — один Tool в руке
+            for (const t of _toolsOf(luaCharacterRef)) luaSetParent(t, bp);   // simultaneously — one Tool in hand
             if (!equipped) luaSetParent(ref, luaCharacterRef);
             _hotbarLast = 0;
         }
@@ -14914,7 +14916,7 @@ end
                 const vp = document.getElementById('viewport'); if (!vp) return;
                 vp.appendChild(_hotbarEl);
             }
-            // Хотбар мог оказаться вне DOM (пересборка вьюпорта при смене качества/размера) — возвращаем на место и перерисовываем
+            // The hotbar could end up outside the DOM (viewport rebuild on quality/size change) — put it back and redraw
             if (!_hotbarEl.isConnected) {
                 const vp = document.getElementById('viewport'); if (!vp) return;
                 vp.appendChild(_hotbarEl); _hotbarSig = '';
@@ -14943,9 +14945,9 @@ end
             const list = _toolsOf(bp).concat(_toolsOf(luaCharacterRef)).sort((x, y) => x - y);
             const tool = list[Number(m[1]) - 1]; if (tool !== undefined) _toggleTool(tool);
         });
-        // Tool.Activated / Deactivated: клик или тап по сцене (не по GUI) при экипированном Tool.Enabled ~= false
+        // Tool.Activated / Deactivated: a click or tap on the scene (not the GUI) with an equipped Tool.Enabled ~= false
         let _activatedTool = null;
-        let _toolTouch = null;   // {id, x, y} — палец, который пока может оказаться тапом по сцене (не драгом камеры)
+        let _toolTouch = null;   // {id, x, y} — a finger that may still turn out to be a tap on the scene (not a camera drag)
         function _toolForScenePointer(tg) {
             if (!isPlaying || luaCharacterRef === -1) return undefined;
             if (!tg || !tg.closest || !tg.closest('#viewport')) return undefined;
@@ -14956,9 +14958,9 @@ end
             if (luaGetGenericProp(tool, 'Enabled') === false) return undefined;
             return tool;
         }
-        function _toolPointerDown(e) {   // только мышь
+        function _toolPointerDown(e) {   // mouse only
             if (_activatedTool !== null || e.button !== 0) return;
-            if (performance.now() - _lastTouchEndT < 700) return;   // эмулированный после тапа mousedown
+            if (performance.now() - _lastTouchEndT < 700) return;   // the mousedown emulated after a tap
             const tool = _toolForScenePointer(e.target);
             if (tool === undefined) return;
             _activatedTool = tool;
@@ -14971,8 +14973,8 @@ end
         }
         document.addEventListener('mousedown', _toolPointerDown);
         document.addEventListener('mouseup', _toolPointerUp);
-        // Тач: Activated стреляет при ТАПЕ (палец не уехал дальше ~12px). Так свайп камеры не «стреляет» предметом,
-        // а второй палец (тап) работает при зажатом джойстике — свой id у каждого пальца.
+        // Touch: Activated fires on a TAP (the finger didn't move further than ~12px). This way a camera swipe doesn't «shoot» with the item,
+        // and a second finger (a tap) works with the joystick held — each finger has its own id.
         document.addEventListener('touchstart', (e) => {
             if (!isPlaying || luaCharacterRef === -1 || _toolTouch) return;
             for (const t of e.changedTouches) {
@@ -14998,7 +15000,7 @@ end
                 if (tool === undefined || luaGetGenericProp(tool, 'Enabled') === false) return;
                 _activatedTool = tool;
                 fireLuaSignal(tool, 'Activated', []);
-                setTimeout(_toolPointerUp, 120);   // тап = короткое нажатие: даём анимации «нажать → отпустить» успеть
+                setTimeout(_toolPointerUp, 120);   // a tap = a short press: let the «press → release» animation finish
                 return;
             }
         }
@@ -15006,11 +15008,11 @@ end
         document.addEventListener('touchcancel', (e) => _toolTouchEnd(e, false), { passive: true });
 
         let _activePromptRef = null;
-        let _promptShownRef = null;      // подсказка, для которой уже стрелял PromptShown
-        let _promptHeldRef = null;       // подсказка, у которой сейчас «зажата кнопка»
-        let _promptTriggered = false;    // Triggered уже выстрелил за текущее удержание
+        let _promptShownRef = null;      // a prompt for which PromptShown has already fired
+        let _promptHeldRef = null;       // a prompt whose «button is held» right now
+        let _promptTriggered = false;    // Triggered has already fired for the current hold
         let _ppsRefCache = null;
-        // Style: из файла приходит числом (1 = Custom), из скрипта — именем Enum
+        // Style: from the file it comes as a number (1 = Custom), from a script — as an Enum name
         function _promptIsCustom(p) {
             const v = p && p.Style;
             return v === 1 || v === '1' || v === 'Custom' || (v && v.Name === 'Custom') || /Custom$/.test(String(v));
@@ -15019,8 +15021,8 @@ end
             const touch = (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window);
             return { __enum: ['ProximityPromptInputType', touch ? 'Touch' : 'Keyboard'] };
         }
-        // Сигналы самого ProximityPromptService (PromptShown/Hidden/Triggered/...): ref сервиса появляется только
-        // после game:GetService("ProximityPromptService") — до этого слушать некому.
+        // Signals of ProximityPromptService itself (PromptShown/Hidden/Triggered/...): the service's ref appears only
+        // after game:GetService("ProximityPromptService") — until then there is nobody to listen.
         function _ppsRef() {
             if (_ppsRefCache !== null && luaByRef[_ppsRefCache] && luaByRef[_ppsRefCache].cls === 'ProximityPromptService') return _ppsRefCache;
             for (const k in luaByRef) { if (luaByRef[k] && luaByRef[k].cls === 'ProximityPromptService') { _ppsRefCache = Number(k); return _ppsRefCache; } }
@@ -15028,7 +15030,7 @@ end
         }
         const _PPS_EV = { Triggered: 'PromptTriggered', TriggerEnded: 'PromptTriggerEnded' };
         function _promptFire(ref, ev, extra) {
-            // сигнал на самом prompt + одноимённый на сервисе (там prompt — первый аргумент, Triggered зовётся PromptTriggered)
+            // the signal on the prompt itself + a same-named one on the service (there the prompt is the first argument, Triggered is called PromptTriggered)
             fireLuaSignal(Number(ref), ev, extra || []);
             const pps = _ppsRef();
             if (pps !== null) fireLuaSignal(pps, _PPS_EV[ev] || ev, [{ __instanceRef: Number(ref) }].concat(extra || []));
@@ -15081,14 +15083,14 @@ end
                 if (!p.Enabled || p.parentRef === -1 || p.parentRef === undefined) continue;
                 const wp = _promptWorldPos(p);
                 if (!wp) continue;
-                // дистанция — от HumanoidRootPart настоящего R15 (на R15_HRP_ABOVE_GROUND над землёй), а не от центра сферы-коллайдера
+                // distance — from the HumanoidRootPart of a real R15 (R15_HRP_ABOVE_GROUND above the ground), not from the collider sphere's center
                 const d = Math.hypot(wp.x - charBody.position.x, wp.y - (charBody.position.y + (R15_HRP_ABOVE_GROUND - CHAR_RADIUS)), wp.z - charBody.position.z);
                 if (d <= p.MaxActivationDistance && d < bestDist) { best = p; bestRef = refStr; bestDist = d; }
             }
             _activePromptRef = bestRef;
             _activePrompt = best;
-            _promptSetShown(bestRef);   // Hidden у старой / Shown у новой (только Custom), сброс удержания
-            // Style=Custom: стандартную кнопку Roblox НЕ рисуем — подсказку показывает скрипт карты по PromptShown
+            _promptSetShown(bestRef);   // Hidden for the old one / Shown for the new one (Custom only), reset the hold
+            // Style=Custom: we do NOT draw the standard Roblox button — the map's script shows the prompt on PromptShown
             if (!best || _promptIsCustom(best)) { el.style.display = 'none'; }
             else {
                 el.style.display = 'flex';
@@ -15136,9 +15138,9 @@ end
                 ring.addEventListener('touchstart', onDown, { passive: false });
                 ring.addEventListener('mousedown', onDown);
             }
-            // Custom: тап/клик по BillboardGui подсказки (как ClickablePrompt в Roblox). Элементы Druns_PP имеют Active=false, то есть
-            // pointer-events:none — event.target туда не попадает, поэтому проверяем попадание точки в прямоугольник билборда.
-            const _inRelated = (a, b) => {   // a — потомок b или b — потомок a (Adornee может быть деталью внутри модели с промптом)
+            // Custom: a tap/click on the prompt's BillboardGui (like ClickablePrompt in Roblox). Druns_PP elements have Active=false, i.e.
+            // pointer-events:none — event.target doesn't get there, so we check whether the point falls into the billboard's rectangle.
+            const _inRelated = (a, b) => {   // a is a descendant of b or b is a descendant of a (the Adornee may be a part inside a model with the prompt)
                 for (let c = a, g = 0; c !== undefined && c !== -1 && g++ < 80; c = luaParentByRef[c]) if (c === b) return true;
                 for (let c = b, g = 0; c !== undefined && c !== -1 && g++ < 80; c = luaParentByRef[c]) if (c === a) return true;
                 return false;
@@ -15149,7 +15151,7 @@ end
                 const tg = e.target;
                 if (!tg || !tg.closest || !tg.closest('#viewport')) return;
                 if (tg.closest('#mobile-pad, #default-hotbar, #proximity-prompt, button')) return;
-                if (tg.closest('#gui-overlay') && tg !== document.getElementById('gui-overlay')) return;   // настоящая GUI-кнопка карты
+                if (tg.closest('#gui-overlay') && tg !== document.getElementById('gui-overlay')) return;   // a real GUI button of the map
                 for (const ref in guiPropsByRef) {
                     const gp = guiPropsByRef[ref];
                     if (!gp || gp.cls !== 'BillboardGui' || gp.Enabled === false) continue;
@@ -15170,7 +15172,7 @@ end
             window.addEventListener('mouseup', onUp);
         });
 
-        // Долгое нажатие по кастомной подсказке/GUI в Play выделяло текст и открывало системное меню — гасим.
+        // A long press on a custom prompt/GUI in Play selected text and opened the system menu — suppress it.
         document.addEventListener('selectstart', (e) => {
             const t = e.target && (e.target.nodeType === 1 ? e.target : e.target.parentElement);
             if (isPlaying && t && t.closest && t.closest('#viewport') && !t.closest('input, textarea, [contenteditable="true"]')) e.preventDefault();
@@ -15179,16 +15181,16 @@ end
             if (isPlaying && e.target && e.target.closest && e.target.closest('#viewport')) e.preventDefault();
         });
 
-        // Enum.CameraType.Scriptable — настоящий Roblox по нему полностью
+        // Enum.CameraType.Scriptable — real Roblox completely by it
         let cameraIsScriptable = false;
 
-        // 0..1 — прогресс плавного возврата камеры к персонажу после
-        // CameraType.Scriptable; null, когда обычный (мгновенный) follow.
+        // 0..1 — progress of the camera's smooth return to the character after
+        // CameraType.Scriptable; null when it is the ordinary (instant) follow.
         let _camReturnToCharT = null;
-        const CAM_RETURN_DURATION = 0.35; // секунд
-        // Последний CFrame, который скрипт поставил камере. Пока камера Scriptable,
-        // переустанавливаем его каждый кадр, чтобы ничто другое не сбивало вид
-        // (раньше камера внутри холодильника оставалась под «редакторским» углом).
+        const CAM_RETURN_DURATION = 0.35; // seconds
+        // The last CFrame a script set on the camera. While the camera is Scriptable,
+        // we re-apply it every frame so that nothing else disturbs the view
+        // (previously the camera inside the fridge stayed at an «editor» angle).
         let _scriptCam = null;
         function followCharacterCamera() {
             if (charBody && cameraIsScriptable) {
@@ -15205,7 +15207,7 @@ end
                     _camReturnToCharT = null;
                     target.x = desiredX; target.y = desiredY; target.z = desiredZ;
                 } else {
-                    // ease-out — быстрый старт, плавное сближение к цели
+                    // ease-out — a fast start, a smooth approach to the target
                     const a = 1 - Math.pow(1 - _camReturnToCharT, 3);
                     target.x += (desiredX - target.x) * a * 0.3;
                     target.y += (desiredY - target.y) * a * 0.3;
@@ -15218,28 +15220,28 @@ end
             }
             if (charMesh) {
                 charMesh.position.set(charBody.position.x, charBody.position.y - (seatState ? SIT_DROP : 0), charBody.position.z);
-                charMesh.rotation.y = seatState && seatState.ref !== -1 ? seatState.yaw : spherical.theta; // куб развёрнут туда же, куда смотрит камера (сидя — по сиденью)
+                charMesh.rotation.y = seatState && seatState.ref !== -1 ? seatState.yaw : spherical.theta; // the cube is turned the same way the camera looks (when seated — by the seat)
             }
             updateBlobShadow();
             updateCamera();
         }
 
         let _physLastT = 0, _physAcc = 0;
-        let _syncP = null, _syncQ = null, _syncOne = null;   // создаются лениво: THREE подгружается позже скрипта
+        let _syncP = null, _syncQ = null, _syncOne = null;   // created lazily: THREE is loaded later than the script
         const PHYS_BUDGET_MS = 30;
-        let _physStepEma = 1;   // мс на один physicsWorld.step
-        const PHYSICS_MAX_TICKS = 5;   // не больше 5 шагов (1/12 с) за кадр
-        const PHYSICS_SUBSTEPS = 4; // дробим шаг — у cannon.js 0.6.2 нет CCD,
-        // быстро падающая сфера может за один большой шаг проскочить сквозь
-        // тонкий пол ("проваливаюсь"). Мельче шаг — меньше смещение за шаг.
-        const MAX_FALL_SPEED = 300; // студов/сек — подстраховка на случай
-        // разгона до нереальной скорости (например, пока не подгрузился пол).
+        let _physStepEma = 1;   // ms per one physicsWorld.step
+        const PHYSICS_MAX_TICKS = 5;   // no more than 5 steps (1/12 s) per frame
+        const PHYSICS_SUBSTEPS = 4; // split the step — cannon.js 0.6.2 has no CCD,
+        // a fast-falling sphere can pass through a thin floor in one big step
+        // ("I'm falling through"). A smaller step — a smaller displacement per step.
+        const MAX_FALL_SPEED = 300; // studs/sec — a safety net in case of
+        // acceleration to an unreal speed (for example, until the floor has loaded).
 
-        // Touched/TouchEnded для частей с CanCollide=false (триггеры): у них collisionFilterMask=0, поэтому
-        // cannon контактов не создаёт, а в Roblox такие части Touched всё равно получают (если CanTouch).
+        // Touched/TouchEnded for parts with CanCollide=false (triggers): they have collisionFilterMask=0, so
+        // cannon creates no contacts, while in Roblox such parts still receive Touched (if CanTouch).
         let touchingTriggers = new Set();
-        // Touched/TouchEnded от обычных контактов тел. cannon.js 0.6 не шлёт beginContact, поэтому
-        // после шага смотрим physicsWorld.contacts: новая пара -> Touched, пара пропала -> TouchEnded.
+        // Touched/TouchEnded from ordinary body contacts. cannon.js 0.6 doesn't send beginContact, so
+        // after a step we look at physicsWorld.contacts: a new pair -> Touched, a vanished pair -> TouchEnded.
         let touchContacts = new Map();   // "a|b" -> {a, b, frame}
         let touchFrame = 0;
         function updateContactTouches() {
@@ -15261,7 +15263,7 @@ end
                 fireLuaSignal(b, 'Touched', [{ __instanceRef: a }]);
             }
             for (const [key, rec] of touchContacts) {
-                if (touchFrame - rec.frame > 3) {   // небольшой гистерезис, чтобы не мигало на дребезге контакта
+                if (touchFrame - rec.frame > 3) {   // a small hysteresis so it doesn't flicker on contact jitter
                     touchContacts.delete(key);
                     fireLuaSignal(rec.a, 'TouchEnded', [{ __instanceRef: rec.b }]);
                     fireLuaSignal(rec.b, 'TouchEnded', [{ __instanceRef: rec.a }]);
@@ -15307,10 +15309,10 @@ end
             }
         }
 
-        // Глобально friction=0 (чтобы персонаж не цеплялся за стены), поэтому свободные тела (кусочки мяса в холодильнике,
-        // выброшенные полки, любые Anchored=false) раз начав скользить по полу НИКОГДА не останавливались и не засыпали:
-        // после открытия холодильника 36 «Meat» ездили со скоростью до 20 студов/с, cannon.step вырос в ~6 раз (FPS падал).
-        // Для не-персонажных динамических тел: затухание скорости (как трение о пол) и более быстрый сон.
+        // Globally friction=0 (so the character doesn't stick to walls), therefore free bodies (meat pieces in the fridge,
+        // thrown-out shelves, any Anchored=false) once they start sliding on the floor NEVER stopped or fell asleep:
+        // after opening the fridge 36 «Meat» moved at up to 20 studs/s, cannon.step grew ~6 times (FPS dropped).
+        // For non-character dynamic bodies: speed damping (like floor friction) and a faster sleep.
         let _bodyTuneTick = 0;
         function _tuneLooseBodies() {
             if ((_bodyTuneTick++ % 20) !== 0 || typeof CANNON === 'undefined') return;
@@ -15326,17 +15328,17 @@ end
         function stepPhysics() {
             if (!isPlaying || !physicsWorld) return;
             _tuneLooseBodies();
-            // Физика идёт по РЕАЛЬНОМУ времени, как в Roblox (WalkSpeed 16 студов/с — именно в секунду, а не
-            // «за кадр»): накопитель + фиксированный шаг 1/60. Раньше на каждый кадр делался ровно один шаг,
-            // и при 7 FPS мир шёл в ~8 раз медленнее. За кадр не больше PHYSICS_MAX_TICKS шагов, иначе на
-            // слабом телефоне каждый тяжёлый кадр порождал бы ещё более тяжёлый (спираль).
+            // Physics runs in REAL time, as in Roblox (WalkSpeed 16 studs/s — exactly per second, not
+            // «per frame»): an accumulator + a fixed 1/60 step. Previously exactly one step was made per frame,
+            // and at 7 FPS the world ran ~8 times slower. No more than PHYSICS_MAX_TICKS steps per frame, otherwise on
+            // a weak phone every heavy frame would spawn an even heavier one (a spiral).
             const nowT = performance.now();
             const dtReal = _physLastT ? (nowT - _physLastT) / 1000 : 1 / 60;
             _physLastT = nowT;
             _physAcc = Math.min(_physAcc + dtReal, PHYSICS_MAX_TICKS / 60);
-            // Бюджет физики на кадр: шаг мира cannon на телефоне с тысячей тел стоит ~10 мс, а 5 тиков × 4 подшага = 20 шагов
-            // давали 190 мс/кадр и спираль (медленный кадр -> больше тиков -> ещё медленнее). Меряем стоимость шага (EMA) и
-            // подбираем подшаги (не меньше 2 — CCD нет) и число тиков так, чтобы уложиться в PHYS_BUDGET_MS; остальное — замедление времени.
+            // Physics budget per frame: a cannon world step on a phone with a thousand bodies costs ~10 ms, and 5 ticks × 4 substeps = 20 steps
+            // gave 190 ms/frame and a spiral (a slow frame -> more ticks -> even slower). We measure the step cost (EMA) and
+            // pick substeps (not fewer than 2 — no CCD) and the number of ticks so as to fit into PHYS_BUDGET_MS; the rest is time slowdown.
             const subN = Math.max(2, Math.min(PHYSICS_SUBSTEPS, Math.floor(PHYS_BUDGET_MS / Math.max(0.1, _physStepEma))));
             const maxTicks = Math.max(1, Math.min(PHYSICS_MAX_TICKS, Math.floor(PHYS_BUDGET_MS / Math.max(0.1, _physStepEma * subN))));
             let ticks = 0;
@@ -15351,17 +15353,17 @@ end
                     const _t0 = performance.now();
                     physicsWorld.step(subDt);
                     _physStepEma += (performance.now() - _t0 - _physStepEma) * 0.1;
-                    // Ступеньки лестницы — это отдельные боксы с вертикальными
+                    // Ladder steps are separate boxes with vertical
                     if (charBody) {
                         charBody.velocity.x = charVelX;
                         charBody.velocity.z = charVelZ;
-                        if (climbState) charBody.velocity.y = climbState.vy;   // без гравитации на лестнице
+                        if (climbState) charBody.velocity.y = climbState.vy;   // no gravity on the ladder
                     }
                 }
             }
             updateHollowUnionGhosts();
             updateSurfaceGuis();
-            if (ticks === 0) return;   // экран быстрее 60 Гц: новых шагов нет, картинка не изменилась
+            if (ticks === 0) return;   // the screen is faster than 60 Hz: no new steps, the picture hasn't changed
             luaStepWelds();
 
             if (!_syncP) { _syncP = new THREE.Vector3(); _syncQ = new THREE.Quaternion(); _syncOne = new THREE.Vector3(1, 1, 1); }
@@ -15383,7 +15385,7 @@ end
             updateLuaScheduler();
         }
 
-        // ============ ДЕРЕВО ============
+        // ============ TREE ============
         async function loadTree() {
             const r = await api('GET', '/api/tree');
             if (!r.ok) return;
@@ -15397,7 +15399,7 @@ end
             refreshMapLighting();
         }
 
-        // ref -> node и ref -> parentRef — плоские индексы поверх вложенного
+        // ref -> node and ref -> parentRef — flat indexes over the nested
         let treeByRef = {};
         let parentByRef = {};
         function rebuildTreeIndex() {
@@ -15414,7 +15416,7 @@ end
         }
 
         function updateInventoryCount() {
-            // Раньше это писало текст в #inv-selected-info — элемент из
+            // This used to write text into #inv-selected-info — an element from
         }
 
         function findNodeByRef(nodes, ref) {
@@ -15459,7 +15461,7 @@ end
 
         function renderTree() {
             const et = document.getElementById('explorer-title');
-            if (et) et.textContent = 'Explorer' + (selectedRefs.size > 1 ? ' (' + selectedRefs.size + ')' : '');
+            if (et) et.textContent = t('ui_explorer') + (selectedRefs.size > 1 ? ' (' + selectedRefs.size + ')' : '');
             const c = document.getElementById('tree');
             c.innerHTML = '';
             for (const n of treeData) {
@@ -15514,7 +15516,7 @@ end
             label.title = node.cls;
 
             row.onclick = (e) => {
-                if (performance.now() < _treeSuppressClickUntil) return; // клик после отпускания при перетаскивании
+                if (performance.now() < _treeSuppressClickUntil) return; // a click after release during dragging
                 selectRef(node.ref, {
                     additive: e.ctrlKey || e.metaKey || multiSelectMode,
                     range: e.shiftKey
@@ -15531,14 +15533,14 @@ end
             }
         }
 
-        // ============ EXPLORER: перетаскивание объектов (смена Parent) ============
-        // Мышь: потянуть строку. Телефон: удерживать строку ~0.35 с, затем вести
-        // палец (пока держишь — прокрутка списка не срабатывает). Если навести на
-        // строку с потомками и подержать ~0.6 с, ветка раскрывается. Отпустить на
-        // строке = сделать её родителем (на сервере /api/reparent).
+        // ============ EXPLORER: dragging objects (changing Parent) ============
+        // Mouse: drag a row. Phone: hold a row for ~0.35 s, then move the
+        // finger (while you hold, list scrolling doesn't happen). If you hover over a
+        // row with descendants and hold for ~0.6 s, the branch expands. Releasing on a
+        // row = make it the parent (on the server /api/reparent).
         const TREE_LONGPRESS_MS = 350;
         const TREE_HOVER_EXPAND_MS = 600;
-        const TREE_MOVE_CANCEL_PX = 8;      // сдвиг до долгого нажатия = это прокрутка, не перетаскивание
+        const TREE_MOVE_CANCEL_PX = 8;      // movement before the long press = this is scrolling, not dragging
         const TREE_MOUSE_START_PX = 6;
         let _tdrag = null;
         let _treeSuppressClickUntil = 0;
@@ -15548,11 +15550,11 @@ end
             const n = treeByRef[ref];
             if (!n) return false;
             const par = parentByRef[ref];
-            if (par === undefined || par === -1) return false;       // сервисы/корни
+            if (par === undefined || par === -1) return false;       // services/roots
             if (n.cls === 'Terrain' || n.cls === 'Camera') return false;
             return true;
         }
-        function treeInside(ref, ancestorRef) { // ref лежит внутри ancestorRef (или это он сам)
+        function treeInside(ref, ancestorRef) { // ref lies inside ancestorRef (or it is it itself)
             let cur = ref, guard = 0;
             while (cur !== undefined && cur !== null && cur !== -1 && guard++ < 500) {
                 if (cur === ancestorRef) return true;
@@ -15564,9 +15566,9 @@ end
             if (targetRef === null || !_tdrag) return false;
             if (!treeByRef[targetRef]) return false;
             for (const r of _tdrag.refs) {
-                if (treeInside(targetRef, r)) return false;           // в себя или в своего потомка
+                if (treeInside(targetRef, r)) return false;           // into itself or into its descendant
             }
-            return _tdrag.refs.some(r => parentByRef[r] !== targetRef); // всё уже там — нечего делать
+            return _tdrag.refs.some(r => parentByRef[r] !== targetRef); // everything is already there — nothing to do
         }
         function treeRowAt(x, y) {
             const el = document.elementFromPoint(x, y);
@@ -15595,10 +15597,10 @@ end
         function treeDragStart() {
             const d = _tdrag;
             if (!d || d.active) return;
-            // что тащим: все выделенные (если тянем выделенный), иначе одну строку
+            // what we drag: all selected (if we drag a selected one), otherwise a single row
             let refs = (selectedRefs.has(d.srcRef) && selectedRefs.size > 1) ? [...selectedRefs] : [d.srcRef];
             refs = refs.filter(treeCanDrag);
-            refs = refs.filter(r => !refs.some(o => o !== r && treeInside(r, o)));  // вложенные не нужны — поедут с родителем
+            refs = refs.filter(r => !refs.some(o => o !== r && treeInside(r, o)));  // nested ones aren't needed — they travel with the parent
             if (!refs.length) { treeDragEnd(false); return; }
             d.refs = refs;
             d.active = true;
@@ -15639,7 +15641,7 @@ end
                 clearTimeout(d.hoverTimer);
                 d.hoverTimer = null;
                 const n = ref !== null ? treeByRef[ref] : null;
-                // наведение на строку с потомками: через паузу раскрыть ветку
+                // hovering over a row with descendants: expand the branch after a pause
                 if (n && n.children && n.children.length && !expanded.has(ref)) {
                     d.hoverTimer = setTimeout(() => {
                         if (!_tdrag || !_tdrag.active || _tdrag.hoverRef !== ref) return;
@@ -15670,7 +15672,7 @@ end
             _tdrag = null;
             if (wasActive) _treeSuppressClickUntil = performance.now() + 500;
             if (wasActive && commit && target !== null && target !== undefined) {
-                // проверяем с теми же правилами (d уже обнулён — временно восстановим)
+                // check with the same rules (d is already reset — restore temporarily)
                 _tdrag = { refs };
                 const ok = treeDropValid(target);
                 _tdrag = null;
@@ -15720,7 +15722,7 @@ end
                     if (d.pointerType === 'mouse') {
                         if (dist > TREE_MOUSE_START_PX) treeDragStart();
                     } else if (dist > TREE_MOVE_CANCEL_PX) {
-                        treeDragEnd(false);            // палец поехал раньше долгого нажатия — это прокрутка
+                        treeDragEnd(false);            // the finger moved before the long press — this is scrolling
                     }
                     return;
                 }
@@ -15735,7 +15737,7 @@ end
             };
             treeEl.addEventListener('pointerup', finish(true));
             treeEl.addEventListener('pointercancel', finish(false));
-            // Пока тащим — не даём браузеру прокручивать список/вызывать меню
+            // While dragging — don't let the browser scroll the list/open a menu
             treeEl.addEventListener('touchmove', (e) => { if (_tdrag && _tdrag.active && e.cancelable) e.preventDefault(); }, { passive: false });
             treeEl.addEventListener('contextmenu', (e) => { if (_tdrag) e.preventDefault(); });
             window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _tdrag) treeDragEnd(false); });
@@ -15759,13 +15761,13 @@ end
         }
 
         function esc(s) {
-            // Раньше падал на null/undefined — TypeError здесь обрывает
+            // It used to fail on null/undefined — a TypeError here aborts
             if (s === null || s === undefined) return '';
             return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
-        // ============ ВЫБОР ОБЪЕКТА ============
-        // Строки Explorer в порядке отображения (для диапазона по Shift+клик).
+        // ============ OBJECT SELECTION ============
+        // Explorer rows in display order (for the Shift+click range).
         function visibleRefs() {
             const out = [];
             const walk = (n) => {
@@ -15779,11 +15781,11 @@ end
             return out;
         }
 
-        // opts.additive (Ctrl/⌘/режим мультивыбора) — добавить или убрать объект из выделения,
-        // opts.range (Shift) — выделить всё от якоря до объекта в порядке Explorer.
+        // opts.additive (Ctrl/⌘/multi-select mode) — add or remove an object from the selection,
+        // opts.range (Shift) — select everything from the anchor to the object in Explorer order.
         async function selectRef(ref, opts) {
             opts = opts || {};
-            await saveCurrentScriptIfDirty(); // иначе несохранённые правки терялись при переключении объекта
+            await saveCurrentScriptIfDirty(); // otherwise unsaved edits were lost when switching the object
             if (opts.range && selAnchorRef !== null && selAnchorRef !== ref) {
                 const order = visibleRefs();
                 const a = order.indexOf(selAnchorRef), b = order.indexOf(ref);
@@ -15816,8 +15818,8 @@ end
             renderProps(r);
         }
 
-        // Раскрыть предков и прокрутить Explorer к объекту: новые объекты (ассистент, Add) добавляются в КОНЕЦ списка
-        // родителя, а дочерние скрипты лежат в свёрнутом родителе — без этого их не видно.
+        // Expand ancestors and scroll Explorer to the object: new objects (assistant, Add) are appended to the END of the parent's list,
+        // and child scripts lie in a collapsed parent — without this they aren't visible.
         function revealRefs(refs, scrollTo) {
             for (const ref of refs) {
                 let p = parentByRef[ref], guard = 0;
@@ -15830,7 +15832,7 @@ end
         }
 
         function deselect() {
-            saveCurrentScriptIfDirty(); // fire-and-forget — иначе клик мимо объекта тоже терял правки
+            saveCurrentScriptIfDirty(); // fire-and-forget — otherwise a click that missed an object also lost edits
             selectedRef = null;
             selectedRefs = new Set();
             selAnchorRef = null;
@@ -15848,7 +15850,7 @@ end
             if (b) b.classList.toggle('active', multiSelectMode);
         }
 
-        // ============ ПРОСЛУШАТЬ ЗВУК ИЗ EXPLORER (вне Play) ============
+        // ============ LISTEN TO A SOUND FROM EXPLORER (outside Play) ============
         let _editorPreviewAudio = null;
         let _editorPreviewBtn = null;
         let _editorPreviewSoundId = null;
@@ -15869,26 +15871,26 @@ end
             const url = rbxAssetIdToProxyUrl(soundId);
             btn.onclick = () => {
                 if (!url) { notify(t('notify_error'), 'err'); return; }
-                // Повторное нажатие на ТОТ ЖЕ звук, пока он играет — это
-                // "Стоп", а не перезапуск с начала.
+                // Pressing the SAME sound again while it plays is
+                // "Stop", not a restart from the beginning.
                 if (_editorPreviewSoundId === soundId && _editorPreviewAudio && !_editorPreviewAudio.paused) {
                     _stopEditorPreview();
                     return;
                 }
                 _stopEditorPreview();
-                // Раньше тут был голый <audio> без PlaybackSpeed/Octave —
-                // прослушивание из Explorer звучало не так, как в самой
-                // игре (например, ускоренные/питчнутые треки играли
-                // обычным голосом). RobloxSoundElement — тот же движок,
-                // что и в Play, с тем же объединённым стретч+ресемпл.
+                // There used to be a bare <audio> here without PlaybackSpeed/Octave —
+                // listening from Explorer sounded different from in the
+                // game itself (for example, sped-up/pitched tracks played
+                // with a normal voice). RobloxSoundElement is the same engine
+                // as in Play, with the same combined stretch+resample.
                 if (!_editorPreviewAudio) _editorPreviewAudio = new RobloxSoundElement();
                 _editorPreviewAudio.src = url;
                 _editorPreviewAudio.playbackRate = playbackSpeed;
                 _editorPreviewAudio.pitchOctave = pitchOctave;
-                // RobloxSoundElement — не настоящий <audio>, у него нет
-                // IDL-свойства onended, только addEventListener (как и у
-                // остальных Sound-обёрток в этом файле) — прямое
-                // "audio.onended = fn" тут молча ничего не делает.
+                // RobloxSoundElement is not a real <audio>, it has no
+                // IDL property onended, only addEventListener (like the
+                // other Sound wrappers in this file) — a direct
+                // "audio.onended = fn" silently does nothing here.
                 _editorPreviewAudio.addEventListener('ended', () => _stopEditorPreview());
                 _editorPreviewAudio.play().catch((e) => { notify(String(e.message || e), 'err'); _stopEditorPreview(); });
                 _editorPreviewBtn = btn;
@@ -15899,7 +15901,7 @@ end
             return row;
         }
 
-        // ============ СВОЙСТВА ============
+        // ============ PROPERTIES ============
         function renderProps(r) {
             const SCLS = ['Script', 'LocalScript', 'ModuleScript'];
             const panel = document.getElementById('tab-props');
@@ -15916,7 +15918,7 @@ end
             const cls = document.createElement('div');
             cls.className = 'prop-cls';
             cls.textContent = r.cls;
-            // Имя инстанса — раньше шапка Properties показывала ТОЛЬКО класс
+            // The instance name — the Properties header used to show ONLY the class
             if (r.props && r.props.Name && r.props.Name !== r.cls) {
                 const nameEl = document.createElement('div');
                 nameEl.className = 'prop-name-title';
@@ -15932,7 +15934,7 @@ end
             hdr.appendChild(ref);
             panel.appendChild(hdr);
 
-            // Прослушать звук прямо из Explorer, вне Play — раньше это
+            // Listen to a sound right from Explorer, outside Play — previously this
             if (r.cls === 'Sound' && r.props.SoundId) {
                 const rawSpeed = r.props.PlaybackSpeed != null ? r.props.PlaybackSpeed
                     : (r.props.Pitch != null ? r.props.Pitch : 1);
@@ -15947,7 +15949,7 @@ end
                 }
             }
 
-            // Остальные свойства
+            // Other properties
             for (const [k, v] of Object.entries(r.props).sort()) {
                 if (k === 'Source' || k === 'CFrame' || specialProps.includes(k) || k === '_assets') {
                     continue;
@@ -15956,7 +15958,7 @@ end
             }
 
             if (SCLS.includes(r.cls)) {
-                // Script выполняется на сервере, LocalScript — на клиенте,
+                // A Script runs on the server, a LocalScript — on the client,
                 const badge = SCRIPT_BADGES[r.cls] || SCRIPT_BADGES.Script;
                 document.getElementById('script-name').innerHTML =
                     '<span style="color:' + badge.color + '">' + badge.icon + ' ' + badge.label + '</span>'
@@ -16000,14 +16002,14 @@ end
                 input.className = 'prop-val';
                 input.type = 'number';
                 input.step = propName === 'Rotation' ? '1' : '0.1';
-                input.value = typeof value === 'object' ? (Math.round((value[coord] || 0) * 10000) / 10000) : 0; // без хвоста float — влезает в поле
+                input.value = typeof value === 'object' ? (Math.round((value[coord] || 0) * 10000) / 10000) : 0; // without the float tail — fits into the field
                 input.inputMode = 'decimal';
                 input.style.cssText = 'min-width:0';
 
                 input.onchange = async () => {
                     const newValue = { ...value };
                     newValue[coord] = parseFloat(input.value) || 0;
-                    // ВАЖНО: value — общий объект для всех трёх инпутов
+                    // IMPORTANT: value is a shared object for all three inputs
                     value[coord] = newValue[coord];
                     await api('POST', '/api/instance/' + ref, {
                         prop: propName,
@@ -16025,14 +16027,14 @@ end
             panel.appendChild(container);
         }
 
-        // Экспорт ассета (меш/текстура/звук) по долгому нажатию на строку свойства: берём тот же файл, что и
-        // игра (/api/asset-proxy, он кешируется на диск), и отдаём через «Поделиться» или обычным скачиванием.
+        // Asset export (mesh/texture/sound) by long-pressing a property row: we take the same file the
+        // game uses (/api/asset-proxy, it is cached on disk) and hand it over via «Share» or an ordinary download.
         const ASSET_PROP_RE = /(mesh\s*id|texture\s*id|sound\s*id|animation\s*id|image|colormap|normalmap|texture)$/i;
         async function exportAssetById(id, label) {
             try {
                 notify(t('exp_asset_start', { label: label, id: id }));
-                // Приложение Android: системный диалог «Сохранить как» (сам выбираешь папку) через мост —
-                // та же схема, что у экспорта .rbxl. WebView сам файл скачать/поделиться не умеет.
+                // Android app: the system «Save as» dialog (you pick the folder yourself) through the bridge —
+                // the same scheme as the .rbxl export. A WebView can't download/share a file on its own.
                 if (window.AndroidBridge && typeof window.AndroidBridge.getDataDir === 'function' &&
                     typeof window.AndroidBridge.exportRbxlFile === 'function') {
                     const er = await api('POST', '/api/asset-export', { id });
@@ -16054,7 +16056,7 @@ end
                 const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
                 if (navigator.canShare && navigator.canShare({ files: [file] })) {
                     try { await navigator.share({ files: [file], title: name }); notify(t('exp_shared', { name: name, kb: Math.round(blob.size / 1024) })); return; }
-                    catch (e) { if (e && e.name === 'AbortError') return; /* иначе — обычное скачивание */ }
+                    catch (e) { if (e && e.name === 'AbortError') return; /* otherwise — an ordinary download */ }
                 }
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob); a.download = name;
@@ -16131,7 +16133,7 @@ end
                 };
                 row.appendChild(pr);
             } else if (typeof v === 'number' && ['Transparency', 'Reflectance', 'BackgroundTransparency', 'TextTransparency', 'ImageTransparency'].includes(k)) {
-                // Ползунок 0..1 + числовое поле
+                // A 0..1 slider + a numeric field
                 const rng = document.createElement('input');
                 rng.type = 'range'; rng.min = 0; rng.max = 1; rng.step = 0.01;
                 rng.value = v; rng.className = 'prop-range';
@@ -16187,7 +16189,7 @@ end
                 prop: 'Source',
                 value: src
             });
-            currentScriptOrigSource = src; // синхронизируем трекер "грязности" — см. saveCurrentScriptIfDirty
+            currentScriptOrigSource = src; // sync the "dirtiness" tracker — see saveCurrentScriptIfDirty
             notify(t('notify_script_saved'));
         }
 
@@ -16201,7 +16203,7 @@ end
             if (t === 'script') refreshCM();
         }
 
-        // ============ БЫСТРОЕ ДОБАВЛЕНИЕ ============
+        // ============ QUICK ADD ============
         async function quickAdd(cls) {
             const name = 'New' + cls;
             let parent = selectedRef;
@@ -16230,15 +16232,15 @@ end
             }
         }
 
-        // ============ ФАЙЛОВЫЙ БРАУЗЕР ============
+        // ============ FILE BROWSER ============
         let _fbMode = 'open';
         let _fbPath = '';
 
-        // ============ СОХРАНЕНИЕ "КАК" ============
+        // ============ SAVE "AS" ============
         async function openFileBrowser(mode) {
             _fbMode = mode;
 
-            // ОТКРЫТИЕ — см. pickRbxlFileForOpen().
+            // OPENING — see pickRbxlFileForOpen().
             if (mode === 'open') {
                 pickRbxlFileForOpen();
                 return;
@@ -16263,7 +16265,7 @@ end
 
             if (window.AndroidBridge && typeof window.AndroidBridge.getDataDir === 'function' &&
                 typeof window.AndroidBridge.exportRbxlFile === 'function') {
-                // Android: сервер сначала пишет .rbxl во временный файл в
+                // Android: the server first writes the .rbxl to a temporary file in
                 const dataDir = window.AndroidBridge.getDataDir();
                 const tempPath = dataDir + '/export_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
                 const r = await api('POST', '/api/save', { path: tempPath });
@@ -16275,7 +16277,7 @@ end
                 return;
             }
 
-            // Браузер: обычная нативная загрузка файла — вызывается сразу
+            // Browser: an ordinary native file download — called right
             const a = document.createElement('a');
             a.href = '/api/save/download?name=' + encodeURIComponent(name);
             a.download = name;
@@ -16285,14 +16287,14 @@ end
             notify('💾 ' + name);
         }
 
-        // Вызывается из Kotlin после того как пользователь выбрал место
-        // через SAF и файл скопирован (или отменил диалог / произошла ошибка).
+        // Called from Kotlin after the user chose a location
+        // via SAF and the file was copied (or cancelled the dialog / an error occurred).
         window.onAndroidFileExported = function (ok) {
             notify(ok ? t('notify_saved_simple') : t('notify_save_cancelled'), ok ? undefined : 'err');
         };
 
-        // ============ RBXM: ЭКСПОРТ ВЫБРАННЫХ ОБЪЕКТОВ / ИМПОРТ МОДЕЛИ ============
-        // Выбранные объекты в порядке Explorer (сервер сам отбрасывает вложенные дубли).
+        // ============ RBXM: EXPORT OF SELECTED OBJECTS / MODEL IMPORT ============
+        // Selected objects in Explorer order (the server drops nested duplicates itself).
         function selectedRefsInTreeOrder() {
             const order = new Map();
             (function walk(nodes) { nodes.forEach(n => { order.set(n.ref, order.size); walk(n.children || []); }); })(treeData);
@@ -16321,7 +16323,7 @@ end
 
             if (window.AndroidBridge && typeof window.AndroidBridge.getDataDir === 'function' &&
                 typeof window.AndroidBridge.exportRbxlFile === 'function') {
-                // Android: как в confirmSaveAs — файл во временную папку приложения, дальше SAF.
+                // Android: as in confirmSaveAs — the file into the app's temp folder, then SAF.
                 const tempPath = window.AndroidBridge.getDataDir() + '/export_' + name.replace(/[^A-Za-z0-9._-]/g, '_');
                 const r = await api('POST', '/api/export/rbxm', { refs: refs, path: tempPath });
                 if (!r.ok) { notify(r.error || t('notify_error'), 'err'); return; }
@@ -16330,7 +16332,7 @@ end
                 return;
             }
 
-            // Браузер: сначала fetch (чтобы показать ошибку, а не скачать JSON под видом .rbxm), затем загрузка.
+            // Browser: fetch first (to show an error instead of downloading JSON as .rbxm), then the download.
             try {
                 const resp = await fetch('/api/export/rbxm?refs=' + refs.join(',') + '&name=' + encodeURIComponent(name));
                 if (!resp.ok) {
@@ -16353,22 +16355,22 @@ end
                 try { warns = JSON.parse(decodeURIComponent(resp.headers.get('X-Rbxm-Warnings') || '[]')); } catch (e) { emuWarn('swallow:warns:12463', 'warns: ' + _errText(e) + ''); }
                 if (warns.length) notify(t('notify_rbxm_warn', { msg: warns[0] }), 'warn');
             } catch (err) {
-                console.error('Экспорт rbxm:', err);
+                console.error('rbxm export:', err);
                 notify(t('notify_error'), 'err');
             }
         }
 
-        // Куда вставлять: в выбранный контейнер (Model/Folder/объект с детьми), иначе сервер берёт Workspace.
+        // Where to insert: into the selected container (Model/Folder/an object with children), otherwise the server takes Workspace.
         function rbxmImportParent() {
             const n = selectedRef !== null ? treeByRef[selectedRef] : null;
             if (n && ((n.children && n.children.length) || ['Model', 'Folder', 'Workspace'].includes(n.cls))) return n.ref;
             return null;
         }
 
-        // ===== Подтверждение импорта модели со скриптами =====
-        // Сервер (/api/import/rbxm*, Toolbox) вместо импорта отдаёт {needsConfirm, token, scan}, если в модели есть скрипты.
-        // «Больше не показывать» (localStorage) пропускает окно, НО только когда в скриптах нет require/loadstring/
-        // HttpService/Kick и прочих опасных команд — тогда окно показывается всегда.
+        // ===== Confirmation of importing a model with scripts =====
+        // The server (/api/import/rbxm*, Toolbox) returns {needsConfirm, token, scan} instead of importing if the model has scripts.
+        // «Don't show again» (localStorage) skips the window, BUT only when the scripts have no require/loadstring/
+        // HttpService/Kick or other dangerous commands — otherwise the window is always shown.
         const _RBXM_RULES = {
             require_id: ['require(<ID/URL>) — загрузка стороннего кода по ID (типичный бэкдор)', 'require(<ID/URL>) — loads third-party code by ID (typical backdoor)'],
             require: ['require(…) — подключение модуля', 'require(…) — loads a module'],
@@ -16431,7 +16433,7 @@ end
             await loadTree();
             const roots = r.roots || [];
             if (roots.length) {
-                // раскрыть путь до новых объектов и выделить их все
+                // expand the path to the new objects and select them all
                 let par = parentByRef[roots[0]];
                 while (par !== undefined && par !== null && par !== -1) { expanded.add(par); par = parentByRef[par]; }
                 selectedRefs = new Set(roots);
@@ -16451,7 +16453,7 @@ end
 
         function importRbxm() {
             if (window.AndroidBridge && typeof window.AndroidBridge.pickRbxlFile === 'function') {
-                // Тот же SAF-пикер (type */*), но результат уходит в /api/import/rbxm — см. onAndroidFileImported.
+                // The same SAF picker (type */*), but the result goes to /api/import/rbxm — see onAndroidFileImported.
                 window._rbxmImportPending = true;
                 window.AndroidBridge.pickRbxlFile();
                 return;
@@ -16473,17 +16475,17 @@ end
                     const resp = await fetch('/api/import/rbxm/upload', { method: 'POST', body: formData });
                     await afterRbxmImport(await resp.json());
                 } catch (err) {
-                    console.error('Импорт rbxm:', err);
+                    console.error('rbxm import:', err);
                     notify(t('notify_error'), 'err');
                 }
             });
-            fileInput.click();   // синхронно, в рамках клика — иначе браузер откажет
+            fileInput.click();   // synchronously, within the click — otherwise the browser will refuse
         }
 
-        // Открытие .rbxl/.rbxlx нативным способом ОС вместо /api/browse.
+        // Opening .rbxl/.rbxlx the OS-native way instead of /api/browse.
         function pickRbxlFileForOpen() {
-            // ВАЖНО: здесь раньше стояли блокирующие alert() между кликом
-            console.log('pickRbxlFileForOpen вызвана. AndroidBridge=' +
+            // IMPORTANT: there used to be blocking alert()s here between the click
+            console.log('pickRbxlFileForOpen called. AndroidBridge=' +
                 (typeof window.AndroidBridge) +
                 ', pickRbxlFile=' +
                 (window.AndroidBridge ? typeof window.AndroidBridge.pickRbxlFile : 'n/a'));
@@ -16506,7 +16508,7 @@ end
                     return;
                 }
 
-                console.log('выбран файл ' + file.name + ', размер ' + file.size + ' байт. Отправляю на /api/open/upload...');
+                console.log('selected file ' + file.name + ', size ' + file.size + ' bytes. Sending to /api/open/upload...');
 
                 const formData = new FormData();
                 formData.append('file', file);
@@ -16527,17 +16529,17 @@ end
                     })
                     .catch(err => {
                         document.body.removeChild(fileInput);
-                        console.error('Ошибка загрузки файла:', err);
+                        console.error('File upload error:', err);
                         notify(t('notify_error'), 'err');
                     });
             });
 
-            // Вызывается сразу, синхронно, в рамках того же клика — без
-            // alert()/await между ними, иначе браузер молча откажет.
+            // Called right away, synchronously, within the same click — without
+            // alert()/await between them, otherwise the browser silently refuses.
             fileInput.click();
         }
 
-        // Вызывается из Kotlin (MainActivity.AndroidBridge) после того как
+        // Called from Kotlin (MainActivity.AndroidBridge) after
         window.onAndroidFileImported = async function (path, errMsg, shownName) {
             const wasRbxmImport = !!window._rbxmImportPending;
             window._rbxmImportPending = false;
@@ -16565,14 +16567,14 @@ end
         async function doSave(path) {
             const r = await api('POST', '/api/save', { path: path });
             if (!r.ok) { notify(r.error || t('notify_error'), 'err'); return; }
-            // Android: открытый файл — это внутренняя копия (imported_*.rbxl). Переписываем ещё и оригинал, выбранный в пикере.
+            // Android: the open file is an internal copy (imported_*.rbxl). We also rewrite the original chosen in the picker.
             try {
                 if (window.AndroidBridge && typeof window.AndroidBridge.writeBackToSource === 'function') {
                     const wb = String(window.AndroidBridge.writeBackToSource(r.path || path));
                     if (wb === 'ok') { notify(t('notify_saved_original')); return; }
                     if (wb.indexOf('err:') === 0) {
                         notify(t('notify_save_original_failed', { err: wb.slice(4) }), 'err');
-                        openFileBrowser('save');   // оригинал не перезаписать (нет права записи) — предлагаем «Сохранить как»
+                        openFileBrowser('save');   // the original can't be overwritten (no write permission) — offer «Save as»
                         return;
                     }
                 }
@@ -16581,7 +16583,7 @@ end
         }
 
         async function newProject(template, fromStart) {
-            // Создаёт пустую сцену на сервере (набор стандартных сервисов
+            // Creates an empty scene on the server (a set of standard services
             if (!fromStart && !window._startMode && !confirm(t('confirm_discard_unsaved'))) return;
             const r = await api('POST', '/api/new', { template: (template === 'empty' ? 'empty' : 'baseplate') });
             if (!r.ok) {
@@ -16608,11 +16610,11 @@ end
             doSave(r.file);
         }
 
-        // ============ ДИАЛОГИ ============
+        // ============ DIALOGS ============
 
-        // === Меню «Файл» (как в строке меню macOS): действия с файлами и плейсами одним выпадающим списком.
-        // Рисуется position:fixed поверх страницы — панель инструментов прокручивается по горизонтали
-        // (overflow), внутри неё выпадающее меню обрезалось бы.
+        // === The «File» menu (like the macOS menu bar): file and place actions in a single dropdown.
+        // Drawn position:fixed over the page — the toolbar scrolls horizontally
+        // (overflow), and a dropdown inside it would be clipped.
         function closeFileMenu() {
             const m = document.getElementById('file-menu');
             if (m) m.remove();
@@ -16650,7 +16652,7 @@ end
                     '#file-menu-btn.open{background:#2f6bff !important}';
                 document.head.appendChild(st);
             }
-            const fromRoblox = !!window._rbxOrigin;   // Save — только для файлов: плейс из Roblox сохраняем через «Сохранить как»
+            const fromRoblox = !!window._rbxOrigin;   // Save — for files only: a place from Roblox is saved via «Save as»
             const items = [
                 { ico: '🆕', k: 'menu_new', act: () => newProject() },
                 'sep',
@@ -16728,7 +16730,7 @@ end
                 '<button onclick="closeModal()">' + t('btn_cancel') + '</button>' +
                 '</div>'
             );
-            // иконки подгружаем после показа окна (один запрос; кэшируем на время сессии)
+            // icons are loaded after the window is shown (one request; cached for the session)
             const fill = (icons) => {
                 document.querySelectorAll('#add-grid .add-tile').forEach(el => {
                     const src = icons[el.dataset.cls];
@@ -16778,22 +16780,22 @@ end
                 parent = findWs(treeData) ?? -1;
             }
             const body = { class: cls, name: name, parent: parent };
-            // Seat/VehicleSeat/TrussPart: без позиции сервер ставил их в (0,5,0) — лестница 2x10x2 накрывала точку спавна
-            // (персонаж появлялся внутри неё), а сиденье висело в воздухе. Ставим перед камерой, низом на землю.
+            // Seat/VehicleSeat/TrussPart: without a position the server put them at (0,5,0) — a 2x10x2 ladder covered the spawn point
+            // (the character appeared inside it), and the seat hung in the air. We place it in front of the camera, bottom on the ground.
             const _halfH = { Seat: 0.5, VehicleSeat: 0.5, TrussPart: 5 }[cls];
             if (_halfH !== undefined) {
-                const lx = -Math.sin(spherical.theta), lz = -Math.cos(spherical.theta);   // куда смотрит камера по горизонтали
-                // каждая следующая такая деталь — правее предыдущей, чтобы Seat и лестница не вставали друг в друга
+                const lx = -Math.sin(spherical.theta), lz = -Math.cos(spherical.theta);   // where the camera looks horizontally
+                // each next such part goes to the right of the previous one so that a Seat and a ladder don't end up inside each other
                 const side = (window._addSpread = ((window._addSpread || 0) + 1)) - 1;
-                const rx = lz * -1, rz = lx;   // вправо от взгляда
+                const rx = lz * -1, rz = lx;   // to the right of the view
                 const px = target.x + lx * 10 + rx * 6 * (side % 4), pz = target.z + lz * 10 + rz * 6 * (side % 4);
-                // высота земли в этой точке (на baseplate под ногами спавн-площадка выше плиты: деталь на y=0.5 оказывалась внутри неё)
+                // ground height at this point (on a baseplate the spawn pad under the feet is above the slab: a part at y=0.5 ended up inside it)
                 let gy = 0;
                 try {
                     const rc = new THREE.Raycaster(new THREE.Vector3(px, 1000, pz), new THREE.Vector3(0, -1, 0));
                     const hit = rc.intersectObjects(Object.values(sceneObjs).filter(o => o.userData && o.userData.ref !== undefined), true)[0];
                     if (hit) gy = hit.point.y;
-                } catch (e) { /* нет земли под точкой — ставим на y=0 */ }
+                } catch (e) { /* no ground under the point — place at y=0 */ }
                 body.px = Math.round(px * 10) / 10;
                 body.pz = Math.round(pz * 10) / 10;
                 body.py = Math.round((gy + _halfH) * 100) / 100;
@@ -16823,11 +16825,11 @@ end
             }
         }
 
-        // ===== Скачивание мест с Roblox — как стартовый экран Studio =====
-        // Список Experiences аккаунта (карточки), клик → место скачивается и
-        // открывается в редакторе. Нужен вход в аккаунт (Account). Запасной
-        // путь — по Place ID. После правок — ☁ Публикация: Universe/Place ID
-        // подставляются из того, что было открыто.
+        // ===== Downloading places from Roblox — like Studio's start screen =====
+        // The account's Experiences list (cards), click → the place is downloaded and
+        // opened in the editor. Requires a login (Account). The fallback
+        // path — by Place ID. After edits — ☁ Publish: Universe/Place ID
+        // are filled in from what was opened.
         let _experiences = [];
         window._rbxOrigin = null;
         window._rbxPendingName = '';
@@ -16835,7 +16837,7 @@ end
         function _escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
 
         let _recents = [];
-        window._startMode = false;   // true — стартовый экран при запуске: вопросов «потерять сцену?» нет
+        window._startMode = false;   // true — the start screen at launch: no «lose the scene?» questions
 
         function _confirmDiscardForOpen() {
             return window._startMode || confirm(t('dl_discard'));
@@ -16847,12 +16849,12 @@ end
             return isNaN(d) ? '' : d.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
 
-        // ---- Стартовый экран (как у Studio): слева разделы, справа карточки ----
+        // ---- Start screen (like Studio's): sections on the left, cards on the right ----
         let _stView = 'home', _stQuery = '';
-        let _stExp = { ok: false };          // ответ /api/roblox/experiences
-        let _stArch = null;                  // ответ ...?archived=1 (грузится при первом заходе в Archive)
+        let _stExp = { ok: false };          // the /api/roblox/experiences response
+        let _stArch = null;                  // the ...?archived=1 response (loaded on the first visit to Archive)
         let _stWho = '';
-        let _stStudio = { ok: false, games: [] };   // ответ /api/studio/games
+        let _stStudio = { ok: false, games: [] };   // the /api/studio/games response
 
         function _startVisible() {
             const el = document.getElementById('start-screen');
@@ -16865,13 +16867,13 @@ end
         }
 
         function _stTileFail(img) {
-            // Первая неудача часто временная (медленный DNS/CDN, сервер отвечает 502): пробуем ещё раз, и только потом заглушка
+            // The first failure is often temporary (slow DNS/CDN, the server answers 502): try once more, and only then a placeholder
             if (!img._retried) {
                 img._retried = true;
                 setTimeout(() => { if (img.isConnected) img.src = img.src.replace(/&_r=\d+$/, '') + '&_r=' + Date.now(); }, 1500);
                 return;
             }
-            if (!window._stThumbDiag) {   // причина — один раз, не на каждую карточку
+            if (!window._stThumbDiag) {   // the reason — once, not for every card
                 window._stThumbDiag = true;
                 fetch(img.src).then(r => r.text().then(tx =>
                     console.error('thumb HTTP ' + r.status + ': ' + tx.slice(0, 300))))
@@ -17080,12 +17082,12 @@ end
             if (m) m.scrollTop = 0;
         }
 
-        // isStartup=true — показ при запуске (см. DOMContentLoaded внизу).
+        // isStartup=true — shown at launch (see DOMContentLoaded below).
         function showStartScreen(isStartup) {
             window._startMode = !!isStartup;
             const el = _stEnsureDom();
             closeModal();
-            _stView = 'home';          // как в Studio: экран всегда открывается на Home
+            _stView = 'home';          // as in Studio: the screen always opens on Home
             _stQuery = '';
             const si = document.getElementById('st-search');
             if (si) si.value = '';
@@ -17100,7 +17102,7 @@ end
         }
 
         function startOpenFile() {
-            // выбор файла должен вызываться синхронно из клика; экран скрывается после успешного открытия
+            // file selection must be called synchronously from a click; the screen is hidden after a successful open
             openFileBrowser('open');
         }
 
@@ -17130,7 +17132,7 @@ end
             if (!_confirmDiscardForOpen()) return;
             if (x.kind === 'roblox') {
                 window._rbxPendingName = x.name;
-                loadPlaceFromRoblox(x.placeId, x.universeId || '');   // всегда свежая версия
+                loadPlaceFromRoblox(x.placeId, x.universeId || '');   // always a fresh version
                 return;
             }
             const r = await api('POST', '/api/open', { path: x.path });
@@ -17151,7 +17153,7 @@ end
 
         async function openExperience(i) {
             const x = _stExpList()[i];
-            if (!x) { console.error('openExperience: нет элемента #' + i); return; }
+            if (!x) { console.error('openExperience: no element #' + i); return; }
             if (!_confirmDiscardForOpen()) return;
             window._rbxPendingName = x.name;
             console.log('openExperience:', x.name, x.placeId, x.universeId);
@@ -17171,7 +17173,7 @@ end
             loadPlaceFromRoblox(x.placeId, x.universeId);
         }
 
-        // === Крутилка на время загрузки плейса/файла
+        // === A spinner while a place/file loads
         function showLoading(text) {
             if (!document.getElementById('rsw-loading-css')) {
                 const st = document.createElement('style');
@@ -17199,7 +17201,7 @@ end
             if (el) el.classList.remove('show');
         }
 
-        // Места (миры) открытого experience: список из Roblox и переключение для редактирования (как Game Explorer в Studio).
+        // Places (worlds) of the open experience: a list from Roblox and switching for editing (like Game Explorer in Studio).
         async function showPlacesDialog() {
             const o = window._rbxOrigin;
             if (!o || !o.universeId) {
@@ -17236,8 +17238,8 @@ end
             loadPlaceFromRoblox(placeId, o.universeId);
         }
 
-        // TeleportService:Teleport(placeId) из Lua: остановить игру, скачать другой плейс (из той же вселенной, что и
-        // открытый) и запустить заново. stopPlay закрывает Lua-VM, поэтому из вызова Lua его делаем отложенно.
+        // TeleportService:Teleport(placeId) from Lua: stop the game, download another place (from the same universe as the
+        // open one) and start again. stopPlay closes the Lua VM, so from a Lua call we do it deferred.
         let _teleporting = false;
         function luaTeleportToPlace(placeId) {
             placeId = Math.floor(Number(placeId));
@@ -17296,7 +17298,7 @@ end
         }
 
 
-        // === Панель «Войти в Roblox» при запуске, если аккаунт не подключён
+        // === The «Sign in to Roblox» panel at launch if the account isn't connected
         function _loginPromptVisible() {
             const el = document.getElementById('login-prompt');
             return !!(el && el.classList.contains('show'));
@@ -17383,7 +17385,7 @@ end
         }
 
         async function _maybeShowLoginPrompt() {
-            try { if (localStorage.getItem('rsw-login-never') === '1') return; } catch (e) { emuWarn('swallow:L13302', 'блок около script.js:13302: ' + _errText(e) + ''); }
+            try { if (localStorage.getItem('rsw-login-never') === '1') return; } catch (e) { emuWarn('swallow:L13302', 'block near script.js:13302: ' + _errText(e) + ''); }
             let ok = false;
             try {
                 if (IS_ANDROID) ok = !!window.AndroidBridge.isRobloxLoggedIn();
@@ -17392,8 +17394,8 @@ end
             if (!ok) showLoginPrompt();
         }
 
-        // === Меню «Вышла новая версия» (только Android-приложение, только stable-релизы v1.N)
-        // Hot-update релизы (hot-N) помечены prerelease и сюда не попадают — они ставятся сами.
+        // === The «New version available» menu (Android app only, stable releases v1.N only)
+        // Hot-update releases (hot-N) are marked prerelease and don't get here — they install themselves.
         let _pendingUpdateRelease = null;
 
         function showUpdatePrompt() {
@@ -17446,7 +17448,7 @@ end
                 if (!best || best.n <= cur) return;
                 _pendingUpdateRelease = best;
                 if (!_loginPromptVisible()) showUpdatePrompt();
-            } catch (e) { /* нет сети — молча пропускаем, обновление не критично */ }
+            } catch (e) { /* no network — skip silently, the update is not critical */ }
         }
 
         function showDownloadPlaceDialog() {
@@ -17490,7 +17492,7 @@ end
             );
         }
 
-        // === Open Cloud API-ключ + вход в Roblox — теперь одно меню
+        // === Open Cloud API key + Roblox sign-in — now a single menu
         async function _apiKeySectionHtml() {
             const st = await api('GET', '/api/roblox/api-key');
             const has = st.ok && st.hasKey;
@@ -17540,7 +17542,7 @@ end
         async function validateRobloxApiKey() {
             const resEl = document.getElementById('rbx-apikey-validate-result');
             if (resEl) resEl.textContent = t('apikey_validating');
-            // Пробуем реальным ассетом со сцены, если он уже загружен
+            // We try a real asset from the scene if it is already loaded
             let testAssetId = null;
             for (const ref in (typeof soundElByRef !== 'undefined' ? soundElByRef : {})) {
                 const src = soundElByRef[ref].src || '';
@@ -17597,7 +17599,7 @@ end
             }
         }
 
-        // === Скачивание 3D-аватара пользователя по Roblox User ID ===
+        // === Downloading a user's 3D avatar by Roblox User ID ===
         window.onRobloxAuthUpdated = function (loggedIn) {
             const fromPrompt = _loginPromptVisible();
             hideLoginPrompt();
@@ -17611,10 +17613,10 @@ end
             }
         };
 
-        // showAvatar3dDialog — старое имя, оставлено как алиас (на него
+        // showAvatar3dDialog — the old name, kept as an alias (it is called by
         function showAvatar3dDialog() { return showAccountDialog(); }
 
-        // Раньше кнопка выхода звала ТОЛЬКО window.AndroidBridge.logoutRoblox()
+        // The logout button used to call ONLY window.AndroidBridge.logoutRoblox()
         async function logoutRoblox() {
             if (IS_ANDROID && window.AndroidBridge && window.AndroidBridge.logoutRoblox) {
                 window.AndroidBridge.logoutRoblox();
@@ -17625,8 +17627,8 @@ end
             showAccountDialog();
         }
 
-        // Скачать ассет по ID из диалога Account: меш / текстура / звук. Дальше — тот же путь, что у долгого
-        // нажатия на MeshId: в приложении системное окно «Сохранить как», в браузере «Поделиться»/скачивание.
+        // Download an asset by ID from the Account dialog: mesh / texture / sound. Then — the same path as the long
+        // press on MeshId: in the app the system «Save as» window, in the browser «Share»/download.
         function downloadAssetFromAccount() {
             const inp = document.getElementById('acc-asset-id');
             const ids = Array.from(new Set(((inp ? inp.value : '').match(/\d{4,}/g)) || []));
@@ -17640,7 +17642,7 @@ end
             inp.value = Array.from(failedMeshIds).join(' ');
             notify(failedMeshIds.size ? t('mesh_failed_n', { n: failedMeshIds.size }) : t('mesh_failed_none'));
         }
-        // Несколько ассетов одним ZIP: в приложении — окно «Сохранить как», в браузере — «Поделиться»/скачивание.
+        // Several assets as one ZIP: in the app — the «Save as» window, in the browser — «Share»/download.
         async function exportAssetsZip(ids) {
             try {
                 notify(t('exp_assets_start', { n: ids.length }));
@@ -17686,7 +17688,7 @@ end
                 loggedIn = !!(st.ok && st.loggedIn);
             }
 
-            // Кнопка импорта ZIP теперь доступна всегда, без проверки IS_ANDROID
+            // The ZIP import button is now always available, without the IS_ANDROID check
             const localImportRow = '<div class="modal-row"><button onclick="pickAvatarFileForImport()">' + t('avatar_import_file') + '</button></div>';
             const apiKeyHtml = await _apiKeySectionHtml();
             const hr = '<hr style="border-color:#374151;border-style:solid;margin:12px 0 4px">';
@@ -17783,7 +17785,7 @@ end
                 '</div>';
         }
 
-        // AbortController текущей загрузки — доступен снаружи doDownloadAvatar3d,
+        // AbortController of the current download — available outside doDownloadAvatar3d,
         let _avatar3dAbort = null;
         let _avatar3dCancelled = false;
 
@@ -17800,13 +17802,13 @@ end
         }
 
         function pickAvatarFileForImport() {
-            // Если есть Android-мост — используем нативный выбор файла
+            // If there is an Android bridge — use the native file picker
             if (window.AndroidBridge && typeof window.AndroidBridge.pickAvatarZipFile === 'function') {
                 window.AndroidBridge.pickAvatarZipFile();
                 return;
             }
 
-            // Веб-версия: создаём скрытый input для выбора ZIP
+            // Web version: create a hidden input for choosing the ZIP
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
             fileInput.accept = '.zip,application/zip';
@@ -17820,7 +17822,7 @@ end
                     return;
                 }
 
-                // Отправляем файл на сервер (multipart/form-data)
+                // Send the file to the server (multipart/form-data)
                 const formData = new FormData();
                 formData.append('file', file);
 
@@ -17832,7 +17834,7 @@ end
                     .then(data => {
                         document.body.removeChild(fileInput);
                         if (data.ok) {
-                            // Вызываем реальную функцию импорта в сцену
+                            // Call the real scene import function
                             importAvatarIntoScene(data.obj_text, data.mtl_text, data.textures, 'local')
                                 .then(() => notify(t('avatar_added_to_scene')))
                                 .catch(e => notify(t('notify_import_failed') + e.message, 'err'));
@@ -17842,7 +17844,7 @@ end
                     })
                     .catch(err => {
                         document.body.removeChild(fileInput);
-                        console.error('Ошибка загрузки файла:', err);
+                        console.error('File upload error:', err);
                         notify(t('notify_import_net'), 'err');
                     });
             });
@@ -17852,7 +17854,7 @@ end
 
 
         window.onAvatarFilePicked = async function (path) {
-            if (!path) return; // пользователь отменил выбор
+            if (!path) return; // the user cancelled the selection
             closeModal();
             notify(t('notify_reading_file'));
             let r;
@@ -17937,7 +17939,7 @@ end
             step = 2;
             showModal(_avatarProgressHtml(steps, step));
 
-            // savePath: на Android — приватная папка приложения (для SAF-
+            // savePath: on Android — the app's private folder (for SAF-
             const dataDir = (typeof IS_ANDROID !== 'undefined' && IS_ANDROID)
                 ? window.AndroidBridge.getDataDir() : '.';
 
@@ -17979,15 +17981,15 @@ end
                 showModal(_avatarProgressHtml(steps, step, t('av_zip_android', { path: r.zipPath })));
                 return;
             }
-            // Тот же поток, что уже работает для сохранения .rbxl:
+            // The same flow that already works for saving .rbxl:
             window.AndroidBridge.exportRbxlFile(r.zipPath, r.zipName);
         }
 
-        // Загружает OBJ+MTL+текстуры (уже скачанные с сервера как текст/
+        // Loads OBJ+MTL+textures (already downloaded from the server as text/
         async function importAvatarIntoScene(objText, mtlText, textures, userId) {
             await ensureObjMtlLoaders();
 
-            // КРИТИЧНЫЙ ФИКС: Roblox отдаёт НЕстандартный .obj — строки вершин
+            // CRITICAL FIX: Roblox serves a NON-standard .obj — the vertex lines
             const fixedObjText = objText.replace(
                 /^v(\s+-?[\d.eE+-]+\s+-?[\d.eE+-]+\s+-?[\d.eE+-]+)(?:\s+-?[\d.eE+-]+)*\s*$/gm,
                 'v$1'
@@ -18002,17 +18004,17 @@ end
                 return texByName[clean] || url;
             });
 
-            // ФИКС ПРОЗРАЧНОСТИ: THREE.MTLLoader (r128) трактует тег "Tr"
+            // TRANSPARENCY FIX: THREE.MTLLoader (r128) treats the "Tr" tag
             const mtlLoader = new THREE.MTLLoader(manager);
             mtlLoader.setMaterialOptions({ invertTrProperty: true });
             const materials = mtlLoader.parse(mtlText, '');
             materials.preload();
-            // ФИКС КАЧЕСТВА 1/2: MTLLoader по умолчанию делает материалы
+            // QUALITY FIX 1/2: MTLLoader by default makes materials
             for (const key in materials.materials) {
                 const m = materials.materials[key];
                 m.side = THREE.DoubleSide;
-                // Принудительно делаем непрозрачным: ошибочно распарсенный
-                // d/Tr — самая частая причина "полупрозрачного" аватара.
+                // Force it opaque: a wrongly parsed
+                // d/Tr is the most common cause of a "semi-transparent" avatar.
                 m.transparent = false;
                 m.opacity = 1;
                 m.alphaTest = 0;
@@ -18024,18 +18026,18 @@ end
             objLoader.setMaterials(materials);
             const object = objLoader.parse(fixedObjText);
 
-            // ФИКС КАЧЕСТВА 2/2: текстуры из data:
+            // QUALITY FIX 2/2: textures from data:
             object.traverse(n => {
                 if (n.isMesh) {
                     n.castShadow = true;
                     n.receiveShadow = true;
-                    // ФИКС "ГРАНЁНОГО" ВИДА:
+                    // "FACETED" LOOK FIX:
                     if (n.geometry) n.geometry.computeVertexNormals();
                     const mats = Array.isArray(n.material) ? n.material : [n.material];
                     mats.forEach(m => {
                         if (m && m.map) {
                             m.map.encoding = THREE.sRGBEncoding;
-                            // ФИКС ЗЕРНИСТОСТИ ТЕКСТУР НА ТЕЛЕФОНЕ:
+                            // TEXTURE GRAININESS FIX ON PHONES:
                             m.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
                             m.map.needsUpdate = true;
                         }
@@ -18056,7 +18058,7 @@ end
             }
             scene.add(object);
 
-            // ВАЖНО: координаты вершин в OBJ от Roblox абсолютные — они
+            // IMPORTANT: vertex coordinates in Roblox's OBJ are absolute — they
             const box = new THREE.Box3().setFromObject(object);
             const center = box.getCenter(new THREE.Vector3());
 
@@ -18068,10 +18070,10 @@ end
             }
             object.position.copy(targetPos).sub(center);
 
-            // Сохраняем смещение центра, чтобы использовать при reloadScene
+            // We keep the center offset to use on reloadScene
             const centerOffset = center.clone();
 
-            // Чтобы аватар появился в Explorer, был выбираемым/удаляемым
+            // So that the avatar appears in Explorer, is selectable/deletable
             let ref = null;
             if (typeof api === 'function') {
                 const findWs = ns => {
@@ -18091,14 +18093,14 @@ end
                 if (r.ok) {
                     ref = r.ref;
                 } else {
-                    // ВАЖНО: PUT /api/instance молча возвращает {ok:false},
+                    // IMPORTANT: PUT /api/instance silently returns {ok:false},
                     throw new Error(t('av_err_not_saved'));
                 }
                 if (ref !== null) {
-                    // КРИТИЧНЫЙ ФИКС #2: /api/scene на сервере (make_scene_objects)
+                    // CRITICAL FIX #2: /api/scene on the server (make_scene_objects)
                     const p = object.position;
                     const size = box.getSize(new THREE.Vector3());
-                    // Формат CFrame, который реально понимает сервер (см.
+                    // The CFrame format the server actually understands (see
                     await api('POST', '/api/instance/' + ref, {
                         prop: 'CFrame',
                         value: {
@@ -18118,7 +18120,7 @@ end
                 }
             }
             if (ref !== null) {
-                // Без userData.ref луч в pick() не может определить, какому
+                // Without userData.ref the ray in pick() can't determine which
                 object.userData.ref = ref;
                 window._avatarMeshCache = window._avatarMeshCache || {};
                 window._avatarMeshCache[ref] = { object, centerOffset: centerOffset };
@@ -18126,7 +18128,7 @@ end
                 await loadTree();
             }
 
-            // Рендер-цикл приложения не всегда рисует каждый кадр по
+            // The app's render loop doesn't always draw every frame by
             if (typeof renderer !== 'undefined' && renderer && typeof camera !== 'undefined') {
                 try { renderer.render(scene, camera); } catch (e) { emuWarn('swallow:renderer.render:13989', 'renderer.render: ' + _errText(e) + ''); }
             }
@@ -18134,8 +18136,8 @@ end
             return { vertCount, ref };
         }
 
-        // Тот же колбэк уже используется для сохранения .rbxl — здесь
-        // просто закрываем прогресс-модалку аватара, если она открыта.
+        // The same callback is already used for saving .rbxl — here
+        // we just close the avatar progress modal if it is open.
         const _prevOnAndroidFileExported = window.onAndroidFileExported;
         window.onAndroidFileExported = function (ok) {
             if (_prevOnAndroidFileExported) _prevOnAndroidFileExported(ok);
@@ -18155,7 +18157,7 @@ end
             document.getElementById('modal-overlay').classList.remove('show');
         }
 
-        // ============ КЛАВИШИ ============
+        // ============ KEYS ============
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' ||
                 e.target.classList.contains('CodeMirror') || e.target.closest('.CodeMirror')) {
@@ -18208,24 +18210,24 @@ end
             if (e.target.id === 'modal-overlay') closeModal();
         };
 
-        // ============ ИНИЦИАЛИЗАЦИЯ ============
-        // script.js, app.py и style.css — три файла одной сборки. Если обновили только часть, баги «не исправлены»
-        // (например, прозрачные текстуры на High чинятся парой script.js + app.py) — говорим об этом прямо в Output.
+        // ============ INITIALIZATION ============
+        // script.js, app.py and style.css are three files of one build. If only some were updated, bugs «aren't fixed»
+        // (for example, transparent textures on High are fixed by the script.js + app.py pair) — we say so directly in Output.
         async function checkBuildConsistency() {
             try {
                 const st = await api('GET', '/api/status');
                 const cssBuild = (getComputedStyle(document.documentElement).getPropertyValue('--css-build') || '').trim().replace(/^["']|["']$/g, '');
                 const problems = [];
-                if (!st || st.build === undefined) problems.push('app.py устарел (нет метки сборки)');
+                if (!st || st.build === undefined) problems.push('app.py is outdated (no build label)');
                 else if (st.build !== BUILD_LABEL) problems.push('app.py: ' + st.build);
-                if (cssBuild !== BUILD_LABEL) problems.push('style.css: ' + (cssBuild || 'нет метки'));
+                if (cssBuild !== BUILD_LABEL) problems.push('style.css: ' + (cssBuild || 'no label'));
                 if (problems.length) {
-                    logLuaOutput('warn', 'Файлы разных сборок! script.js: ' + BUILD_LABEL + ' | ' + problems.join(' | ')
-                        + ' — замените ВСЕ три файла (script.js, app.py, style.css) и перезапустите приложение.');
+                    logLuaOutput('warn', 'Files from different builds! script.js: ' + BUILD_LABEL + ' | ' + problems.join(' | ')
+                        + ' — replace ALL three files (script.js, app.py, style.css) and restart the app.');
                 } else {
-                    logLuaOutput('info', 'script.js, app.py и style.css одной сборки ✓');
+                    logLuaOutput('info', 'script.js, app.py and style.css are from one build ✓');
                 }
-            } catch (e) { emuWarn('swallow:L14086', 'блок около script.js:14086: ' + _errText(e) + ' (без сервера нечего сравнивать)'); }
+            } catch (e) { emuWarn('swallow:L14086', 'block near script.js:14086: ' + _errText(e) + ' (nothing to compare without a server)'); }
         }
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -18234,13 +18236,13 @@ end
 
             refreshCM();
             console.log('Build: ' + BUILD_LABEL);
-            try { logLuaOutput('info', 'Build: ' + BUILD_LABEL); } catch (e) { /* Output ещё не готов */ }
+            try { logLuaOutput('info', 'Build: ' + BUILD_LABEL); } catch (e) { /* Output is not ready yet */ }
             checkBuildConsistency();
-            // Стартовый экран при запуске — только если на сервере ещё нет открытой сцены
-            // (обновление страницы посреди работы его не вызывает).
+            // The start screen at launch — only if the server has no open scene yet
+            // (a page refresh in the middle of work doesn't trigger it).
             api('GET', '/api/status').then(st => {
                 if (st && st.ok && !st.loaded) showStartScreen(true);
-            }).catch(() => { /* сервер недоступен — нечего показывать */ })
+            }).catch(() => { /* the server is unavailable — nothing to show */ })
                 .then(() => _maybeShowLoginPrompt())
                 .then(() => _maybeShowUpdatePrompt());
         });
@@ -18252,12 +18254,12 @@ end
         });
 
         window.addEventListener('resize', refreshCM);
-        // Обычный window 'resize' на многих мобильных браузерах/WebView НЕ
+        // The ordinary window 'resize' on many mobile browsers/WebViews does NOT
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', () => {
                 refreshCM();
                 if (cmEditor && cmEditor.state && cmEditor.state.completionActive) {
-                    cmEditor.closeCompletion(); // старая позиция всё равно неверна — не показывать её "зависшей"
+                    cmEditor.closeCompletion(); // the old position is wrong anyway — don't show it as «stuck»
                 }
             });
         }

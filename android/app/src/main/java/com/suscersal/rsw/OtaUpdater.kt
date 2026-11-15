@@ -10,45 +10,45 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * Обновление "горячих" файлов (app.py, rbxl_parser.py, index.html,
- * style.css, script.js — конкретный список задаётся в
- * scripts/generate-ota-manifest.sh, эта Kotlin-сторона его не хардкодит,
- * а честно берёт из version.json) без пересборки и переустановки APK.
- * Иконки (icons.txt, icons/) сюда
- * намеренно не входят — любое их изменение теперь всегда идёт через
- * полную сборку APK (см. build-and-release.yml), поэтому OtaUpdater про
- * них ничего не знает.
+ * Updating the "hot" files (app.py, rbxl_parser.py, index.html,
+ * style.css, script.js — the exact list is set in
+ * scripts/generate-ota-manifest.sh, this Kotlin side doesn't hardcode it,
+ * but honestly takes it from version.json) without rebuilding or reinstalling the APK.
+ * Icons (icons.txt, icons/) are
+ * deliberately not included — any change to them now always goes through a
+ * full APK build (see build-and-release.yml), so OtaUpdater knows
+ * nothing about them.
  *
- * Логика:
- *  0. Если versionCode установленного APK вырос с прошлого запуска (значит,
- *     только что поставили новый полный релиз) — стираем старый hotpatch,
- *     чтобы он не перекрывал свежий baked-in код (см.
- *     invalidateHotpatchIfAppWasUpdated). Это нужно, потому что полные
- *     релизы больше не публикуют version.json — см. пункт про эндпоинт ниже.
- *  1. Скачиваем ota/version.json из САМОГО СВЕЖЕГО GitHub Release репозитория
- *     (его туда кладёт CI — см. .github/workflows/build-and-release.yml и
+ * Logic:
+ *  0. If the installed APK's versionCode has grown since the last launch (meaning
+ *     a new full release was just installed) — we erase the old hotpatch
+ *     so that it doesn't override the fresh baked-in code (see
+ *     invalidateHotpatchIfAppWasUpdated). This is needed because full
+ *     releases no longer publish version.json — see the endpoint note below.
+ *  1. We download ota/version.json from the NEWEST GitHub Release of the repository
+ *     (CI puts it there — see .github/workflows/build-and-release.yml and
  *     scripts/generate-ota-manifest.sh).
- *  2. Сравниваем версию с сохранённой локально (SharedPreferences).
- *  3. Если версия новее — качаем изменившиеся файлы (по sha256) в
- *     filesDir/hotpatch и сохраняем новую версию.
+ *  2. We compare the version with the locally saved one (SharedPreferences).
+ *  3. If the version is newer — we download the changed files (by sha256) into
+ *     filesDir/hotpatch and save the new version.
  *
- * ВАЖНО про выбор эндпоинта: используем /releases (список), а НЕ
- * /releases/latest. Причина — hot-update релизы (см. workflow,
- * publish-hot-update) специально помечены prerelease: true, чтобы не быть
- * "latest release" для releases/latest/download/app-debug.apk (та ссылка
- * обязана указывать на релиз, где есть APK). Но раз они prerelease —
- * GitHub-эндпоинт /releases/latest их не отдаст, и это приложение
- * перестало бы видеть hot-обновления.
+ * IMPORTANT about the endpoint choice: we use /releases (the list), NOT
+ * /releases/latest. The reason: hot-update releases (see the workflow,
+ * publish-hot-update) are deliberately marked prerelease: true so as not to become
+ * the "latest release" for releases/latest/download/app-debug.apk (that link
+ * must point to a release that has an APK). But since they are prereleases —
+ * GitHub's /releases/latest endpoint won't return them, and this app
+ * would stop seeing hot updates.
  *
- * ВАЖНО про сортировку: порядок элементов в /releases НИГДЕ не
- * гарантирован GitHub'ом (в отличие от /releases/latest, где явно
- * задокументировано "сортировка по created_at"). На практике он иногда
- * не совпадает с датой публикации. Поэтому просто брать releases[0] как
- * "самый новый" — ошибка: он может внезапно оказаться НЕ последним, и
- * тогда приложение перестаёт видеть новые hot-update'ы (символ этого бага
- * — "первое обновление подтянулось, следующие — нет"). Вместо этого
- * забираем небольшое окно последних релизов и сами выбираем среди них
- * самый новый по полю created_at.
+ * IMPORTANT about sorting: the order of items in /releases is NOWHERE
+ * guaranteed by GitHub (unlike /releases/latest, where "sorted by created_at"
+ * is explicitly documented). In practice it sometimes
+ * doesn't match the publication date. So simply taking releases[0] as
+ * "the newest" is a mistake: it may suddenly turn out NOT to be the latest, and
+ * then the app stops seeing new hot updates (the symptom of this bug
+ * is "the first update came through, the following ones didn't"). Instead we
+ * fetch a small window of the latest releases and pick the newest among them ourselves
+ * by the created_at field.
  */
 object OtaUpdater {
 
@@ -58,28 +58,28 @@ object OtaUpdater {
     private const val KEY_VERSION = "hot_version"
     private const val KEY_APP_VERSION_CODE = "app_version_code"
 
-    // Окно последних релизов, среди которых сами ищем самый новый по
-    // created_at — см. пояснение про ненадёжный порядок /releases выше.
+    // The window of the latest releases, among which we ourselves look for the newest by
+    // created_at — see the note about the unreliable /releases order above.
     private val RELEASES_LIST_URL =
         "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=10"
 
     interface ProgressListener {
-        /** percent от 0 до 100, statusText — что показать пользователю */
+        /** percent from 0 to 100, statusText — what to show the user */
         fun onProgress(percent: Int, statusText: String)
-        /** updated — true, если только что реально скачали новые/изменённые файлы */
+        /** updated — true only if new/changed files were really just downloaded */
         fun onFinished(hotpatchDir: File?, updated: Boolean)
     }
 
     fun hotpatchDir(ctx: Context): File = File(ctx.filesDir, "hotpatch")
 
     /**
-     * Вызывать из фонового потока (не UI thread) — делает сетевые запросы.
-     * Колбэки listener'а вызывающая сторона сама переводит на UI-поток при
-     * необходимости (см. MainActivity).
+     * Call from a background thread (not the UI thread) — it makes network requests.
+     * The caller itself moves the listener's callbacks to the UI thread when
+     * needed (see MainActivity).
      */
     fun checkAndUpdate(ctx: Context, listener: ProgressListener) {
         try {
-            listener.onProgress(0, "Проверка обновлений…")
+            listener.onProgress(0, ctx.getString(R.string.ota_checking))
 
             invalidateHotpatchIfAppWasUpdated(ctx)
 
@@ -95,9 +95,9 @@ object OtaUpdater {
                 return
             }
 
-            // Ищем среди ассетов релиза version.json
+            // We look for version.json among the release's assets
             var versionAssetUrl: String? = null
-            val fileAssetUrls = HashMap<String, String>() // имя файла -> browser_download_url
+            val fileAssetUrls = HashMap<String, String>() // file name -> browser_download_url
             for (i in 0 until assets.length()) {
                 val a = assets.getJSONObject(i)
                 val name = a.getString("name")
@@ -110,11 +110,11 @@ object OtaUpdater {
             }
 
             if (versionAssetUrl == null) {
-                // В этом релизе нет OTA-пакета — это нормально для обычных
-                // "полных" релизов (там всё уже запечено в APK, см.
-                // build-and-release.yml). Он есть только у hot-update
-                // релизов. Просто продолжаем со старой версией, если она
-                // уже скачана раньше.
+                // This release has no OTA package — that's normal for ordinary
+                // "full" releases (everything is already baked into the APK there, see
+                // build-and-release.yml). It exists only for hot-update
+                // releases. We simply continue with the old version, if it
+                // was already downloaded earlier.
                 listener.onFinished(existingHotpatchOrNull(ctx), false)
                 return
             }
@@ -128,8 +128,8 @@ object OtaUpdater {
 
             val dir = hotpatchDir(ctx)
 
-            // Даже если версия совпадает, но папки ещё нет (первый запуск
-            // после установки) — качаем всё равно.
+            // Even if the version matches but the folder doesn't exist yet (the first launch
+            // after installation) — we download anyway.
             if (localVersion == remoteVersion && dir.exists()) {
                 listener.onFinished(dir, false)
                 return
@@ -137,20 +137,20 @@ object OtaUpdater {
 
             dir.mkdirs()
 
-            // Качаем во ВРЕМЕННУЮ папку, а не прямо в hotpatch/, которую
-            // bridge_launcher.py тут же подставляет в sys.path и импортирует.
-            // Раньше при обрыве сети НА СЕРЕДИНЕ докачки (например, app.py
-            // уже перезаписан новой версией, а index.html — ещё старой)
-            // в hotpatch/ оставалась смешанная, несогласованная версия кода,
-            // и приложение либо падало, либо вело себя непредсказуемо в
-            // зависимости от того, что именно успело докачаться до обрыва.
-            // Теперь подменяем файлы одним атомарным rename() только после
-            // того, как ВСЕ файлы успешно скачаны и провалидированы по хэшу.
+            // We download into a TEMPORARY folder, not straight into hotpatch/, which
+            // bridge_launcher.py immediately puts into sys.path and imports.
+            // Previously, when the network dropped IN THE MIDDLE of the download (for example, app.py
+            // was already overwritten with the new version while index.html was still old),
+            // hotpatch/ was left with a mixed, inconsistent version of the code,
+            // and the app either crashed or behaved unpredictably
+            // depending on what exactly had managed to download before the drop.
+            // Now we swap the files with a single atomic rename() only after
+            // ALL files have been successfully downloaded and validated by hash.
             val stagingDir = File(ctx.filesDir, "hotpatch_staging")
             stagingDir.deleteRecursively()
             stagingDir.mkdirs()
-            // Начинаем с копии уже имеющихся актуальных файлов — качать
-            // заново будем только то, что реально изменилось.
+            // We start with a copy of the current up-to-date files already present — we will
+            // re-download only what has really changed.
             if (dir.exists()) {
                 dir.copyRecursively(stagingDir, overwrite = true)
             }
@@ -167,13 +167,13 @@ object OtaUpdater {
                     "check $name: expected=$expectedHash actual=$actualHash exists=${destFile.exists()} size=${destFile.length()}"
                 )
 
-                // Пропускаем файл, если он уже скачан и хэш совпадает —
-                // это ускоряет докачку, когда изменилась только часть файлов.
+                // We skip a file if it is already downloaded and the hash matches —
+                // this speeds up downloading when only some of the files changed.
                 if (actualHash == expectedHash) {
                     done++
                     listener.onProgress(
                         (done * 100 / names.size),
-                        "Проверено $done/${names.size} (без изменений)"
+                        ctx.getString(R.string.ota_checked, done, names.size)
                     )
                     continue
                 }
@@ -182,8 +182,8 @@ object OtaUpdater {
                 if (downloadUrl != null) {
                     destFile.parentFile?.mkdirs()
                     downloadToFile(downloadUrl, destFile)
-                    // Сверяем хэш сразу после скачивания — обрыв связи
-                    // посреди файла не должен молча пройти как "успех".
+                    // We check the hash right after downloading — a connection drop
+                    // in the middle of a file must not silently pass as a "success".
                     val gotHash = sha256(destFile)
                     if (gotHash != expectedHash) {
                         throw java.io.IOException("Hash mismatch for $name after download")
@@ -194,42 +194,42 @@ object OtaUpdater {
                 done++
                 listener.onProgress(
                     (done * 100 / names.size),
-                    "Скачано $downloaded, проверено $done/${names.size}"
+                    ctx.getString(R.string.ota_downloaded, downloaded, done, names.size)
                 )
             }
 
-            // Все файлы на месте и проверены — теперь одним атомарным шагом
-            // подменяем рабочую hotpatch/ на staging-версию. Если процесс
-            // убьют прямо на этой строке, на диске всё равно останется
-            // ЛИБО полностью старая, ЛИБО полностью новая папка — никогда
-            // не смесь.
+            // All files are in place and verified — now in one atomic step
+            // we swap the working hotpatch/ for the staging version. If the process
+            // is killed right on this line, the disk still holds
+            // EITHER a fully old OR a fully new folder — never
+            // a mix.
             dir.deleteRecursively()
             stagingDir.renameTo(dir)
 
             prefs.edit().putString(KEY_VERSION, remoteVersion).apply()
             listener.onFinished(dir, true)
         } catch (e: Exception) {
-            // Нет сети / GitHub недоступен / репозиторий приватный и т.п. —
-            // не блокируем запуск приложения, просто работаем на том, что
-            // уже было скачано раньше (или на версии из APK, если ничего
-            // ещё не скачивалось).
+            // No network / GitHub unavailable / the repository is private, etc. —
+            // we don't block the app launch, we just work with what was
+            // already downloaded earlier (or the version from the APK, if nothing
+            // has been downloaded yet).
             listener.onFinished(existingHotpatchOrNull(ctx), false)
         }
     }
 
     /**
-     * Полные релизы (v1.N) больше не публикуют version.json (см.
-     * build-and-release.yml — там теперь только APK), поэтому
-     * checkAndUpdate() не может узнать "вышел новый полный релиз" по сети.
-     * Вместо этого узнаём это локально: versionCode установленного APK
-     * (см. android/app/build.gradle, ANDROID_VERSION_CODE) растёт только
-     * при полной пересборке и всегда >= версии любого hot-update,
-     * опубликованного до неё. Если он вырос с прошлого запуска — значит,
-     * только что установили новый полный APK, и код внутри него уже как
-     * минимум не старее любого ранее скачанного hot-patch. Стираем
-     * устаревший hotpatch, чтобы он не перекрывал свежий baked-in код
-     * из нового APK (bridge_launcher.py подставляет hotpatch в начало
-     * sys.path, если папка существует).
+     * Full releases (v1.N) no longer publish version.json (see
+     * build-and-release.yml — only the APK is there now), so
+     * checkAndUpdate() can't learn "a new full release came out" over the network.
+     * Instead we learn it locally: the installed APK's versionCode
+     * (see android/app/build.gradle, ANDROID_VERSION_CODE) grows only
+     * on a full rebuild and is always >= the version of any hot-update
+     * published before it. If it has grown since the last launch — it means
+     * a new full APK was just installed, and the code inside it is already at
+     * least as new as any previously downloaded hot patch. We erase the
+     * outdated hotpatch so that it doesn't override the fresh baked-in code
+     * from the new APK (bridge_launcher.py puts hotpatch at the start of
+     * sys.path if the folder exists).
      */
     private fun invalidateHotpatchIfAppWasUpdated(ctx: Context) {
         val currentVersionCode = try {
@@ -254,9 +254,9 @@ object OtaUpdater {
     }
 
     /**
-     * created_at — формат ISO-8601 UTC ("2026-07-26T12:00:00Z"), поэтому
-     * обычное лексикографическое сравнение строк корректно даёт
-     * хронологический порядок — полноценный парсинг даты не нужен.
+     * created_at is the ISO-8601 UTC format ("2026-07-26T12:00:00Z"), so
+     * an ordinary lexicographic string comparison correctly gives
+     * chronological order — full date parsing isn't needed.
      */
     private fun pickNewestByCreatedAt(releases: JSONArray): JSONObject {
         var newest = releases.getJSONObject(0)
@@ -304,9 +304,9 @@ object OtaUpdater {
         conn.connectTimeout = 8000
         conn.readTimeout = 15000
         conn.instanceFollowRedirects = true
-        // HttpURLConnection иногда сам добавляет "Accept-Encoding: gzip" и
-        // прозрачно разжимает ответ — отключаем это явно, чтобы не гадать,
-        // не отсюда ли берётся расхождение в байтах/хэше.
+        // HttpURLConnection sometimes adds "Accept-Encoding: gzip" by itself and
+        // transparently decompresses the response — we disable this explicitly so as not to guess
+        // whether the byte/hash mismatch comes from there.
         conn.setRequestProperty("Accept-Encoding", "identity")
         conn.inputStream.use { input ->
             dest.outputStream().use { output ->

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Синхронизирует единственный "источник правды" (корневой app.py,
+# Synchronizes the single "source of truth" (the root app.py,
 # rbxl_parser.py, index.html, style.css, script.js, icons.txt, icons/)
-# в папку Chaquopy для Android-сборки.
+# into the Chaquopy folder for the Android build.
 #
-# Запускать из корня репозитория:
+# Run from the repository root:
 #   bash scripts/sync-android-python.sh
 #
-# Используется как локально (перед открытием Android Studio / gradle),
-# так и в GitHub Actions (шаг перед сборкой APK и перед публикацией
-# hot-update релиза — см. .github/workflows/build-and-release.yml).
+# Used both locally (before opening Android Studio / gradle)
+# and in GitHub Actions (a step before building the APK and before publishing the
+# hot-update release — see .github/workflows/build-and-release.yml).
 
 set -euo pipefail
 
@@ -17,12 +17,12 @@ cd "$ROOT_DIR"
 
 DEST="android/app/src/main/python"
 
-echo "[sync] Копирую app.py, rbxl_parser.py, index.html, style.css, script.js, assistant.js, collab.js, cloud.js, icons.txt -> $DEST/"
+echo "[sync] Copying app.py, rbxl_parser.py, index.html, style.css, script.js, assistant.js, collab.js, cloud.js, icons.txt -> $DEST/"
 mkdir -p "$DEST"
 cp app.py rbxl_parser.py index.html style.css script.js assistant.js collab.js cloud.js icons.txt "$DEST/"
 
-echo "[sync] Копирую icons/ -> $DEST/icons/"
+echo "[sync] Copying icons/ -> $DEST/icons/"
 mkdir -p "$DEST/icons"
 cp -r icons/. "$DEST/icons/"
 
-echo "[sync] Готово."
+echo "[sync] Done."

@@ -1,7 +1,7 @@
-// ИИ-ассистент / AI assistant: панель чата в стиле редактора (палитра #111827/#1f2937/#374151/#3b82f6,
-// масштабы --fs/--bs). Самодостаточный файл: сам добавляет кнопку «🤖 AI» в верхнюю панель
-// и свои стили. Бэкенд — /api/assistant/* в app.py (любой OpenAI-совместимый провайдер,
-// ключ хранится на сервере). Язык (en/ru) берётся из редактора (LANG), иначе из браузера.
+// AI assistant: a chat panel styled like the editor (palette #111827/#1f2937/#374151/#3b82f6,
+// --fs/--bs scales). A self-contained file: it adds the «🤖 AI» button to the top bar
+// and its own styles. Backend — /api/assistant/* in app.py (any OpenAI-compatible provider,
+// the key is stored on the server). The language (en/ru) comes from the editor (LANG), otherwise from the browser.
 (function () {
     'use strict';
 
@@ -81,8 +81,8 @@
         }
     };
     const L = (() => {
-        try { if (typeof LANG !== 'undefined' && DICT[LANG]) return LANG; } catch (e) { /* LANG ещё не объявлен */ }
-        return /^ru/i.test(navigator.language || '') ? 'ru' : 'en';
+        try { if (typeof LANG !== 'undefined' && DICT[LANG]) return LANG; } catch (e) { /* LANG is not declared yet */ }
+        return 'en';
     })();
     const T = (k, v) => {
         let s = (DICT[L][k] != null) ? DICT[L][k] : (DICT.en[k] != null ? DICT.en[k] : k);
@@ -244,7 +244,7 @@
         } catch (e) { setNote(T('no_server', { msg: e })); }
     }
 
-    // Форматирование: ``` блоки -> <pre>, `код` -> <code>, **жирный**, *курсив*, # заголовки, списки, [текст](http…)
+    // Formatting: ``` blocks -> <pre>, `code` -> <code>, **bold**, *italic*, # headings, lists, [text](http…)
     function inline(t) {
         return t.split('`').map((x, i) => {
             if (i % 2) return '<code>' + esc(x) + '</code>';
@@ -311,11 +311,11 @@
                 out.push(root.ref + ': ' + root.name + ' (' + root.cls + ')');
                 walk(root.children, 1);
             }
-        } catch (e) { /* дерево ещё не загружено */ }
+        } catch (e) { /* the tree is not loaded yet */ }
         return out.length ? T('ctx_scene') + '\n' + out.join('\n') : '';
     }
 
-    // Контекст уходит частями: сервер сам решает, сколько чего оставить (сцена с ref'ами режется последней)
+    // Context is sent in parts: the server decides how much of each to keep (the scene with refs is trimmed last)
     async function buildContext() {
         if (!$('ai-ctx').checked) return {};
         const out = { selection: '', scene: '', script: '', output: '' };
@@ -339,11 +339,11 @@
             out.scene = sceneSummary();
             const od = outputDigest(25, 10), playing = isRunning();
             if (od.lines.length || playing) out.output = T('ctx_output', { state: T(playing ? 'st_running' : 'st_stopped') }) + '\n' + (od.lines.join('\n') || '(no output)');
-        } catch (e) { /* контекст необязателен */ }
+        } catch (e) { /* context is optional */ }
         return out;
     }
 
-    // ===== Индикатор заполнения контекста: оценку считает сервер (/api/assistant/usage) =====
+    // ===== Context fill indicator: the estimate is computed by the server (/api/assistant/usage) =====
     const fmtK = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n);
     let meterSeq = 0, meterTimer = 0;
     async function updateMeter() {
@@ -366,11 +366,11 @@
             if (r.dropped) tip.push(T('meter_drop', { n: r.dropped }));
             if (pct >= 70) tip.push(T('meter_full'));
             m.title = tip.join('\n');
-        } catch (e) { /* индикатор не критичен */ }
+        } catch (e) { /* the indicator is not critical */ }
     }
     const scheduleMeter = () => { clearTimeout(meterTimer); meterTimer = setTimeout(updateMeter, 500); };
 
-    // ===== Действия над сценой: ассистент присылает блок ```rbx-actions с JSON-массивом =====
+    // ===== Scene actions: the assistant sends an ```rbx-actions block with a JSON array =====
     const ACT_PROPS = { Position: 'v3', Rotation: 'v3', Size: 'size', Color: 'color', Transparency: 'unit', Reflectance: 'unit',
         Anchored: 'bool', CanCollide: 'bool', CastShadow: 'bool', Name: 'str', Source: 'src' };
     const SCRIPT_CLASSES = ['Script', 'LocalScript', 'ModuleScript'];
@@ -410,8 +410,8 @@
     const isRoot = ref => { try { return treeData.some(n => n.ref === ref); } catch (e) { return false; } };
     const fmtVal = v => (typeof v === 'string' && v.length > 40) ? v.slice(0, 37).replace(/\n/g, ' ') + '…' : (v && typeof v === 'object') ? Object.keys(v).map(k => +(+v[k]).toFixed(2)).join(', ') : String(v);
 
-    // Бесплатные модели часто забывают метку rbx-actions (пишут ```json, ``` или голый массив) — принимаем всё,
-    // что парсится в массив объектов с полем "op".
+    // Free models often forget the rbx-actions label (they write ```json, ``` or a bare array) — accept everything
+    // that parses into an array of objects with an "op" field.
     function _actList(src) {
         try {
             const j = JSON.parse(src.trim());
@@ -423,9 +423,9 @@
         if (/^rbx-actions\b/.test(p)) return true;
         return !!_actList(p.replace(/^[a-zA-Z0-9_+-]*[ \t]*\n/, ''));
     }
-    // Модели часто ломают JSON: настоящие переводы строк внутри "source", неэкранированные кавычки в коде,
-    // запятая перед ], ответ оборван по лимиту токенов. Сначала пробуем как есть, потом чиним, потом показываем
-    // понятную ошибку с фрагментом вокруг позиции.
+    // Models often break JSON: real newlines inside "source", unescaped quotes in code,
+    // a comma before ], a reply cut off by the token limit. First try as is, then repair, then show
+    // a clear error with the fragment around the position.
     function repairJson(src) {
         let out = '', inStr = false, esc = false, depth = 0, lastEnd = -1;
         const n = src.length;
@@ -435,14 +435,14 @@
                 if (esc) {
                     esc = false;
                     const ok = '"\\/bfnrt'.indexOf(ch) >= 0 || (ch === 'u' && /^[0-9a-fA-F]{4}$/.test(src.substr(i + 1, 4)));
-                    out += ok ? '\\' + ch : '\\\\' + ch;   // неверный escape (\d, \$) — это буквальный обратный слэш
+                    out += ok ? '\\' + ch : '\\\\' + ch;   // invalid escape (\d, \$) — this is a literal backslash
                     continue;
                 }
                 if (ch === '\\') { esc = true; continue; }
                 if (ch === '"') {
                     let j = i + 1; while (j < n && /\s/.test(src[j])) j++;
                     if (j >= n || ',:}]'.indexOf(src[j]) >= 0) { inStr = false; out += '"'; }
-                    else out += '\\"';   // кавычка внутри кода без экранирования
+                    else out += '\\"';   // a quote inside code without escaping
                     continue;
                 }
                 if (ch === '\n') out += '\\n'; else if (ch === '\r') out += '\\r'; else if (ch === '\t') out += '\\t';
@@ -454,7 +454,7 @@
             if (ch === '{' || ch === '[') { depth++; out += ch; continue; }
             if (ch === '}' || ch === ']') {
                 out = out.replace(/,\s*$/, ''); out += ch; depth--;
-                if (ch === '}' && depth === 1) lastEnd = out.length;   // закрылось полное действие верхнего массива
+                if (ch === '}' && depth === 1) lastEnd = out.length;   // a complete action of the top-level array has closed
                 continue;
             }
             out += ch;
@@ -462,7 +462,7 @@
         const truncated = inStr || depth !== 0;
         if (truncated) {
             if (lastEnd < 0) return { text: out, truncated: true };
-            out = out.slice(0, lastEnd) + ']';   // последнее недописанное действие отбрасываем
+            out = out.slice(0, lastEnd) + ']';   // drop the last unfinished action
         }
         return { text: out, truncated: truncated };
     }
@@ -480,7 +480,7 @@
                 const r = repairJson(body), j = JSON.parse(r.text), arr = Array.isArray(j) ? j : [j];
                 if (arr.length && arr.every(a => a && typeof a === 'object' && typeof a.op === 'string'))
                     return { arr: arr, note: r.truncated ? T('note_cut', { n: arr.length }) : T('note_fixed'), cut: r.truncated };
-            } catch (e2) { /* ниже — понятная ошибка */ }
+            } catch (e2) { /* a clear error is shown below */ }
             return { arr: [], err: info };
         }
     }
@@ -496,7 +496,7 @@
                 if (r.note) warn = r.note;
             } else { const l = _actList(body); if (l) l.forEach(a => list.push(a)); }
         }
-        if (!list.length && err === null) {   // голый JSON-массив вне fence
+        if (!list.length && err === null) {   // a bare JSON array outside a fence
             const m = /\[\s*\{\s*"op"[\s\S]*\}\s*\]/.exec(parts.filter((x, i) => i % 2 === 0).join('\n'));
             const l = m && _actList(m[0]); if (l) l.forEach(a => list.push(a));
         }
@@ -507,7 +507,7 @@
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const isRunning = () => typeof isPlaying !== 'undefined' && !!isPlaying;
 
-    // Вывод игры (Output редактора): ошибки/предупреждения важнее print, берём последние строки по каждому виду
+    // Game output (the editor's Output): errors/warnings matter more than print, take the last lines of each kind
     function outputDigest(maxBad, maxPrint) {
         const L = (typeof luaOutputLines !== 'undefined' && Array.isArray(luaOutputLines)) ? luaOutputLines : [];
         let e = 0, w = 0; const bad = [], pr = [];
@@ -534,7 +534,7 @@
             if (a.op === 'delete') return T('act_delete', { name: nodeName(+a.ref), ref: a.ref });
             if (a.op === 'play') return T('act_play', { sec: runSecs(a) ? ' · ' + runSecs(a) + T('sec_u') : '' });
             if (a.op === 'stop') return T('act_stop');
-        } catch (e) { /* ниже общий вариант */ }
+        } catch (e) { /* a generic variant is below */ }
         return JSON.stringify(a).slice(0, 80);
     }
 
@@ -560,7 +560,7 @@
         touched.add(ref);
     }
 
-    // имена объектов, созданных в текущем пакете (дерево в браузере обновится только после пакета)
+    // names of objects created in the current batch (the browser tree only refreshes after the batch)
     const batch = { names: {}, last: null };
     function resolveParent(x) {
         const n = parseInt(x, 10);
@@ -570,12 +570,12 @@
         if (batch.names[want] !== undefined) return batch.names[want];
         let hit = null;
         const walk = ns => { for (const nd of (ns || [])) { if (!hit && (String(nd.name).toLowerCase() === want || String(nd.cls).toLowerCase() === want)) hit = nd; if (!hit) walk(nd.children); } };
-        try { walk(treeData); } catch (e) { /* дерево недоступно */ }
+        try { walk(treeData); } catch (e) { /* the tree is unavailable */ }
         return hit ? hit.ref : NaN;
     }
 
     async function doMove(a, undo, touched) {
-        const ref = resolveParent(a.ref), parent = resolveParent(a.parent);   // ref/parent: число или имя
+        const ref = resolveParent(a.ref), parent = resolveParent(a.parent);   // ref/parent: a number or a name
         if (!isFinite(ref)) throw bad('ref');
         if (!isFinite(parent)) throw bad('parent');
         const info = await exists(ref); await exists(parent);
@@ -592,7 +592,7 @@
         const name = (typeof a.name === 'string' && a.name.trim()) ? a.name.slice(0, 100) : cls;
         const p = a.props || {}, body = { class: cls, name: name };
         let parent = resolveParent(a.parent);
-        if (!isFinite(parent) && cls === 'Script' && batch.last && /script\.Parent/.test(String(a.source || p.Source || ''))) parent = batch.last;   // скрипт управляет объектом через script.Parent — кладём внутрь
+        if (!isFinite(parent) && cls === 'Script' && batch.last && /script\.Parent/.test(String(a.source || p.Source || ''))) parent = batch.last;   // the script controls the object through script.Parent — put it inside
         if (!isFinite(parent)) {
             const roots = (typeof treeData !== 'undefined' ? treeData : []);
             const root = c => roots.find(n => n.cls === c);
@@ -606,7 +606,7 @@
         if (typeof a.source === 'string' && !('Source' in p)) p.Source = a.source;
         for (const k in p) {
             if (k === 'Name' && typeof p[k] === 'string' && p[k].trim()) { body.name = p[k].slice(0, 100); continue; }
-            if (!(k in ACT_PROPS) || k === 'Name') continue;   // неподдерживаемое свойство (Material и т.п.) пропускаем, не валим весь пакет
+            if (!(k in ACT_PROPS) || k === 'Name') continue;   // skip an unsupported property (Material etc.) instead of failing the whole batch
             const v = normVal(ACT_PROPS[k], p[k], k);
             if (k === 'Position') { body.px = v.x; body.py = v.y; body.pz = v.z; }
             else if (k === 'Size') { body.sx = v.x; body.sy = v.y; body.sz = v.z; }
@@ -641,11 +641,12 @@
                 if (typeof revealRefs === 'function') revealRefs(made, made[0]);
             }
             else if (typeof selectedRef !== 'undefined' && selectedRef !== null && touched.has(selectedRef) && typeof selectRef === 'function') await selectRef(selectedRef);
-        } catch (e) { /* интерфейс обновится при следующем действии */ }
+        } catch (e) { /* the UI will refresh on the next action */ }
     }
 
     function acc_text_without_block(t) {
-        return String(t).replace(/```[a-zA-Z0-9_+-]*[ \t]*\n\s*\[\s*\{\s*"op"[\s\S]*?```/g, '').replace(/\n?\[Патч (применён|отменён)[^\]]*\]/g, '').trim();
+        // The Russian alternatives keep markers saved in older chat histories working.
+        return String(t).replace(/```[a-zA-Z0-9_+-]*[ \t]*\n\s*\[\s*\{\s*"op"[\s\S]*?```/g, '').replace(/\n?\[(?:Патч (?:применён|отменён)|Patch (?:applied|cancelled))[^\]]*\]/g, '').trim();
     }
 
     function attachActions(bubble, parsed) {
@@ -661,23 +662,23 @@
         doBtn.textContent = T('act_apply'); undoBtn.textContent = T('act_undo');
         let undo = [], running = false;
 
-        // Ошибку видит и ИИ: кнопка «исправить» (или авто-отправка с галочкой) + пометка в истории
+        // The AI sees the error too: a «fix» button (or auto-send with the checkbox) + a note in the history
         function offerFix(msg) {
             if (autoSend(msg)) { fixBtn.style.display = 'none'; return; }
             fixBtn.textContent = T('btn_fix'); fixBtn.style.display = '';
             fixBtn.onclick = () => { fixBtn.style.display = 'none'; send(msg); };
         }
         function noteInHistory(text) {
-            if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content) + '\n[Ошибка патча: ' + String(text).slice(0, 600) + ']';
+            if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content) + '\n[Patch error: ' + String(text).slice(0, 600) + ']';
         }
 
         if (parsed.err) {
             st.textContent = T('act_bad_json', { msg: parsed.err }); st.className = 'st bad';
-            noteInHistory('JSON не прочитан: ' + parsed.err);
+            noteInHistory('JSON could not be parsed: ' + parsed.err);
             offerFix(T('fix_json', { msg: parsed.err }));
         } else if (parsed.warn) { st.textContent = parsed.warn; st.className = 'st warn'; }
 
-        // ---- запуск/остановка игры ----
+        // ---- starting/stopping the game ----
         function finishRun() {
             const d = outputDigest(25, 10);
             if (!d.e && !d.w) { rs.textContent = T('run_clean'); rs.className = 'rs ok'; return; }
@@ -690,7 +691,7 @@
         function watchRun(secs) {
             const t0 = Date.now();
             const iv = setInterval(() => {
-                if (isRunning() && secs && Date.now() - t0 >= secs * 1000) { try { stopPlay(); } catch (e) { /* уже остановлена */ } }
+                if (isRunning() && secs && Date.now() - t0 >= secs * 1000) { try { stopPlay(); } catch (e) { /* already stopped */ } }
                 if (!isRunning() || Date.now() - t0 > 600000) { clearInterval(iv); setTimeout(finishRun, 600); }
             }, 400);
         }
@@ -702,7 +703,7 @@
             }
             if (typeof startPlay !== 'function') { rs.textContent = T('act_nofn'); rs.className = 'rs bad'; return; }
             try {
-                if (isRunning()) { stopPlay(); await sleep(300); }    // перезапуск: чтобы выполнился новый код
+                if (isRunning()) { stopPlay(); await sleep(300); }    // restart: so that the new code runs
                 if (typeof clearLuaOutput === 'function') clearLuaOutput();
                 await startPlay();
             } catch (e) { rs.textContent = T('act_play_fail') + ': ' + e.message; rs.className = 'rs bad'; offerFix(T('fix_run', { msg: T('act_play_fail') + ': ' + e.message, done: '—' })); return; }
@@ -722,7 +723,7 @@
                     else if (a.op === 'create') await doCreate(a, undo, touched, made);
                     else if (a.op === 'delete') await doDelete(a, touched);
                     else if (a.op === 'move') await doMove(a, undo, touched);
-                    else if (a.op === 'play' || a.op === 'stop') post.push(a);   // после обновления дерева, когда сцена уже сохранена
+                    else if (a.op === 'play' || a.op === 'stop') post.push(a);   // after the tree refresh, when the scene is already saved
                     else throw bad(String(a.op));
                     n++;
                 }
@@ -734,16 +735,16 @@
             doBtn.style.display = 'none'; running = false;
             if (failMsg !== null) {
                 const done = summaryParts(acts.slice(0, n), made);
-                noteInHistory(failMsg + '. Выполнено ' + n + ' из ' + acts.length + (done ? ': ' + done : ''));
+                noteInHistory(failMsg + '. Done ' + n + ' of ' + acts.length + (done ? ': ' + done : ''));
                 offerFix(T('fix_run', { msg: failMsg + ' — ' + describe(acts[n] || {}), done: done || '—' }));
             } else { for (const a of post) await runGame(a); }
             $('ai-msgs').scrollTop = $('ai-msgs').scrollHeight;
         }
         undoBtn.onclick = async () => {
             undoBtn.disabled = true;
-            for (const f of undo.reverse()) { try { await f(); } catch (e) { /* пропускаем */ } }
+            for (const f of undo.reverse()) { try { await f(); } catch (e) { /* skip */ } }
             undo = []; st.textContent = T('act_reverted'); st.className = 'st';
-            if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content).replace(/\n?\[Патч применён:[^\]]*\]/, '') + '\n[Патч отменён пользователем]';
+            if (parsed.entry) parsed.entry.content = acc_text_without_block(parsed.entry.content).replace(/\n?\[(?:Патч применён|Patch applied):[^\]]*\]/, '') + '\n[Patch cancelled by the user]';
             undoBtn.style.display = 'none';
             await refreshEditor([], new Set());
         };
@@ -755,13 +756,13 @@
         else if (hasDelete) { st.textContent = T('act_wait'); st.className = 'st'; }
     }
 
-    // Текст для показа во время стрима: убираем пульс \x1f, <think>…</think> и недописанный/сырой блок rbx-actions
+    // Text to show while streaming: strip the pulse \x1f, <think>…</think> and an unfinished/raw rbx-actions block
     function shown(acc) {
         let t = acc.replace(/\x1f/g, '').replace(/<think>[\s\S]*?(<\/think>|$)/gi, '');
         t = t.replace(/```rbx-actions[\s\S]*?(```|$)/g, '\n' + T('patch_prep') + '\n');
         return t.trim();
     }
-    // Сводка выполненного патча для истории: модель видит, что и с какими ref создано
+    // Summary of an applied patch for the history: the model sees what was created and with which refs
     function summaryParts(acts, made) {
         let mi = 0;
         return acts.map(a => {
@@ -773,9 +774,9 @@
             return String(a.op);
         }).join('; ').slice(0, 900);
     }
-    function patchSummary(acts, made) { return '[Патч применён: ' + summaryParts(acts, made) + ']'; }
+    function patchSummary(acts, made) { return '[Patch applied: ' + summaryParts(acts, made) + ']'; }
 
-    // Автоисправление: ошибку можно отправить ИИ кнопкой, а с галочкой — автоматически (не более 2 раз подряд)
+    // Auto-fix: the error can be sent to the AI with the button, or automatically with the checkbox (at most 2 times in a row)
     let autofixLeft = 2;
     function autoSend(msg) {
         if (!$('ai-autofix').checked || autofixLeft <= 0) return false;
@@ -807,7 +808,7 @@
         bubble.textContent = T('thinking');
         let acc = '';
         try {
-            for (let attempt = 0; attempt < 2 && !shown(acc); attempt++) {   // бесплатный роутер иногда отдаёт пустой ответ — пробуем ещё раз
+            for (let attempt = 0; attempt < 2 && !shown(acc); attempt++) {   // the free router sometimes returns an empty reply — try again
                 const resp = await fetch('/api/assistant/chat', {
                     method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, HDR),
                     body: JSON.stringify({ messages: history, ctx: await buildContext(), image: shot || undefined })
@@ -853,20 +854,20 @@
         const q = e.target.closest('#ai-chips button');
         if (q) send(QUICK[+q.dataset.q][1]);
     });
-    // ===== Перетаскивание панели за заголовок (как debug-консоль); позиция запоминается, двойной тап по заголовку — сброс =====
+    // ===== Dragging the panel by its header (like the debug console); the position is remembered, double-tap on the header resets it =====
     (function () {
-        const head = $('ai-head'), KEY = 'rsw_ai_panel_pos2';   // pos2: старые сохранённые размеры были урезаны перетаскиванием
+        const head = $('ai-head'), KEY = 'rsw_ai_panel_pos2';   // pos2: the old saved sizes had been trimmed by dragging
         head.style.touchAction = 'none'; head.style.cursor = 'move'; head.title = head.title || '';
-        // Видимая область: когда открыта экранная клавиатура, она меньше window.innerHeight (или layout-viewport)
+        // Visible area: with the on-screen keyboard open it is smaller than window.innerHeight (or the layout viewport)
         const vv = window.visualViewport;
         const visH = () => (vv ? vv.height : window.innerHeight);
         const clamp = (l, t, w, h) => ({
             left: Math.max(0, Math.min(l, window.innerWidth - Math.min(w, window.innerWidth))),
-            // нижний край — предел: панель не уезжает вниз и не сжимается (раньше высота урезалась и так сохранялась)
+            // the bottom edge is the limit: the panel does not slide down or shrink (previously the height was trimmed and saved that way)
             top: Math.max(0, Math.min(t, visH() - Math.min(h, visH())))
         });
-        // Желаемая позиция/размер (то, что выбрал пользователь). На resize панель пересчитывается ОТ НЕЁ,
-        // а не от текущего прямоугольника: раньше клавиатура ужимала панель, и она так и оставалась маленькой.
+        // Desired position/size (what the user chose). On resize the panel is recomputed FROM IT,
+        // not from the current rectangle: previously the keyboard squeezed the panel and it stayed small.
         let want = null;
         function syncViewport() {
             const kb = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
@@ -885,12 +886,12 @@
         function reset() {
             want = null;
             ['left', 'top', 'right', 'bottom', 'width', 'height', 'max-width', 'max-height'].forEach(k => panel.style.removeProperty(k));
-            try { localStorage.removeItem(KEY); localStorage.removeItem('rsw_ai_panel_pos'); } catch (e) { /* без хранилища */ }
+            try { localStorage.removeItem(KEY); localStorage.removeItem('rsw_ai_panel_pos'); } catch (e) { /* no storage */ }
         }
         try {
             const sv = JSON.parse(localStorage.getItem(KEY) || 'null');
             if (sv && [sv.left, sv.top, sv.w, sv.h].every(Number.isFinite)) { want = { left: sv.left, top: sv.top, w: sv.w, h: sv.h }; place(sv.left, sv.top, sv.w, sv.h); }
-        } catch (e) { /* игнорируем */ }
+        } catch (e) { /* ignore */ }
         let drag = null, lastTap = 0;
         head.addEventListener('pointerdown', e => {
             if (e.target.closest('button, input, select')) return;
@@ -899,7 +900,7 @@
             lastTap = now;
             const r = panel.getBoundingClientRect();
             drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top, w: r.width, h: r.height, moved: false };
-            try { head.setPointerCapture(e.pointerId); } catch (err) { /* не критично */ }
+            try { head.setPointerCapture(e.pointerId); } catch (err) { /* not critical */ }
         });
         head.addEventListener('pointermove', e => {
             if (!drag) return;
@@ -912,7 +913,7 @@
             if (drag && drag.moved) {
                 const r = panel.getBoundingClientRect();
                 want = { left: r.left, top: r.top, w: drag.w, h: drag.h };
-                try { localStorage.setItem(KEY, JSON.stringify({ left: r.left, top: r.top, w: drag.w, h: drag.h })); } catch (e) { /* без хранилища */ }
+                try { localStorage.setItem(KEY, JSON.stringify({ left: r.left, top: r.top, w: drag.w, h: drag.h })); } catch (e) { /* no storage */ }
             }
             drag = null;
         };
@@ -924,7 +925,7 @@
         window.addEventListener('resize', onViewport);
         window.addEventListener('orientationchange', () => setTimeout(onViewport, 300));
         if (vv) { vv.addEventListener('resize', onViewport); vv.addEventListener('scroll', syncViewport); }
-        // некоторые WebView не присылают resize при закрытии клавиатуры — перепроверяем после потери фокуса
+        // some WebViews do not send resize when the keyboard closes — re-check after focus is lost
         panel.addEventListener('focusout', () => setTimeout(onViewport, 350));
         panel.addEventListener('focusin', () => setTimeout(onViewport, 350));
         syncViewport();
@@ -950,7 +951,7 @@
         setNote(c.ok ? T('key_removed') : (c.error || T('error')));
         if (c.ok) loadCfg();
     };
-    // datalist в Android WebView не раскрывается — свой выпадающий список с фильтром по вводу
+    // datalist does not open in Android WebView — a custom dropdown filtered by the input
     let aiModels = [];
     function renderModList(all) {
         const box = $('ai-modlist'), q = $('ai-model').value.trim().toLowerCase();
@@ -967,7 +968,7 @@
 
     $('ai-load').onclick = async () => {
         setNote(T('loading_models'));
-        // сначала сохраняем адрес/ключ, иначе список придёт от прежнего провайдера
+        // save the address/key first, otherwise the list would come from the previous provider
         const body = { base_url: $('ai-url').value };
         if ($('ai-key').value.trim()) body.api_key = $('ai-key').value;
         await jpost('/api/assistant/config', body);
@@ -977,15 +978,15 @@
         setNote(T('models_n', { n: r.models.length }));
     };
 
-    try { if (localStorage.getItem('rsw_ai_auto') === '0') $('ai-auto').checked = false; } catch (e) { /* без хранилища */ }
-    $('ai-auto').onchange = () => { try { localStorage.setItem('rsw_ai_auto', $('ai-auto').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
-    try { if (localStorage.getItem('rsw_ai_autofix') === '1') $('ai-autofix').checked = true; } catch (e) { /* без хранилища */ }
-    $('ai-autofix').onchange = () => { try { localStorage.setItem('rsw_ai_autofix', $('ai-autofix').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } };
+    try { if (localStorage.getItem('rsw_ai_auto') === '0') $('ai-auto').checked = false; } catch (e) { /* no storage */ }
+    $('ai-auto').onchange = () => { try { localStorage.setItem('rsw_ai_auto', $('ai-auto').checked ? '1' : '0'); } catch (e) { /* no storage */ } };
+    try { if (localStorage.getItem('rsw_ai_autofix') === '1') $('ai-autofix').checked = true; } catch (e) { /* no storage */ }
+    $('ai-autofix').onchange = () => { try { localStorage.setItem('rsw_ai_autofix', $('ai-autofix').checked ? '1' : '0'); } catch (e) { /* no storage */ } };
 
-    try { if (localStorage.getItem('rsw_ai_shot') === '1') $('ai-shot').checked = true; } catch (e) { /* без хранилища */ }
-    $('ai-shot').onchange = () => { try { localStorage.setItem('rsw_ai_shot', $('ai-shot').checked ? '1' : '0'); } catch (e) { /* без хранилища */ } updateMeter(); };
+    try { if (localStorage.getItem('rsw_ai_shot') === '1') $('ai-shot').checked = true; } catch (e) { /* no storage */ }
+    $('ai-shot').onchange = () => { try { localStorage.setItem('rsw_ai_shot', $('ai-shot').checked ? '1' : '0'); } catch (e) { /* no storage */ } updateMeter(); };
 
-    // выпадающее меню с галочками: закрывается по клику вне и по Esc
+    // dropdown menu with checkboxes: closes on outside click and on Esc
     const setMenu = open => { $('ai-menu').hidden = !open; $('ai-opts').setAttribute('aria-expanded', open ? 'true' : 'false'); };
     $('ai-opts').onclick = e => { e.stopPropagation(); setMenu($('ai-menu').hidden); };
     panel.addEventListener('click', e => { if (!e.target.closest('#ai-menu') && !e.target.closest('#ai-opts')) setMenu(false); });
@@ -994,9 +995,9 @@
     showEmpty();
     $('ai-ctx').addEventListener('change', updateMeter);
     $('ai-input').addEventListener('input', scheduleMeter);
-    setInterval(updateMeter, 5000);   // выделение и открытый скрипт меняются без событий для панели
+    setInterval(updateMeter, 5000);   // selection and the open script change without events for the panel
 
-    // Кнопка в верхней панели (синяя, как «Account»)
+    // Button in the top bar (blue, like «Account»)
     const bar = document.getElementById('toolbar-top');
     if (bar) {
         const b = document.createElement('button');

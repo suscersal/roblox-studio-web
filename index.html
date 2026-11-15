@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
@@ -7,25 +7,25 @@
     <title>Roblox Studio Mobile</title>
 
     <script>
-        // ВРЕМЕННАЯ ДИАГНОСТИКА (нет доступа к консоли разработчика) —
-        // ловим ЛЮБУЮ необработанную ошибку JS где угодно на странице.
-        // Если что-то падает при первой загрузке скрипта, это может тихо
-        // остановить выполнение остального кода (в т.ч. не даст
-        // определиться функции openFileBrowser) — и тогда клик по кнопке
-        // не будет делать вообще ничего, без единого алерта из самой
-        // функции. Этот перехватчик покажет такую ошибку.
+        // TEMPORARY DIAGNOSTICS (no access to the developer console) —
+        // catch ANY unhandled JS error anywhere on the page.
+        // If something fails while the script first loads, it can quietly
+        // stop the rest of the code from running (including preventing
+        // the openFileBrowser function from being defined) — and then a click on the button
+        // would do nothing at all, without a single alert from the
+        // function itself. This handler will show such an error.
         window.addEventListener('error', function (e) {
             console.error('GLOBAL ERROR:', e.message, (e.filename || '') + ':' + e.lineno + ':' + e.colno);
         });
     </script>
 
-    <!-- vendor/*.css — локальные копии, скачанные один раз setup_termux.sh
-         (см. корень проекта). После setup.sh приложение работает без сети
-         вообще; если запускать без setup.sh (например, сразу с ПК), эти
-         файлы можно заменить обратно на CDN-ссылки. -->
-    <!-- CodeMirror 5 CSS больше не нужен — CM6 задаёт свою тему целиком через
-         JS (EditorView.theme(...) в entry.mjs), никаких отдельных .css файлов
-         подключать не требуется. -->
+    <!-- vendor/*.css — local copies downloaded once by setup_termux.sh
+         (see the project root). After setup.sh the app works without a network
+         at all; if run without setup.sh (for example, straight from a PC), these
+         files can be swapped back to CDN links. -->
+    <!-- CodeMirror 5 CSS is no longer needed — CM6 sets its theme entirely through
+         JS (EditorView.theme(...) in entry.mjs), no separate .css files
+         need to be included. -->
 
 
 
@@ -55,9 +55,9 @@
         <button class="blue" onclick="showPublishDialog()" data-i18n-title="tb_publish_title" title="Publish"><span
                 data-i18n="tb_publish">☁ Publish</span></button>
         <button class="purple" id="account-btn" onclick="showAccountDialog()"
-            data-i18n-title="tb_account_title" title="Аккаунт Roblox и Open Cloud API-ключ">
+            data-i18n-title="tb_account_title" title="Roblox account and Open Cloud API key">
             <span data-i18n="tb_account">👤 Account</span></button>
-        <button onclick="toggleLang()" title="Switch language / Сменить язык" id="lang-btn">🌐 EN</button>
+        <button onclick="toggleLang()" data-i18n-title="tb_lang_title" title="Switch language" id="lang-btn">🌐 EN</button>
         <div class="sep"></div>
         <button class="green" id="play-btn" onclick="togglePlay()" data-i18n-title="tb_play_title"
             title="Run physics simulation"><span data-i18n="tb_play">▶ Play</span></button>
@@ -106,11 +106,11 @@
                 <button onclick="setQuality('low')" class="active" id="q-low" data-i18n="q_low">Low</button>
                 <button onclick="setQuality('medium')" id="q-medium" data-i18n="q_med">Med</button>
                 <button onclick="setQuality('high')" id="q-high" data-i18n="q_high">High</button>
-                <button onclick="setGuiScale(1)" id="g-1" data-s="1" title="GUI scale">UI 1×</button>
-                <button onclick="setGuiScale(1.5)" id="g-15" data-s="1.5" title="GUI scale">1.5×</button>
-                <button onclick="setGuiScale(2)" id="g-2" data-s="2" title="GUI scale">2×</button>
+                <button onclick="setGuiScale(1)" id="g-1" data-s="1" data-i18n-title="gui_scale" title="GUI scale">UI 1×</button>
+                <button onclick="setGuiScale(1.5)" id="g-15" data-s="1.5" data-i18n-title="gui_scale" title="GUI scale">1.5×</button>
+                <button onclick="setGuiScale(2)" id="g-2" data-s="2" data-i18n-title="gui_scale" title="GUI scale">2×</button>
             </div>
-            <!-- Старый плавающий блок Lua Output удалён -->
+            <!-- The old floating Lua Output block has been removed -->
             <div id="vp-label" data-i18n-html="vp_hint">
                 🖱️ LMB — rotate | 🖱️ RMB — pan | 🖱️ Wheel — render distance<br>
                 ⌨️ WASD — move | F — focus | Esc — deselect
@@ -139,7 +139,7 @@
             <div id="tabs">
                 <div class="tab active" onclick="switchTab('props')" data-i18n="ui_properties">Properties</div>
                 <div class="tab" onclick="switchTab('script')" data-i18n="ui_script_tab">Script</div>
-                <!-- Вкладка Output удалена, она теперь снизу -->
+                <!-- The Output tab has been removed, it is now at the bottom -->
             </div>
             <div id="tab-props">
                 <p style="color:#6b7280;font-size:12px;padding:8px" data-i18n="props_placeholder">← Select an object</p>
@@ -154,7 +154,7 @@
         </div>
     </div>
 
-    <!-- Горизонтальный ресайзер и нижняя панель Output (после main) -->
+    <!-- Horizontal resizer and the bottom Output panel (after main) -->
     <div class="resizer-h" id="resizer-h"></div>
     <div id="bottom-panel">
         <div id="output-header">
@@ -175,14 +175,14 @@
     <div id="notify"></div>
 
 
-    <!-- CodeMirror 6, единым офлайн-бандлом (см. entry.mjs/rollup.config.mjs
-         в репозитории — собирается через rollup из официальных пакетов
-         @codemirror/*, вместо CDN-зависимости). Раньше здесь было 4 отдельных
-         файла CM5 (ядро + режим Lua + два аддона) — CM6 такой же блокирующий
-         <script>, но один: cmEditor создаётся в DOMContentLoaded-колбэке чуть
-         ниже, так что достаточно, чтобы бандл успел выполниться до этого
-         события (обычный порядковый <script> это и так гарантирует). -->
-<!-- ==== ВРЕМЕННАЯ DEBUG-КОНСОЛЬ  ==== -->
+    <!-- CodeMirror 6, as a single offline bundle (see entry.mjs/rollup.config.mjs
+         in the repository — built with rollup from the official
+         @codemirror/* packages, instead of a CDN dependency). There used to be 4 separate
+         CM5 files here (core + Lua mode + two addons) — CM6 is the same blocking
+         <script>, but a single one: cmEditor is created in the DOMContentLoaded callback a bit
+         below, so it is enough for the bundle to finish running before that
+         event (an ordinary in-order <script> guarantees this anyway). -->
+<!-- ==== TEMPORARY DEBUG CONSOLE ==== -->
     <script>
         (function () {
             var maxLines = 300;
@@ -202,10 +202,10 @@
                 'box-sizing:border-box;white-space:pre-wrap;word-break:break-all;border-top:2px solid #0f0;' +
                 'display:none;height:' + consoleHeight + 'px;';
 
-            // Полоска-хваталка сверху консоли — перетаскиванием вверх/вниз
-            // можно менять её высоту (как перетаскиваемый bottom sheet).
-            // position:absolute внутри position:fixed родителя не скроллится
-            // вместе с содержимым лога — остаётся приклеенной к верхнему краю.
+            // A grab strip on top of the console — dragging it up/down
+            // changes its height (like a draggable bottom sheet).
+            // position:absolute inside a position:fixed parent doesn't scroll
+            // with the log content — it stays glued to the top edge.
             var handle = document.createElement('div');
             handle.id = 'debugConsoleHandle';
             handle.style.cssText = 'position:absolute;top:0;left:0;right:0;height:16px;cursor:ns-resize;' +
@@ -219,7 +219,7 @@
                 'height:36px;border-radius:50%;background:#222;color:#0f0;border:1px solid #0f0;font-size:16px;' +
                 'touch-action:none;';
 
-            // Кнопки быстрой прокрутки лога вверх/вниз — видны только пока консоль открыта.
+            // Buttons for quickly scrolling the log up/down — visible only while the console is open.
             var btnStyle = 'position:fixed;right:8px;z-index:1000001;width:36px;height:36px;border-radius:50%;' +
                 'background:#222;color:#0f0;border:1px solid #0f0;font-size:16px;display:none;';
             var btnTop = document.createElement('button');
@@ -231,10 +231,10 @@
             btnBottom.style.cssText = btnStyle;
             btnBottom.onclick = function () { box.scrollTop = box.scrollHeight; };
 
-            // Высота консоли определяет, где над ней висит кнопка-переключатель
-            // и кнопки прокрутки — пересчитываем при каждом изменении высоты.
-            // Все три кнопки размещаются НАД консолью (bottom = consoleHeight + 8),
-            // в один ряд, чтобы консоль их не перекрывала.
+            // The console height determines where the toggle button and
+            // the scroll buttons hang above it — recomputed on every height change.
+            // All three buttons are placed ABOVE the console (bottom = consoleHeight + 8),
+            // in one row, so that the console doesn't cover them.
             function layoutForHeight() {
                 box.style.height = consoleHeight + 'px';
                 btnTop.style.bottom = (consoleHeight + 8) + 'px';
@@ -252,7 +252,7 @@
                 try { localStorage.setItem('rsw_debug_height', String(consoleHeight)); } catch (e) { }
             }
 
-            // --- Перетаскивание хваталки: изменение высоты консоли ---
+            // --- Dragging the grab strip: changing the console height ---
             (function () {
                 var dragging = false;
                 var startY = 0;
@@ -279,7 +279,7 @@
                 handle.addEventListener('pointercancel', endHandleDrag);
             })();
 
-            // --- Перетаскивание кнопки 🐞 в любое место экрана (как иконка mod-меню) ---
+            // --- Dragging the 🐞 button anywhere on the screen (like a mod-menu icon) ---
             var toggleHasCustomPos = false;
             (function () {
                 var DRAG_THRESHOLD = 6;
@@ -337,14 +337,14 @@
                         var rect = toggle.getBoundingClientRect();
                         var pos = { right: window.innerWidth - rect.right, bottom: window.innerHeight - rect.bottom };
                         try { localStorage.setItem('rsw_debug_btn_pos', JSON.stringify(pos)); } catch (err) { }
-                        // Не даём этому же жесту сработать как клик (открыть/закрыть консоль).
+                        // Don't let the same gesture also fire as a click (open/close the console).
                         var suppressClick = function (ev) { ev.stopPropagation(); ev.preventDefault(); };
                         toggle.addEventListener('click', suppressClick, { capture: true, once: true });
                     }
                 }
                 toggle.addEventListener('pointerup', endToggleDrag);
                 toggle.addEventListener('pointercancel', endToggleDrag);
-                // В коде инициализации дебаг-консоли:
+                // In the debug console initialization code:
                 toggle.style.cssText = 'position:fixed;right:8px;z-index:10000000;width:36px;' +
                     'height:36px;border-radius:50%;background:#222;color:#0f0;border:1px solid #0f0;font-size:16px;' +
                     'touch-action:none;cursor:pointer;';
@@ -359,9 +359,9 @@
             };
 
             function addLine(text, color) {
-                // Автопрокрутка вниз только если пользователь и так уже был у низа —
-                // иначе он не смог бы пролистать лог вверх руками во время потока
-                // новых сообщений (как это нормально работает на странице/в чатах).
+                // Auto-scroll down only if the user was already at the bottom —
+                // otherwise they couldn't scroll the log up by hand during a stream
+                // of new messages (as it normally works on a page/in chats).
                 var wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
                 var line = document.createElement('div');
                 if (color) line.style.color = color;
@@ -390,26 +390,26 @@
                 };
             });
 
-            // Ловим в т.ч. ошибки загрузки ресурсов (сорванные <script src>/<link>/<img>) —
-            // именно это нужно для диагностики офлайн-запуска.
+            // Also catch resource load errors (broken <script src>/<link>/<img>) —
+            // exactly this is needed for diagnosing an offline launch.
             window.addEventListener('error', function (e) {
                 var t = e.target;
                 if (t && t !== window && t.getAttribute && t.getAttribute('data-nolog')) {
-                    return;   // миниатюры Toolbox и т.п.: ошибка не должна засорять Output
+                    return;   // Toolbox thumbnails etc.: the error must not clutter Output
                 }
                 if (t && t !== window && (t.tagName === 'SCRIPT' || t.tagName === 'LINK' || t.tagName === 'IMG')) {
-                    addLine('❌ Не удалось загрузить ресурс: ' + (t.src || t.href), '#f66');
+                    addLine('❌ Failed to load resource: ' + (t.src || t.href), '#f66');
                 } else if (t && t !== window && (t.tagName === 'VIDEO' || t.tagName === 'AUDIO' || t.tagName === 'SOURCE')) {
-                    // Ошибка загрузки <video>/<audio> (сорванный источник) — это
-                    // обычный Event, а не ErrorEvent: у него нет message/
-                    // filename/lineno, поэтому раньше она проваливалась в ветку
-                    // ниже и превращалась в бесполезное "JS error @ :". Берём
-                    // код ошибки из el.error (MediaError), чтобы было видно,
-                    // что реально не так с медиа.
+                    // A <video>/<audio> load error (a broken source) — this is
+                    // an ordinary Event, not an ErrorEvent: it has no message/
+                    // filename/lineno, so previously it fell through into the branch
+                    // below and turned into a useless "JS error @ :". We take the
+                    // error code from el.error (MediaError) so it is visible
+                    // what is really wrong with the media.
                     var mediaErr = t.error;
                     var mediaErrNames = { 1: 'ABORTED', 2: 'NETWORK', 3: 'DECODE', 4: 'SRC_NOT_SUPPORTED' };
                     var code = mediaErr ? (mediaErr.code + ' ' + (mediaErrNames[mediaErr.code] || '')) : '?';
-                    addLine('❌ Ошибка загрузки медиа (' + t.tagName.toLowerCase() + ', код ' + code + '): ' + (t.currentSrc || t.src || ''), '#f66');
+                    addLine('❌ Media load error (' + t.tagName.toLowerCase() + ', code ' + code + '): ' + (t.currentSrc || t.src || ''), '#f66');
                 } else {
                     addLine('❌ ' + (e.message || 'JS error') + ' @ ' + (e.filename || '') + ':' + (e.lineno || ''), '#f66');
                 }
@@ -426,10 +426,10 @@
             document.body.appendChild(btnBottom);
             box.addEventListener('touchmove', function (e) { e.stopPropagation(); }, { passive: true });
             layoutForHeight();
-            addLine('Debug-консоль запущена (Roblox Studio Web)');
+            addLine('Debug console started (Roblox Studio Web)');
         })();
     </script>
-    <!-- ==== КОНЕЦ ВРЕМЕННОЙ DEBUG-КОНСОЛИ ==== -->
+    <!-- ==== END OF TEMPORARY DEBUG CONSOLE ==== -->
     <script>
         (function () {
             var of = window.fetch;
@@ -454,9 +454,9 @@
     <script src="assistant.js"></script>
     <script src="collab.js"></script>
     <script src="cloud.js"></script>
-    <!-- show-hint.min.js/lua-hint.js (CodeMirror 5 addon) больше не нужны —
-         автодополнение теперь встроено в CM6-бандл (@codemirror/autocomplete),
-         см. entry.mjs. -->
+    <!-- show-hint.min.js/lua-hint.js (CodeMirror 5 addon) are no longer needed —
+         autocompletion is now built into the CM6 bundle (@codemirror/autocomplete),
+         see entry.mjs. -->
 </body>
 
 </html>
