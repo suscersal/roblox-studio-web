@@ -698,6 +698,7 @@
             en: {
                 tb_lang_title: 'Switch language',
                 gui_scale: 'GUI scale',
+                gui_scale_auto: 'GUI scale: auto-fit to the screen',
                 stop_title: 'Stop',
                 no_output: '(no output)',
                 pub_ver_published: 'Published',
@@ -954,6 +955,7 @@
             ru: {
                 tb_lang_title: 'Сменить язык',
                 gui_scale: 'Масштаб интерфейса',
+                gui_scale_auto: 'Масштаб интерфейса: авто по размеру экрана',
                 stop_title: 'Стоп',
                 no_output: '(нет вывода)',
                 pub_ver_published: 'Опубликовать (Published)',
@@ -13407,8 +13409,21 @@ end
         // The game GUI scale (the overlay gets CSS zoom): on a phone the Play window is small, while the GUI is computed in «Roblox pixels».
         // All coordinates Lua sees (mouse/touch, AbsolutePosition/AbsoluteSize, ViewportSize) are in GUI units,
         // from the overlay's top-left corner (as in Roblox), not in screen pixels.
-        let guiScale = 1;
-        try { const v = parseFloat(localStorage.getItem('rbxstudio-gui-scale')); if (v >= 1 && v <= 3) guiScale = v; } catch (e) { /* no localStorage */ }
+        // «UI auto»: a GUI drawn for a big screen (the TV desktop: 82×88 icons, a 44 px taskbar — all in «Roblox pixels»)
+        // did not fit a ~360 px tall phone. Auto mode picks a scale so that the GUI height is at least
+        // GUI_AUTO_REF_H (480): a 360 px screen -> 0.75×. Big screens stay at 1×. Until the user picks something, it is auto.
+        const GUI_AUTO_REF_H = 480, GUI_AUTO_MIN = 0.6;
+        let guiScale = 1, guiAuto = true;
+        try {
+            const raw = localStorage.getItem('rbxstudio-gui-scale');
+            if (raw !== null && raw !== 'auto') { const v = parseFloat(raw); if (v >= 0.5 && v <= 3) { guiScale = v; guiAuto = false; } }
+        } catch (e) { /* no localStorage */ }
+        function _autoGuiScale() {
+            const vp = document.getElementById('viewport');
+            const h = (vp && vp.clientHeight) || window.innerHeight || GUI_AUTO_REF_H;
+            return Math.max(GUI_AUTO_MIN, Math.min(1, Math.round(h / GUI_AUTO_REF_H * 20) / 20));
+        }
+        if (guiAuto) guiScale = _autoGuiScale();
         function _guiOverlayRect() {
             const ov = document.getElementById('gui-overlay');
             return ov ? ov.getBoundingClientRect() : { left: 0, top: 0 };
@@ -13427,16 +13442,25 @@ end
             const par = ov.parentElement;
             if (!par || guiScale === 1) return;
             const pr = par.getBoundingClientRect(), orr = ov.getBoundingClientRect();
-            if (pr.width > 0 && orr.width > pr.width * 1.02) {
+            // both for guiScale > 1 (the box stuck out) and for < 1 (in old WebViews the box shrank and the GUI covered only part of the screen)
+            if (pr.width > 0 && Math.abs(orr.width - pr.width) > pr.width * 0.02) {
                 ov.style.right = 'auto'; ov.style.bottom = 'auto';
                 ov.style.width = (pr.width / guiScale) + 'px';
                 ov.style.height = (pr.height / guiScale) + 'px';
             }
         }
-        window.addEventListener('resize', () => { const ov = document.getElementById('gui-overlay'); if (ov && ov.classList.contains('active')) _applyGuiZoom(ov); });
-        function setGuiScale(sc) {
-            guiScale = sc;
-            try { localStorage.setItem('rbxstudio-gui-scale', String(sc)); } catch (e) { /* nothing */ }
+        window.addEventListener('resize', () => {
+            const ov = document.getElementById('gui-overlay');
+            if (guiAuto) {   // the screen/window changed — recompute the auto scale and, if it changed, redraw the GUI
+                const ns = _autoGuiScale();
+                if (Math.abs(ns - guiScale) > 0.001) { setGuiScale('auto', true); return; }
+            }
+            if (ov && ov.classList.contains('active')) _applyGuiZoom(ov);
+        });
+        function setGuiScale(sc, fromResize) {
+            guiAuto = (sc === 'auto');
+            guiScale = guiAuto ? _autoGuiScale() : Number(sc);
+            if (!fromResize) { try { localStorage.setItem('rbxstudio-gui-scale', guiAuto ? 'auto' : String(guiScale)); } catch (e) { /* nothing */ } }
             _markGuiScaleButtons();
             const ov = document.getElementById('gui-overlay');
             _applyGuiZoom(ov);
@@ -13460,7 +13484,8 @@ end
         window.addEventListener('resize', () => { if (isPlaying) _notifyViewportChanged(); });
         function _markGuiScaleButtons() {
             document.querySelectorAll('#quality-selector button[id^="g-"]').forEach(b => {
-                b.classList.toggle('active', Math.abs(parseFloat(b.dataset.s) - guiScale) < 0.01);
+                b.classList.toggle('active', b.dataset.s === 'auto' ? guiAuto : (!guiAuto && Math.abs(parseFloat(b.dataset.s) - guiScale) < 0.01));
+                if (b.dataset.s === 'auto') b.textContent = guiAuto ? 'UI auto ' + guiScale + '×' : 'UI auto';
             });
         }
         document.addEventListener('DOMContentLoaded', () => _markGuiScaleButtons());
