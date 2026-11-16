@@ -13521,11 +13521,8 @@ end
         // did not fit a ~360 px tall phone. Auto mode picks a scale so that the GUI height is at least
         // GUI_AUTO_REF_H (480): a 360 px screen -> 0.75×. Big screens stay at 1×. Until the user picks something, it is auto.
         const GUI_AUTO_REF_H = 480, GUI_AUTO_MIN = 0.6;
+        // Auto is the ONLY mode (the manual UI 0.75×/1×/1.5×/2× buttons were removed: they also rescaled game inventories/HUD).
         let guiScale = 1, guiAuto = true;
-        try {
-            const raw = localStorage.getItem('rbxstudio-gui-scale');
-            if (raw !== null && raw !== 'auto') { const v = parseFloat(raw); if (v >= 0.5 && v <= 3) { guiScale = v; guiAuto = false; } }
-        } catch (e) { /* no localStorage */ }
         function _autoGuiScale() {
             const vp = document.getElementById('viewport');
             const h = (vp && vp.clientHeight) || window.innerHeight || GUI_AUTO_REF_H;
@@ -13566,9 +13563,8 @@ end
             if (ov && ov.classList.contains('active')) _applyGuiZoom(ov);
         });
         function setGuiScale(sc, fromResize) {
-            guiAuto = (sc === 'auto');
-            guiScale = guiAuto ? _autoGuiScale() : Number(sc);
-            if (!fromResize) { try { localStorage.setItem('rbxstudio-gui-scale', guiAuto ? 'auto' : String(guiScale)); } catch (e) { /* nothing */ } }
+            guiAuto = true;                 // auto only
+            guiScale = _autoGuiScale();
             _markGuiScaleButtons();
             const ov = document.getElementById('gui-overlay');
             _applyGuiZoom(ov);
@@ -13662,12 +13658,14 @@ end
             if (props.cls === 'TextButton' || props.cls === 'ImageButton') {
                 el.style.outline = 'none';
                 // A button click is a real Lua signal (fireLuaSignal),
-                el.addEventListener('click', () => fireLuaSignal(ref, 'MouseButton1Click', []));
+                // GuiButton.Activated = a click or a tap (together with MouseButton1Click). It was never fired for GUI buttons (only for
+                // Tool), so every script on .Activated — the whole TV desktop: Start, menu, «Exit TV», close — did nothing
+                el.addEventListener('click', () => { fireLuaSignal(ref, 'MouseButton1Click', []); fireLuaSignal(ref, 'Activated', [null, 1]); });
                 el.addEventListener('mousedown', () => fireLuaSignal(ref, 'MouseButton1Down', []));
                 el.addEventListener('mouseup', () => fireLuaSignal(ref, 'MouseButton1Up', []));
                 // touchend is NOT passive and with preventDefault — otherwise right after
                 el.addEventListener('touchstart', () => fireLuaSignal(ref, 'MouseButton1Down', []), { passive: true });
-                el.addEventListener('touchend', (e) => { e.preventDefault(); fireLuaSignal(ref, 'MouseButton1Up', []); fireLuaSignal(ref, 'MouseButton1Click', []); }, { passive: false });
+                el.addEventListener('touchend', (e) => { e.preventDefault(); fireLuaSignal(ref, 'MouseButton1Up', []); fireLuaSignal(ref, 'MouseButton1Click', []); fireLuaSignal(ref, 'Activated', [null, 1]); }, { passive: false });
             }
             // MouseEnter/MouseLeave — on ANY GuiObject in real Roblox,
             // not only buttons (Frame/TextLabel support them too).
