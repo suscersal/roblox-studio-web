@@ -2599,6 +2599,7 @@
             } catch (e) {
                 _reportFrameError('beams', e);
             }
+            if (isPlaying) { try { updateNpcMoves(now); } catch (e) { _reportFrameError('npc-moves', e); } }
             if (isPlaying) {
                 try { updateHighlights(now); } catch (e) { _reportFrameError('highlight', e); }
                 try { updateSmallCull(now); } catch (e) { _reportFrameError('smallcull', e); }
@@ -7605,7 +7606,7 @@ InstanceMT.__index = function(t, k)
                     local f = __find_first_child(ref, name)
                     if f ~= nil and f ~= -1 then return wrap(f) end
                     if limit and waited >= limit then return nil end
-                    if not warned and waited >= 5 then
+                    if not warned and not limit and waited >= 5 then
                         warned = true
                         warn("Infinite yield possible on '" .. tostring(__get_name(ref)) .. ":WaitForChild(" .. tostring(name) .. ")'")
                     end
@@ -8323,6 +8324,7 @@ local function isDescendantOf(ref, ancestor)
     return false
 end
 
+__humanoid_states = {}   -- ref -> { current = state, enabled = {state=bool} } (Humanoid:SetStateEnabled/ChangeState)
 local COMPAT = {
     -- ParticleEmitter:Emit(n) — emits n particles at once (see the PARTICLES block in script.js)
     Emit = function(t, ref) return function(self, count) __particle_emit(ref, tonumber(count) or 1) end end,
@@ -8408,6 +8410,43 @@ local COMPAT = {
         local _, _, _, sx, sy, sz = __get_bbox(ref)
         return Vector3.new(sx, sy, sz)
     end end,
+    -- Humanoid states: the emulator has no state machine, but scripts call these methods (the Stand knockdown: SetStateEnabled(GettingUp,false)
+    -- + ChangeState(FallingDown), ...). Without them the call failed on «attempt to call a nil value» and broke the whole handler.
+    SetStateEnabled = function(t, ref) return function(self, state, enabled)
+        __humanoid_states[ref] = __humanoid_states[ref] or { enabled = {} }
+        __humanoid_states[ref].enabled[tostring(state)] = enabled
+    end end,
+    GetStateEnabled = function(t, ref) return function(self, state)
+        local st = __humanoid_states[ref]
+        if st and st.enabled[tostring(state)] ~= nil then return st.enabled[tostring(state)] end
+        return true
+    end end,
+    ChangeState = function(t, ref) return function(self, state)
+        local st = __humanoid_states[ref] or { enabled = {} }
+        __humanoid_states[ref] = st
+        local old = st.current
+        st.current = state
+        if old ~= state then pcall(__fire_signal, ref, "StateChanged", old or state, state) end
+    end end,
+    GetState = function(t, ref) return function(self)
+        local st = __humanoid_states[ref]
+        if st and st.current ~= nil then return st.current end
+        local ok, v = pcall(function() return Enum.HumanoidStateType.Running end)
+        return ok and v or "Running"
+    end end,
+    -- Network ownership: everything is «server» in the emulator, so these are harmless stubs
+    SetNetworkOwner = function(t, ref) return function(self, plr) end end,
+    SetNetworkOwnershipAuto = function(t, ref) return function(self) end end,
+    GetNetworkOwner = function(t, ref) return function(self) return nil end end,
+    CanSetNetworkOwnership = function(t, ref) return function(self) return true, nil end end,
+    -- NPC Humanoid:MoveTo(point): the character walks toward the point at WalkSpeed (see updateNpcMoves on the JS side),
+    -- MoveToFinished(reached) fires on arrival, or with false after 8 s (as in Roblox)
+    MoveTo = function(t, ref) return function(self, pos, part)
+        if typeof(pos) == "Instance" then pos = pos.Position end
+        __npc_move_to(ref, pos.X, pos.Y, pos.Z)
+    end end,
+    MoveToFinished = function(t, ref) return makeEvent(ref, "MoveToFinished") end,
+    CancelMoveTo = function(t, ref) return function(self) __npc_move_to(ref, nil, nil, nil) end end,
     TakeDamage = function(t, ref) return function(self, amount)
         local ok, hp = pcall(__get_prop, ref, "Health")
         if ok and type(hp) == "number" then __set_prop(ref, "Health", hp - amount) end
@@ -9537,6 +9576,47 @@ end
             _modelPivots[ref] = M.clone();
         }
         // part.CFrame = cf — sets exactly the part's CFrame (without PivotOffset)
+        // ---- NPC Humanoid:MoveTo: walking an NPC to a point ----
+        // The character's HumanoidRootPart moves horizontally at WalkSpeed (the rest of the rig follows through the joints),
+        // turning toward the movement; reaching the point (< 1 stud) fires MoveToFinished(true), 8 s without arriving — (false).
+        const _npcMoves = {};   // humanoid ref -> { x, y, z, t0 }
+        function luaNpcMoveTo(humRef, x, y, z) {
+            if (humRef === luaHumanoidRef) return;     // the player is driven by the joystick, not MoveTo
+            _npcMoves[humRef] = { x, y, z, t0: performance.now() };
+        }
+        function _npcRootOf(humRef) {
+            const model = luaParentByRef[humRef];
+            if (model === undefined) return -1;
+            for (const c of (luaChildrenByRef[model] || [])) if (luaByRef[c] && luaByRef[c].name === 'HumanoidRootPart') return c;
+            return -1;
+        }
+        let _npcLastT = 0;
+        function updateNpcMoves(nowMs) {
+            const dt = Math.min(0.1, Math.max(0, (nowMs - (_npcLastT || nowMs)) / 1000));
+            _npcLastT = nowMs;
+            for (const k of Object.keys(_npcMoves)) {
+                const humRef = Number(k), mv = _npcMoves[k];
+                const hum = luaByRef[humRef];
+                const rootRef = hum ? _npcRootOf(humRef) : -1;
+                if (!hum || rootRef === -1) { delete _npcMoves[k]; continue; }
+                const gp = luaGenericPropsByRef[humRef] || {};
+                if (typeof gp.Health === 'number' && gp.Health <= 0) { delete _npcMoves[k]; continue; }
+                const speed = typeof gp.WalkSpeed === 'number' ? gp.WalkSpeed : 16;
+                const M = luaPartMatrix(rootRef), e = M.elements;
+                const dx = mv.x - e[12], dz = mv.z - e[14];
+                const dist = Math.hypot(dx, dz);
+                if (dist < 1.0) { delete _npcMoves[k]; fireLuaSignal(humRef, 'MoveToFinished', [true]); continue; }
+                if (nowMs - mv.t0 > 8000) { delete _npcMoves[k]; fireLuaSignal(humRef, 'MoveToFinished', [false]); continue; }
+                const step = Math.min(dist, speed * dt);
+                const nm = new THREE.Matrix4().makeRotationY(Math.atan2(-dx, -dz));
+                nm.setPosition(e[12] + dx / dist * step, e[13], e[14] + dz / dist * step);
+                // Move the WHOLE character rigidly (like PivotTo): the emulator's joints do not drag the torso/limbs behind the root
+                const model = luaParentByRef[humRef];
+                const delta = nm.clone().multiply(M.clone().invert());
+                luaSetPivotMatrix(model, delta.multiply(luaGetPivotMatrix(model)));
+            }
+        }
+
         function luaSetCFrameMatrix(ref, M) {
             if (luaIsPartRef(ref) && !luaIsCharRef(ref)) {
                 luaApplyPartMatrix(ref, M);
@@ -10142,6 +10222,15 @@ end
         }
         function luaGetGenericProp(ref, name) {
             if (name === 'Name' && luaByRef[ref]) return luaByRef[ref].name;
+            // An NPC Humanoid from the file: Health defaults to MaxHealth (Roblox does the same), so scripts like
+            // `while hum.Health > 0` no longer fail with «attempt to compare number with nil»
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Humanoid' && ref !== luaHumanoidRef) {
+                const gp = luaGenericPropsByRef[ref] || {};
+                const mh = typeof gp.MaxHealth === 'number' ? gp.MaxHealth : 100;
+                const defs = { MaxHealth: 100, Health: mh, WalkSpeed: 16, JumpPower: 50, JumpHeight: 7.2, HipHeight: 0, AutoRotate: true };
+                if (name in gp) return gp[name];
+                if (name in defs) return defs[name];
+            }
             // Sound — the live state of the real <audio>, not what
             if (luaSoundLikeCls(ref) && soundElByRef[ref]) {
                 const a = soundElByRef[ref];
@@ -10384,6 +10473,19 @@ end
                     }
                     abody.aabbNeedsUpdate = true;
                 }
+            }
+            if (luaByRef[ref] && luaByRef[ref].cls === 'Humanoid' && ref !== luaHumanoidRef && name === 'Health') {
+                // NPC health is clamped to [0, MaxHealth]; HealthChanged fires, and reaching 0 fires Died once
+                const gp = luaGenericPropsByRef[ref] = luaGenericPropsByRef[ref] || {};
+                const mh = typeof gp.MaxHealth === 'number' ? gp.MaxHealth : 100;
+                let nv = Number(value);
+                if (!Number.isFinite(nv)) return;
+                nv = Math.max(0, Math.min(nv, mh));
+                const old = typeof gp.Health === 'number' ? gp.Health : mh;
+                gp.Health = nv;
+                if (nv !== old) fireLuaSignal(ref, 'HealthChanged', [nv]);
+                if (nv <= 0 && old > 0) fireLuaSignal(ref, 'Died', []);
+                return;
             }
             if (ref === luaHumanoidRef && name === 'Health') {
                 // Health is clamped to [0, MaxHealth]; reaching 0 — Died, then respawn (as in Roblox)
@@ -11217,6 +11319,12 @@ end
             def('__teleport_place', function (L2) {
                 lua.lua_pushboolean(L2, luaTeleportToPlace(lua.lua_tonumber(L2, 1)) ? 1 : 0);
                 return 1;
+            });
+            def('__npc_move_to', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                if (lua.lua_isnumber(L2, 2)) luaNpcMoveTo(ref, lua.lua_tonumber(L2, 2), lua.lua_tonumber(L2, 3), lua.lua_tonumber(L2, 4));
+                else delete _npcMoves[ref];
+                return 0;
             });
             def('__particle_emit', function (L2) {
                 try { psEmit(lua.lua_tonumber(L2, 1), Math.max(0, Math.min(500, lua.lua_tonumber(L2, 2) || 1))); } catch (e) { console.error('Emit:', e); }

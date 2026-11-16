@@ -3975,6 +3975,7 @@ _REF_PROP_CLASSES = ('RigidConstraint', 'WeldConstraint', 'Weld', 'ManualWeld', 
 # the new Audio API (AudioPlayer/Wire/...), Lighting post effects, Atmosphere/Clouds, Beam, Smoke/Sparkles,
 # constraints, Highlight. We take ALL properties from the file except service ones.
 _FILE_PROP_CLASSES = frozenset((
+    'Humanoid',   # NPC: MaxHealth/WalkSpeed/HipHeight from the file (Health defaults to MaxHealth, see luaGetGenericProp)
     'Highlight', 'Decal',   # Decal: Texture/Transparency/Face/ZIndex are read and changed from Lua (TV screens, posters)
     'AudioPlayer', 'AudioFader', 'AudioCompressor', 'AudioEqualizer', 'AudioEmitter', 'AudioListener',
     'AudioDeviceOutput', 'AudioReverb', 'AudioEcho', 'AudioDistortion', 'AudioFlanger', 'AudioChorus',
