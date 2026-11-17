@@ -4256,6 +4256,13 @@ def api_all_instances():
             _bc = _pp.get('Color')
             if isinstance(_bc, list) and _bc and isinstance(_bc[0], dict):
                 item['beamColor'] = [float(_bc[0].get('r', 1)), float(_bc[0].get('g', 1)), float(_bc[0].get('b', 1))]
+            # Transparency — a NumberSequence: the ribbon is drawn with the average value (the TV's noise: 0.8 -> a faint overlay;
+            # before, transparency was ignored and the beam showed up as opaque white bars)
+            _bt = _pp.get('Transparency')
+            if isinstance(_bt, list) and _bt and isinstance(_bt[0], dict):
+                _vals = [float(k.get('value', 0)) for k in _bt if isinstance(k, dict)]
+                if _vals:
+                    item['beamTransparency'] = sum(_vals) / len(_vals)
         if cls in _FILE_PROP_CLASSES or cls == 'Terrain':
             _g, _t = _file_props_for_client(cls, pr.get(ref, {}), r2c)
             if cls == 'Highlight':

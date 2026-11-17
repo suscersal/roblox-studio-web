@@ -4697,6 +4697,7 @@
         // We draw a colored additive ribbon toward the camera; the Beam texture isn't applied.
         const luaBeamRefs = new Set();
         const luaBeamColor = {};      // ref -> [r,g,b] (the first point of the ColorSequence)
+        const luaBeamTransp = {};     // ref -> 0..1 (the average of the NumberSequence Transparency)
         const _beamMeshes = {};       // ref -> THREE.Mesh
         let _beamTmpA = null, _beamTmpB = null;   // THREE isn't loaded yet when the script initializes — create lazily
         let _beamWsRef = -1;
@@ -4729,6 +4730,7 @@
             for (const r of Object.keys(_beamMeshes)) _beamDispose(r);
             luaBeamRefs.clear();
             for (const k of Object.keys(luaBeamColor)) delete luaBeamColor[k];
+            for (const k of Object.keys(luaBeamTransp)) delete luaBeamTransp[k];
         }
         function updateBeams() {
             if (!luaBeamRefs.size || !scene || !camera) return;
@@ -4739,39 +4741,114 @@
                 if (!info) { luaBeamRefs.delete(ref); _beamDispose(ref); continue; }
                 const gp = luaGenericPropsByRef[ref] || {};
                 let show = gp.Enabled !== false && _beamUnderWorkspace(ref);
+                let a0 = -1, a1 = -1;
                 if (show) {
-                    const a0 = _beamResolveAtt(ref, 'Attachment0'), a1 = _beamResolveAtt(ref, 'Attachment1');
+                    a0 = _beamResolveAtt(ref, 'Attachment0'); a1 = _beamResolveAtt(ref, 'Attachment1');
                     show = a0 !== -1 && a1 !== -1 && _bbAnchorWorld(a0, _beamTmpA) && _bbAnchorWorld(a1, _beamTmpB);
                 }
                 if (!show) { if (_beamMeshes[ref]) _beamMeshes[ref].visible = false; continue; }
+                // The ribbon follows the Roblox Beam: Segments along a Bezier curve (CurveSize0/1 along the attachments' axes), width
+                // Width0->Width1, FaceCamera (false: the width goes along the attachments' Y axes — the TV's noise panel stays on the
+                // screen), the Texture is scrolled (TextureSpeed), stretched (TextureMode 0) or tiled (1), Transparency, LightEmission.
+                const segs = Math.max(1, Math.min(32, Math.floor(typeof gp.Segments === 'number' ? gp.Segments : 10)));
                 let m = _beamMeshes[ref];
+                if (m && m.userData.segs !== segs) { _beamDispose(ref); m = null; }
+                const texId = _beamTexId(gp.Texture || gp.TextureContent);
                 if (!m) {
                     const g = new THREE.BufferGeometry();
-                    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
-                    g.setIndex([0, 1, 2, 2, 1, 3]);
-                    const col = luaBeamColor[ref] || [1, 1, 1];
+                    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array((segs + 1) * 2 * 3), 3));
+                    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array((segs + 1) * 2 * 2), 2));
+                    const idx = [];
+                    for (let i = 0; i < segs; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 2, a + 1, a + 3); }
+                    g.setIndex(idx);
                     const mat = new THREE.MeshBasicMaterial({
-                        color: new THREE.Color(col[0], col[1], col[2]), side: THREE.DoubleSide,
-                        transparent: true, depthWrite: false, fog: false,
+                        side: THREE.DoubleSide, transparent: true, depthWrite: false, fog: false,
                         blending: (gp.LightEmission || 0) > 0.5 ? THREE.AdditiveBlending : THREE.NormalBlending,
                     });
                     m = new THREE.Mesh(g, mat);
                     m.frustumCulled = false;
+                    m.userData.segs = segs;
                     scene.add(m);
                     _beamMeshes[ref] = m;
                 }
+                const col = luaBeamColor[ref] || [1, 1, 1];
+                m.material.color.setRGB(col[0], col[1], col[2]);
+                const tr = Math.max(0, Math.min(1, luaBeamTransp[ref] || 0));
+                m.material.opacity = 1 - tr;
+                if (texId) {
+                    if (m.userData.texId !== texId) {
+                        const tx = getOrLoadPartTexture(texId);
+                        tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
+                        m.material.map = tx; m.material.needsUpdate = true; m.userData.texId = texId;
+                    }
+                } else if (m.material.map) { m.material.map = null; m.material.needsUpdate = true; m.userData.texId = null; }
                 m.visible = true;
-                const w0 = (typeof gp.Width0 === 'number' ? gp.Width0 : 1) / 2, w1 = (typeof gp.Width1 === 'number' ? gp.Width1 : 1) / 2;
-                const dir = _beamTmpB.clone().sub(_beamTmpA);
-                const toCam = camera.position.clone().sub(_beamTmpA.clone().add(_beamTmpB).multiplyScalar(0.5));
-                const side = new THREE.Vector3().crossVectors(dir, toCam);
-                if (side.lengthSq() < 1e-10) side.set(0, 1, 0).cross(dir);
-                side.normalize();
-                const P = m.geometry.attributes.position.array;
-                const put = (i, v, off) => { P[i * 3] = v.x + side.x * off; P[i * 3 + 1] = v.y + side.y * off; P[i * 3 + 2] = v.z + side.z * off; };
-                put(0, _beamTmpA, -w0); put(1, _beamTmpA, w0); put(2, _beamTmpB, -w1); put(3, _beamTmpB, w1);
-                m.geometry.attributes.position.needsUpdate = true;
+                _beamBuild(m, _beamTmpA, _beamTmpB, a0, a1, gp, segs);
             }
+        }
+        function _beamTexId(v) {
+            if (!v) return null;
+            const mm = /(?:rbxassetid:\/\/|[?&]id=)(\d+)/i.exec(String(v));
+            return mm ? mm[1] : null;
+        }
+        const _beamQ = { m0: null, m1: null };
+        // fills the ribbon geometry: positions along the Bezier, width, side vector and UVs (with the TextureSpeed scroll)
+        function _beamBuild(m, A, B, att0, att1, gp, segs) {
+            if (!_beamQ.m0) { _beamQ.m0 = new THREE.Matrix4(); _beamQ.m1 = new THREE.Matrix4(); }
+            const ax0 = new THREE.Vector3(1, 0, 0), ax1 = new THREE.Vector3(1, 0, 0), y0 = new THREE.Vector3(0, 1, 0), y1 = new THREE.Vector3(0, 1, 0);
+            if (_attWorldMatrix(att0, _beamQ.m0)) { const e = _beamQ.m0.elements; ax0.set(e[0], e[1], e[2]).normalize(); y0.set(e[4], e[5], e[6]).normalize(); }
+            if (_attWorldMatrix(att1, _beamQ.m1)) { const e = _beamQ.m1.elements; ax1.set(e[0], e[1], e[2]).normalize(); y1.set(e[4], e[5], e[6]).normalize(); }
+            const c0 = typeof gp.CurveSize0 === 'number' ? gp.CurveSize0 : 0, c1 = typeof gp.CurveSize1 === 'number' ? gp.CurveSize1 : 0;
+            const P0 = A.clone(), P3 = B.clone();
+            const P1 = P0.clone().addScaledVector(ax0, c0), P2 = P3.clone().addScaledVector(ax1, c1);
+            const w0 = typeof gp.Width0 === 'number' ? gp.Width0 : 1, w1 = typeof gp.Width1 === 'number' ? gp.Width1 : w0;
+            const texLen = Math.max(0.01, typeof gp.TextureLength === 'number' ? gp.TextureLength : 1);
+            const speed = typeof gp.TextureSpeed === 'number' ? gp.TextureSpeed : 0;
+            const wrapMode = gp.TextureMode === 1;                    // 0 Stretch, 1 Wrap
+            const off = (performance.now() / 1000) * speed;
+            const face = gp.FaceCamera === true;
+            const P = m.geometry.attributes.position.array, UV = m.geometry.attributes.uv.array;
+            const pts = [];
+            for (let i = 0; i <= segs; i++) {
+                const t = i / segs, u = 1 - t;
+                pts.push(new THREE.Vector3(
+                    u * u * u * P0.x + 3 * u * u * t * P1.x + 3 * u * t * t * P2.x + t * t * t * P3.x,
+                    u * u * u * P0.y + 3 * u * u * t * P1.y + 3 * u * t * t * P2.y + t * t * t * P3.y,
+                    u * u * u * P0.z + 3 * u * u * t * P1.z + 3 * u * t * t * P2.z + t * t * t * P3.z));
+            }
+            let run = 0;
+            for (let i = 0; i <= segs; i++) {
+                const t = i / segs;
+                const p = pts[i];
+                const tan = (pts[Math.min(segs, i + 1)].clone().sub(pts[Math.max(0, i - 1)]));
+                const side = new THREE.Vector3();
+                if (face) {
+                    const toCam = camera.position.clone().sub(p);
+                    side.crossVectors(tan, toCam);
+                    if (side.lengthSq() < 1e-10) side.set(0, 1, 0).cross(tan);
+                } else {
+                    side.copy(y0).lerp(y1, t);
+                }
+                side.normalize();
+                const hw = (w0 + (w1 - w0) * t) / 2;
+                const k = i * 2;
+                P[k * 3] = p.x - side.x * hw; P[k * 3 + 1] = p.y - side.y * hw; P[k * 3 + 2] = p.z - side.z * hw;
+                P[k * 3 + 3] = p.x + side.x * hw; P[k * 3 + 4] = p.y + side.y * hw; P[k * 3 + 5] = p.z + side.z * hw;
+                if (i > 0) run += pts[i].distanceTo(pts[i - 1]);
+                const v = (wrapMode ? run / texLen : t * texLen) - off;
+                UV[k * 2] = 0; UV[k * 2 + 1] = v; UV[k * 2 + 2] = 1; UV[k * 2 + 3] = v;
+            }
+            m.geometry.attributes.position.needsUpdate = true;
+            m.geometry.attributes.uv.needsUpdate = true;
+        }
+        // the world matrix of an Attachment (the part's matrix * the attachment's local CFrame)
+        function _attWorldMatrix(ref, out) {
+            const part = luaParentByRef[ref];
+            if (part === undefined || !luaIsPartRef(part)) return false;
+            out.copy(luaPartMatrix(part));
+            const a = luaAttCF[ref];
+            if (a) out.multiply(new THREE.Matrix4().set(a[3], a[4], a[5], a[0], a[6], a[7], a[8], a[1], a[9], a[10], a[11], a[2], 0, 0, 0, 1));
+            return true;
         }
         function updateParticles(nowMs) {
             if (!PS.list.length) { PS.lastT = nowMs; return; }
@@ -10878,6 +10955,7 @@ end
             if (luaGenericPropsByRef[ref]) luaGenericPropsByRef[newRef] = Object.assign({}, luaGenericPropsByRef[ref]);
             if (cls === 'Beam') {
                 if (luaBeamColor[ref]) luaBeamColor[newRef] = luaBeamColor[ref];
+                if (luaBeamTransp[ref] !== undefined) luaBeamTransp[newRef] = luaBeamTransp[ref];
                 if (luaRefProps[ref]) luaRefProps[newRef] = Object.assign({}, luaRefProps[ref]);
             }
             if (cls === 'Sound' || cls === 'AudioPlayer') {
@@ -13037,7 +13115,7 @@ end
                     if (inst.att) luaAttCF[inst.ref] = inst.att;
                     if (inst.refs) luaRefProps[inst.ref] = inst.refs;
                     // Properties of classes that Lua didn't have before (Audio API, Beam, post effects, Atmosphere, constraints)
-                    if (inst.cls === 'Beam') { luaBeamRefs.add(inst.ref); if (inst.beamColor) luaBeamColor[inst.ref] = inst.beamColor; }
+                    if (inst.cls === 'Beam') { luaBeamRefs.add(inst.ref); if (inst.beamColor) luaBeamColor[inst.ref] = inst.beamColor; if (typeof inst.beamTransparency === 'number') luaBeamTransp[inst.ref] = inst.beamTransparency; }
                     if (inst.tprops) {
                         for (const [pn, pv] of Object.entries(inst.tprops)) {
                             if (pv[0] === 'ref') (luaRefProps[inst.ref] = luaRefProps[inst.ref] || {})[pn] = pv[1];
