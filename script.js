@@ -10777,11 +10777,37 @@ end
         // A clone of a part from the file (UnionOperation/MeshPart/Part of the fridge) is an empty virtual instance: without a mesh and physics
         // it stood at (0,0,0) as an invisible thing. When a clone gets into Workspace — we build a mesh and a body from the original's data,
         // at the position that Clone()/PivotTo set for the clone (luaPartXform).
+        function _isHeldToolRef(ref) {
+            const i = luaByRef[ref];
+            return !!(i && i.cls === 'Tool' && luaCharacterRef !== -1 && luaParentByRef[ref] === luaCharacterRef);
+        }
+        // hide the world meshes of an item's parts (it was lying in the world before the player picked it up)
+        function _hideToolMeshes(tool) {
+            const st = [tool];
+            while (st.length) {
+                const r = st.pop();
+                for (const c of (luaChildrenByRef[r] || [])) st.push(c);
+                const m = sceneObjs[r];
+                if (m) m.visible = false;
+            }
+        }
+        // the Tool (equipped by the local player) that a part/attachment belongs to, or -1
+        function _heldToolOf(ref) {
+            let cur = ref, g = 0;
+            while (cur !== undefined && cur !== -1 && g++ < 50) {
+                if (_isHeldToolRef(cur)) return cur;
+                cur = luaParentByRef[cur];
+            }
+            return -1;
+        }
         function luaRealizeClonedParts(root) {
             if (!isPlaying || !luaIsUnderWorkspace(root)) return;
             const stack = [root];
             while (stack.length) {
                 const r0 = stack.pop();
+                // A Tool in the local player's hand is drawn by the separate «held item» model (refreshCharacterTool). Realizing its Handle
+                // too left a second copy of the item at the clone's position (the map center) — and the ammo counter along with it.
+                if (_isHeldToolRef(r0)) { _hideToolMeshes(r0); continue; }
                 for (const c of (luaChildrenByRef[r0] || [])) stack.push(c);
                 const origin = luaCloneOrigin[r0];
                 if (origin === undefined || sceneObjs[r0]) continue;
@@ -13726,6 +13752,13 @@ end
                     m.multiply(l);
                 }
                 out.setFromMatrixPosition(m);
+                return true;
+            }
+            // A part of the item in the player's hand (the ammo counter BillboardGui in the pistol's Handle): the part has no mesh in the
+            // world, the item is drawn by the held model — anchor to it (otherwise the counter hung at (0,0,0), the map center)
+            if (_heldToolOf(ref) !== -1 && charMesh) {
+                const held = charMesh.userData && charMesh.userData.toolHeld;
+                (held || charMesh).getWorldPosition(out);
                 return true;
             }
             if (luaIsPartRef(ref)) {
