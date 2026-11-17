@@ -1043,6 +1043,11 @@ def build_all_scene_objects():
         # We don't send the mesh itself over the network — the client fetches it via /api/union_mesh.
         union_mesh = (cls == 'UnionOperation'
                       and union_mesh_from_parsed(parsed, ref) is not None)
+        # Newer Studio saves a union WITHOUT embedded geometry (MeshData/MeshData2/ChildData are empty): only a link to its mesh
+        # asset in Content («.../asset/?id=1999766009»). Such unions were drawn as a plain box (the TV's body, the screen frame…). The link
+        # is fetched like a MeshPart's MeshId — the client fits the mesh into the union's Size.
+        if cls == 'UnionOperation' and not union_mesh and not real_mesh_id:
+            real_mesh_id = _rbxassetid_num(props.get('Content'))
 
         # The part's PivotOffset (an offset of the rotation point for GetPivot/PivotTo —
         # for example a door hinge): [x, y, z, R00..R22]; None if identity.
