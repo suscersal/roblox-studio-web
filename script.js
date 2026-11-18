@@ -4782,7 +4782,9 @@
                         m.material.map = tx; m.material.needsUpdate = true; m.userData.texId = texId;
                     }
                 } else if (m.material.map) { m.material.map = null; m.material.needsUpdate = true; m.userData.texId = null; }
-                m.visible = true;
+                // while the texture has not loaded (or failed to) a textured beam is hidden: otherwise the noise would show up as a flat
+                // faint white sheet over the TV
+                m.visible = !texId || !!(m.material.map && m.material.map.image);
                 _beamBuild(m, _beamTmpA, _beamTmpB, a0, a1, gp, segs);
             }
         }
