@@ -381,9 +381,19 @@ def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
     ss = parsed.get('shared_strings') or []
     props = parsed['props'].get(ref, {})
     idx = props.get('ChildData2')
-    if not isinstance(idx, int):
+    if not isinstance(idx, (int, bytes, bytearray)):
         idx = props.get('ChildData')
-    if not isinstance(idx, int) or not (0 <= idx < len(ss)) or not ss[idx][1] or depth > 4:
+    if depth > 4:
+        return None
+    if isinstance(idx, (bytes, bytearray)):
+        # a PartOperationAsset from an rbxm container keeps ChildData as a raw nested rbxm, not a SharedString index
+        blob = bytes(idx)
+        if not blob:
+            return None
+        idx = ('raw', hash(blob))
+    elif isinstance(idx, int) and 0 <= idx < len(ss) and ss[idx][1]:
+        blob = ss[idx][1]
+    else:
         return None
     cache = parsed.setdefault('_union_child_cache', {})
     child = cache.get(idx)
@@ -391,7 +401,7 @@ def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
         fd, path = _tmp.mkstemp(suffix='.rbxm')
         try:
             with _os.fdopen(fd, 'wb') as f:
-                f.write(ss[idx][1])
+                f.write(blob)
             child = _parse(path)
         except Exception:
             child = False
@@ -406,7 +416,7 @@ def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
     r2c, cp = child['referent_to_class'], child['props']
     got = False
     for cref, cls in r2c.items():
-        if cls not in ('Part', 'MeshPart', 'UnionOperation'):
+        if cls not in ('Part', 'MeshPart', 'UnionOperation', 'PartOperationAsset'):
             continue   # NegateOperation and the rest — we don't add
         pr = cp.get(cref, {})
         sz = pr.get('Size') or pr.get('InitialSize')
@@ -417,7 +427,7 @@ def _collect_union_child_boxes(parsed, ref, depth=0, out=None):
             pos, rot = get_pos(cf), [float(v) for v in get_rot_matrix(cf)]
         except Exception:
             continue
-        if cls == 'UnionOperation':
+        if cls in ('UnionOperation', 'PartOperationAsset'):
             # a nested union: we try its own operands (in its local space -> transfer into ours)
             sub = _collect_union_child_boxes(child, cref, depth + 1, [])
             if sub:
