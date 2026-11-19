@@ -4516,7 +4516,8 @@ def api_scene():
                     pass
 
     objs, total = make_scene_objects(cx, cy, cz, r, limit, chunk=chunk, points=points or None)
-    return jsonify({'ok': True, 'objects': objs, 'total': total})
+    return jsonify({'ok': True, 'objects': objs, 'total': total,
+                    'rev': id(state.get('parsed'))})
 
 
 @flask_app.route('/api/proximity_prompts')

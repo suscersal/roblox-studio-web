@@ -2614,7 +2614,7 @@
             } catch (e) {
                 _reportFrameError('render', e);
             }
-            if (isPlaying) {
+            if (isPlaying || _editBbReady) {
                 try { updateBillboardGuis(); } catch (e) { _reportFrameError('billboard', e); }
             }
         }
@@ -3559,7 +3559,12 @@
                         parsed = await _parseRobloxMeshDraco(bytes.subarray(nl + 1));
                     } else {
                         failedMeshIds.add(String(meshId));
-                        logLuaOutput('warn', 'Mesh ' + meshId + ': format "' + (version || '?') + '" is not supported yet, using an approximation');
+                        // version == null: the body has no "version X.XX" header (a CSGMDL union asset, an HTML error page, ...) - we show
+                        // the first bytes so that the log says what actually arrived, instead of a bare "?"
+                        const _hb = new Uint8Array(buf, 0, Math.min(12, buf.byteLength));
+                        const _magic = Array.from(_hb).map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
+                        const _hex = Array.from(_hb).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                        logLuaOutput('warn', 'Mesh ' + meshId + ': format "' + (version || '?') + '" is not supported yet (' + buf.byteLength + ' bytes, starts with "' + _magic + '" / ' + _hex + '), using an approximation');
                         return null;
                     }
                     if (!parsed) {
@@ -4963,6 +4968,12 @@
 
             const r = await api('GET', '/api/scene?' + params.toString());
             if (!r.ok) return;
+            if (r.rev !== undefined && r.rev !== _editBbRev) {   // another file was opened: the old billboards (other refs) must go
+                _editBbRev = r.rev; resetEditBillboards();
+                const ov0 = document.getElementById('gui-overlay');
+                if (ov0) { ov0.innerHTML = ''; ov0.classList.remove('active'); }
+                guiDomByRef = {}; guiPropsByRef = {};
+            }
 
             // Clearing old objects
             for (const mesh of Object.values(sceneObjs)) {
@@ -5061,6 +5072,7 @@
                 highlightSelected(selectedRef);
             }
             loadParticles();
+            refreshEditBillboards();
         }
 
         function highlightSelected(ref) {
@@ -6341,6 +6353,8 @@
             _scriptCam = null;
             setEditorPanelsCollapsedForPlay(false);
             stopLuaScripts();
+            resetEditBillboards();
+            setTimeout(refreshEditBillboards, 0);
             physicsWorld = null;
             physicsBodies = {};
             charBody = null;
@@ -13948,6 +13962,47 @@ end
             }
         }
 
+        // ============ BillboardGui outside Play (editor) ============
+        // Billboards used to exist only in Play: their data (luaByRef/luaParentByRef/guiPropsByRef) is filled at Play start and
+        // updateBillboardGuis ran only under isPlaying. Now, when the file has at least one BillboardGui, the editor loads the same
+        // hierarchy once (no Lua), draws only the BillboardGui nodes and updates them every frame. Play start/stop resets all of this
+        // (stopPlay -> refreshEditBillboards again). Edits to a BillboardGui in Properties show up after the next scene reload.
+        let _editBbReady = false, _editBbBusy = false, _editBbLoaded = false, _editBbRev;
+        async function refreshEditBillboards() {
+            if (isPlaying || _editBbBusy || _editBbLoaded) return;
+            _editBbBusy = true;
+            try {
+                const [allR, guiR] = await Promise.all([api('GET', '/api/all_instances'), api('GET', '/api/gui_tree')]);
+                if (isPlaying) return;
+                if (!(allR && allR.ok && allR.instances && guiR && guiR.ok && guiR.elements)) return;
+                _editBbLoaded = true;
+                if (!guiR.elements.some(e => e.cls === 'BillboardGui')) return;   // nothing to draw: don't touch the editor state
+                luaByRef = {}; luaByRefVer++;
+                luaParentByRef = {};
+                luaChildrenByRef = {};
+                luaAttCF = {};
+                for (const inst of allR.instances) {
+                    luaByRef[inst.ref] = { cls: inst.cls, name: inst.name };
+                    luaParentByRef[inst.ref] = inst.parent;
+                    if (inst.att) luaAttCF[inst.ref] = inst.att;
+                }
+                for (const inst of allR.instances) {
+                    if (inst.parent !== undefined && inst.parent !== -1) (luaChildrenByRef[inst.parent] = luaChildrenByRef[inst.parent] || []).push(inst.ref);
+                }
+                guiPropsByRef = {};
+                for (const item of guiR.elements) guiPropsByRef[item.ref] = item;
+                renderGuiOverlayFromClient(true);
+                _editBbReady = true;
+            } catch (e) {
+                console.warn('editor BillboardGui:', e);
+            } finally {
+                _editBbBusy = false;
+            }
+        }
+        function resetEditBillboards() {
+            _editBbReady = false; _editBbLoaded = false;
+        }
+
         function guiRenderNode(ref, parentEl) {
             const props = guiPropsByRef[ref];
             if (!props) return;
@@ -14082,7 +14137,7 @@ end
         }
 
         // Renders the DOM overlay from the already prepared guiPropsByRef (assembled
-        function renderGuiOverlayFromClient() {
+        function renderGuiOverlayFromClient(quiet) {
             const overlay = document.getElementById('gui-overlay');
             if (!overlay) { logLuaOutput('error', 'renderGuiOverlayFromClient: #gui-overlay not found in the DOM'); return; }
             overlay.innerHTML = '';
@@ -14121,7 +14176,7 @@ end
             }
             overlay.classList.add('active');
             // Temporary diagnostic log:
-            logLuaOutput('info', 'GUI overlay: top-level screens drawn ' + renderedCount
+            if (!quiet) logLuaOutput('info', 'GUI overlay: top-level screens drawn ' + renderedCount
                 + ' of ' + Object.keys(guiPropsByRef).length + ' known GUI objects');
         }
 
