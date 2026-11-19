@@ -3557,6 +3557,13 @@
                         const bytes = new Uint8Array(buf);
                         const nl = bytes.indexOf(10);
                         parsed = await _parseRobloxMeshDraco(bytes.subarray(nl + 1));
+                    } else if (new TextDecoder('ascii').decode(buf.slice(0, 8)) === '<roblox!') {
+                        // The asset is an rbxm container (a union uploaded as a model): the server pulls the union geometry out of it
+                        const rr = await fetch('/api/asset-rbxm-mesh?id=' + meshId);
+                        if (!rr.ok) throw new Error('rbxm container without usable geometry (HTTP ' + rr.status + ')');
+                        const d = await rr.json();
+                        const n = d.position.length / 3;
+                        parsed = { positions: new Float32Array(d.position), normals: new Float32Array(d.normal), uvs: new Float32Array(n * 2), indices: null };
                     } else {
                         failedMeshIds.add(String(meshId));
                         // version == null: the body has no "version X.XX" header (a CSGMDL union asset, an HTML error page, ...) - we show

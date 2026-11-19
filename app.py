@@ -6592,6 +6592,51 @@ def api_asset_export():
     return jsonify({'ok': True, 'path': str(out), 'name': name, 'size': len(raw)})
 
 
+def rbxm_mesh_from_bytes(raw):
+    """A binary rbxm/rbxl container (starts with '<roblox!') -> union geometry of the first UnionOperation inside
+    (SolidMeshHolder or the operands from ChildData), as flat arrays for the client, or None."""
+    import os as _os, tempfile as _tmp
+    from rbxl_parser import parse_rbxl as _parse
+    fd, path = _tmp.mkstemp(suffix='.rbxm')
+    try:
+        with _os.fdopen(fd, 'wb') as f:
+            f.write(raw)
+        sub = _parse(path)
+    finally:
+        try:
+            _os.unlink(path)
+        except OSError:
+            pass
+    best = None
+    for ref, cls in sub['referent_to_class'].items():
+        if cls != 'UnionOperation':
+            continue
+        m = union_mesh_from_parsed(sub, ref)
+        if m and (best is None or m['triangles'] > best['triangles']):
+            best = m
+    return union_mesh_render_json(best) if best else None
+
+
+@flask_app.route('/api/asset-rbxm-mesh')
+def api_asset_rbxm_mesh():
+    """Some mesh ids (union assets) are not a «version X.XX» mesh but an rbxm container. 404 — no geometry in it."""
+    m = _re.search(r'\d+', request.args.get('id', ''))
+    if not m:
+        return jsonify({'ok': False, 'error': 'bad asset id'}), 400
+    with flask_app.test_request_context('/api/asset-proxy?id=' + m.group()):
+        resp = api_asset_proxy()
+        raw = resp.get_data() if getattr(resp, 'status_code', 200) == 200 else b''
+    if not raw.startswith(b'<roblox!'):
+        return jsonify({'ok': False, 'error': 'not an rbxm container'}), 404
+    try:
+        res = rbxm_mesh_from_bytes(raw)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'rbxm parse failed: %s' % e}), 404
+    if not res:
+        return jsonify({'ok': False, 'error': 'no union geometry in the container'}), 404
+    return jsonify(res)
+
+
 _ASSET_THUMB_CACHE = {}
 
 
