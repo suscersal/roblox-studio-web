@@ -6602,6 +6602,53 @@ def api_asset_export():
     return jsonify({'ok': True, 'path': str(out), 'name': name, 'size': len(raw)})
 
 
+_CSGMDL_KEY = bytes.fromhex('562e6e583120300434690c770c015e001a6037691d522b074f24596553047a')
+
+
+def decode_csgmdl(blob):
+    """PartOperationAsset.MeshData (a «CSGMDL» v2 blob XOR-ed with a 31-byte repeating key) -> the same dict as decode_solid_mesh
+    ('positions','normals','index','normal_index','triangles') or None. Layout of the decrypted data: 'CSGMDL', u32 version (2),
+    32 bytes of id/hash, u32 vertex count, u32 vertex stride (84), vertices (position = 3 floats at the start of a record),
+    u32 index count, u32 indices (triangles)."""
+    import struct as _st
+    blob = bytes(blob)
+    if len(blob) < 60:
+        return None
+    pt = bytes(b ^ _CSGMDL_KEY[i % 31] for i, b in enumerate(blob))
+    if pt[:6] != b'CSGMDL' or _st.unpack_from('<I', pt, 6)[0] != 2:
+        return None
+    n, stride = _st.unpack_from('<2I', pt, 42)
+    start = 50
+    end = start + n * stride
+    if not (0 < n < 1000000 and stride >= 12 and end + 4 <= len(pt)):
+        return None
+    cnt = _st.unpack_from('<I', pt, end)[0]
+    if cnt % 3 or end + 4 + cnt * 4 > len(pt):
+        return None
+    pos = [_st.unpack_from('<3f', pt, start + i * stride) for i in range(n)]
+    idx = list(_st.unpack_from('<%dI' % cnt, pt, end + 4))
+    if not idx or max(idx) >= n:
+        return None
+    # flat normals; the winding is chosen so that the faces look outward (a vote against the bbox center)
+    cx = [(min(p[i] for p in pos) + max(p[i] for p in pos)) / 2 for i in range(3)]
+    normals, vote = [], 0.0
+    for t in range(0, cnt, 3):
+        a, b, c = pos[idx[t]], pos[idx[t + 1]], pos[idx[t + 2]]
+        u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        nx, ny, nz = u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]
+        ln = (nx * nx + ny * ny + nz * nz) ** 0.5 or 1.0
+        nx, ny, nz = nx / ln, ny / ln, nz / ln
+        normals.append((nx, ny, nz))
+        vote += nx * (a[0] - cx[0]) + ny * (a[1] - cx[1]) + nz * (a[2] - cx[2])
+    if vote < 0:
+        for t in range(0, cnt, 3):
+            idx[t + 1], idx[t + 2] = idx[t + 2], idx[t + 1]
+        normals = [(-x, -y, -z) for x, y, z in normals]
+    return {'positions': pos, 'normals': normals, 'index': idx,
+            'normal_index': [t // 3 for t in range(cnt)], 'triangles': cnt // 3}
+
+
 def rbxm_mesh_from_bytes(raw):
     """A binary rbxm/rbxl container (starts with '<roblox!') -> (result, info).
     result: {'position','normal','triangles'} of the largest UnionOperation inside, or {'meshId': N} if it holds a MeshPart with a
@@ -6658,7 +6705,14 @@ def rbxm_mesh_from_bytes(raw):
     for ref, cls in sub['referent_to_class'].items():
         pr = sub['props'].get(ref, {})
         if cls == 'PartOperationAsset':
-            m = union_mesh_from_parsed(sub, ref)   # SolidMeshHolder / ChildData as in a UnionOperation
+            m = None
+            if blob_of(pr.get('MeshData')):
+                try:
+                    m = decode_csgmdl(blob_of(pr.get('MeshData')))   # the real render mesh
+                except Exception:
+                    m = None
+            if not m:
+                m = union_mesh_from_parsed(sub, ref)   # SolidMeshHolder / ChildData (boxes) as in a UnionOperation
             if not m:
                 for k, v in pr.items():
                     b = blob_of(v)
