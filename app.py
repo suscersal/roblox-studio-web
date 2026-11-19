@@ -6597,7 +6597,7 @@ def rbxm_mesh_from_bytes(raw):
     result: {'position','normal','triangles'} of the largest UnionOperation inside, or {'meshId': N} if it holds a MeshPart with a
     MeshId, or None. info: a short text describing the container (classes, union data sizes) for the log when there is no result."""
     import os as _os, tempfile as _tmp, collections as _col
-    from rbxl_parser import parse_rbxl as _parse
+    from rbxl_parser import parse_rbxl as _parse, decode_solid_mesh
     fd, path = _tmp.mkstemp(suffix='.rbxm')
     try:
         with _os.fdopen(fd, 'wb') as f:
@@ -6616,9 +6616,50 @@ def rbxm_mesh_from_bytes(raw):
         return len(v) if isinstance(v, (bytes, bytearray, str)) else 0
     classes = _col.Counter(sub['referent_to_class'].values())
     best, mesh_id, notes = None, None, []
+
+    def blob_of(v):
+        if isinstance(v, int) and 0 <= v < len(ss):
+            return bytes(ss[v][1])
+        return bytes(v) if isinstance(v, (bytes, bytearray)) else b''
+
+    def solid_from_blob(b):
+        # A SolidMesh blob as is, with a wrapper in front of it (we look for the b'SolidMesh' mark), or inside a zstd frame
+        cands = [b]
+        k = b.find(b'SolidMesh')
+        if k >= 14:
+            cands.append(b[k - 14:])
+        z = b.find(b'\x28\xb5\x2f\xfd')
+        if z >= 0:
+            try:
+                import zstandard as _zs
+                d = _zs.ZstdDecompressor().decompressobj().decompress(b[z:])
+                cands.append(d)
+                k = d.find(b'SolidMesh')
+                if k >= 14:
+                    cands.append(d[k - 14:])
+            except Exception:
+                pass
+        for c in cands:
+            try:
+                return decode_solid_mesh(c)
+            except Exception:
+                continue
+        return None
     for ref, cls in sub['referent_to_class'].items():
         pr = sub['props'].get(ref, {})
-        if cls == 'UnionOperation':
+        if cls == 'PartOperationAsset':
+            m = union_mesh_from_parsed(sub, ref)   # SolidMeshHolder / ChildData as in a UnionOperation
+            if not m:
+                for k, v in pr.items():
+                    b = blob_of(v)
+                    if len(b) > 40 and (m := solid_from_blob(b)):
+                        break
+            if m and (best is None or m['triangles'] > best['triangles']):
+                best = m
+            elif not m and len(notes) < 2:
+                notes.append('PartOperationAsset: ' + ', '.join('%s=%dB[%s]' % (k, len(b), b[:8].hex()) for k, v in pr.items()
+                             if len(b := blob_of(v)) > 0))
+        elif cls == 'UnionOperation':
             m = union_mesh_from_parsed(sub, ref)
             if m and (best is None or m['triangles'] > best['triangles']):
                 best = m
