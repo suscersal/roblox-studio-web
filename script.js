@@ -3825,11 +3825,91 @@
             }
         }
 
+        // A Decal on a part with a real mesh (a union/MeshPart with a MeshId). Such parts aren't boxes, so the box material array
+        // (one material per face) doesn't fit: triangles whose normal looks along the Decal's face get planar UVs (as for
+        // BoxGeometry, from the geometry's bounding box) and the texture material, the rest keep the part's material.
+        const _RM_DECAL_FACE_NAMES = ['Right', 'Top', 'Back', 'Left', 'Bottom', 'Front'];
+        const _RM_DECAL_FACE_AXIS = { Right: [1, 0, 0], Left: [-1, 0, 0], Top: [0, 1, 0], Bottom: [0, -1, 0], Back: [0, 0, 1], Front: [0, 0, -1] };
+        function applyDecalsToRealMesh(o, mesh, geoIn) {
+            const list = (qualitySettings.textures && Array.isArray(o.decals)) ? o.decals.filter(d => d && d.tex) : [];
+            if (!list.length || !geoIn || !geoIn.attributes || !geoIn.attributes.position) return;
+            const geo = geoIn.index ? geoIn.toNonIndexed() : geoIn;
+            const src = geo.attributes.position.array, nsrc = geo.attributes.normal ? geo.attributes.normal.array : null;
+            geo.computeBoundingBox();
+            const bb = geo.boundingBox;
+            const W = (bb.max.x - bb.min.x) || 1, H = (bb.max.y - bb.min.y) || 1, D = (bb.max.z - bb.min.z) || 1;
+            const cx = (bb.max.x + bb.min.x) / 2, cy = (bb.max.y + bb.min.y) / 2, cz = (bb.max.z + bb.min.z) / 2;
+            const faces = list.map(d => typeof d.face === 'number' ? _RM_DECAL_FACE_NAMES[d.face] : d.face).map(f => _RM_DECAL_FACE_AXIS[f] ? f : 'Front');
+            const triN = src.length / 9;
+            const buckets = [[]];                       // 0 — the part's own material, 1..n — the Decals' materials
+            for (let i = 0; i < list.length; i++) buckets.push([]);
+            for (let t = 0; t < triN; t++) {
+                const o9 = t * 9;
+                let nx, ny, nz;
+                if (nsrc) { nx = nsrc[o9] + nsrc[o9 + 3] + nsrc[o9 + 6]; ny = nsrc[o9 + 1] + nsrc[o9 + 4] + nsrc[o9 + 7]; nz = nsrc[o9 + 2] + nsrc[o9 + 5] + nsrc[o9 + 8]; }
+                else {
+                    const ux = src[o9 + 3] - src[o9], uy = src[o9 + 4] - src[o9 + 1], uz = src[o9 + 5] - src[o9 + 2];
+                    const vx = src[o9 + 6] - src[o9], vy = src[o9 + 7] - src[o9 + 1], vz = src[o9 + 8] - src[o9 + 2];
+                    nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx;
+                }
+                const ln = Math.hypot(nx, ny, nz) || 1;
+                let g = 0;
+                for (let i = 0; i < faces.length; i++) {
+                    const ax = _RM_DECAL_FACE_AXIS[faces[i]];
+                    if ((nx * ax[0] + ny * ax[1] + nz * ax[2]) / ln > 0.9) { g = i + 1; break; }
+                }
+                buckets[g].push(t);
+            }
+            if (buckets.slice(1).every(b => !b.length)) return;   // no triangle faces the Decal's side
+            const P = new Float32Array(src.length), N = new Float32Array(src.length), UV = new Float32Array(triN * 6);
+            const g2 = new THREE.BufferGeometry();
+            let k = 0;
+            buckets.forEach((b, gi) => {
+                const first = k;
+                for (const t of b) {
+                    for (let c = 0; c < 3; c++) {
+                        const si = t * 9 + c * 3, di = k * 9 + c * 3;
+                        P[di] = src[si]; P[di + 1] = src[si + 1]; P[di + 2] = src[si + 2];
+                        if (nsrc) { N[di] = nsrc[si]; N[di + 1] = nsrc[si + 1]; N[di + 2] = nsrc[si + 2]; }
+                        const x = P[di] - cx, y = P[di + 1] - cy, z = P[di + 2] - cz;
+                        let u = 0, v = 0;
+                        const f = gi ? faces[gi - 1] : 'Front';
+                        if (f === 'Right') { u = -z / D + 0.5; v = y / H + 0.5; }
+                        else if (f === 'Left') { u = z / D + 0.5; v = y / H + 0.5; }
+                        else if (f === 'Top') { u = x / W + 0.5; v = -z / D + 0.5; }
+                        else if (f === 'Bottom') { u = x / W + 0.5; v = z / D + 0.5; }
+                        else if (f === 'Back') { u = x / W + 0.5; v = y / H + 0.5; }
+                        else { u = -x / W + 0.5; v = y / H + 0.5; }
+                        UV[k * 6 + c * 2] = u; UV[k * 6 + c * 2 + 1] = v;
+                    }
+                    k++;
+                }
+                if (b.length) g2.addGroup(first * 3, b.length * 3, gi);
+            });
+            g2.setAttribute('position', new THREE.BufferAttribute(P, 3));
+            g2.setAttribute('normal', new THREE.BufferAttribute(nsrc ? N : P.slice(), 3));
+            g2.setAttribute('uv', new THREE.BufferAttribute(UV, 2));
+            if (!nsrc) g2.computeVertexNormals();
+            const base = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+            const op = (typeof o.opacity === 'number') ? o.opacity : 1;
+            const mats = [base];
+            for (const d of list) {
+                const dop = (typeof d.op === 'number') ? d.op : 1;
+                mats.push(_applyDecalBias(new THREE.MeshLambertMaterial({
+                    ...DECAL_FACE_OPTS, color: '#ffffff', transparent: true, opacity: dop, depthWrite: dop >= 0.99,
+                    side: THREE.DoubleSide, map: getOrLoadPartTexture(d.tex),
+                })));
+            }
+            mesh.geometry = g2;
+            mesh.material = mats;
+        }
+
         function scheduleRealMeshSwap(o, mesh) {
             const p = loadRealMeshGeometry(o.meshId).then((result) => {
                 if (!result) return;
                 if (sceneObjs[o.ref] !== mesh) return; // the object has already been replaced/deleted
                 mesh.geometry = result.geometry;
+                const _realGeo = result.geometry;
                 // DoubleSide — real geometry (especially from Draco, v7.00)
                 // may have come with a vertex winding order of faces
                 // opposite to what three.js expects by default;
@@ -3839,6 +3919,7 @@
                 // draws both sides regardless of winding —
                 // slightly more expensive to render, but guaranteed not "holey".
                 if (mesh.material) mesh.material.side = THREE.DoubleSide;
+                try { applyDecalsToRealMesh(o, mesh, _realGeo); } catch (e) { console.warn('decal on a mesh:', e); }
                 const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scale = new THREE.Vector3();
                 mesh.matrix.decompose(pos, quat, scale);
                 if (o.meshScale) {
