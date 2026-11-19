@@ -3559,8 +3559,13 @@
                     } else if (new TextDecoder('ascii').decode(buf.slice(0, 8)) === '<roblox!') {
                         // The asset is an rbxm container (a union uploaded as a model): the server pulls the union geometry out of it
                         const rr = await fetch('/api/asset-rbxm-mesh?id=' + meshId);
-                        if (!rr.ok) throw new Error('rbxm container without usable geometry (HTTP ' + rr.status + ')');
-                        const d = await rr.json();
+                        const d = await rr.json().catch(() => ({}));
+                        if (!rr.ok) throw new Error('rbxm container: ' + (d.error || ('HTTP ' + rr.status)));
+                        if (d.meshId) {   // the container holds a MeshPart: its mesh is a separate asset
+                            const inner = await loadRealMeshGeometry(d.meshId);
+                            if (!inner) throw new Error('rbxm container -> MeshPart mesh ' + d.meshId + ' failed to load');
+                            return inner;
+                        }
                         const n = d.position.length / 3;
                         parsed = { positions: new Float32Array(d.position), normals: new Float32Array(d.normal), uvs: new Float32Array(n * 2), indices: null };
                     } else {

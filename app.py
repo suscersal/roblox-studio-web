@@ -6593,9 +6593,10 @@ def api_asset_export():
 
 
 def rbxm_mesh_from_bytes(raw):
-    """A binary rbxm/rbxl container (starts with '<roblox!') -> union geometry of the first UnionOperation inside
-    (SolidMeshHolder or the operands from ChildData), as flat arrays for the client, or None."""
-    import os as _os, tempfile as _tmp
+    """A binary rbxm/rbxl container (starts with '<roblox!') -> (result, info).
+    result: {'position','normal','triangles'} of the largest UnionOperation inside, or {'meshId': N} if it holds a MeshPart with a
+    MeshId, or None. info: a short text describing the container (classes, union data sizes) for the log when there is no result."""
+    import os as _os, tempfile as _tmp, collections as _col
     from rbxl_parser import parse_rbxl as _parse
     fd, path = _tmp.mkstemp(suffix='.rbxm')
     try:
@@ -6607,19 +6608,39 @@ def rbxm_mesh_from_bytes(raw):
             _os.unlink(path)
         except OSError:
             pass
-    best = None
+    ss = sub.get('shared_strings') or []
+
+    def blen(v):
+        if isinstance(v, int) and 0 <= v < len(ss):
+            return len(ss[v][1])
+        return len(v) if isinstance(v, (bytes, bytearray, str)) else 0
+    classes = _col.Counter(sub['referent_to_class'].values())
+    best, mesh_id, notes = None, None, []
     for ref, cls in sub['referent_to_class'].items():
-        if cls != 'UnionOperation':
-            continue
-        m = union_mesh_from_parsed(sub, ref)
-        if m and (best is None or m['triangles'] > best['triangles']):
-            best = m
-    return union_mesh_render_json(best) if best else None
+        pr = sub['props'].get(ref, {})
+        if cls == 'UnionOperation':
+            m = union_mesh_from_parsed(sub, ref)
+            if m and (best is None or m['triangles'] > best['triangles']):
+                best = m
+            elif not m and len(notes) < 3:
+                notes.append('Union: ' + ', '.join('%s=%dB' % (k, blen(pr.get(k))) for k in
+                             ('SolidMeshHolder', 'ChildData', 'ChildData2', 'MeshData', 'MeshData2', 'PhysicalConfigData')))
+        elif cls == 'MeshPart' and mesh_id is None:
+            mm = _re.search(r'\d+', str(pr.get('MeshId') or ''))
+            if mm:
+                mesh_id = mm.group()
+    info = 'classes: ' + ', '.join('%s x%d' % kv for kv in classes.most_common(8)) + ('; ' + '; '.join(notes) if notes else '')
+    if best:
+        return union_mesh_render_json(best), info
+    if mesh_id:
+        return {'meshId': mesh_id}, info
+    return None, info
 
 
 @flask_app.route('/api/asset-rbxm-mesh')
 def api_asset_rbxm_mesh():
-    """Some mesh ids (union assets) are not a «version X.XX» mesh but an rbxm container. 404 — no geometry in it."""
+    """Some mesh ids (union assets) are not a "version X.XX" mesh but an rbxm container. 404 — no geometry in it
+    (the error text says what the container holds)."""
     m = _re.search(r'\d+', request.args.get('id', ''))
     if not m:
         return jsonify({'ok': False, 'error': 'bad asset id'}), 400
@@ -6629,11 +6650,11 @@ def api_asset_rbxm_mesh():
     if not raw.startswith(b'<roblox!'):
         return jsonify({'ok': False, 'error': 'not an rbxm container'}), 404
     try:
-        res = rbxm_mesh_from_bytes(raw)
+        res, info = rbxm_mesh_from_bytes(raw)
     except Exception as e:
         return jsonify({'ok': False, 'error': 'rbxm parse failed: %s' % e}), 404
     if not res:
-        return jsonify({'ok': False, 'error': 'no union geometry in the container'}), 404
+        return jsonify({'ok': False, 'error': 'no union geometry in the container (%s)' % info}), 404
     return jsonify(res)
 
 
