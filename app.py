@@ -6645,6 +6645,36 @@ def decode_csgmdl(blob):
         for t in range(0, cnt, 3):
             idx[t + 1], idx[t + 2] = idx[t + 2], idx[t + 1]
         normals = [(-x, -y, -z) for x, y, z in normals]
+    # Smoothing: the vertices are split by UV seams, so the faces are joined by POSITION; a corner takes the (area-weighted)
+    # average of the faces around it that deviate from its own face by less than ~40 degrees — rounded surfaces look smooth,
+    # sharp edges (a box's rim, the screen's frame) stay sharp.
+    try:
+        areas, by_pos = [], {}
+        for t in range(0, cnt, 3):
+            a, b, c = pos[idx[t]], pos[idx[t + 1]], pos[idx[t + 2]]
+            u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+            v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+            areas.append(((u[1] * v[2] - u[2] * v[1]) ** 2 + (u[2] * v[0] - u[0] * v[2]) ** 2 + (u[0] * v[1] - u[1] * v[0]) ** 2) ** 0.5)
+        for t in range(cnt // 3):
+            for k in range(3):
+                p = pos[idx[t * 3 + k]]
+                by_pos.setdefault((round(p[0], 4), round(p[1], 4), round(p[2], 4)), []).append(t)
+        smooth = []
+        for t in range(cnt // 3):
+            n0 = normals[t]
+            for k in range(3):
+                p = pos[idx[t * 3 + k]]
+                sx = sy = sz = 0.0
+                for f in by_pos[(round(p[0], 4), round(p[1], 4), round(p[2], 4))]:
+                    nf = normals[f]
+                    if nf[0] * n0[0] + nf[1] * n0[1] + nf[2] * n0[2] > 0.766:   # cos(40 deg)
+                        sx += nf[0] * areas[f]; sy += nf[1] * areas[f]; sz += nf[2] * areas[f]
+                ln = (sx * sx + sy * sy + sz * sz) ** 0.5
+                smooth.append((sx / ln, sy / ln, sz / ln) if ln > 1e-12 else n0)
+        return {'positions': pos, 'normals': smooth, 'index': idx,
+                'normal_index': list(range(cnt)), 'triangles': cnt // 3}
+    except Exception:
+        pass
     return {'positions': pos, 'normals': normals, 'index': idx,
             'normal_index': [t // 3 for t in range(cnt)], 'triangles': cnt // 3}
 
@@ -6742,6 +6772,36 @@ def rbxm_mesh_from_bytes(raw):
     return None, info
 
 
+_RBXM_MESH_MEM = {}
+_RBXM_MESH_VER = 'v2'   # change it when decode_csgmdl / the normals change: the old disk entries are then ignored
+
+
+def _rbxm_mesh_cache_get(asset_id):
+    """The decoded mesh of an rbxm container: memory first, then the disk cache (asset_cache). None — not cached."""
+    key = asset_id + _RBXM_MESH_VER
+    if key in _RBXM_MESH_MEM:
+        return _RBXM_MESH_MEM[key]
+    try:
+        hit = _asset_cache_disk_get('rbxmesh' + _RBXM_MESH_VER + asset_id)
+        if hit:
+            data = json.loads(bytes(hit[1]).decode('utf-8'))
+            if isinstance(data, dict) and ('position' in data or 'meshId' in data):
+                _RBXM_MESH_MEM[key] = data
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def _rbxm_mesh_cache_put(asset_id, res):
+    _RBXM_MESH_MEM[asset_id + _RBXM_MESH_VER] = res
+    try:
+        _asset_cache_disk_put('rbxmesh' + _RBXM_MESH_VER + asset_id, 'application/json',
+                              json.dumps(res, separators=(',', ':')).encode('utf-8'))
+    except Exception:
+        pass
+
+
 @flask_app.route('/api/asset-rbxm-mesh')
 def api_asset_rbxm_mesh():
     """Some mesh ids (union assets) are not a "version X.XX" mesh but an rbxm container. 404 — no geometry in it
@@ -6749,6 +6809,9 @@ def api_asset_rbxm_mesh():
     m = _re.search(r'\d+', request.args.get('id', ''))
     if not m:
         return jsonify({'ok': False, 'error': 'bad asset id'}), 400
+    cached = _rbxm_mesh_cache_get(m.group())
+    if cached is not None:
+        return jsonify(cached)
     with flask_app.test_request_context('/api/asset-proxy?id=' + m.group()):
         resp = api_asset_proxy()
         raw = resp.get_data() if getattr(resp, 'status_code', 200) == 200 else b''
@@ -6760,6 +6823,7 @@ def api_asset_rbxm_mesh():
         return jsonify({'ok': False, 'error': 'rbxm parse failed: %s' % e}), 404
     if not res:
         return jsonify({'ok': False, 'error': 'no union geometry in the container (%s)' % info}), 404
+    _rbxm_mesh_cache_put(m.group(), res)
     return jsonify(res)
 
 

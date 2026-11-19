@@ -2522,7 +2522,8 @@
                 }
                 document.getElementById('fps-counter').textContent = 'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
-                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '');
+                    ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '') +
+                    ((_meshStats.ok + _meshStats.fail + _meshStats.pending) ? (' | mesh:' + _meshStats.ok + (_meshStats.fail ? ' ✗' + _meshStats.fail : '') + (_meshStats.pending ? ' …' + _meshStats.pending : '')) : '');
                 fpsFrames = 0;
                 fpsTime = now;
             }
@@ -3530,6 +3531,8 @@
             return null;
         }
 
+        // Real meshes: loaded / failed / in flight — shown at the end of the FPS line
+        const _meshStats = { ok: 0, fail: 0, pending: 0 };
         async function loadRealMeshGeometry(meshId) {
             if (_meshGeometryCache[meshId]) return _meshGeometryCache[meshId];
             const p = (async () => {
@@ -3590,6 +3593,8 @@
                 }
             })();
             _meshGeometryCache[meshId] = p;
+            _meshStats.pending++;
+            p.then((r) => { _meshStats.pending--; if (r) _meshStats.ok++; else _meshStats.fail++; }, () => { _meshStats.pending--; _meshStats.fail++; });
             return p;
         }
 
@@ -3845,12 +3850,14 @@
             for (let i = 0; i < list.length; i++) buckets.push([]);
             for (let t = 0; t < triN; t++) {
                 const o9 = t * 9;
-                let nx, ny, nz;
-                if (nsrc) { nx = nsrc[o9] + nsrc[o9 + 3] + nsrc[o9 + 6]; ny = nsrc[o9 + 1] + nsrc[o9 + 4] + nsrc[o9 + 7]; nz = nsrc[o9 + 2] + nsrc[o9 + 5] + nsrc[o9 + 8]; }
-                else {
-                    const ux = src[o9 + 3] - src[o9], uy = src[o9 + 4] - src[o9 + 1], uz = src[o9 + 5] - src[o9 + 2];
-                    const vx = src[o9 + 6] - src[o9], vy = src[o9 + 7] - src[o9 + 1], vz = src[o9 + 8] - src[o9 + 2];
-                    nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx;
+                // the geometric (flat) normal of the triangle — smoothed vertex normals would drop the rim triangles out of the Decal's face;
+                // its sign (the winding of real meshes isn't reliable) comes from the vertex normals when there are any
+                const ux = src[o9 + 3] - src[o9], uy = src[o9 + 4] - src[o9 + 1], uz = src[o9 + 5] - src[o9 + 2];
+                const vx = src[o9 + 6] - src[o9], vy = src[o9 + 7] - src[o9 + 1], vz = src[o9 + 8] - src[o9 + 2];
+                let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+                if (nsrc) {
+                    const sx = nsrc[o9] + nsrc[o9 + 3] + nsrc[o9 + 6], sy = nsrc[o9 + 1] + nsrc[o9 + 4] + nsrc[o9 + 7], sz = nsrc[o9 + 2] + nsrc[o9 + 5] + nsrc[o9 + 8];
+                    if (nx * sx + ny * sy + nz * sz < 0) { nx = -nx; ny = -ny; nz = -nz; }
                 }
                 const ln = Math.hypot(nx, ny, nz) || 1;
                 let g = 0;
@@ -3860,7 +3867,14 @@
                 }
                 buckets[g].push(t);
             }
-            if (buckets.slice(1).every(b => !b.length)) return;   // no triangle faces the Decal's side
+            if (buckets.slice(1).every(b => !b.length)) {   // no triangle faces the Decal's side: the picture would silently disappear
+                if (!applyDecalsToRealMesh._warned) applyDecalsToRealMesh._warned = new Set();
+                if (!applyDecalsToRealMesh._warned.has(o.ref)) {
+                    applyDecalsToRealMesh._warned.add(o.ref);
+                    logLuaOutput('warn', 'Decal on "' + (o.name || o.ref) + '": the mesh ' + o.meshId + ' has no flat face on the side ' + faces.join('/') + ' — the picture is not drawn');
+                }
+                return;
+            }
             const P = new Float32Array(src.length), N = new Float32Array(src.length), UV = new Float32Array(triN * 6);
             const g2 = new THREE.BufferGeometry();
             let k = 0;
@@ -16564,6 +16578,13 @@ end
                 value: val
             });
             if (prop !== 'Source') _psSchedule();
+            // A BillboardGui (or its child) was edited in the editor: reload the billboards so the change is visible at once
+            try {
+                if (!isPlaying && (_editBbReady || _editBbLoaded) && typeof guiPropsByRef !== 'undefined' && guiPropsByRef[ref]) {
+                    resetEditBillboards();
+                    setTimeout(refreshEditBillboards, 150);
+                }
+            } catch (e) { /* the billboards are a convenience, the edit itself has already been applied */ }
         }
 
         async function saveScript() {
