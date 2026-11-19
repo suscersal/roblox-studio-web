@@ -1612,9 +1612,9 @@ body.m-ui #m-nav {
 body.m-ui.m-playing #m-nav,
 body.m-ui.m-kb #m-nav { display: none }
 
-/* Play: panels are unavailable; Output — via the 📟 button */
+/* Play: the floating «Log» (Output) button is removed — it didn't work */
 body.m-ui.m-playing #m-out-toggle {
-    display: block;
+    display: none;
     position: fixed;
     top: 66px;
     right: 6px;

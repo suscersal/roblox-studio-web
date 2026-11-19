@@ -2523,7 +2523,6 @@
                 document.getElementById('fps-counter').textContent = 'FPS: ' + currentFPS + ' | ' + _visibleObjCount + ' obj' +
                     ' | PR:' + _dbgPR + ' | buf:' + Math.round(_dbgSize.x * _dbgPR) + 'x' + Math.round(_dbgSize.y * _dbgPR) +
                     ' | aniso:' + _dbgAniso + (isPlaying ? (' | loaded:' + Object.keys(physicsBodies).length) : '');
-                if (isPlaying) { _profInstall(); _profWrapWorld(); _profReport(fpsFrames); }
                 fpsFrames = 0;
                 fpsTime = now;
             }
