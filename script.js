@@ -11219,7 +11219,7 @@ end
                     (guiChildrenByRef[parentRef] = guiChildrenByRef[parentRef] || []).push(ref);
                 }
                 const selfProps = guiPropsByRef[ref];
-                const isDecoration = selfProps.cls === 'UICorner' || selfProps.cls === 'UIStroke';
+                const isDecoration = selfProps.cls === 'UICorner' || selfProps.cls === 'UIStroke' || selfProps.cls === 'UIPadding';
                 const parentEl = guiDomByRef[parentRef];
                 if (isDecoration) {
                     // Instance.new("UICorner"); corner.Parent = frame —
@@ -13555,6 +13555,14 @@ end
         // Applies UICorner/UIStroke to the DOM element of their PARENT.
         function applyGuiDecoration(parentEl, decoProps) {
             if (!parentEl || !decoProps) return;
+            if (decoProps.cls === 'UIPadding') {
+                const u = (d) => d ? ('calc(' + ((d.scale || 0) * 100) + '% + ' + (d.offset || 0) + 'px)') : '0px';
+                parentEl.style.paddingLeft = u(decoProps.PaddingLeft);
+                parentEl.style.paddingRight = u(decoProps.PaddingRight);
+                parentEl.style.paddingTop = u(decoProps.PaddingTop);
+                parentEl.style.paddingBottom = u(decoProps.PaddingBottom);
+                return;
+            }
             if (decoProps.cls === 'UICorner') {
                 // Some files store one shared CornerRadius, some (in
                 if (decoProps.TopLeftRadius || decoProps.TopRightRadius ||
@@ -13649,6 +13657,18 @@ end
             el.style.top = pos.top;
             el.style.width = size.width;
             el.style.height = size.height;
+            {
+                // AutomaticSize: for a text element the size follows its text (Size is the minimum); without it a button
+                // with Size (0,0,1,0) + AutomaticSize.X was 0 px wide and the whole row piled up in one point
+                const as = props.AutomaticSize;
+                const autoX = as === 'X' || as === 'XY' || as === 1 || as === 3;
+                const autoY = as === 'Y' || as === 'XY' || as === 2 || as === 3;
+                const textEl = cls === 'TextLabel' || cls === 'TextButton' || cls === 'TextBox';
+                el.style.minWidth = (textEl && autoX) ? size.width : '';
+                el.style.minHeight = (textEl && autoY) ? size.height : '';
+                if (textEl && autoX) el.style.width = 'max-content';
+                if (textEl && autoY) el.style.height = 'max-content';
+            }
             // A Roblox file stores instances grouped BY CLASS
             const isInteractiveCls = props.cls === 'TextButton' || props.cls === 'ImageButton' || props.cls === 'TextBox';
             el.style.zIndex = String((props.ZIndex || 1) * 10 + (isInteractiveCls ? 5 : 0));
@@ -14163,7 +14183,7 @@ end
                 const childProps = guiPropsByRef[childRef];
                 if (childProps && childProps.cls === 'UIScale') continue; // applied in the parent's applyGuiElementStyle
                 if (childProps && (childProps.cls === 'UIListLayout' || childProps.cls === 'UIGridLayout')) continue; // layout: properties exist, no DOM node
-                if (childProps && (childProps.cls === 'UICorner' || childProps.cls === 'UIStroke')) {
+                if (childProps && (childProps.cls === 'UICorner' || childProps.cls === 'UIStroke' || childProps.cls === 'UIPadding')) {
                     // A modifier, not a separate visual node — we paint
                     // el (the parent), and don't create a DOM element for it.
                     applyGuiDecoration(el, childProps);
@@ -14539,6 +14559,11 @@ end
                 if (parentRef !== undefined && parentRef !== -1) applyUIListLayout(parentRef);
                 return true;
             }
+            if (props.cls === 'UIPadding') {
+                const parentRef = luaParentByRef[ref], pel = guiDomByRef[parentRef];
+                if (pel) { applyGuiDecoration(pel, props); _guiRelayoutAround(parentRef); }
+                return true;
+            }
             if (props.cls === 'UIScale') {
                 // UIScale has no DOM node of its own: we recompute the parent's style (GuiScale changes Scale on the fly)
                 const parentRef = luaParentByRef[ref];
@@ -14559,7 +14584,26 @@ end
                 return true;
             }
             applyGuiElementStyle(el, props);
+            // The layouts (list/grid) measure the DOM: a hidden container has no size, an AutomaticSize button no width until its
+            // text is known. So when Visible/Size/AutomaticSize (and Text of an auto-sized element) change, lay out again.
+            if (name === 'Visible' || name === 'Size' || name === 'AutomaticSize' ||
+                (props.AutomaticSize && props.AutomaticSize !== 'None' && props.AutomaticSize !== 0 &&
+                 (name === 'Text' || name === 'TextSize' || name === 'Font'))) {
+                if (name === 'Visible' || name === 'Size') _guiRelayoutSubtree(ref, 0);
+                _guiRelayoutAround(ref);
+            }
             return true;
+        }
+        // the containers inside ref (and ref itself) lay out again — for the case when ref has just become visible/changed its size
+        function _guiRelayoutSubtree(ref, depth) {
+            if (depth > 12) return;
+            applyUIListLayout(ref);
+            for (const c of (guiChildrenByRef[ref] || [])) if (guiDomByRef[c]) _guiRelayoutSubtree(c, depth + 1);
+        }
+        // the list/grid whose item is ref lays out again (its neighbours move)
+        function _guiRelayoutAround(ref) {
+            const pr = luaParentByRef[ref];
+            if (pr !== undefined && pr !== -1 && guiDomByRef[pr]) applyUIListLayout(pr);
         }
 
         function updateLuaScheduler() {
