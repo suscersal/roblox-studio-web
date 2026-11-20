@@ -2883,6 +2883,7 @@ def _fetch_via_doh(pu, hdr):
 
 
 _THUMB_CACHE = {}
+_THUMB_FAIL = {}   # url -> when the last fetch failed (see api_roblox_thumb)
 _THUMB_CACHE_MAX = 400
 
 
@@ -2904,23 +2905,39 @@ def api_roblox_thumb():
     if hit:
         ct, data = hit
     else:
+        failed_at = _THUMB_FAIL.get(u)
+        if failed_at and time.time() - failed_at < 30:
+            # failed a moment ago (a VPN/network that cuts TLS): don't wait for the attempts again on every request
+            return Response('thumb fetch failed recently, retrying later', status=502)
         hdr = dict(ROBLOX_HEADERS_BASE)       # without the cookie: the CDN doesn't need it
         hdr['Referer'] = 'https://www.roblox.com/'
         hdr['Accept'] = 'image/avif,image/webp,image/png,image/*;q=0.8'
         hdr.pop('Accept-Encoding', None)      # we return the image as is, without gzip
-        try:
-            r = _req.Request(u, headers=hdr)
-            with _req.urlopen(r, timeout=15) as resp:
-                data = resp.read()
-                ct = resp.headers.get('Content-Type', 'image/png')
-        except Exception as e1:
-            # Often rbxcdn.com isn't resolved by the system DNS (gaierror) —
-            # then we resolve it ourselves via DNS-over-HTTPS and go by IP.
+        data = None
+        last = None
+        # "SSL: UNEXPECTED_EOF" is usually a transient cut of the connection (VPN, mobile network): a couple of retries fix it
+        for attempt in range(3):
             try:
-                ct, data = _fetch_via_doh(pu, hdr)
-            except Exception as e2:
-                print('[thumb] FAIL', u, '->', repr(e1), '| DoH:', repr(e2))
-                return Response('thumb fetch failed: ' + repr(e1) + ' | DoH: ' + repr(e2), status=502)
+                r = _req.Request(u, headers=hdr)
+                with _req.urlopen(r, timeout=10) as resp:
+                    data = resp.read()
+                    ct = resp.headers.get('Content-Type', 'image/png')
+                break
+            except Exception as e1:
+                # Often rbxcdn.com isn't resolved by the system DNS (gaierror) —
+                # then we resolve it ourselves via DNS-over-HTTPS and go by IP.
+                try:
+                    ct, data = _fetch_via_doh(pu, hdr)
+                    break
+                except Exception as e2:
+                    last = (e1, e2)
+                    if attempt < 2:
+                        time.sleep(0.5 * (attempt + 1))
+        if data is None:
+            _THUMB_FAIL[u] = time.time()
+            print('[thumb] FAIL', u, '->', repr(last[0]), '| DoH:', repr(last[1]))
+            return Response('thumb fetch failed: ' + repr(last[0]) + ' | DoH: ' + repr(last[1]), status=502)
+        _THUMB_FAIL.pop(u, None)
         if len(_THUMB_CACHE) >= _THUMB_CACHE_MAX:
             _THUMB_CACHE.pop(next(iter(_THUMB_CACHE)))
         _THUMB_CACHE[u] = (ct, data)

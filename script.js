@@ -8160,6 +8160,21 @@ InstanceMT.__index = function(t, k)
         local d = __TOOL_DEFAULTS[k]
         if d ~= nil then return d end
     end
+    if cls == "Camera" and k == "CameraSubject" then
+        -- Roblox: until a script changes it, the camera follows the Humanoid of the local player's character
+        local pok, h = pcall(function()
+            local lp = game:GetService("Players").LocalPlayer
+            local ch = lp and lp.Character
+            return ch and ch:FindFirstChildOfClass("Humanoid")
+        end)
+        if pok and h ~= nil then return h end
+        return nil
+    end
+    -- BasePart.LocalTransparencyModifier (first-person camera scripts fade the character with it): 0 by default
+    if k == "LocalTransparencyModifier" and ({ Part = true, MeshPart = true, UnionOperation = true, WedgePart = true,
+        CornerWedgePart = true, TrussPart = true, SpawnLocation = true, Seat = true, VehicleSeat = true })[cls] then
+        return 0
+    end
     __emuWarnOnce("missing:" .. cls .. "." .. tostring(k),
         tostring(k) .. " — is neither a property nor a descendant of " .. tostring(__get_name(ref)) .. " (" .. cls ..
         "); the emulator returned nil (in Roblox: 'is not a valid member', or this property is missing in the emulator)")
