@@ -5802,10 +5802,10 @@
             let scale = null;
             for (const k of _AVATAR_UNIT_CANDIDATES) {
                 const h = size.y * k;
-                if (h >= 4.2 && h <= 12) { scale = k; break; }   // tall hats/hair/wings give 9-11 studs; the ranges of different k still don't overlap
+                if (h >= 4.2 && h <= 9) { scale = k; break; }   // the ranges of different k don't overlap
             }
             if (scale === null) {
-                logLuaOutput('warn', 'Avatar: OBJ units not determined (bbox ' + size.x.toFixed(3) + ' x ' + size.y.toFixed(3) + ' x ' + size.z.toFixed(3) + ') — scaling by height, as before');
+                logLuaOutput('info', 'Avatar: OBJ units not determined (bbox ' + size.x.toFixed(3) + ' x ' + size.y.toFixed(3) + ' x ' + size.z.toFixed(3) + ') — scaling to the character height (normal for avatars with tall accessories)');
                 return _fitToCharHeight(obj);
             }
             const c = box.getCenter(new THREE.Vector3());
@@ -8175,6 +8175,8 @@ InstanceMT.__index = function(t, k)
         CornerWedgePart = true, TrussPart = true, SpawnLocation = true, Seat = true, VehicleSeat = true })[cls] then
         return 0
     end
+    -- UserInputService.MouseBehavior was never assigned: Enum.MouseBehavior.Default (the admin panel remembers it to restore later)
+    if cls == "UserInputService" and k == "MouseBehavior" then return Enum.MouseBehavior.Default end
     __emuWarnOnce("missing:" .. cls .. "." .. tostring(k),
         tostring(k) .. " — is neither a property nor a descendant of " .. tostring(__get_name(ref)) .. " (" .. cls ..
         "); the emulator returned nil (in Roblox: 'is not a valid member', or this property is missing in the emulator)")
@@ -8599,6 +8601,14 @@ local COMPAT = {
         if char == nil then return nil end
         for _, c in ipairs(t:GetChildren()) do
             if c.ClassName == "Player" and c.Character == char then return c end
+        end
+        return nil
+    end end,
+    -- Players:GetPlayerByUserId(id) -> the Player with this UserId (otherwise nil)
+    GetPlayerByUserId = function(t, ref) return function(self, uid)
+        if uid == nil then return nil end
+        for _, c in ipairs(t:GetChildren()) do
+            if c.ClassName == "Player" and c.UserId == uid then return c end
         end
         return nil
     end end,
