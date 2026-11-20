@@ -5802,10 +5802,10 @@
             let scale = null;
             for (const k of _AVATAR_UNIT_CANDIDATES) {
                 const h = size.y * k;
-                if (h >= 4.2 && h <= 9) { scale = k; break; }   // the ranges of different k don't overlap
+                if (h >= 4.2 && h <= 12) { scale = k; break; }   // tall hats/hair/wings give 9-11 studs; the ranges of different k still don't overlap
             }
             if (scale === null) {
-                logLuaOutput('warn', 'Avatar: OBJ units not determined (bbox height ' + size.y.toFixed(3) + ') — scaling by height, as before');
+                logLuaOutput('warn', 'Avatar: OBJ units not determined (bbox ' + size.x.toFixed(3) + ' x ' + size.y.toFixed(3) + ' x ' + size.z.toFixed(3) + ') — scaling by height, as before');
                 return _fitToCharHeight(obj);
             }
             const c = box.getCenter(new THREE.Vector3());
@@ -8759,6 +8759,14 @@ local PURE_METHODS = { IsA = true, isA = true, FindFirstChild = true, findFirstC
                 end
             end
         end
+        if k == "GetFocusedTextBox" and __get_class(ref) == "UserInputService" then
+            -- the TextBox that has the keyboard focus now (nil — none): input handlers (the admin panel's P key) must not react while typing
+            return function(self)
+                local r = __focused_textbox()
+                if r ~= nil and r >= 0 then return wrap(r) end
+                return nil
+            end
+        end
         if k == "IsKeyDown" and __get_class(ref) == "UserInputService" then
             return function(self, kc) return kc ~= nil and __is_key_down(kc.Name) end
         end
@@ -11216,6 +11224,21 @@ end
                 if (isDecoration) {
                     // Instance.new("UICorner"); corner.Parent = frame —
                     if (parentEl) applyGuiDecoration(parentEl, selfProps);
+                } else if (selfProps.cls === 'ScreenGui') {
+                    // A ScreenGui has no DOM parent: PlayerGui is not a node, the overlay itself plays its role. A script that does
+                    // Instance.new("ScreenGui") + Parent = PlayerGui (the admin panel's «ADMIN» button, any script-built UI) used to be drawn
+                    // only if it also set Enabled = true by hand — in Roblox Enabled is true by default.
+                    const pinfo = luaByRef[parentRef];
+                    const inPlayerGui = !!(pinfo && pinfo.cls === 'PlayerGui');
+                    const ov = document.getElementById('gui-overlay');
+                    const cur = guiDomByRef[ref];
+                    if (inPlayerGui && ov && !cur && selfProps.Enabled !== false) {
+                        guiRenderNode(ref, ov);
+                        ov.classList.add('active');
+                    } else if (!inPlayerGui && cur) {
+                        cur.remove();            // taken out of PlayerGui (Parent = nil / another container) — it is not drawn any more
+                        delete guiDomByRef[ref];
+                    }
                 } else {
                     let el = guiDomByRef[ref];
                     if (el && parentEl) {
@@ -11900,6 +11923,10 @@ end
                     }
                     lua.lua_pushstring(L2, out.join(','));
                 } catch (e) { console.warn('Overlap:', e); lua.lua_pushstring(L2, ''); }
+                return 1;
+            });
+            def('__focused_textbox', function (L2) {
+                lua.lua_pushnumber(L2, _focusedTextBoxRef);
                 return 1;
             });
             def('__is_key_down', function (L2) {
@@ -13937,8 +13964,9 @@ end
                 el.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') { enterPressed = true; el.blur(); }
                 });
-                el.addEventListener('focus', () => fireLuaSignal(ref, 'Focused', []));
+                el.addEventListener('focus', () => { _focusedTextBoxRef = ref; fireLuaSignal(ref, 'Focused', []); });
                 el.addEventListener('blur', () => {
+                    if (_focusedTextBoxRef === ref) _focusedTextBoxRef = -1;
                     fireLuaSignal(ref, 'FocusLost', [enterPressed]);
                     enterPressed = false;
                 });
@@ -13952,6 +13980,7 @@ end
         // at the anchor's distance), Offset — in pixels. StudsOffsetWorldSpace — in the world, StudsOffset — in camera space (x,y).
         // MaxDistance — hide beyond it. AlwaysOnTop=false — hide if there is geometry between the camera and the anchor
         // (a ray, no more often than once per 5 frames; parts of the owner model itself don't occlude).
+        let _focusedTextBoxRef = -1;   // the TextBox that has the focus (UserInputService:GetFocusedTextBox)
         const _bbOcc = {};   // ref -> { frame, hidden }
         let _bbFrame = 0;
         function _bbAnchorWorld(ref, out) {
@@ -15639,11 +15668,37 @@ end
                 target.z = desiredZ;
             }
             if (charMesh) {
+                _animateCharBody(charMesh);
                 charMesh.position.set(charBody.position.x, charBody.position.y - (seatState ? SIT_DROP : 0), charBody.position.z);
                 charMesh.rotation.y = seatState && seatState.ref !== -1 ? seatState.yaw : spherical.theta; // the cube is turned the same way the camera looks (when seated — by the seat)
             }
             updateBlobShadow();
             updateCamera();
+        }
+
+        // The avatar is one rigid mesh (no skeleton), so the run is faked: bounce twice per step cycle, a forward lean and a little
+        // sway. It fades in/out smoothly with the speed, and only on the ground (not while jumping/falling/sitting).
+        let _runPhase = 0, _runAmt = 0, _runLastT = 0;
+        function _animateCharBody(group) {
+            const body = group.userData && group.userData.body;
+            if (!body) return;
+            const now = performance.now();
+            const dt = Math.min(0.1, _runLastT ? (now - _runLastT) / 1000 : 0);
+            _runLastT = now;
+            if (body.userData._baseY === undefined) body.userData._baseY = body.position.y;
+            const v = charBody.velocity;
+            const speed = Math.hypot(v.x, v.z);
+            const target = (canJump && !seatState && speed > 1.5) ? Math.min(1, speed / 16) : 0;
+            _runAmt += (target - _runAmt) * Math.min(1, dt * 10);
+            if (_runAmt < 0.01) {
+                _runAmt = 0;
+                body.position.y = body.userData._baseY; body.rotation.x = 0; body.rotation.z = 0;
+                return;
+            }
+            _runPhase += dt * (5 + speed * 0.45);
+            body.position.y = body.userData._baseY + Math.abs(Math.sin(_runPhase)) * 0.2 * _runAmt;
+            body.rotation.x = -0.13 * _runAmt;                      // forward is -Z: the top of the body leans toward it
+            body.rotation.z = Math.sin(_runPhase) * 0.05 * _runAmt;
         }
 
         let _physLastT = 0, _physAcc = 0;
