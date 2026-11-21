@@ -6959,6 +6959,27 @@ bit32 = bit32 or {
 -- here) — a known limitation, we don't pretend it isn't there.
 -- Lua 5.3 (fengari) has no math.atan2 — but Roblox/Luau does.
 if not math.atan2 then math.atan2 = function(y, x) return math.atan(y, x) end end
+-- Lua 5.3 (fengari): string.format("%d", 3.7) raises «number has no integer representation»; Luau (Roblox) truncates the number
+-- (distance labels, timers: string.format("%d м", (a - b).Magnitude) is everywhere). The integer conversions take a float now.
+do
+    local __fmt = string.format
+    string.format = function(f, ...)
+        if type(f) ~= "string" or not f:find("%%[%-%+ #0]*%d*%.?%d*[dixXuoc]") then return __fmt(f, ...) end
+        local args = table.pack(...)
+        local idx = 0
+        for spec in f:gmatch("%%[%-%+ #0]*%d*%.?%d*(.)") do
+            if spec ~= "%%" then
+                idx = idx + 1
+                local v = args[idx]
+                if (spec == "d" or spec == "i" or spec == "x" or spec == "X" or spec == "u" or spec == "o" or spec == "c")
+                    and type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge and math.tointeger(v) == nil then
+                    args[idx] = v >= 0 and math.floor(v) or math.ceil(v)
+                end
+            end
+        end
+        return __fmt(f, table.unpack(args, 1, args.n))
+    end
+end
 CFrame = {}
 -- A full CFrame: position + a 3x3 rotation matrix (R00..R22, rows),
 -- as in Roblox: RightVector = column 0, UpVector = column 1,
@@ -6976,6 +6997,7 @@ local function _cfNew(x, y, z, a, b, c, d, e, f, g, h, i)
         lookVector = lv, LookVector = lv,
         rightVector = rv, RightVector = rv,
         upVector = uv, UpVector = uv,
+        XVector = rv, YVector = uv, ZVector = Vector3.new(c, f, i),   -- the columns of the rotation matrix (ZVector = -LookVector)
     }, CFrame)
 end
 local function _m3(A, B)
@@ -8177,6 +8199,10 @@ InstanceMT.__index = function(t, k)
     end
     -- UserInputService.MouseBehavior was never assigned: Enum.MouseBehavior.Default (the admin panel remembers it to restore later)
     if cls == "UserInputService" and k == "MouseBehavior" then return Enum.MouseBehavior.Default end
+    -- defaults of properties that exist in Roblox but are absent from a script-created/cloned instance
+    if k == "PrimaryPart" and cls == "Model" then return nil end   -- not set — a valid nil, not a missing member
+    if k == "SoundId" and cls == "Sound" then return "" end
+    if k == "Brightness" and (cls == "PointLight" or cls == "SpotLight" or cls == "SurfaceLight") then return 1 end
     __emuWarnOnce("missing:" .. cls .. "." .. tostring(k),
         tostring(k) .. " — is neither a property nor a descendant of " .. tostring(__get_name(ref)) .. " (" .. cls ..
         "); the emulator returned nil (in Roblox: 'is not a valid member', or this property is missing in the emulator)")
@@ -13723,13 +13749,18 @@ end
                 // into 1 because of `|| 1` and drew a border around the screen — we check for null/undefined.
                 const bsp = (props.BorderSizePixel === undefined || props.BorderSizePixel === null) ? 1 : Number(props.BorderSizePixel);
                 el.style.border = bsp > 0
-                    ? bsp + 'px solid ' + color3ToCss(props.BorderColor3)
+                    // Roblox's default BorderColor3 is (27, 42, 53), not white
+                    ? bsp + 'px solid ' + color3ToCss(props.BorderColor3 || { r: 27 / 255, g: 42 / 255, b: 53 / 255 })
                     : 'none';
                 if (props.BackgroundTransparency >= 1) el.style.background = 'transparent';
                 if (cls === 'ScrollingFrame') {
                     // ScrollingFrame used to be rendered 1-to-1 like an ordinary
-                    el.style.overflowY = 'auto';
-                    el.style.overflowX = 'hidden';
+                    // ScrollingDirection X (a row of tabs/targets with AutomaticCanvasSize.X) scrolls sideways, Y (the default here) — up/down
+                    const sd = props.ScrollingDirection;
+                    const sdX = sd === 'X' || sd === 'XY' || sd === 1 || sd === 4;
+                    const sdY = sd === undefined || sd === null || sd === 'Y' || sd === 'XY' || sd === 2 || sd === 4;
+                    el.style.overflowX = sdX ? 'auto' : 'hidden';
+                    el.style.overflowY = sdY ? 'auto' : 'hidden';
                     el.style.webkitOverflowScrolling = 'touch';
                 }
             } else if (cls === 'TextLabel' || cls === 'TextButton' || cls === 'TextBox') {
@@ -13962,8 +13993,19 @@ end
                 el.addEventListener('mousedown', () => fireLuaSignal(ref, 'MouseButton1Down', []));
                 el.addEventListener('mouseup', () => fireLuaSignal(ref, 'MouseButton1Up', []));
                 // touchend is NOT passive and with preventDefault — otherwise right after
-                el.addEventListener('touchstart', () => fireLuaSignal(ref, 'MouseButton1Down', []), { passive: true });
-                el.addEventListener('touchend', (e) => { e.preventDefault(); fireLuaSignal(ref, 'MouseButton1Up', []); fireLuaSignal(ref, 'MouseButton1Click', []); fireLuaSignal(ref, 'Activated', [null, 1]); }, { passive: false });
+                el.addEventListener('touchstart', (e) => {
+                    const t0 = e.touches && e.touches[0];
+                    el._tapStart = t0 ? { x: t0.clientX, y: t0.clientY } : null;
+                    fireLuaSignal(ref, 'MouseButton1Down', []);
+                }, { passive: true });
+                el.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    fireLuaSignal(ref, 'MouseButton1Up', []);
+                    // A finger that travelled > 12 px scrolled something (a row of tabs, a list) — that is not a tap on the button
+                    const t1 = e.changedTouches && e.changedTouches[0], s0 = el._tapStart;
+                    if (t1 && s0 && Math.hypot(t1.clientX - s0.x, t1.clientY - s0.y) > 12) return;
+                    fireLuaSignal(ref, 'MouseButton1Click', []); fireLuaSignal(ref, 'Activated', [null, 1]);
+                }, { passive: false });
             }
             // MouseEnter/MouseLeave — on ANY GuiObject in real Roblox,
             // not only buttons (Frame/TextLabel support them too).
@@ -14240,8 +14282,11 @@ end
             const lines = Math.ceil(items.length / maxCells);
             const lineLen = (n) => n * (horizontal ? cellW : cellH) + Math.max(0, n - 1) * (horizontal ? padX : padY);
             const totalCross = lines * (horizontal ? cellH : cellW) + Math.max(0, lines - 1) * (horizontal ? padY : padX);
-            const HA = lp.HorizontalAlignment === undefined ? 0 : lp.HorizontalAlignment;   // 0 Center, 1 Left, 2 Right
-            const VA = lp.VerticalAlignment === undefined ? 0 : lp.VerticalAlignment;       // 0 Center, 1 Top, 2 Bottom
+            // 0 Center, 1 Left/Top, 2 Right/Bottom; numbers or names. Roblox defaults: horizontally Center, vertically TOP (centring a
+            // content taller than the frame pushed the first row of buttons out of the visible area)
+            const _al = (v, dflt) => (v === undefined || v === null) ? dflt : (typeof v === 'string' ? ({ Center: 0, Left: 1, Top: 1, Right: 2, Bottom: 2 }[v] ?? dflt) : v);
+            const HA = _al(lp.HorizontalAlignment, 0);
+            const VA = _al(lp.VerticalAlignment, 1);
             items.forEach((k, idx) => {
                 const line = Math.floor(idx / maxCells), pos = idx % maxCells;
                 const inLine = Math.min(maxCells, items.length - line * maxCells);

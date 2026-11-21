@@ -318,6 +318,12 @@
             cursor: pointer;
         }
 
+        /* Chromium 130+ makes scroll containers keyboard-focusable and draws a white focus frame around a ScrollingFrame after a tap */
+        .rbx-gui-el:focus,
+        .rbx-gui-el:focus-visible {
+            outline: none;
+        }
+
         #vp-label {
             display: none; /* the LMB/RMB/WASD hint was removed on request — it covered the GUI overlay from below */
         }
