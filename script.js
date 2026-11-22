@@ -18844,3 +18844,136 @@ end
                 }
             });
         }
+
+        // ============ Line icons instead of emoji (Design v2) ============
+        // The interface strings (and the i18n tables) contain emoji; here they are swapped for one set of 24px line icons, drawn as a CSS
+        // mask so they take the text colour. Only the interface chrome is touched: never the tree, the output, the code, the game GUI.
+        const _IC_SVG = {
+            menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+            save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+            play: '<path d="M7 4.5v15l12-7.5z" fill="black"/>',
+            pause: '<path d="M8 5v14M16 5v14"/>',
+            folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
+            plus: '<path d="M5 12h14M12 5v14"/>',
+            trash: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+            refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+            globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+            upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
+            download: '<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>',
+            user: '<circle cx="12" cy="8" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>',
+            home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>',
+            up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+            down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
+            right: '<path d="M5 12h14M12 5l7 7-7 7"/>',
+            camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
+            target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+            grid: '<path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/>',
+            panel: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>',
+            checksq: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+            chevdown2: '<path d="m7 6 5 5 5-5M7 13l5 5 5-5"/>',
+            chevup2: '<path d="m17 11-5-5-5 5M17 18l-5-5-5 5"/>',
+            chevdown: '<path d="m6 9 6 6 6-6"/>',
+            search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+            box: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/>',
+            tree: '<path d="M21 12h-8M21 6H8M21 18h-8M3 6v4a2 2 0 0 0 2 2h3M3 10v6a2 2 0 0 0 2 2h3"/>',
+            sliders: '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/>',
+            script: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M10 13l-2 2 2 2M14 13l2 2-2 2"/>',
+            terminal: '<path d="M4 17l6-6-6-6M12 19h8"/>',
+            pointer: '<path d="M4 4l7 17 2.5-7.5L21 11z"/>',
+            select: '<rect x="3.5" y="3.5" width="17" height="17" rx="1" stroke-dasharray="3 3"/>',
+            move: '<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
+            rotate: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+            scale: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+            pin: '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
+            magnet: '<path d="m6 15-4-4 6.75-6.77a7.79 7.79 0 0 1 11 11L13 22l-4-4 6.39-6.36a2.14 2.14 0 0 0-3-3L6 15"/><path d="m5 8 4 4M12 15l4 4"/>',
+            undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+            redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
+            gamepad: '<path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/><rect x="2" y="6" width="20" height="12" rx="4"/>',
+            lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+            palette: '<circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20 2 2 0 0 0 2-2 2 2 0 0 1 2-2h2a4 4 0 0 0 4-4c0-5-4.5-10-10-10z"/>',
+            volume: '<path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>',
+            x: '<path d="M18 6 6 18M6 6l12 12"/>',
+            check: '<path d="M20 6 9 17l-5-5"/>',
+            alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+            keyboard: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M7 15h10"/>',
+            monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+            sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/>',
+            users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+            wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+            sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+        };
+        const _IC_EMOJI = {
+            '💾': 'save', '📁': 'folder', '📂': 'folder', '➕': 'plus', '🗑': 'trash', '🔄': 'refresh', '🌍': 'globe', '🌐': 'globe', '☁': 'upload',
+            '👤': 'user', '🧍': 'user', '▶': 'play', '⏸': 'pause', '🏠': 'home', '⬆': 'up', '⬇': 'down', '➡': 'right', '📷': 'camera', '🎯': 'target',
+            '📏': 'grid', '📐': 'panel', '☑': 'checksq', '◢': 'chevup2', '◣': 'chevdown2', '▾': 'chevdown', '🔍': 'search', '🔎': 'search',
+            '🎬': 'box', '📋': 'panel', '🌳': 'tree', '🧩': 'sliders', '📜': 'script', '📟': 'terminal', '🖱': 'pointer', '⬚': 'select',
+            '✥': 'move', '⟳': 'rotate', '⤢': 'scale', '📍': 'pin', '🧲': 'magnet', '↶': 'undo', '↷': 'redo', '⚙': 'sliders', '🎮': 'gamepad',
+            '🔒': 'lock', '🎨': 'palette', '🔊': 'volume', '✕': 'x', '✖': 'x', '❌': 'x', '✓': 'check', '✔': 'check', '⚠': 'alert', '⌨': 'keyboard',
+            '🖥': 'monitor', '💻': 'monitor', '🌅': 'sun', '👥': 'users', '🤖': 'sparkle', '📥': 'download', '📤': 'upload', '🆕': 'plus', '🧰': 'wrench',
+            '🎚': 'sliders', '📦': 'box', '🚀': 'play',
+        };
+        const _icRe = new RegExp('(' + Object.keys(_IC_EMOJI).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')[\\uFE0E\\uFE0F]?', 'u');
+        const _icReG = new RegExp(_icRe.source, 'gu');
+        const _icUrlCache = {};
+        function _icUrl(name) {
+            if (!_icUrlCache[name]) {
+                const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + _IC_SVG[name] + '</svg>';
+                _icUrlCache[name] = 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+            }
+            return _icUrlCache[name];
+        }
+        const _IC_CHROME = 'button, summary, .st-nav, .tab, .notif, #explorer-header, #output-header, #toolbar-top .title, .modal h3, #m-nav, #m-subtabs';
+        const _IC_SKIP = '#tree, #tree-scroll, .tree-node, #gui-overlay, #output-content, #output-log, .cm-editor, textarea, input, select, #joy-base, #debug-console, [data-no-icons]';
+        function iconifyNode(root) {
+            if (!root) return;
+            const base = root.nodeType === 1 ? root : root.parentElement;
+            if (!base || !base.closest || base.closest(_IC_SKIP)) return;
+            const walker = document.createTreeWalker(root.nodeType === 1 ? root : root.parentNode, NodeFilter.SHOW_TEXT);
+            const hits = [];
+            let n;
+            while ((n = walker.nextNode())) {
+                if (!_icRe.test(n.nodeValue)) continue;
+                const el = n.parentElement;
+                if (el && el.closest(_IC_CHROME) && !el.closest(_IC_SKIP)) hits.push(n);
+            }
+            for (const t of hits) {
+                const frag = document.createDocumentFragment();
+                const txt = t.nodeValue;
+                let last = 0, m;
+                _icReG.lastIndex = 0;
+                while ((m = _icReG.exec(txt))) {
+                    if (m.index > last) frag.appendChild(document.createTextNode(txt.slice(last, m.index)));
+                    const sp = document.createElement('span');
+                    sp.className = 'ic';
+                    sp.setAttribute('aria-hidden', 'true');
+                    sp.style.setProperty('--ic', _icUrl(_IC_EMOJI[m[1]]));
+                    frag.appendChild(sp);
+                    last = m.index + m[0].length;
+                }
+                if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+                t.parentNode.replaceChild(frag, t);
+            }
+        }
+        function _icFixPlaceholders() {
+            const sb = document.getElementById('search-box');
+            if (sb && /^[🔍🔎]/u.test(sb.placeholder || '')) sb.placeholder = sb.placeholder.replace(/^[🔍🔎]\uFE0F?\s*/u, '');
+        }
+        {
+            // the search field gets its magnifier as a background (a placeholder cannot hold an icon)
+            const mag = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#6E7584" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>') + '")';
+            document.documentElement.style.setProperty('--ic-search', mag);
+            const pending = new Set();
+            let raf = 0;
+            const flush = () => { raf = 0; const items = [...pending]; pending.clear(); for (const it of items) { try { iconifyNode(it); } catch (e) { /* the icons are decoration */ } } _icFixPlaceholders(); };
+            const mo = new MutationObserver((muts) => {
+                for (const m of muts) {
+                    if (m.type === 'characterData') pending.add(m.target);
+                    else if (m.type === 'attributes') pending.add(m.target);
+                    else for (const a of m.addedNodes) if (a.nodeType === 1 || a.nodeType === 3) pending.add(a);
+                }
+                if (pending.size && !raf) raf = requestAnimationFrame(flush);
+            });
+            iconifyNode(document.body);
+            _icFixPlaceholders();
+            mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+        }
