@@ -8286,7 +8286,36 @@ if __name__ == '__main__':
             except Exception as e:
                 print(f'[RbxStudio] Load error: {e}')
 
-    url = f'http://127.0.0.1:{PORT}'
+    # If PORT is already taken (typically a previous instance that is still
+    # running or hung), werkzeug dies with SystemExit(1) and no clear message.
+    # Pick the next free port instead and say so explicitly.
+    import socket as _sock
+
+    def _port_free(p):
+        s = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        try:
+            s.bind(('0.0.0.0', p))
+            return True
+        except OSError:
+            return False
+        finally:
+            s.close()
+
+    run_port = PORT
+    if not _port_free(run_port):
+        print(f'[RbxStudio] Port {PORT} is already in use '
+              f'(another RbxStudio instance still running?)')
+        for cand in range(PORT + 1, PORT + 21):
+            if _port_free(cand):
+                run_port = cand
+                break
+        else:
+            print(f'[RbxStudio] No free port in {PORT}..{PORT + 20}. '
+                  f'Close the old instance and try again.')
+            sys.exit(1)
+        print(f'[RbxStudio] Using port {run_port} instead')
+
+    url = f'http://127.0.0.1:{run_port}'
     print(f'[RbxStudio] Starting: {url}')
 
     def open_browser():
@@ -8323,5 +8352,5 @@ if __name__ == '__main__':
     # the whole duration of a long /api/roblox/avatar3d/fetch — exactly because of
     # this the app looked "frozen" as a whole, not only the
     # avatar download dialog.
-    flask_app.run(host='0.0.0.0', port=PORT, debug=False,
+    flask_app.run(host='0.0.0.0', port=run_port, debug=False,
                   use_reloader=False, threaded=True)
