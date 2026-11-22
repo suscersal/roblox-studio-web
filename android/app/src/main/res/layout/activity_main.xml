@@ -8,13 +8,22 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <TextView
-        android:id="@+id/loadingStatus"
+    <!-- ScrollView so that a long startup error (traceback) can be scrolled;
+         MainActivity.showFatalError() stretches it to the full screen. -->
+    <ScrollView
+        android:id="@+id/loadingScroll"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:text="@string/loading_start" />
+        android:layout_gravity="center">
+
+        <TextView
+            android:id="@+id/loadingStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:text="@string/loading_start" />
+
+    </ScrollView>
 
 </FrameLayout>

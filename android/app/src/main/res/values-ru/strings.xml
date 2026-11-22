@@ -4,6 +4,7 @@
     <string name="loading_no_connection">Нет соединения, запуск без обновлений…</string>
     <string name="loading_update_ready">Обновление готово, перезапуск…</string>
     <string name="loading_error">Ошибка: %1$s</string>
+    <string name="loading_error_hint">Нажмите и удерживайте текст, чтобы выделить и скопировать его.</string>
     <string name="server_start_failed">Не удалось запустить локальный сервер.\nПерезапустите приложение.</string>
     <string name="back_press_exit">Нажмите «Назад» ещё раз для выхода</string>
     <string name="roblox_login_title">Войдите в аккаунт Roblox</string>

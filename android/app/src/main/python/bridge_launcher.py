@@ -9,7 +9,7 @@ import os
 import sys
 
 
-def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
+def _start_server_impl(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     os.environ.setdefault("FLASK_DEBUG", "False")
 
     # IMPORTANT: this module (bridge_launcher.py) itself NEVER goes through the
@@ -74,7 +74,10 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
     def _port_free(p):
         s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         try:
-            s.bind(("127.0.0.1", p))
+            # Same address the server really binds (0.0.0.0). Checking only
+            # 127.0.0.1 reported "free" when another app held the port on a
+            # specific interface, and werkzeug then died with SystemExit(1).
+            s.bind(("0.0.0.0", p))
             return True
         except OSError:
             return False
@@ -111,3 +114,110 @@ def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
         use_reloader=False,
         threaded=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Error reporting for the Kotlin side.
+#
+# Chaquopy turns a SystemExit(1) coming out of werkzeug into a PyException whose
+# message is just "SystemExit: 1" — the real reason ("Address already in use",
+# ...) was printed to stderr and is lost. Here we (1) keep the last lines of
+# stdout/stderr, (2) on ANY failure build a readable report with those lines and
+# the traceback, (3) save it to <data_dir>/last_error.txt (MainActivity reads it
+# and shows it on screen) and (4) raise a RuntimeError carrying the same text.
+# ---------------------------------------------------------------------------
+class _Tee:
+    def __init__(self, real, ring):
+        self._real = real
+        self._ring = ring
+        self._partial = ""
+
+    def write(self, text):
+        try:
+            if self._real is not None:
+                self._real.write(text)
+        except Exception:
+            pass
+        try:
+            self._partial += text
+            *lines, self._partial = self._partial.split("\n")
+            for line in lines:
+                if line.strip():
+                    self._ring.append(line.rstrip())
+        except Exception:
+            pass
+        return len(text)
+
+    def flush(self):
+        try:
+            if self._real is not None:
+                self._real.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _build_report(exc, ring, port, data_dir, hotpatch_dir):
+    import platform
+    import traceback
+
+    if isinstance(exc, SystemExit):
+        headline = "SystemExit(%r): the server asked the process to exit" % (exc.code,)
+    else:
+        headline = "%s: %s" % (type(exc).__name__, exc)
+
+    out = ["Server failed to start", headline, ""]
+    if ring:
+        out.append("--- last output ---")
+        out.extend(ring)
+        out.append("")
+    out.append("--- traceback ---")
+    out.append("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip())
+    out.append("")
+    out.append("--- environment ---")
+    out.append("python %s, %s" % (sys.version.split()[0], platform.platform()))
+    out.append("port requested: %s" % port)
+    out.append("data_dir: %s" % (data_dir or "-"))
+    out.append("hotpatch_dir: %s" % (hotpatch_dir or "-"))
+    try:
+        from importlib import metadata as _md
+        vers = []
+        for pkg in ("flask", "werkzeug"):
+            try:
+                vers.append("%s %s" % (pkg, _md.version(pkg)))
+            except Exception:
+                vers.append("%s NOT INSTALLED" % pkg)
+        out.append("packages: " + ", ".join(vers))
+    except Exception:
+        pass
+    return "\n".join(out)
+
+
+def start_server(port: int, data_dir: str = "", hotpatch_dir: str = ""):
+    from collections import deque
+
+    err_file = os.path.join(data_dir, "last_error.txt") if data_dir else None
+    if err_file:
+        try:
+            os.remove(err_file)  # drop the report from a previous launch
+        except OSError:
+            pass
+
+    ring = deque(maxlen=40)
+    real_out, real_err = sys.stdout, sys.stderr
+    sys.stdout, sys.stderr = _Tee(real_out, ring), _Tee(real_err, ring)
+    try:
+        _start_server_impl(port, data_dir, hotpatch_dir)
+    except BaseException as e:  # SystemExit included on purpose
+        report = _build_report(e, list(ring), port, data_dir, hotpatch_dir)
+        if err_file:
+            try:
+                with open(err_file, "w", encoding="utf-8") as f:
+                    f.write(report)
+            except OSError:
+                pass
+        raise RuntimeError(report) from None
+    finally:
+        sys.stdout, sys.stderr = real_out, real_err

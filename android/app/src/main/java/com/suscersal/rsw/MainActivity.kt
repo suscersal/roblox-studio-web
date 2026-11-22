@@ -2,12 +2,16 @@ package com.suscersal.rsw
 
 import android.content.Intent
 import android.net.Uri
+import android.graphics.Typeface
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -410,6 +414,7 @@ class MainActivity : AppCompatActivity() {
         // so that waitForServerThenLoad doesn't connect by mistake to a port
         // on which nobody has been listening for a long time.
         File(filesDir, "server_port.txt").delete()
+        File(filesDir, "last_error.txt").delete()
 
         val hotpatchPath = hotpatchDir?.absolutePath ?: ""
 
@@ -420,11 +425,49 @@ class MainActivity : AppCompatActivity() {
                 launcher.callAttr("start_server", PORT, filesDir.absolutePath, hotpatchPath)
             } catch (e: Exception) {
                 Log.e("MainActivity", "Server start failed", e)
-                runOnUiThread {
-                    findViewById<TextView>(R.id.loadingStatus).text = getString(R.string.loading_error, e.message)
-                }
+                // bridge_launcher.py writes the full report (last output +
+                // traceback) to last_error.txt; e.message is the same text, or
+                // just "SystemExit: 1" if the launcher itself could not run.
+                showFatalError(readStartupError() ?: (e.message ?: e.toString()))
             }
     }.start()
+    }
+
+    /** Report written by bridge_launcher.py when the server failed to start, or null. */
+    private fun readStartupError(): String? = try {
+        File(filesDir, "last_error.txt").takeIf { it.exists() }
+            ?.readText()?.trim()?.takeIf { it.isNotEmpty() }
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Shows a fatal startup error on the whole screen instead of a bare
+     * "SystemExit: 1": scrollable, monospace, long-press to select and copy.
+     * Safe to call from any thread and more than once.
+     */
+    private fun showFatalError(text: String) {
+        Log.e("MainActivity", "Startup error:\n$text")
+        runOnUiThread {
+            val scroll = findViewById<ScrollView>(R.id.loadingScroll)
+            val status = findViewById<TextView>(R.id.loadingStatus)
+            scroll.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            status.layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+            status.visibility = View.VISIBLE
+            status.gravity = Gravity.START
+            status.typeface = Typeface.MONOSPACE
+            status.textSize = 12f
+            status.setPadding(32, 64, 32, 32)
+            status.setTextIsSelectable(true)
+            status.text = getString(R.string.loading_error, text) +
+                "\n\n" + getString(R.string.loading_error_hint)
+        }
     }
 
     private fun waitForServerThenLoad() {
@@ -442,6 +485,11 @@ class MainActivity : AppCompatActivity() {
             var attempts = 0
             while (!up && attempts < 100) {
                 attempts++
+                // The Python side failed — no point in waiting out the timeout.
+                readStartupError()?.let { err ->
+                    showFatalError(err)
+                    return@Thread
+                }
                 if (portFile.exists()) {
                     portFile.readText().trim().toIntOrNull()?.let { resolvedPort = it }
                 }
@@ -460,7 +508,9 @@ class MainActivity : AppCompatActivity() {
                     status.visibility = View.GONE
                     webView.loadUrl("http://127.0.0.1:$resolvedPort/")
                 } else {
-                    status.text = getString(R.string.server_start_failed)
+                    val err = readStartupError()
+                    if (err != null) showFatalError(err)
+                    else status.text = getString(R.string.server_start_failed)
                 }
             }
         }.start()
