@@ -1,4 +1,124 @@
 #!/usr/bin/env python3
+# ---------------------------------------------------------------------------
+# Crash diagnostics. Deliberately placed BEFORE the other imports and uses the
+# standard library only, so that it also catches failures during import and
+# startup (a bare "SystemExit: 1" from werkzeug says nothing on its own).
+# The report goes to stderr AND to rsw_crash.log (appended), in this order of
+# preference: $RSW_DATA_DIR, the folder next to app.py, the system temp dir.
+# ---------------------------------------------------------------------------
+import sys as _csys
+import os as _cos
+import platform as _cplatform
+import traceback as _ctb
+import datetime as _cdt
+import tempfile as _ctmp
+import faulthandler as _cfh
+
+
+def _crash_open_log():
+    for base in (_cos.environ.get('RSW_DATA_DIR'),
+                 _cos.path.dirname(_cos.path.abspath(__file__)),
+                 _ctmp.gettempdir()):
+        if not base:
+            continue
+        path = _cos.path.join(base, 'rsw_crash.log')
+        try:
+            return path, open(path, 'a', encoding='utf-8', buffering=1)
+        except OSError:
+            continue
+    return None, None
+
+
+_CRASH_LOG_PATH, _CRASH_LOG_FH = _crash_open_log()
+
+
+def _crash_env_lines():
+    lines = [
+        f'python    : {_csys.version.split()[0]} ({_cplatform.python_implementation()}) at {_csys.executable}',
+        f'platform  : {_cplatform.platform()}',
+        f'cwd       : {_cos.getcwd()}',
+        f'argv      : {_csys.argv!r}',
+        f'file      : {_cos.path.abspath(__file__)}',
+    ]
+    keys = [k for k in _cos.environ if k.startswith('RSW_') or k in
+            ('TERMUX_VERSION', 'FLASK_DEBUG', 'VIRTUAL_ENV')]
+    if keys:
+        lines.append('env       : ' + ', '.join(f'{k}={_cos.environ[k]}' for k in sorted(keys)))
+    try:
+        from importlib import metadata as _md
+        vers = []
+        for pkg in ('flask', 'werkzeug'):
+            try:
+                vers.append(f'{pkg} {_md.version(pkg)}')
+            except Exception:
+                vers.append(f'{pkg} NOT INSTALLED')
+        lines.append('packages  : ' + ', '.join(vers))
+    except Exception:
+        pass
+    return lines
+
+
+def _crash_report(title, exc_type=None, exc=None, tb=None, extra=None):
+    """Write a detailed crash report. Never raises."""
+    try:
+        out = ['=' * 72,
+               f'{_cdt.datetime.now().isoformat(timespec="seconds")}  {title}',
+               '=' * 72]
+        out += _crash_env_lines()
+        if extra:
+            out += list(extra)
+        if exc is not None:
+            if isinstance(exc, SystemExit):
+                out.append(f'exit code : {exc.code!r}')
+            out.append('traceback (incl. chained causes):')
+            out.append(''.join(_ctb.format_exception(exc_type or type(exc), exc, tb)).rstrip())
+        text = '\n'.join(out) + '\n'
+        try:
+            _csys.stderr.write(text)
+            _csys.stderr.flush()
+        except Exception:
+            pass
+        if _CRASH_LOG_FH:
+            _CRASH_LOG_FH.write(text)
+            _CRASH_LOG_FH.flush()
+            try:
+                _csys.stderr.write(f'[RbxStudio] Crash report saved to: {_CRASH_LOG_PATH}\n')
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _crash_excepthook(exc_type, exc, tb):
+    if not issubclass(exc_type, KeyboardInterrupt):
+        _crash_report('Uncaught exception', exc_type, exc, tb)
+    _csys.__excepthook__(exc_type, exc, tb)
+
+
+_csys.excepthook = _crash_excepthook
+try:
+    # Native crashes (segfault etc.) dump the Python stack into the same log.
+    _cfh.enable(file=_CRASH_LOG_FH if _CRASH_LOG_FH else _csys.stderr, all_threads=True)
+except Exception:
+    pass
+
+
+def _crash_cleanup():
+    # Don't leave an empty rsw_crash.log behind after every clean run.
+    try:
+        _cfh.disable()
+        if _CRASH_LOG_FH:
+            _CRASH_LOG_FH.close()
+            if _cos.path.getsize(_CRASH_LOG_PATH) == 0:
+                _cos.remove(_CRASH_LOG_PATH)
+    except Exception:
+        pass
+
+
+import atexit as _catexit
+_catexit.register(_crash_cleanup)
+# ---------------------------------------------------------------------------
+
 import urllib.error as _urlerr
 import urllib.parse as _urlparse
 import urllib.request as _req
@@ -8312,6 +8432,7 @@ if __name__ == '__main__':
         else:
             print(f'[RbxStudio] No free port in {PORT}..{PORT + 20}. '
                   f'Close the old instance and try again.')
+            _crash_report(f'No free port in {PORT}..{PORT + 20}')
             sys.exit(1)
         print(f'[RbxStudio] Using port {run_port} instead')
 
@@ -8352,5 +8473,20 @@ if __name__ == '__main__':
     # the whole duration of a long /api/roblox/avatar3d/fetch — exactly because of
     # this the app looked "frozen" as a whole, not only the
     # avatar download dialog.
-    flask_app.run(host='0.0.0.0', port=run_port, debug=False,
-                  use_reloader=False, threaded=True)
+    try:
+        flask_app.run(host='0.0.0.0', port=run_port, debug=False,
+                      use_reloader=False, threaded=True)
+    except SystemExit as e:
+        # werkzeug calls sys.exit(1) after printing the reason (e.g. the port
+        # is in use). Record what the port looks like right now as well.
+        probe = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+        try:
+            probe.bind(('0.0.0.0', run_port))
+            port_state = 'free now (was it a transient conflict?)'
+        except OSError as pe:
+            port_state = f'busy: {pe}'
+        finally:
+            probe.close()
+        _crash_report(f'flask_app.run() exited with SystemExit({e.code!r})',
+                      *sys.exc_info(), extra=[f'port {run_port}: {port_state}'])
+        raise
