@@ -7421,6 +7421,14 @@ end
 -- Called from JS (fireLuaSignal) — finds ITS OWN Lua function by id and
 -- calls it with an ordinary pcall, instead of JS directly poking
 -- lua_rawgeti/lua_pcall on a value taken via luaL_ref.
+-- RemoteFunction: rf.OnServerInvoke / rf.OnClientInvoke = function(player, ...) ... return ... end. The function lives in the VM that assigned it
+-- (the server's or the client's); JS routes InvokeServer/InvokeClient to that VM through __rf_call and brings the results back.
+local __rfFns = {}
+function __rf_call(ref, key, ...)
+    local fn = __rfFns[ref .. "|" .. key]
+    if not fn then return false, "no handler" end
+    return pcall(fn, ...)
+end
 function __invoke_conn(id, ...)
     local fn = __conns[id]
     if fn then
@@ -8094,6 +8102,16 @@ InstanceMT.__index = function(t, k)
     if k == "FireServer" then
         return function(self, ...) __fire_remote(ref, "server", ...) end
     end
+    if k == "InvokeServer" then
+        -- RemoteFunction:InvokeServer(...) -> what the server's OnServerInvoke returns (called right here, synchronously)
+        return function(self, ...) return __invoke_remote(ref, "server", ...) end
+    end
+    if k == "InvokeClient" then
+        return function(self, player, ...) return __invoke_remote(ref, "client", ...) end
+    end
+    if k == "OnServerInvoke" or k == "OnClientInvoke" then
+        return __rfFns[ref .. "|" .. k]
+    end
     -- Camera: ViewportSize / FieldOfView (a live value) / WorldToViewportPoint / ViewportPointToRay
     if k == "ViewportSize" or k == "FieldOfView" or k == "WorldToViewportPoint" or k == "WorldToScreenPoint"
         or k == "ViewportPointToRay" or k == "ScreenPointToRay" then
@@ -8210,6 +8228,11 @@ InstanceMT.__index = function(t, k)
 end
 InstanceMT.__newindex = function(t, k, v)
     local ref = rawget(t, "__ref")
+    if (k == "OnServerInvoke" or k == "OnClientInvoke") and type(v) == "function" then
+        __rfFns[ref .. "|" .. k] = v
+        __register_rf(ref, k)
+        return
+    end
     if k == "Position" then
         if __is_gui_ref(ref) then
             __set_prop(ref, k, v)
@@ -10825,6 +10848,7 @@ end
         let luaSignalsByKey = {};  // "ref|evName" -> [id, ...]
         let luaNextSignalId = 1;
         let remoteQueue = [];      // [{ref, targetSide, args, dueAt}] — see __fire_remote
+        let rfHandlers = {};       // 'ref|OnServerInvoke' -> the Lua state (server/client VM) that holds the handler — see __register_rf
 
         // A RemoteEvent value (null/number/string/boolean/array/object/Instance) -> Lua, nested tables recursively
         function pushRemoteValue(L, a) {
@@ -10931,6 +10955,7 @@ end
             luaSignalsByKey = {};
             luaNextSignalId = 1;
             remoteQueue = [];
+            rfHandlers = {};
             lastRunServiceTick = null; // otherwise the first Heartbeat/Stepped after
             // the next Play would give a huge dt — the difference from the moment
             // the game was stopped last time.
@@ -12449,6 +12474,47 @@ end
                 remoteQueue.push({ ref, targetSide, args, dueAt: performance.now() + 16 });
                 return 0;
             });
+            // RemoteFunction: rf.OnServerInvoke = fn was assigned in the VM L2 — remember where the handler lives
+            def('__register_rf', function (L2) {
+                rfHandlers[lua.lua_tonumber(L2, 1) + '|' + lua.lua_tojsstring(L2, 2)] = L2;
+                return 0;
+            });
+            // __invoke_remote(ref, side, ...) — RemoteFunction:InvokeServer/InvokeClient: runs the handler in the other VM and returns its results.
+            // The handler runs in a fresh coroutine: if it yields (task.wait, a Yield-ing call) it cannot be waited for from here — nil + a warning.
+            def('__invoke_remote', function (L2) {
+                const ref = lua.lua_tonumber(L2, 1);
+                const side = lua.lua_tojsstring(L2, 2);
+                const key = side === 'server' ? 'OnServerInvoke' : 'OnClientInvoke';
+                const n = lua.lua_gettop(L2);
+                const args = [];
+                if (side === 'server') args.push({ __instanceRef: luaPlayerRef });   // OnServerInvoke(player, ...)
+                for (let i = 3; i <= n; i++) args.push(luaToRemote(L2, i, 0));
+                const target = rfHandlers[ref + '|' + key];
+                if (!target) {
+                    emuWarn('rf:' + ref + key, 'RemoteFunction ' + ((luaByRef[ref] && luaByRef[ref].name) || ref) + ': no ' + key + ' handler (nobody assigned it) — ' + (side === 'server' ? 'InvokeServer' : 'InvokeClient') + ' returned nil');
+                    return 0;
+                }
+                const co = lua.lua_newthread(target);
+                lua.lua_getglobal(co, '__rf_call');
+                lua.lua_pushnumber(co, ref);
+                lua.lua_pushstring(co, key);
+                const na = pushLuaSignalArgs(co, args);
+                const status = lua.lua_resume(co, null, 2 + na);
+                let results = [];
+                let ok = false;
+                if (status === lua.LUA_OK) {
+                    const top = lua.lua_gettop(co);
+                    ok = top >= 1 && !!lua.lua_toboolean(co, 1);
+                    if (ok) for (let i = 2; i <= top; i++) results.push(luaToRemote(co, i, 0));
+                    else logLuaOutput('error', 'RemoteFunction ' + ((luaByRef[ref] && luaByRef[ref].name) || ref) + ': ' + (top >= 2 ? lua.lua_tojsstring(co, 2) : 'error in the handler'), key, null, target === luaServerL ? 'Script' : 'LocalScript');
+                } else if (status === lua.LUA_YIELD) {
+                    emuWarn('rfy:' + ref + key, 'RemoteFunction ' + ((luaByRef[ref] && luaByRef[ref].name) || ref) + ': the ' + key + ' handler yielded (task.wait/WaitForChild...) — the emulator cannot wait for it, the call returned nil');
+                } else {
+                    logLuaOutput('error', luaErrToString(co), key, null, target === luaServerL ? 'Script' : 'LocalScript');
+                }
+                lua.lua_pop(target, 1);   // lua_newthread left the coroutine on the stack of the target VM
+                return pushLuaSignalArgs(L2, results);
+            });
             def('__fire_bindable', function (L2) {
                 // BindableEvent:Fire(...) — synchronous, unlike
                 const ref = lua.lua_tonumber(L2, 1);
@@ -13882,6 +13948,32 @@ end
                 ov.style.width = (pr.width / guiScale) + 'px';
                 ov.style.height = (pr.height / guiScale) + 'px';
             }
+            // The first fit is measured right after the zoom is set, when the layout of Play (the bars hiding, the viewport growing) may not be
+            // final, and WebViews disagree on whether CSS zoom also scales an explicit width. So the fit is checked again once the layout has
+            // settled and, if the overlay still doesn't cover the screen, the sizing that does is found by measuring.
+            requestAnimationFrame(() => requestAnimationFrame(() => _verifyGuiFit(ov)));
+            setTimeout(() => _verifyGuiFit(ov), 600);
+        }
+        let _guiFitLogged = '';
+        function _guiFitBad(ov, par) {
+            const pr = par.getBoundingClientRect(), orr = ov.getBoundingClientRect();
+            return pr.width > 0 && pr.height > 0 && (Math.abs(orr.width - pr.width) > pr.width * 0.02 || Math.abs(orr.height - pr.height) > pr.height * 0.02);
+        }
+        function _verifyGuiFit(ov) {
+            const par = ov && ov.parentElement;
+            if (!par || !ov.classList.contains('active') || guiScale === 1 || !_guiFitBad(ov, par)) return;
+            const pr = par.getBoundingClientRect();
+            const before = ov.getBoundingClientRect();
+            const tries = [['div', pr.width / guiScale, pr.height / guiScale], ['raw', pr.width, pr.height], ['mul', pr.width * guiScale, pr.height * guiScale], ['auto', 0, 0]];
+            let chosen = 'none';
+            for (const [mode, w, h] of tries) {
+                if (mode === 'auto') { ov.style.width = ''; ov.style.height = ''; ov.style.right = ''; ov.style.bottom = ''; }
+                else { ov.style.right = 'auto'; ov.style.bottom = 'auto'; ov.style.width = w + 'px'; ov.style.height = h + 'px'; }
+                if (!_guiFitBad(ov, par)) { chosen = mode; break; }
+            }
+            const msg = 'GUI overlay fit: scale ' + guiScale + ', screen ' + Math.round(pr.width) + 'x' + Math.round(pr.height) + ', overlay was ' +
+                Math.round(before.width) + 'x' + Math.round(before.height) + ' -> sizing "' + chosen + '"';
+            if (msg !== _guiFitLogged) { _guiFitLogged = msg; try { logLuaOutput('info', msg); } catch (e) { /* diagnostics only */ } }
         }
         window.addEventListener('resize', () => {
             const ov = document.getElementById('gui-overlay');
